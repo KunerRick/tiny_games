@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, EventTouch, EventKeyboard, KeyboardEvent, KeyCode, Vec2 } from 'cc';
+import { _decorator, Component, Node, EventTouch, EventKeyboard, KeyboardEvent, KeyCode, Vec2, systemEvent, SystemEvent } from 'cc';
 import { Direction } from './GameConfig';
 
 const { ccclass, property } = _decorator;
@@ -24,14 +24,14 @@ export class InputHandler extends Component {
     onLoad() {
         this.node.on(Node.EventType.TOUCH_START, this.onTouchStart, this);
         this.node.on(Node.EventType.TOUCH_END, this.onTouchEnd, this);
-        // 键盘方向键 / WASD 支持
-        this.node.on(Node.EventType.KEY_DOWN, this.onKeyDown, this);
+        // 键盘方向键 / WASD 支持（全局监听，不依赖节点焦点）
+        systemEvent.on(SystemEvent.EventType.KEY_DOWN, this.onKeyDown, this);
     }
     
     onDestroy() {
         this.node.off(Node.EventType.TOUCH_START, this.onTouchStart, this);
         this.node.off(Node.EventType.TOUCH_END, this.onTouchEnd, this);
-        this.node.off(Node.EventType.KEY_DOWN, this.onKeyDown, this);
+        systemEvent.off(SystemEvent.EventType.KEY_DOWN, this.onKeyDown, this);
     }
     
     setCallback(callback: (direction: Direction) => void): void {

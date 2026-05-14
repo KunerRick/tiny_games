@@ -153,6 +153,8 @@ export class Game2048 extends Component {
             if (!this._hasWon && this._tiles.some(t => t.value >= 2048)) {
                 this._hasWon = true;
                 this.showWin();
+                // 胜利后阻塞输入，防止面板背后继续操作
+                this._isGameOver = true;
                 return;
             }
             
