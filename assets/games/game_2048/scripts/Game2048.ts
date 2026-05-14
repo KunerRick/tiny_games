@@ -7,6 +7,7 @@ import { ScoreManager } from './ScoreManager';
 import { InputHandler } from './InputHandler';
 import { GameGrid } from './GameGrid';
 import { SettingsPanel } from './SettingsPanel';
+import { GameOverPanel } from './GameOverPanel';
 
 const { ccclass, property } = _decorator;
 
@@ -33,17 +34,8 @@ export class Game2048 extends Component {
     @property(Button)
     backButton: Button | null = null;
     
-    @property(Node)
-    gameOverPanel: Node | null = null;
-    
-    @property(Label)
-    gameOverScoreLabel: Label | null = null;
-    
-    @property(Button)
-    restartButton: Button | null = null;
-    
-    @property(Button)
-    backToLobbyButton: Button | null = null;
+    @property(GameOverPanel)
+    gameOverPanelComponent: GameOverPanel | null = null;
     
     private _gridSize: GridSize = DEFAULT_GRID_SIZE;
     private _tiles: TileData[] = [];
@@ -61,21 +53,10 @@ export class Game2048 extends Component {
         if (this.backButton) {
             this.backButton.node.on(Node.EventType.TOUCH_END, this.onBackClick, this);
         }
-        if (this.restartButton) {
-            this.restartButton.node.on(Node.EventType.TOUCH_END, this.onRestartClick, this);
-        }
-        if (this.backToLobbyButton) {
-            this.backToLobbyButton.node.on(Node.EventType.TOUCH_END, this.onBackToLobbyClick, this);
-        }
-        
+
         // 设置输入回调
         if (this.inputHandler) {
             this.inputHandler.setCallback(this.onDirectionInput.bind(this));
-        }
-        
-        // 隐藏游戏结束面板
-        if (this.gameOverPanel) {
-            this.gameOverPanel.active = false;
         }
         
         // 记录最近游玩
@@ -197,7 +178,6 @@ export class Game2048 extends Component {
     }
     
     private onRestartClick(): void {
-        this.hideGameOver();
         this.initGame(this._gridSize, true);
     }
     
@@ -206,20 +186,16 @@ export class Game2048 extends Component {
     }
     
     private showGameOver(): void {
-        if (this.gameOverPanel) {
-            this.gameOverPanel.active = true;
-        }
-        if (this.gameOverScoreLabel && this.scoreManager) {
-            this.gameOverScoreLabel.string = `最终分数: ${this.scoreManager.getCurrentScore()}`;
-        }
+        const currentScore = this.scoreManager?.getCurrentScore() || 0;
+
+        this.gameOverPanelComponent?.show(
+            currentScore,
+            () => this.onRestartClick(),
+            () => this.onBackToLobbyClick()
+        );
+
         // 清除保存的进度
         StorageManager.instance.clearProgress();
-    }
-    
-    private hideGameOver(): void {
-        if (this.gameOverPanel) {
-            this.gameOverPanel.active = false;
-        }
     }
     
     private saveProgress(): void {
