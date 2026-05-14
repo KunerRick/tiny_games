@@ -20,25 +20,12 @@ export class SettingsPanel extends Component {
     private _selectedSize: GridSize = 4;
     private _onConfirm: ((size: GridSize) => void) | null = null;
 
-    onLoad() {
-        // 设置滑条事件
-        if (this.gridSizeSlider) {
-            this.gridSizeSlider.node.on(Slider.EventType.SLIDE, this.onSliderChanged, this);
-        }
-
-        // 设置开始按钮事件
-        if (this.startButton) {
-            this.startButton.node.on(Node.EventType.TOUCH_END, this.onStart, this);
-        }
-        // 设置取消按钮事件
-        if (this.cancelButton) {
-            this.cancelButton.node.on(Node.EventType.TOUCH_END, this.onCancel, this);
-        }
-    }
-
     show(currentSize: GridSize, onConfirm: (size: GridSize) => void): void {
         this._selectedSize = currentSize;
         this._onConfirm = onConfirm;
+
+        // 绑定事件（在 show 中绑定，确保 Slider/Button 已初始化完成）
+        this.bindEvents();
 
         // 设置滑条初始值 (4-8 映射到 0-1)
         if (this.gridSizeSlider) {
@@ -52,7 +39,32 @@ export class SettingsPanel extends Component {
     }
 
     hide(): void {
+        this.unbindEvents();
         this.node.active = false;
+    }
+
+    private bindEvents(): void {
+        if (this.gridSizeSlider) {
+            this.gridSizeSlider.node.on('slide', this.onSliderChanged, this);
+        }
+        if (this.startButton) {
+            this.startButton.node.on(Node.EventType.TOUCH_END, this.onStart, this);
+        }
+        if (this.cancelButton) {
+            this.cancelButton.node.on(Node.EventType.TOUCH_END, this.onCancel, this);
+        }
+    }
+
+    private unbindEvents(): void {
+        if (this.gridSizeSlider) {
+            this.gridSizeSlider.node.off('slide', this.onSliderChanged, this);
+        }
+        if (this.startButton) {
+            this.startButton.node.off(Node.EventType.TOUCH_END, this.onStart, this);
+        }
+        if (this.cancelButton) {
+            this.cancelButton.node.off(Node.EventType.TOUCH_END, this.onCancel, this);
+        }
     }
 
     private onSliderChanged(): void {

@@ -3502,7 +3502,7 @@
       "b": 186,
       "a": 255
     },
-    "_string": "网格大小",
+    "_string": "网格数量",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
     "_actualFontSize": 32,
@@ -5126,7 +5126,9 @@
     "gridSizeSlider": {
       "__id__": 102
     },
-    "gridSizeValueLabel": null,
+    "gridSizeValueLabel": {
+      "__id__": 90
+    },
     "startButton": {
       "__id__": 122
     },
