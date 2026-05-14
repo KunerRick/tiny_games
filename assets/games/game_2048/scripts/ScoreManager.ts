@@ -11,6 +11,12 @@ export class ScoreManager extends Component {
     
     @property(Label)
     bestScoreLabel: Label | null = null;
+
+    @property(Label)
+    scoreTitleLabel: Label | null = null;
+
+    @property(Label)
+    bestScoreTitleLabel: Label | null = null;
     
     private _currentScore: number = 0;
     private _bestScore: number = 0;
