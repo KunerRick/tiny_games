@@ -26,16 +26,26 @@ export class ScoreManager extends Component {
         this._gridSize = gridSize;
         this._currentScore = 0;
         this._bestScore = StorageManager.instance.getBestScore(gridSize);
+        if (this.scoreTitleLabel) {
+            this.scoreTitleLabel.string = '分数';
+        }
+        if (this.bestScoreTitleLabel) {
+            this.bestScoreTitleLabel.string = '最高分';
+        }
         this.updateDisplay();
     }
     
-    addScore(points: number): void {
-        this._currentScore += points;
+    setScore(score: number): void {
+        this._currentScore = score;
         if (this._currentScore > this._bestScore) {
             this._bestScore = this._currentScore;
             StorageManager.instance.setBestScore(this._gridSize, this._bestScore);
         }
         this.updateDisplay();
+    }
+
+    addScore(points: number): void {
+        this.setScore(this._currentScore + points);
     }
     
     getCurrentScore(): number {
@@ -53,10 +63,10 @@ export class ScoreManager extends Component {
     
     private updateDisplay(): void {
         if (this.scoreLabel) {
-            this.scoreLabel.string = `分数: ${this._currentScore}`;
+            this.scoreLabel.string = `${this._currentScore}`;
         }
         if (this.bestScoreLabel) {
-            this.bestScoreLabel.string = `最佳: ${this._bestScore}`;
+            this.bestScoreLabel.string = `${this._bestScore}`;
         }
     }
 }

@@ -7,6 +7,12 @@ export class GameOverPanel extends Component {
     @property(Label)
     scoreValueLabel: Label | null = null;
 
+    @property(Label)
+    bestScoreValueLabel: Label | null = null;
+
+    @property(Label)
+    titleLabel: Label | null = null;
+
     @property(Button)
     restartButton: Button | null = null;
 
@@ -31,13 +37,21 @@ export class GameOverPanel extends Component {
         this.node.active = false;
     }
 
-    show(score: number, onRestart: () => void, onBack: () => void): void {
+    show(score: number, onRestart: () => void, onBack: () => void, bestScore: number = 0, isWin: boolean = false): void {
         this._onRestart = onRestart;
         this._onBack = onBack;
+
+        // 更新标题
+        if (this.titleLabel) {
+            this.titleLabel.string = isWin ? '恭喜通关！' : '游戏结束';
+        }
 
         // 更新分数显示
         if (this.scoreValueLabel) {
             this.scoreValueLabel.string = score.toString();
+        }
+        if (this.bestScoreValueLabel) {
+            this.bestScoreValueLabel.string = bestScore.toString();
         }
 
         // 显示面板

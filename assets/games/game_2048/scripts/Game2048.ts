@@ -40,6 +40,7 @@ export class Game2048 extends Component {
     private _gridSize: GridSize = DEFAULT_GRID_SIZE;
     private _tiles: TileData[] = [];
     private _isGameOver: boolean = false;
+    private _isMoving: boolean = false;
     private _hasWon: boolean = false;
     
     onLoad() {
@@ -71,14 +72,8 @@ export class Game2048 extends Component {
             this._tiles = progress.tiles;
             this.initGame(this._gridSize, false);
             this.scoreManager?.init(this._gridSize);
-            // 恢复分数
-            if (this.scoreManager) {
-                const currentScore = progress.score;
-                // 通过 addScore 恢复，但这是个 hack，更好的方式是添加 setScore 方法
-                for (let i = 0; i < currentScore; i += 100) {
-                    this.scoreManager.addScore(Math.min(100, currentScore - i));
-                }
-            }
+            // 恢复分数（直接设置，无需循环累加）
+            this.scoreManager?.setScore(progress.score);
             this.renderTiles();
         } else {
             // 新游戏
@@ -119,7 +114,7 @@ export class Game2048 extends Component {
     }
     
     private onDirectionInput(direction: Direction): void {
-        if (this._isGameOver) return;
+        if (this._isGameOver || this._isMoving) return;
         
         // 执行移动
         const result = this.gameGrid?.move(this._tiles, direction, this._gridSize);
@@ -130,12 +125,21 @@ export class Game2048 extends Component {
             this.scoreManager?.addScore(result.scoreGained);
         }
         
+        // 找出合并后被吞掉的 TileId，清理节点
+        const newIds = new Set(result.tiles.map(t => t.id));
+        const consumedIds = this._tiles.filter(t => !newIds.has(t.id)).map(t => t.id);
+        this.gameGrid?.removeMergedTiles(consumedIds);
+        
         // 更新方块位置
         this._tiles = result.tiles;
         this.gameGrid?.updateTiles(this._tiles, true);
         
+        this._isMoving = true;
+        
         // 生成新方块
         setTimeout(() => {
+            this._isMoving = false;
+            
             const newTile = this.gameGrid?.spawnRandomTile(this._tiles, this._gridSize);
             if (newTile) {
                 this._tiles.push(newTile);
@@ -148,6 +152,8 @@ export class Game2048 extends Component {
             // 检查是否达到 2048
             if (!this._hasWon && this._tiles.some(t => t.value >= 2048)) {
                 this._hasWon = true;
+                this.showWin();
+                return;
             }
             
             // 保存进度
@@ -185,13 +191,28 @@ export class Game2048 extends Component {
         SceneManager.gotoLobby();
     }
     
-    private showGameOver(): void {
+    private showWin(): void {
         const currentScore = this.scoreManager?.getCurrentScore() || 0;
+        const bestScore = this.scoreManager?.getBestScore() || 0;
 
         this.gameOverPanelComponent?.show(
             currentScore,
             () => this.onRestartClick(),
-            () => this.onBackToLobbyClick()
+            () => this.onBackToLobbyClick(),
+            bestScore,
+            true,
+        );
+    }
+
+    private showGameOver(): void {
+        const currentScore = this.scoreManager?.getCurrentScore() || 0;
+        const bestScore = this.scoreManager?.getBestScore() || 0;
+
+        this.gameOverPanelComponent?.show(
+            currentScore,
+            () => this.onRestartClick(),
+            () => this.onBackToLobbyClick(),
+            bestScore,
         );
 
         // 清除保存的进度

@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Sprite, tween, Vec3 } from 'cc';
+import { _decorator, Component, Node, Label, Sprite, tween, Vec3, UITransform, Size } from 'cc';
 import { getTileColor, TileData } from './GameConfig';
 
 const { ccclass, property } = _decorator;
@@ -19,6 +19,19 @@ export class Tile extends Component {
         this._data = data;
         this._cellSize = cellSize;
         this._spacing = spacing;
+
+        // 设置方块视觉尺寸
+        const uiTransform = this.node.getComponent(UITransform);
+        if (uiTransform) {
+            uiTransform.contentSize = new Size(cellSize, cellSize);
+        }
+
+        // 字大小自适应（大格子大字号，小格子小字号）
+        const fontSize = Math.max(14, Math.floor(cellSize * 0.28));
+        if (this.valueLabel) {
+            this.valueLabel.fontSize = fontSize;
+        }
+
         this.updateVisual();
         this.updatePosition();
     }

@@ -1,9 +1,20 @@
-import { _decorator, Component, Node, EventTouch, Vec2 } from 'cc';
+import { _decorator, Component, Node, EventTouch, EventKeyboard, KeyboardEvent, KeyCode, Vec2 } from 'cc';
 import { Direction } from './GameConfig';
 
 const { ccclass, property } = _decorator;
 
 const SWIPE_THRESHOLD = 50;
+
+const KEY_MAP: Record<number, Direction> = {
+    [KeyCode.ARROW_UP]: Direction.UP,
+    [KeyCode.ARROW_DOWN]: Direction.DOWN,
+    [KeyCode.ARROW_LEFT]: Direction.LEFT,
+    [KeyCode.ARROW_RIGHT]: Direction.RIGHT,
+    [KeyCode.W]: Direction.UP,
+    [KeyCode.S]: Direction.DOWN,
+    [KeyCode.A]: Direction.LEFT,
+    [KeyCode.D]: Direction.RIGHT,
+};
 
 @ccclass('InputHandler')
 export class InputHandler extends Component {
@@ -13,15 +24,26 @@ export class InputHandler extends Component {
     onLoad() {
         this.node.on(Node.EventType.TOUCH_START, this.onTouchStart, this);
         this.node.on(Node.EventType.TOUCH_END, this.onTouchEnd, this);
+        // 键盘方向键 / WASD 支持
+        this.node.on(Node.EventType.KEY_DOWN, this.onKeyDown, this);
     }
     
     onDestroy() {
         this.node.off(Node.EventType.TOUCH_START, this.onTouchStart, this);
         this.node.off(Node.EventType.TOUCH_END, this.onTouchEnd, this);
+        this.node.off(Node.EventType.KEY_DOWN, this.onKeyDown, this);
     }
     
     setCallback(callback: (direction: Direction) => void): void {
         this._onDirectionInput = callback;
+    }
+    
+    private onKeyDown(event: EventKeyboard): void {
+        const direction = KEY_MAP[event.keyCode];
+        if (direction !== undefined) {
+            event.preventDefault?.();
+            this._onDirectionInput?.(direction);
+        }
     }
     
     private onTouchStart(event: EventTouch): void {

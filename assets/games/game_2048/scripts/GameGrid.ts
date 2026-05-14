@@ -17,7 +17,16 @@ export class GameGrid extends Component {
     init(gridSize: GridSize): void {
         this._gridSize = gridSize;
         this.calculateCellSize();
+        this.centerGrid();
         this.clearTiles();
+    }
+
+    private centerGrid(): void {
+        // Tile positions: x = col * (cellSize + spacing)
+        // First tile at x=0, last at x=(gridSize-1)*(cellSize+spacing)
+        // Shift gameGrid so the tile range is centered in the container
+        const totalSpan = (this._gridSize - 1) * (this._cellSize + this._spacing);
+        this.node.setPosition(-totalSpan / 2, totalSpan / 2);
     }
     
     private calculateCellSize(): void {
@@ -76,6 +85,17 @@ export class GameGrid extends Component {
                 this._tiles.delete(id);
             }
         });
+    }
+
+    /** 清理不在活跃 ID 列表中的旧节点（合并后被吞掉的方块） */
+    retainOnly(activeIds: Set<number>): void {
+        const toRemove: number[] = [];
+        this._tiles.forEach((_node, id) => {
+            if (!activeIds.has(id)) {
+                toRemove.push(id);
+            }
+        });
+        this.removeMergedTiles(toRemove);
     }
     
     // 游戏逻辑：移动和合并
