@@ -112,8 +112,22 @@ export class Game2048 extends Component {
     }
     
     private onDirectionInput(direction: Direction): void {
-        if (this._isGameOver || this._isMoving) return;
-        if (this.settingsPanel?.node.active || this.gameOverPanelComponent?.node.active) return;
+        console.log('[Game2048] onDirectionInput called, direction:', direction, '_isGameOver:', this._isGameOver, '_isMoving:', this._isMoving);
+        
+        if (this._isGameOver || this._isMoving) {
+            console.log('[Game2048] Ignoring input, _isGameOver:', this._isGameOver, '_isMoving:', this._isMoving);
+            return;
+        }
+        
+        if (this.settingsPanel?.node.active) {
+            console.log('[Game2048] Ignoring input, settingsPanel is active');
+            return;
+        }
+        
+        if (this.gameOverPanelComponent?.node.active) {
+            console.log('[Game2048] Ignoring input, gameOverPanel is active');
+            return;
+        }
 
         const result = this.gameGrid?.move(this._tiles, direction, this._gridSize);
         if (!result || !result.hasMoved) {
@@ -137,9 +151,12 @@ export class Game2048 extends Component {
 
         // 滑动动画完成后 → 生新方块 → 统一结算检测
         setTimeout(() => {
+            console.log('[Game2048] setTimeout callback executed');
             this._isMoving = false;
 
             const newTile = this.gameGrid?.spawnRandomTile(this._tiles, this._gridSize);
+            console.log('[Game2048] spawnRandomTile result:', newTile ? `tile at (${newTile.row},${newTile.col})` : 'null');
+            
             if (newTile) {
                 this._tiles.push(newTile);
                 this.gameGrid?.spawnTile(newTile);
@@ -147,6 +164,7 @@ export class Game2048 extends Component {
 
             // 检查是否达到 2048
             if (!this._hasWon && this._tiles.some(t => t.value >= 2048)) {
+                console.log('[Game2048] Player won!');
                 this._hasWon = true;
                 this.showWin();
                 this._isGameOver = true;
@@ -154,6 +172,7 @@ export class Game2048 extends Component {
             }
 
             // 统一结算检测（用最终棋盘 state）
+            console.log('[Game2048] Calling checkGameEnd from setTimeout');
             this.checkGameEnd();
             this.saveProgress();
         }, 150);
@@ -161,8 +180,11 @@ export class Game2048 extends Component {
 
     /** 用当前棋盘检测是否 Game Over，是则弹出结算面板 */
     private checkGameEnd(): void {
+        console.log('[Game2048] Checking game end, tiles count:', this._tiles.length, 'gridSize:', this._gridSize);
         const isOver = this.gameGrid?.checkGameOver(this._tiles, this._gridSize) || false;
+        console.log('[Game2048] checkGameOver result:', isOver);
         if (isOver) {
+            console.log('[Game2048] Game is over, showing game over panel');
             this._isGameOver = true;
             this.showGameOver();
         }
@@ -210,7 +232,18 @@ export class Game2048 extends Component {
         const currentScore = this.scoreManager?.getCurrentScore() || 0;
         const bestScore = this.scoreManager?.getBestScore() || 0;
 
-        this.gameOverPanelComponent?.show(
+        if (!this.gameOverPanelComponent) {
+            console.error('[Game2048] gameOverPanelComponent is null, cannot show game over panel');
+            return;
+        }
+
+        if (!this.gameOverPanelComponent.node) {
+            console.error('[Game2048] gameOverPanelComponent.node is null');
+            return;
+        }
+
+        console.log('[Game2048] Showing game over panel, score:', currentScore, 'bestScore:', bestScore);
+        this.gameOverPanelComponent.show(
             currentScore,
             () => this.onRestartClick(),
             () => this.onBackToLobbyClick(),
