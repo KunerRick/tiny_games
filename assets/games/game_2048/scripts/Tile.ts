@@ -61,8 +61,9 @@ export class Tile extends Component {
 
     playMergeAnimation(): void {
         tween(this.node)
-            .to(0.075, { scale: new Vec3(1.2, 1.2, 1) })
-            .to(0.075, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
+            .delay(0.15)
+            .to(0.08, { scale: new Vec3(1.25, 1.25, 1) })
+            .to(0.1, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
             .start();
     }
 
