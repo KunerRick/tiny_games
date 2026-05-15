@@ -65,18 +65,15 @@ export class Game2048 extends Component {
     }
     
     start() {
-        // 检查是否有保存的进度
         const progress = StorageManager.instance.loadProgress();
         if (progress) {
             this._gridSize = progress.gridSize;
-            this._tiles = progress.tiles;
+            this._tiles = progress.tiles.map(t => ({ ...t, isNew: undefined }));
             this.initGame(this._gridSize, false);
-            this.scoreManager?.init(this._gridSize);
-            // 恢复分数（直接设置，无需循环累加）
             this.scoreManager?.setScore(progress.score);
+            this.saveProgress();
             this.renderTiles();
         } else {
-            // 新游戏
             this._gridSize = StorageManager.instance.getDefaultGridSize();
             this.initGame(this._gridSize, true);
         }
@@ -85,6 +82,7 @@ export class Game2048 extends Component {
     initGame(gridSize: GridSize, spawnInitialTiles: boolean = true): void {
         this._gridSize = gridSize;
         this._isGameOver = false;
+        this._isMoving = false;
         this._hasWon = false;
         
         if (this.gameGrid) {
@@ -116,65 +114,58 @@ export class Game2048 extends Component {
     private onDirectionInput(direction: Direction): void {
         if (this._isGameOver || this._isMoving) return;
         if (this.settingsPanel?.node.active || this.gameOverPanelComponent?.node.active) return;
-        
-        // 执行移动
+
         const result = this.gameGrid?.move(this._tiles, direction, this._gridSize);
-        if (!result) return;
-        if (!result.hasMoved) {
-            // 无实际移动时仍需检查棋盘是否已死（填满且无合并方向）
-            this._isGameOver = this.gameGrid?.checkGameOver(this._tiles, this._gridSize) || false;
-            if (this._isGameOver) {
-                this.showGameOver();
-            }
+        if (!result || !result.hasMoved) {
+            // 棋盘没变，但需检测是否已死（满+无合并方向）
+            this.checkGameEnd();
             return;
         }
-        
+
         // 更新分数
         if (result.scoreGained > 0) {
             this.scoreManager?.addScore(result.scoreGained);
         }
-        
-        // 找出合并后被吞掉的 TileId，清理节点
+
+        // 清理被吞的 tile，更新位置
         const newIds = new Set(result.tiles.map(t => t.id));
         const consumedIds = this._tiles.filter(t => !newIds.has(t.id)).map(t => t.id);
         this.gameGrid?.removeMergedTiles(consumedIds);
-        
-        // 更新方块位置
         this._tiles = result.tiles;
         this.gameGrid?.updateTiles(this._tiles, true);
-        
         this._isMoving = true;
-        
-        // 生成新方块
+
+        // 滑动动画完成后 → 生新方块 → 统一结算检测
         setTimeout(() => {
             this._isMoving = false;
-            
+
             const newTile = this.gameGrid?.spawnRandomTile(this._tiles, this._gridSize);
             if (newTile) {
                 this._tiles.push(newTile);
                 this.gameGrid?.spawnTile(newTile);
             }
-            
-            // 检查游戏结束
-            this._isGameOver = this.gameGrid?.checkGameOver(this._tiles, this._gridSize) || false;
-            
+
             // 检查是否达到 2048
             if (!this._hasWon && this._tiles.some(t => t.value >= 2048)) {
                 this._hasWon = true;
                 this.showWin();
-                // 胜利后阻塞输入，防止面板背后继续操作
                 this._isGameOver = true;
                 return;
             }
-            
-            // 保存进度
+
+            // 统一结算检测（用最终棋盘 state）
+            this.checkGameEnd();
             this.saveProgress();
-            
-            // 显示游戏结束
-            if (this._isGameOver) {
-                this.showGameOver();
-            }
         }, 150);
+    }
+
+    /** 用当前棋盘检测是否 Game Over，是则弹出结算面板 */
+    private checkGameEnd(): void {
+        const isOver = this.gameGrid?.checkGameOver(this._tiles, this._gridSize) || false;
+        if (isOver) {
+            this._isGameOver = true;
+            this.showGameOver();
+        }
     }
     
     private onSettingsClick(): void {

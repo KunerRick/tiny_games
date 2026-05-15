@@ -184,9 +184,10 @@ export class GameGrid extends Component {
                     scoreGained += current.value * 2;
                     j++;
                 } else {
-                    // 只移动
+                    // 只移动（清除可能残留的合并标记）
+                    const { isMerged: _ignored, ...clean } = current;
                     merged.push({
-                        ...current,
+                        ...clean,
                         [isHorizontal ? 'col' : 'row']: isReverse ? gridSize - 1 - pos : pos,
                     });
                 }

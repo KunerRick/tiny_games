@@ -65,12 +65,14 @@ export class GameOverPanel extends Component {
     }
 
     private onRestartClick(): void {
+        const cb = this._onRestart;
         this.hide();
-        this._onRestart?.();
+        cb?.();
     }
 
     private onBackClick(): void {
+        const cb = this._onBack;
         this.hide();
-        this._onBack?.();
+        cb?.();
     }
 }
