@@ -58,6 +58,8 @@ export function getTileColor(value: number): { bg: Color; text: Color } {
     };
 }
 
+let _tileIdCounter = 0;
+
 export function generateTileId(): number {
-    return Date.now() + Math.floor(Math.random() * 1000);
+    return ++_tileIdCounter;
 }

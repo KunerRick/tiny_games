@@ -202,31 +202,40 @@ export class GameGrid extends Component {
         const hasMoved = newTiles.some(nt => {
             const ot = originalMap.get(nt.id);
             return !ot || ot.row !== nt.row || ot.col !== nt.col || ot.value !== nt.value;
-        });
+        }) || newTiles.length !== tiles.length;
 
         return { tiles: newTiles, scoreGained, hasMoved };
     }
     
     spawnRandomTile(tiles: TileData[], gridSize: GridSize): TileData | null {
+        // 使用 Set 来更准确地跟踪已占用的位置
+        const occupiedPositions = new Set<string>();
+        for (const t of tiles) {
+            if (t.row !== undefined && t.col !== undefined &&
+                t.row >= 0 && t.row < gridSize &&
+                t.col >= 0 && t.col < gridSize) {
+                occupiedPositions.add(`${t.row},${t.col}`);
+            }
+        }
+
         // 找出所有空位
         const emptyCells: {row: number, col: number}[] = [];
-        
         for (let row = 0; row < gridSize; row++) {
             for (let col = 0; col < gridSize; col++) {
-                if (!tiles.some(t => t.row === row && t.col === col)) {
+                if (!occupiedPositions.has(`${row},${col}`)) {
                     emptyCells.push({row, col});
                 }
             }
         }
-        
+
         if (emptyCells.length === 0) return null;
-        
+
         // 随机选择一个空位
         const cell = emptyCells[Math.floor(Math.random() * emptyCells.length)];
-        
+
         // 90%概率生成2，10%概率生成4
         const value = Math.random() < 0.9 ? 2 : 4;
-        
+
         return {
             id: generateTileId(),
             row: cell.row,
@@ -237,26 +246,49 @@ export class GameGrid extends Component {
     }
     
     checkGameOver(tiles: TileData[], gridSize: GridSize): boolean {
+        // 过滤掉无效的 tile（位置无效或重复）
+        const validTiles = tiles.filter(t =>
+            t.row !== undefined && t.col !== undefined &&
+            t.row >= 0 && t.row < gridSize &&
+            t.col >= 0 && t.col < gridSize
+        );
+
+        // 使用 Map 去重，确保每个位置只有一个 tile
+        const positionMap = new Map<string, TileData>();
+        for (const t of validTiles) {
+            const key = `${t.row},${t.col}`;
+            if (!positionMap.has(key)) {
+                positionMap.set(key, t);
+            }
+        }
+
+        const uniqueTiles = Array.from(positionMap.values());
+
         // 还有空位？
-        if (tiles.length < gridSize * gridSize) return false;
-        
+        if (uniqueTiles.length < gridSize * gridSize) return false;
+
         // 检查是否有可合并的相邻方块
-        for (const tile of tiles) {
+        for (const tile of uniqueTiles) {
             const neighbors = [
                 {row: tile.row - 1, col: tile.col},
                 {row: tile.row + 1, col: tile.col},
                 {row: tile.row, col: tile.col - 1},
                 {row: tile.row, col: tile.col + 1},
             ];
-            
+
             for (const n of neighbors) {
-                const neighbor = tiles.find(t => t.row === n.row && t.col === n.col);
+                // 跳过超出边界的邻居
+                if (n.row < 0 || n.row >= gridSize || n.col < 0 || n.col >= gridSize) {
+                    continue;
+                }
+                const neighborKey = `${n.row},${n.col}`;
+                const neighbor = positionMap.get(neighborKey);
                 if (neighbor && neighbor.value === tile.value) {
                     return false;
                 }
             }
         }
-        
+
         return true;
     }
 }
