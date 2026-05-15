@@ -76,3 +76,8 @@ AI: "请在 Game2048 场景中：
 
 人: 在 Cocos Creator 中按步骤操作（约 2 分钟），完成场景配置。
 ```
+
+## 相关文档
+
+- [Cocos Creator 最佳实践](./docs/cocos-best-practices.md) - 常见陷阱与解决方案
+- [2048 游戏设计](./docs/specs/2026-05-13-game-2048-design.md)
