@@ -1,6 +1,8 @@
-import { _decorator, Component, UITransform } from 'cc';
+import { _decorator, Component, UITransform, view } from 'cc';
 
 const { ccclass, property, menu } = _decorator;
+
+declare const wx: any;
 
 @ccclass('SafeAreaAdapter')
 @menu('Common/SafeAreaAdapter')
@@ -15,12 +17,12 @@ export class SafeAreaAdapter extends Component {
     }
 
     private calculateTopPadding(): number {
-        const wx = (window as any).wx;
-        if (wx?.getSystemInfoSync) {
+        if (typeof wx !== 'undefined' && wx.getSystemInfoSync) {
             try {
                 const info = wx.getSystemInfoSync();
                 if (info.safeArea?.top > 0) {
-                    const scale = 1280 / (info.windowHeight || 1280);
+                    const designH = view.getDesignResolutionSize().height;
+                    const scale = designH / (info.windowHeight || designH);
                     return Math.ceil(info.safeArea.top * scale);
                 }
             } catch {}

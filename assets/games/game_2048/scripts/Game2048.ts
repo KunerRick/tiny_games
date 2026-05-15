@@ -115,6 +115,7 @@ export class Game2048 extends Component {
     
     private onDirectionInput(direction: Direction): void {
         if (this._isGameOver || this._isMoving) return;
+        if (this.settingsPanel?.node.active || this.gameOverPanelComponent?.node.active) return;
         
         // 执行移动
         const result = this.gameGrid?.move(this._tiles, direction, this._gridSize);

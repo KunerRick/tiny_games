@@ -196,12 +196,12 @@ export class GameGrid extends Component {
             newTiles.push(...merged);
         }
         
-        // 基于 tile ID 和位置对比，判断是否有实际移动或合并
-        const newTileIds = new Set(newTiles.map(t => t.id));
-        const hasMoved = tiles.some(t =>
-            !newTileIds.has(t.id) ||
-            newTiles.some(nt => nt.id === t.id && (nt.row !== t.row || nt.col !== t.col))
-        );
+        // 判断是否有实际移动或合并：逐个对比新 tiles 与其原始状态
+        const originalMap = new Map(tiles.map(t => [t.id, t]));
+        const hasMoved = newTiles.some(nt => {
+            const ot = originalMap.get(nt.id);
+            return !ot || ot.row !== nt.row || ot.col !== nt.col || ot.value !== nt.value;
+        });
 
         return { tiles: newTiles, scoreGained, hasMoved };
     }
