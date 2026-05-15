@@ -118,7 +118,15 @@ export class Game2048 extends Component {
         
         // 执行移动
         const result = this.gameGrid?.move(this._tiles, direction, this._gridSize);
-        if (!result || !result.hasMoved) return;
+        if (!result) return;
+        if (!result.hasMoved) {
+            // 无实际移动时仍需检查棋盘是否已死（填满且无合并方向）
+            this._isGameOver = this.gameGrid?.checkGameOver(this._tiles, this._gridSize) || false;
+            if (this._isGameOver) {
+                this.showGameOver();
+            }
+            return;
+        }
         
         // 更新分数
         if (result.scoreGained > 0) {

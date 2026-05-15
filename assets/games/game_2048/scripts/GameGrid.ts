@@ -1,8 +1,12 @@
-import { _decorator, Component, Node, Prefab, instantiate, Size } from 'cc';
+import { _decorator, Component, Node, Prefab, instantiate, Size, Graphics, Color } from 'cc';
 import { TileData, GridSize, MoveResult, Direction, generateTileId } from './GameConfig';
 import { Tile } from './Tile';
 
 const { ccclass, property } = _decorator;
+
+const GRID_BG_COLOR = new Color(187, 173, 160);
+const CELL_BG_COLOR = new Color(205, 193, 180);
+const CELL_CORNER_RADIUS = 6;
 
 @ccclass('GameGrid')
 export class GameGrid extends Component {
@@ -13,12 +17,53 @@ export class GameGrid extends Component {
     private _tiles: Map<number, Node> = new Map();
     private _cellSize: number = 80;
     private _spacing: number = 10;
+    private _bgNode: Node | null = null;
     
     init(gridSize: GridSize): void {
         this._gridSize = gridSize;
         this.calculateCellSize();
         this.centerGrid();
         this.clearTiles();
+        this.renderGridBackground();
+    }
+
+    private renderGridBackground(): void {
+        if (this._bgNode) {
+            this._bgNode.removeFromParent();
+            this._bgNode.destroy();
+            this._bgNode = null;
+        }
+
+        this._bgNode = new Node('gridBg');
+        this.node.addChild(this._bgNode);
+        this._bgNode.setSiblingIndex(0);
+
+        const g = this._bgNode.addComponent(Graphics);
+        const cs = this._cellSize;
+        const sp = this._spacing;
+        const half = cs / 2;
+        const n = this._gridSize;
+        const maxPos = (n - 1) * (cs + sp);
+        const r = Math.min(CELL_CORNER_RADIUS, half);
+
+        const bgX = -half - sp / 2;
+        const bgY = -(maxPos + half) - sp / 2;
+        const bgW = maxPos + cs + sp;
+        const bgH = maxPos + cs + sp;
+
+        g.fillColor = GRID_BG_COLOR;
+        g.roundRect(bgX, bgY, bgW, bgH, r);
+        g.fill();
+
+        g.fillColor = CELL_BG_COLOR;
+        for (let row = 0; row < n; row++) {
+            for (let col = 0; col < n; col++) {
+                const cx = col * (cs + sp);
+                const cy = -row * (cs + sp);
+                g.roundRect(cx - half, cy - half, cs, cs, r);
+                g.fill();
+            }
+        }
     }
 
     private centerGrid(): void {
@@ -151,9 +196,13 @@ export class GameGrid extends Component {
             newTiles.push(...merged);
         }
         
-        // 检查是否有移动
-        const hasMoved = JSON.stringify(tiles) !== JSON.stringify(newTiles);
-        
+        // 基于 tile ID 和位置对比，判断是否有实际移动或合并
+        const newTileIds = new Set(newTiles.map(t => t.id));
+        const hasMoved = tiles.some(t =>
+            !newTileIds.has(t.id) ||
+            newTiles.some(nt => nt.id === t.id && (nt.row !== t.row || nt.col !== t.col))
+        );
+
         return { tiles: newTiles, scoreGained, hasMoved };
     }
     
