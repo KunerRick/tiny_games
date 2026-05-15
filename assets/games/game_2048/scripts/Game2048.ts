@@ -210,19 +210,13 @@ export class Game2048 extends Component {
         const currentScore = this.scoreManager?.getCurrentScore() || 0;
         const bestScore = this.scoreManager?.getBestScore() || 0;
 
-        if (!this.gameOverPanelComponent) {
-            console.error('[Game2048] gameOverPanelComponent is null, cannot show game over panel');
-            return;
-        }
-
-        this.gameOverPanelComponent.show(
+        this.gameOverPanelComponent?.show(
             currentScore,
             () => this.onRestartClick(),
             () => this.onBackToLobbyClick(),
             bestScore,
         );
 
-        // 清除保存的进度
         StorageManager.instance.clearProgress();
     }
     

@@ -56,6 +56,46 @@ hide() {
 | 弹窗/面板 | ❌ 不勾选 | `onLoad()` 中设为 `false` |
 | 动态创建的元素 | ❌ 不勾选 | 实例化后控制显示 |
 
+### 1.4 防御性编程：处理场景配置错误
+
+**问题场景**：
+- 策划或开发者在场景中不小心勾选了面板节点（`active = true`）
+- 游戏启动时面板就显示出来，破坏游戏体验
+
+**解决方案**：使用状态标志位确保初始状态正确
+
+```typescript
+@ccclass('GameOverPanel')
+export class GameOverPanel extends Component {
+    private _showCalled: boolean = false;
+
+    onLoad() {
+        // 只有 show() 未被调用时才隐藏
+        // 防止场景配置错误（节点被勾选）导致面板提前显示
+        if (!this._showCalled) {
+            this.node.active = false;
+        }
+    }
+
+    show() {
+        this._showCalled = true;
+        // 绑定事件、更新数据...
+        this.node.active = true;
+    }
+}
+```
+
+**关键点**：
+- `_showCalled` 标志位确保 `onLoad()` 不会覆盖 `show()` 的状态
+- 即使节点在场景中被勾选，游戏开始时也不会显示
+- 只有显式调用 `show()` 后，面板才会显示
+
+**适用场景**：
+- 游戏结束面板
+- 设置面板
+- 弹窗/对话框
+- 任何需要代码控制显示时机的 UI 组件
+
 ---
 
 ## 2. 事件绑定与解绑
