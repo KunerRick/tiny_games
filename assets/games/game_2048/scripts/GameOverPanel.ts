@@ -23,63 +23,63 @@ export class GameOverPanel extends Component {
     private _onBack: (() => void) | null = null;
 
     onLoad() {
-        // 绑定重新开始按钮
-        if (this.restartButton) {
-            this.restartButton.node.on(Node.EventType.TOUCH_END, this.onRestartClick, this);
-        }
-
-        // 绑定返回大厅按钮
-        if (this.backButton) {
-            this.backButton.node.on(Node.EventType.TOUCH_END, this.onBackClick, this);
-        }
-
         // 默认隐藏
-        this.node.active = false;
+        if (this.node) {
+            this.node.active = false;
+        }
     }
 
     show(score: number, onRestart: () => void, onBack: () => void, bestScore: number = 0, isWin: boolean = false): void {
-        console.log('[GameOverPanel] show called, score:', score, 'bestScore:', bestScore, 'isWin:', isWin);
-        console.log('[GameOverPanel] node active before:', this.node?.active);
-
         this._onRestart = onRestart;
         this._onBack = onBack;
+
+        // 绑定事件（在 show 中绑定，确保 Button 已初始化完成）
+        this.bindEvents();
 
         // 更新标题
         if (this.titleLabel) {
             this.titleLabel.string = isWin ? '恭喜通关！' : '游戏结束';
-            console.log('[GameOverPanel] title set to:', this.titleLabel.string);
-        } else {
-            console.warn('[GameOverPanel] titleLabel is null');
         }
 
         // 更新分数显示
         if (this.scoreValueLabel) {
             this.scoreValueLabel.string = score.toString();
-            console.log('[GameOverPanel] score set to:', this.scoreValueLabel.string);
-        } else {
-            console.warn('[GameOverPanel] scoreValueLabel is null');
         }
-
         if (this.bestScoreValueLabel) {
             this.bestScoreValueLabel.string = bestScore.toString();
-            console.log('[GameOverPanel] bestScore set to:', this.bestScoreValueLabel.string);
-        } else {
-            console.warn('[GameOverPanel] bestScoreValueLabel is null');
         }
 
         // 显示面板
         if (this.node) {
+            // 确保面板在最上层
+            this.node.setSiblingIndex(9999);
             this.node.active = true;
-            console.log('[GameOverPanel] node set to active');
-        } else {
-            console.error('[GameOverPanel] node is null!');
         }
     }
 
     hide(): void {
+        this.unbindEvents();
         this.node.active = false;
         this._onRestart = null;
         this._onBack = null;
+    }
+
+    private bindEvents(): void {
+        if (this.restartButton) {
+            this.restartButton.node.on(Node.EventType.TOUCH_END, this.onRestartClick, this);
+        }
+        if (this.backButton) {
+            this.backButton.node.on(Node.EventType.TOUCH_END, this.onBackClick, this);
+        }
+    }
+
+    private unbindEvents(): void {
+        if (this.restartButton) {
+            this.restartButton.node.off(Node.EventType.TOUCH_END, this.onRestartClick, this);
+        }
+        if (this.backButton) {
+            this.backButton.node.off(Node.EventType.TOUCH_END, this.onBackClick, this);
+        }
     }
 
     private onRestartClick(): void {
