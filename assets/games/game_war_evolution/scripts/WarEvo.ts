@@ -12,6 +12,12 @@ import { Castle } from './Castle';
 import { AI } from './AI';
 import { UIController } from './UIController';
 
+// 存储键名
+const STORAGE_KEYS = {
+    MAX_KILLS: 'war_evo_max_kills',
+    BEST_TIME: 'war_evo_best_time',
+};
+
 // Re-export for scene binding
 export { Unit } from './Unit';
 export { Castle } from './Castle';
@@ -268,12 +274,50 @@ export class WarEvo extends Component {
         }
     }
 
+    /** 获取最高击杀记录 */
+    private getMaxKillsRecord(): number {
+        const stored = StorageManager.instance.getItem(STORAGE_KEYS.MAX_KILLS);
+        return stored ? parseInt(stored, 10) : 0;
+    }
+
+    /** 获取最快通关记录（秒） */
+    private getBestTimeRecord(): number {
+        const stored = StorageManager.instance.getItem(STORAGE_KEYS.BEST_TIME);
+        return stored ? parseInt(stored, 10) : Infinity;
+    }
+
     private showResult(win: boolean): void {
+        const maxKills = this.getMaxKillsRecord();
+        const bestTime = this.getBestTimeRecord();
+
+        // 更新记录
+        let newMaxKills = maxKills;
+        let newBestTime = bestTime;
+        let isNewKillRecord = false;
+        let isNewTimeRecord = false;
+
+        if (this._playerKills > maxKills) {
+            newMaxKills = this._playerKills;
+            StorageManager.instance.setItem(STORAGE_KEYS.MAX_KILLS, newMaxKills.toString());
+            isNewKillRecord = true;
+        }
+
+        if (win && this._gameTime < bestTime) {
+            newBestTime = this._gameTime;
+            StorageManager.instance.setItem(STORAGE_KEYS.BEST_TIME, Math.floor(newBestTime).toString());
+            isNewTimeRecord = true;
+        }
+
         this.uiController?.showGameOver(
             win,
             this._playerAge,
             this._playerKills,
             this._playerGold,
+            this._gameTime,
+            newMaxKills,
+            newBestTime,
+            isNewKillRecord,
+            isNewTimeRecord,
         );
     }
 

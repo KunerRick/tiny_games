@@ -37,37 +37,37 @@ export const UNIT_CONFIGS: UnitConfig[] = [
     // ===== 原始时代 =====
     {
         id: 'caveman', name: '穴居人', cost: 15,
-        hp: 150, attack: 12, attackSpeed: 1.0, moveSpeed: 80,
+        hp: 35, attack: 15, attackSpeed: 1.0, moveSpeed: 80,
         attackRange: 30, age: Age.PRIMITIVE, desc: '廉价近战',
     },
     {
         id: 'mammoth', name: '猛犸', cost: 80,
-        hp: 600, attack: 30, attackSpeed: 0.6, moveSpeed: 60,
+        hp: 120, attack: 35, attackSpeed: 0.6, moveSpeed: 60,
         attackRange: 35, age: Age.PRIMITIVE, desc: '重型践踏',
         hasStomp: true,
     },
     // ===== 中世纪 =====
     {
         id: 'knight', name: '骑士', cost: 200,
-        hp: 450, attack: 45, attackSpeed: 1.0, moveSpeed: 110,
+        hp: 90, attack: 50, attackSpeed: 1.0, moveSpeed: 110,
         attackRange: 30, age: Age.MEDIEVAL, desc: '冲锋击退',
         hasCharge: true,
     },
     {
         id: 'archer', name: '弓箭手', cost: 60,
-        hp: 100, attack: 25, attackSpeed: 1.5, moveSpeed: 80,
+        hp: 25, attack: 30, attackSpeed: 1.5, moveSpeed: 80,
         attackRange: 200, age: Age.MEDIEVAL, desc: '远程攻击',
     },
     // ===== 未来时代 =====
     {
         id: 'mech', name: '机甲', cost: 800,
-        hp: 1500, attack: 100, attackSpeed: 0.8, moveSpeed: 90,
+        hp: 200, attack: 80, attackSpeed: 0.8, moveSpeed: 90,
         attackRange: 40, age: Age.FUTURE, desc: '能量护盾',
         hasShield: true,
     },
     {
         id: 'laser', name: '激光兵', cost: 350,
-        hp: 200, attack: 50, attackSpeed: 1.2, moveSpeed: 95,
+        hp: 50, attack: 45, attackSpeed: 1.2, moveSpeed: 95,
         attackRange: 260, age: Age.FUTURE, desc: '聚焦射击',
         hasLaserFocus: true,
     },
@@ -98,7 +98,7 @@ export const WORLD = {
 
 /** 城堡配置 */
 export const CASTLE_CONFIG = {
-    HP: 3000,
+    HP: 800,
     ATTACK: 30,
     ATTACK_SPEED: 0.8,  // 每秒攻击次数
     ATTACK_RANGE: 380,

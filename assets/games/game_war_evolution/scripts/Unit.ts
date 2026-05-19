@@ -1,4 +1,4 @@
-import { _decorator, Component, Sprite, Color, Label, UITransform } from 'cc';
+import { _decorator, Component, Sprite, Color, Label, UITransform, tween, Tween, Vec3 } from 'cc';
 import { UnitConfig, UnitState, WORLD } from './GameConfig';
 
 const { ccclass, property } = _decorator;
@@ -41,6 +41,18 @@ export class Unit extends Component {
     private _laserFocus: number = 1.0;       // 激光聚焦倍率
     private _laserTargetId: number = 0;      // 当前聚焦目标 ID（切换目标时重置聚焦）
     private _chargeUsed: boolean = false;    // 冲锋是否已用
+
+    // 视觉反馈
+    private _flashTween: Tween<Color> | null = null;
+    private readonly ORIGINAL_COLOR_PLAYER = new Color(68, 136, 255);
+    private readonly ORIGINAL_COLOR_ENEMY = new Color(255, 68, 68);
+
+    // 死亡淡出
+    private _fadeTween: Tween<Node> | null = null;
+    private _isFading: boolean = false;
+
+    // 攻击抖动
+    private _shakeTween: Tween<Node> | null = null;
 
     // ==================== 初始化 ====================
 
@@ -384,10 +396,8 @@ export class Unit extends Component {
         target.takeDamage(damage, this);
         this._attackCooldown = 1.0 / cfg.attackSpeed;
 
-        // 注：不在这里清除 _target——由 updateFighting 中的 post-attack 检查统一处理，
-        //     以立即触发 tryEngage 重新索敌，避免延迟一帧。
-        // 注2：但 processDeadUnits 会在销毁节点前强制清除所有活体的 _target 引用，
-        //     防止跨帧访问已销毁节点。
+        // 触发攻击抖动效果
+        this.triggerAttackShake();
 
         // 猛犸践踏（随攻击触发）
         if (cfg.hasStomp) {
@@ -438,6 +448,7 @@ export class Unit extends Component {
         if (this._shieldHp > 0) {
             if (remaining <= this._shieldHp) {
                 this._shieldHp -= remaining;
+                this.triggerHitFlash();
                 return;
             }
             remaining -= this._shieldHp;
@@ -445,14 +456,77 @@ export class Unit extends Component {
         }
 
         this._hp -= remaining;
+        this.triggerHitFlash();
         if (this._hp <= 0) {
             this._hp = 0;
             this._state = UnitState.DEAD;
+            this.startFadeOut();
         }
     }
 
+    /** 触发受击闪白效果 */
+    private triggerHitFlash(): void {
+        if (!this.body) return;
+
+        // 停止之前的 tween
+        if (this._flashTween) {
+            this._flashTween.stop();
+        }
+
+        // 使用 tween 实现闪白：变白 -> 恢复原色
+        const originalColor = this._side === 'player'
+            ? this.ORIGINAL_COLOR_PLAYER
+            : this.ORIGINAL_COLOR_ENEMY;
+
+        this.body.color = Color.WHITE;
+
+        this._flashTween = tween(this.body.color)
+            .to(0.1, originalColor, { easing: 'linear' })
+            .call(() => {
+                this._flashTween = null;
+            })
+            .start();
+    }
+
     public isDead(): boolean {
-        return this._state === UnitState.DEAD;
+        return this._state === UnitState.DEAD && !this._isFading;
+    }
+
+    /** 开始死亡淡出 */
+    private startFadeOut(): void {
+        if (this._isFading) return;
+        this._isFading = true;
+
+        // 停止之前的 tween
+        if (this._fadeTween) {
+            this._fadeTween.stop();
+        }
+
+        // 使用 tween 实现淡出：1秒内缩放到0.1
+        this._fadeTween = tween(this.node)
+            .to(1.0, { scale: new Vec3(0.1, 0.1, 1) }, { easing: 'quadIn' })
+            .call(() => {
+                this._isFading = false;
+                this._fadeTween = null;
+            })
+            .start();
+    }
+
+    /** 触发攻击抖动效果 */
+    private triggerAttackShake(): void {
+        // 停止之前的抖动
+        if (this._shakeTween) {
+            this._shakeTween.stop();
+        }
+
+        // 使用 tween 实现抖动：放大 -> 恢复
+        this._shakeTween = tween(this.node)
+            .to(0.075, { scale: new Vec3(1.15, 1.15, 1) }, { easing: 'quadOut' })
+            .to(0.075, { scale: new Vec3(1, 1, 1) }, { easing: 'quadIn' })
+            .call(() => {
+                this._shakeTween = null;
+            })
+            .start();
     }
 
     // ==================== 技能 ====================

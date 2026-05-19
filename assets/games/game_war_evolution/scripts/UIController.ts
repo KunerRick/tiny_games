@@ -202,13 +202,52 @@ export class UIController extends Component {
 
     // ======== 结算面板 ========
 
-    public showGameOver(win: boolean, age: Age, kills: number, totalGold: number): void {
+    public showGameOver(
+        win: boolean,
+        age: Age,
+        kills: number,
+        totalGold: number,
+        gameTime: number,
+        maxKills: number,
+        bestTime: number,
+        isNewKillRecord: boolean,
+        isNewTimeRecord: boolean,
+    ): void {
         if (!this.gameOverPanel) return;
         if (this.resultLabel) {
             this.resultLabel.string = win ? '胜利！' : '失败...';
         }
         if (this.statsLabel) {
-            this.statsLabel.string = `时代: ${AGE_NAMES[age]}  击杀: ${kills}  总金币: ${totalGold}`;
+            // 格式化时间显示
+            const formatTime = (seconds: number): string => {
+                if (!isFinite(seconds)) return '--:--';
+                const mins = Math.floor(seconds / 60);
+                const secs = Math.floor(seconds % 60);
+                return `${mins}:${secs < 10 ? '0' + secs : secs}`;
+            };
+
+            // 构建多行文本
+            let statsText = '';
+
+            // 击杀记录
+            statsText += `本局击杀: ${kills}\n`;
+            if (isNewKillRecord) {
+                statsText += `最高记录: ${maxKills}  ← 新纪录！\n\n`;
+            } else {
+                statsText += `最高记录: ${maxKills}\n\n`;
+            }
+
+            // 时间记录（只有胜利时显示）
+            if (win) {
+                statsText += `本局用时: ${formatTime(gameTime)}\n`;
+                if (isNewTimeRecord) {
+                    statsText += `最快通关: ${formatTime(bestTime)}  ← 新纪录！`;
+                } else {
+                    statsText += `最快通关: ${formatTime(bestTime)}`;
+                }
+            }
+
+            this.statsLabel.string = statsText;
         }
         this.gameOverPanel.active = true;
     }
