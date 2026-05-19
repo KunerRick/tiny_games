@@ -104,3 +104,13 @@ export class AI {
         }
     }
 }
+
+/** 根据 AI 当前时代返回收入倍率 */
+export function getAIIncomeMultiplier(age: Age): number {
+    switch (age) {
+        case Age.PRIMITIVE: return 1.0;
+        case Age.MEDIEVAL:   return 1.2;
+        case Age.FUTURE:     return 1.4;
+        default:             return 1.0;
+    }
+}

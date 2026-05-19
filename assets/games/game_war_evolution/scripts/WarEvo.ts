@@ -9,7 +9,7 @@ import {
 } from './GameConfig';
 import { Unit } from './Unit';
 import { Castle } from './Castle';
-import { AI } from './AI';
+import { AI, getAIIncomeMultiplier } from './AI';
 import { UIController } from './UIController';
 
 // 存储键名
@@ -133,7 +133,11 @@ export class WarEvo extends Component {
         while (this._goldTimer >= 1.0) {
             this._goldTimer -= 1.0;
             this._playerGold += GOLD_INCOME.PLAYER;
-            this._ai?.addGold(GOLD_INCOME.AI);
+            if (this._ai) {
+                const aiAge = this._ai.getCurrentAge();
+                const multiplier = getAIIncomeMultiplier(aiAge);
+                this._ai.addGold(Math.round(GOLD_INCOME.AI * multiplier));
+            }
         }
 
         // 2. AI 决策
