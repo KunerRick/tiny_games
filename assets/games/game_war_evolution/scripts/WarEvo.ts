@@ -334,6 +334,7 @@ export class WarEvo extends Component {
             this.castlePlayer?.getMaxHP() ?? 1,
             this.castleEnemy?.getHP() ?? 0,
             this.castleEnemy?.getMaxHP() ?? 1,
+            this._playerKills,
         );
 
         // 进化按钮是否可用

@@ -159,6 +159,7 @@ export class UIController extends Component {
         playerMaxHP: number,
         enemyHP: number,
         enemyMaxHP: number,
+        kills: number,
     ): void {
         // 金币
         if (this.goldLabel) this.goldLabel.string = `${gold}`;
@@ -168,9 +169,7 @@ export class UIController extends Component {
 
         // 击杀/进化进度
         if (this.killLabel) {
-            this.killLabel.string = expRequired > 0
-                ? `击杀: ${exp}/${expRequired}`
-                : `击杀: ${exp} (已满级)`;
+            this.killLabel.string = `击杀: ${kills}`;
         }
 
         // HP ProgressBar
