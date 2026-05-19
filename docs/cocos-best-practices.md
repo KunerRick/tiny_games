@@ -316,6 +316,60 @@ if (this._flashTween) {
 }
 ```
 
+### 6.4 触摸事件中的 Tween 安全
+
+**问题场景**：
+- 用户快速点击后，节点在动画完成前被销毁
+- 导致 `tween(this.node)` 访问已销毁节点
+
+**解决方案**：
+
+```typescript
+// ❌ 错误：直接 tween，不检查节点有效性
+private onTouchStart(event: EventTouch) {
+    tween(this.node)
+        .to(0.1, { scale: new Vec3(0.95, 0.95, 1) })
+        .start();
+}
+
+// ✅ 正确：动画前检查节点有效性
+private onTouchStart(event: EventTouch) {
+    if (!this.node?.isValid) return;
+    tween(this.node)
+        .to(0.1, { scale: new Vec3(0.95, 0.95, 1) })
+        .start();
+}
+
+// ✅ 正确：touchEnd 中也要检查（节点可能在按下和抬起之间被销毁）
+private onTouchEnd(event: EventTouch) {
+    if (this.node?.isValid) {
+        tween(this.node)
+            .to(0.1, { scale: new Vec3(1, 1, 1) })
+            .start();
+    }
+    // 执行业务逻辑...
+}
+```
+
+### 6.5 公共动画方法的安全检查
+
+```typescript
+// ❌ 错误：外部调用的动画方法不检查节点
+public playMergeAnimation(): void {
+    tween(this.node)
+        .to(0.1, { scale: new Vec3(1.25, 1.25, 1) })
+        .start();
+}
+
+// ✅ 正确：公共方法必须检查节点有效性
+public playMergeAnimation(): void {
+    if (!this.node?.isValid) return;
+    tween(this.node)
+        .to(0.1, { scale: new Vec3(1.25, 1.25, 1) })
+        .start();
+}
+```
+
 ---
 
 ## 7. 节点有效性检查

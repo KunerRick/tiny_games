@@ -57,6 +57,7 @@ export class GameIcon extends Component {
     
     private onTouchStart(event: EventTouch) {
         // Scale down effect
+        if (!this.node?.isValid) return;
         tween(this.node)
             .to(0.1, { scale: new Vec3(0.95, 0.95, 1) })
             .start();
@@ -64,10 +65,12 @@ export class GameIcon extends Component {
     
     private onTouchEnd(event: EventTouch) {
         // Scale back
-        tween(this.node)
-            .to(0.1, { scale: new Vec3(1, 1, 1) })
-            .start();
-        
+        if (this.node?.isValid) {
+            tween(this.node)
+                .to(0.1, { scale: new Vec3(1, 1, 1) })
+                .start();
+        }
+
         // Trigger click
         if (this._gameConfig && this._onClickCallback) {
             this._onClickCallback(this._gameConfig.id);
@@ -76,6 +79,7 @@ export class GameIcon extends Component {
     
     private onTouchCancel(event: EventTouch) {
         // Scale back
+        if (!this.node?.isValid) return;
         tween(this.node)
             .to(0.1, { scale: new Vec3(1, 1, 1) })
             .start();

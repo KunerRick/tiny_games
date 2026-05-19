@@ -44,7 +44,7 @@ export class Tile extends Component {
     }
 
     updatePosition(animate: boolean = false): void {
-        if (!this._data) return;
+        if (!this._data || !this.node?.isValid) return;
 
         const x = this._data.col * (this._cellSize + this._spacing);
         const y = -this._data.row * (this._cellSize + this._spacing);
@@ -60,6 +60,7 @@ export class Tile extends Component {
     }
 
     playMergeAnimation(): void {
+        if (!this.node?.isValid) return;
         tween(this.node)
             .delay(0.1)
             .to(0.06, { scale: new Vec3(1.25, 1.25, 1) }, { easing: 'sineOut' })
@@ -68,6 +69,7 @@ export class Tile extends Component {
     }
 
     playAppearAnimation(): void {
+        if (!this.node?.isValid) return;
         this.node.setScale(0, 0, 1);
         tween(this.node)
             .to(0.2, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
