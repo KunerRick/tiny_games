@@ -1,4 +1,4 @@
-import { _decorator, Component } from 'cc';
+import { _decorator, Component, Sprite, UITransform } from 'cc';
 import { CASTLE_CONFIG } from './GameConfig';
 import { Unit } from './Unit';
 
@@ -6,10 +6,18 @@ const { ccclass, property } = _decorator;
 
 /**
  * 城堡组件
- * 管理城堡 HP、自动防御攻击
+ * 管理城堡 HP、自动防御攻击、脚下血条视觉
  */
 @ccclass('Castle')
 export class Castle extends Component {
+    // ---- 场景绑定 ----
+    @property(Sprite)
+    hpBar: Sprite | null = null;       // 绿色填充条（脚下）
+
+    @property(Sprite)
+    hpBarBg: Sprite | null = null;     // 灰色背景条（脚下）
+
+    // ---- 运行时 ----
     private _hp: number = 3000;
     private _maxHp: number = 3000;
     private _side: 'player' | 'enemy' = 'player';
@@ -23,6 +31,7 @@ export class Castle extends Component {
         this._side = side;
         this._isDead = false;
         this._attackCooldown = 0;
+        this.updateHPBar();
     }
 
     /** 每帧更新自动防御 */
@@ -62,6 +71,22 @@ export class Castle extends Component {
         if (this._hp <= 0) {
             this._hp = 0;
             this._isDead = true;
+        }
+        this.updateHPBar();
+    }
+
+    // ==================== 视觉更新 ====================
+
+    /** 根据 HP 比例调整脚下血条宽度 */
+    private updateHPBar(): void {
+        if (!this.hpBar || !this.hpBarBg) return;
+        const ratio = Math.max(0, this._hp / this._maxHp);
+        const bgTransform = this.hpBarBg.node.getComponent(UITransform);
+        if (!bgTransform) return;
+        const bgWidth = bgTransform.width;
+        const fillTransform = this.hpBar.node.getComponent(UITransform);
+        if (fillTransform) {
+            fillTransform.width = bgWidth * ratio;
         }
     }
 

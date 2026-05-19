@@ -1,4 +1,4 @@
-import { _decorator, Component, Sprite, Color, Label, ProgressBar } from 'cc';
+import { _decorator, Component, Sprite, Color, Label, UITransform } from 'cc';
 import { UnitConfig, UnitState, WORLD } from './GameConfig';
 
 const { ccclass, property } = _decorator;
@@ -11,12 +11,15 @@ const { ccclass, property } = _decorator;
  */
 @ccclass('Unit')
 export class Unit extends Component {
-    // ---- 编辑器绑定 ----
+    // ---- 场景/预制体绑定 ----
     @property(Sprite)
-    sprite: Sprite | null = null;
+    body: Sprite | null = null;             // 单位身体色块（预制体 -> body）
 
-    @property(ProgressBar)
-    hpBar: ProgressBar | null = null;
+    @property(Sprite)
+    hpBarFill: Sprite | null = null;       // 血条填充（预制体 -> hpBarFill）
+
+    @property(Sprite)
+    hpBarBg: Sprite | null = null;         // 血条背景（预制体 -> hpBarBg）
 
     @property(Label)
     nameLabel: Label | null = null;
@@ -67,8 +70,8 @@ export class Unit extends Component {
         this.node.setPosition(startX, WORLD.BATTLE_Y, 0);
 
         // 外观：蓝色玩家 / 红色敌人
-        if (this.sprite) {
-            this.sprite.color = side === 'player'
+        if (this.body) {
+            this.body.color = side === 'player'
                 ? new Color(68, 136, 255)   // 蓝
                 : new Color(255, 68, 68);   // 红
         }
@@ -205,7 +208,7 @@ export class Unit extends Component {
                 return;
             }
             // 执行攻击
-            this.tryAttack(dt, this._target);
+            this.tryAttack(dt, this._target, allUnits);
         } else {
             // 攻击城堡
             this.tryAttackCastle(dt, playerCastleX, enemyCastleX);
@@ -215,7 +218,7 @@ export class Unit extends Component {
     /**
      * 执行单位攻击
      */
-    private tryAttack(dt: number, target: Unit): void {
+    private tryAttack(dt: number, target: Unit, allUnits: Unit[]): void {
         this._attackCooldown -= dt;
         if (this._attackCooldown > 0) return;
 
@@ -397,8 +400,13 @@ export class Unit extends Component {
     // ==================== 视觉更新 ====================
 
     private updateHPBar(): void {
-        if (!this.hpBar) return;
+        if (!this.hpBarFill || !this.hpBarBg) return;
         const ratio = Math.max(0, this._hp / this._maxHp);
-        this.hpBar.progress = ratio;
+        const bgTransform = this.hpBarBg.node.getComponent(UITransform);
+        if (!bgTransform) return;
+        const fillTransform = this.hpBarFill.node.getComponent(UITransform);
+        if (fillTransform) {
+            fillTransform.width = bgTransform.width * ratio;
+        }
     }
 }

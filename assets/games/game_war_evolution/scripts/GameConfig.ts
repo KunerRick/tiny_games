@@ -87,11 +87,11 @@ export const AGE_CONFIGS: AgeConfig[] = [
     { age: Age.FUTURE, name: '未来时代', expRequired: 3000, goldRequired: 3000, unitIds: ['mech', 'laser'] },
 ];
 
-/** 战场坐标系常量（基于 Canvas 720×1280 竖屏） */
+/** 战场坐标系常量（基于 Canvas 720×1280 竖屏，与场景搭建一致） */
 export const WORLD = {
-    PLAYER_X: -300,     // 玩家城堡 x 坐标
-    ENEMY_X: 300,       // 敌方城堡 x 坐标
-    BATTLE_Y: 0,        // 主战线 y 坐标（所有单位在此高度行走）
+    PLAYER_X: -280,     // 玩家城堡中心 x（场景中 Castle_Player 的 x）
+    ENEMY_X: 280,       // 敌方城堡中心 x
+    BATTLE_Y: 60,       // 主战线 y（所有单位 + 城堡在此高度）
     QUEUE_DIST: 44,     // 排队间距（像素）
     SPAWN_OFFSET: 25,   // 单位出生时从城堡向外偏移
 };

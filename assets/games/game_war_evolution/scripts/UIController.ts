@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Button } from 'cc';
+import { _decorator, Component, Node, Label, Button, ProgressBar } from 'cc';
 import { Age, UnitConfig, AGE_NAMES, getNextAgeConfig, getAvailableUnits } from './GameConfig';
 
 const { ccclass, property } = _decorator;
@@ -9,7 +9,20 @@ const { ccclass, property } = _decorator;
  */
 @ccclass('UIController')
 export class UIController extends Component {
-    // ======== 顶部栏 ========
+    // ======== 顶部栏 — 血条 ========
+    @property(ProgressBar)
+    playerHP: ProgressBar | null = null;
+
+    @property(ProgressBar)
+    enemyHP: ProgressBar | null = null;
+
+    @property(Label)
+    hpPlayerLabel: Label | null = null;     // 数字 "5000"
+
+    @property(Label)
+    hpEnemyLabel: Label | null = null;      // 数字 "5000"
+
+    // ======== 顶部栏 — 信息 ========
     @property(Label)
     goldLabel: Label | null = null;
 
@@ -17,16 +30,7 @@ export class UIController extends Component {
     ageLabel: Label | null = null;
 
     @property(Label)
-    expLabel: Label | null = null;
-
-    @property(Label)
-    playerHPLabel: Label | null = null;
-
-    @property(Label)
-    enemyHPLabel: Label | null = null;
-
-    @property(Label)
-    evolveCostLabel: Label | null = null;
+    killLabel: Label | null = null;         // "击杀: 0/800"
 
     // ======== 底部栏 ========
     @property(Button)
@@ -37,6 +41,25 @@ export class UIController extends Component {
 
     @property(Button)
     evolveButton: Button | null = null;
+
+    // 按钮内的文字子节点（每个按钮有 name + cost 两个 Label）
+    @property(Label)
+    unitName0: Label | null = null;
+
+    @property(Label)
+    unitCost0: Label | null = null;
+
+    @property(Label)
+    unitName1: Label | null = null;
+
+    @property(Label)
+    unitCost1: Label | null = null;
+
+    @property(Label)
+    evolveNameLabel: Label | null = null;
+
+    @property(Label)
+    evolveCostLabel: Label | null = null;
 
     // ======== 结算面板 ========
     @property(Node)
@@ -55,9 +78,6 @@ export class UIController extends Component {
     lobbyButton: Button | null = null;
 
     // ======== 运行时 ========
-    private _unitLabel0: Label | null = null;
-    private _unitLabel1: Label | null = null;
-
     // 回调
     private _onUnitSpawn: ((configId: string) => void) | null = null;
     private _onEvolve: (() => void) | null = null;
@@ -65,10 +85,6 @@ export class UIController extends Component {
     private _onLobby: (() => void) | null = null;
 
     onLoad() {
-        // 缓存按钮内部的 Label
-        this._unitLabel0 = this.unitButton0?.node.getComponentInChildren(Label) ?? null;
-        this._unitLabel1 = this.unitButton1?.node.getComponentInChildren(Label) ?? null;
-
         // 绑定按钮事件
         this.bindButton(this.unitButton0, () => this._onUnitSpawn?.('__btn0__'));
         this.bindButton(this.unitButton1, () => this._onUnitSpawn?.('__btn1__'));
@@ -109,18 +125,19 @@ export class UIController extends Component {
         this._currentAge = age;
         this._unitConfigs = getAvailableUnits(age);
 
-        this.updateButton(this.unitButton0, this._unitLabel0, 0);
-        this.updateButton(this.unitButton1, this._unitLabel1, 1);
+        this.updateButton(this.unitButton0, this.unitName0, this.unitCost0, 0);
+        this.updateButton(this.unitButton1, this.unitName1, this.unitCost1, 1);
     }
 
-    private updateButton(btn: Button | null, label: Label | null, idx: number): void {
+    private updateButton(
+        btn: Button | null, nameLbl: Label | null, costLbl: Label | null, idx: number,
+    ): void {
         if (!btn) return;
         if (idx < this._unitConfigs.length) {
             const cfg = this._unitConfigs[idx];
             btn.node.active = true;
-            if (label) {
-                label.string = `${cfg.name} ${cfg.cost}g`;
-            }
+            if (nameLbl) nameLbl.string = cfg.name;
+            if (costLbl) costLbl.string = `${cfg.cost}g`;
         } else {
             btn.node.active = false;
         }
@@ -143,28 +160,38 @@ export class UIController extends Component {
         enemyHP: number,
         enemyMaxHP: number,
     ): void {
-        if (this.goldLabel) this.goldLabel.string = `金币: ${gold}`;
+        // 金币
+        if (this.goldLabel) this.goldLabel.string = `${gold}`;
+
+        // 时代
         if (this.ageLabel) this.ageLabel.string = AGE_NAMES[age];
-        if (this.expLabel) {
-            this.expLabel.string = expRequired > 0
-                ? `经验: ${exp}/${expRequired}`
-                : `经验: ${exp}`;
-        }
-        if (this.playerHPLabel) {
-            this.playerHPLabel.string = `我方: ${playerHP}/${playerMaxHP}`;
-        }
-        if (this.enemyHPLabel) {
-            this.enemyHPLabel.string = `敌方: ${enemyHP}/${enemyMaxHP}`;
+
+        // 击杀/进化进度
+        if (this.killLabel) {
+            this.killLabel.string = expRequired > 0
+                ? `击杀: ${exp}/${expRequired}`
+                : `击杀: ${exp} (已满级)`;
         }
 
-        // 进化费用
+        // HP ProgressBar
+        if (this.playerHP) this.playerHP.progress = Math.max(0, playerHP / playerMaxHP);
+        if (this.enemyHP) this.enemyHP.progress = Math.max(0, enemyHP / enemyMaxHP);
+
+        // HP 数字
+        if (this.hpPlayerLabel) this.hpPlayerLabel.string = `${playerHP}`;
+        if (this.hpEnemyLabel) this.hpEnemyLabel.string = `${enemyHP}`;
+
+        // 进化按钮状态文字
         const next = getNextAgeConfig(age);
         if (this.evolveCostLabel) {
             if (next) {
-                this.evolveCostLabel.string = `进化: ${next.goldRequired}g`;
+                this.evolveCostLabel.string = `${exp}/${next.expRequired}`;
             } else {
                 this.evolveCostLabel.string = '已满级';
             }
+        }
+        if (this.evolveNameLabel) {
+            this.evolveNameLabel.string = next ? '进化' : '已满级';
         }
     }
 
@@ -178,7 +205,7 @@ export class UIController extends Component {
     public showGameOver(win: boolean, age: Age, kills: number, totalGold: number): void {
         if (!this.gameOverPanel) return;
         if (this.resultLabel) {
-            this.resultLabel.string = win ? '🎉 胜利！' : '💀 失败...';
+            this.resultLabel.string = win ? '胜利！' : '失败...';
         }
         if (this.statsLabel) {
             this.statsLabel.string = `时代: ${AGE_NAMES[age]}  击杀: ${kills}  总金币: ${totalGold}`;

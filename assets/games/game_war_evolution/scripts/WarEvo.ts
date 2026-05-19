@@ -1,5 +1,5 @@
 import {
-    _decorator, Component, Node, Prefab, instantiate,
+    _decorator, Component, Node, Button, Prefab, instantiate,
 } from 'cc';
 import { SceneManager } from '../../../common/managers/SceneManager';
 import { StorageManager } from '../../../common/managers/StorageManager';
@@ -41,6 +41,9 @@ export class WarEvo extends Component {
     @property(UIController)
     uiController: UIController | null = null;
 
+    @property(Button)
+    backButton: Button | null = null;
+
     // ======== 游戏状态 ========
     private _units: Unit[] = [];
     private _playerGold: number = 300;
@@ -59,6 +62,10 @@ export class WarEvo extends Component {
     onLoad() {
         // 记录最近游玩
         StorageManager.instance.addRecentGame('war_evo');
+
+        // 绑定返回按钮
+        this.backButton?.node.on(Node.EventType.TOUCH_END, this.onLobby, this);
+
         this.initGame();
     }
 
