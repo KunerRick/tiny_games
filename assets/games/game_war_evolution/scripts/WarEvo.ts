@@ -139,17 +139,7 @@ export class WarEvo extends Component {
         // 2. AI 决策
         this._ai?.tick(dt);
 
-        // 3. 城堡自动防御
-        const playerEnemies = this._units.filter(u =>
-            u.getSide() === 'enemy' && !u.isDead(),
-        );
-        const enemyEnemies = this._units.filter(u =>
-            u.getSide() === 'player' && !u.isDead(),
-        );
-        this.castlePlayer?.tick(dt, playerEnemies);
-        this.castleEnemy?.tick(dt, enemyEnemies);
-
-        // 4. 更新所有单位
+        // 3. 更新所有单位
         for (const unit of this._units) {
             unit.tick(dt, this._units, WORLD.PLAYER_X, WORLD.ENEMY_X);
 

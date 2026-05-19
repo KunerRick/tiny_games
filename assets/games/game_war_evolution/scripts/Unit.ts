@@ -498,7 +498,7 @@ export class Unit extends Component {
         return this._state === UnitState.DEAD && !this._isFading;
     }
 
-    /** 开始死亡淡出 */
+    /** 开始死亡淡出 - 颜色变暗 + 下沉 + 透明度淡出 */
     private startFadeOut(): void {
         if (this._isFading || !this.node?.isValid) return;
         this._isFading = true;
@@ -509,12 +509,32 @@ export class Unit extends Component {
             this._fadeTween = null;
         }
 
-        // 使用 tween 实现淡出：1秒内缩放到0.1
+        // 获取当前位置
+        const startX = this.node.position.x;
+        const startY = this.node.position.y;
+        const endY = startY - 15; // 向下移动 15 像素（倒地效果）
+
+        // 颜色变暗：变为深灰色
+        const deadColor = new Color(80, 80, 80, 255);
+        if (this.body) {
+            this.body.color = deadColor;
+        }
+
+        // 使用 tween 实现下沉 + 淡出
         this._fadeTween = tween(this.node)
-            .to(1.0, { scale: new Vec3(0.1, 0.1, 1) }, { easing: 'quadIn' })
+            .to(0.3, { position: new Vec3(startX, endY, 0) }, { easing: 'quadOut' }) // 下沉
+            .delay(0.5) // 停留片刻
             .call(() => {
-                this._isFading = false;
-                this._fadeTween = null;
+                // 淡出透明度
+                if (this.body) {
+                    tween(this.body.color)
+                        .to(0.7, { a: 0 }, { easing: 'linear' })
+                        .call(() => {
+                            this._isFading = false;
+                            this._fadeTween = null;
+                        })
+                        .start();
+                }
             })
             .start();
     }

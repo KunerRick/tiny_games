@@ -1,12 +1,10 @@
 import { _decorator, Component, Sprite, UITransform } from 'cc';
-import { CASTLE_CONFIG } from './GameConfig';
-import { Unit } from './Unit';
 
 const { ccclass, property } = _decorator;
 
 /**
  * 城堡组件
- * 管理城堡 HP、自动防御攻击、脚下血条视觉
+ * 管理城堡 HP、承受伤害、脚下血条视觉（纯防御建筑，不主动攻击）
  */
 @ccclass('Castle')
 export class Castle extends Component {
@@ -21,7 +19,6 @@ export class Castle extends Component {
     private _hp: number = 3000;
     private _maxHp: number = 3000;
     private _side: 'player' | 'enemy' = 'player';
-    private _attackCooldown: number = 0;
     private _isDead: boolean = false;
 
     /** 初始化城堡 */
@@ -30,39 +27,7 @@ export class Castle extends Component {
         this._maxHp = hp;
         this._side = side;
         this._isDead = false;
-        this._attackCooldown = 0;
         this.updateHPBar();
-    }
-
-    /** 每帧更新自动防御 */
-    public tick(dt: number, enemyUnits: Unit[]): void {
-        if (this._isDead) return;
-
-        this._attackCooldown -= dt;
-        if (this._attackCooldown <= 0) {
-            const target = this.findNearestTarget(enemyUnits);
-            if (target) {
-                // 城堡作为攻击者传入，但单位死亡时会识别为城堡击杀（无击杀奖励）
-                target.takeDamage(CASTLE_CONFIG.ATTACK, this as unknown as Unit);
-                this._attackCooldown = 1.0 / CASTLE_CONFIG.ATTACK_SPEED;
-            }
-        }
-    }
-
-    private findNearestTarget(units: Unit[]): Unit | null {
-        const cx = this.node.position.x;
-        let nearest: Unit | null = null;
-        let minDist = CASTLE_CONFIG.ATTACK_RANGE;
-
-        for (const u of units) {
-            if (u.isDead()) continue;
-            const dist = Math.abs(u.getX() - cx);
-            if (dist <= CASTLE_CONFIG.ATTACK_RANGE && dist <= minDist) {
-                minDist = dist;
-                nearest = u;
-            }
-        }
-        return nearest;
     }
 
     /** 承受伤害 */
