@@ -46,6 +46,10 @@ export class Unit extends Component {
     private _laserTargetId: number = 0;      // 当前聚焦目标 ID（切换目标时重置聚焦）
     private _chargeUsed: boolean = false;    // 冲锋是否已用
 
+    // 激光聚焦视觉
+    private _laserIndicator: Node | null = null;  // 头顶叠加指示器节点
+    private _laserLabel: Label | null = null;      // 叠加倍率文字
+
     // 视觉反馈
     private _flashTween: Tween<Sprite> | null = null;
 
@@ -110,6 +114,20 @@ export class Unit extends Component {
         }
 
         this.updateHPBar();
+
+        // 只有激光兵需要叠加指示器
+        if (config.hasLaserFocus) {
+            const indicatorNode = new Node('laserIndicator');
+            indicatorNode.setParent(this.node);
+            indicatorNode.setPosition(0, 40, 0);  // 头顶 40px
+            const label = indicatorNode.addComponent(Label);
+            label.string = '1.0×';
+            label.fontSize = 14;
+            label.color = Color.WHITE.clone();
+            label.horizontalAlign = Label.HorizontalAlign.CENTER;
+            this._laserIndicator = indicatorNode;
+            this._laserLabel = label;
+        }
     }
 
     public setUnitId(id: number): void { this._unitId = id; }
@@ -407,9 +425,26 @@ export class Unit extends Component {
             if (target.getUnitId() !== this._laserTargetId) {
                 this._laserFocus = 1.0;
                 this._laserTargetId = target.getUnitId();
+                if (this._laserLabel) {
+                    this._laserLabel.string = '1.0×';
+                    this._laserLabel.color = Color.WHITE.clone();
+                }
             }
             this._laserFocus = Math.min(this._laserFocus + 0.15, 2.0);
             damage = Math.round(damage * this._laserFocus);
+
+            // 更新激光聚焦视觉
+            if (this._laserLabel && this._laserIndicator) {
+                const mult = Math.round(this._laserFocus * 10) / 10;
+                this._laserLabel.string = `${mult}×`;
+                if (this._laserFocus >= 2.0) {
+                    this._laserLabel.color = new Color(255, 50, 50);   // 红色
+                } else if (this._laserFocus >= 1.5) {
+                    this._laserLabel.color = new Color(255, 220, 80);  // 黄色
+                } else {
+                    this._laserLabel.color = Color.WHITE.clone();
+                }
+            }
         }
 
         target.takeDamage(damage, this);
