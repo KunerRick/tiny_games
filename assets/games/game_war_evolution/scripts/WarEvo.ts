@@ -222,6 +222,16 @@ export class WarEvo extends Component {
             toRemove.push(unit);
         }
 
+        // 在销毁节点前，先清除所有活体单位对死亡单位的 _target 引用
+        // 避免后续帧访问已销毁节点的 position 导致崩溃
+        for (const dead of toRemove) {
+            for (const alive of this._units) {
+                if (alive !== dead) {
+                    alive.clearTargetIf(dead);
+                }
+            }
+        }
+
         for (const u of toRemove) {
             const idx = this._units.indexOf(u);
             if (idx >= 0) this._units.splice(idx, 1);
@@ -239,6 +249,7 @@ export class WarEvo extends Component {
         if (this._playerGold < next.goldRequired) return;
 
         this._playerGold -= next.goldRequired;
+        this._playerGold += 200; // 进化奖励
         this._playerAge = next.age;
 
         // 更新 UI 按钮

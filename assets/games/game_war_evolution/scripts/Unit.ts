@@ -39,6 +39,7 @@ export class Unit extends Component {
     private _shieldHp: number = 0;          // 机甲护盾
     private _stompTimer: number = 0;         // 猛犸践踏计时
     private _laserFocus: number = 1.0;       // 激光聚焦倍率
+    private _laserTargetId: number = 0;      // 当前聚焦目标 ID（切换目标时重置聚焦）
     private _chargeUsed: boolean = false;    // 冲锋是否已用
 
     // ==================== 初始化 ====================
@@ -55,6 +56,7 @@ export class Unit extends Component {
         this._lastAttacker = null;
         this._chargeUsed = false;
         this._laserFocus = 1.0;
+        this._laserTargetId = 0;
         this._stompTimer = 0;
 
         this._attackingCastle = false;
@@ -90,9 +92,20 @@ export class Unit extends Component {
     public getSide(): 'player' | 'enemy' { return this._side; }
     public getHP(): number { return this._hp; }
     public getMaxHP(): number { return this._maxHp; }
-    public getX(): number { return this.node.position.x; }
+    public getX(): number {
+        // 防御性检查：node 可能已被销毁，避免 "Cannot read properties of undefined"
+        if (!this.node) return 0;
+        return this.node.position.x;
+    }
     public getState(): UnitState { return this._state; }
     public getLastAttacker(): Unit | null { return this._lastAttacker; }
+
+    /** 用于 WarEvo 在 processDeadUnits 中清除活体单位对死亡单位的 _target 引用 */
+    public clearTargetIf(targetUnit: Unit): void {
+        if (this._target === targetUnit) {
+            this._target = null;
+        }
+    }
 
     // ==================== 主 Tick（由 WarEvo 每帧调用） ====================
 
@@ -130,8 +143,6 @@ export class Unit extends Component {
         let newX = this.node.position.x + dx;
 
         // 到达敌方城堡边界则停
-        const boundary = this._side === 'player' ? enemyCastleX : -enemyCastleX;
-        // 简化：玩家单位不超过 ENEMY_X-20，敌方单位不超过 PLAYER_X+20
         if (this._side === 'player' && newX >= enemyCastleX - 20) {
             newX = enemyCastleX - 20;
         } else if (this._side === 'enemy' && newX <= -enemyCastleX + 20) {
@@ -178,13 +189,27 @@ export class Unit extends Component {
             return;
         }
 
-        // 无敌方单位 → 攻击城堡
+        // 无敌方单位 → 攻击城堡（需要距离判断）
         const castleX = this._side === 'player' ? enemyCastleX : playerCastleX;
         const distToCastle = Math.abs(this.getX() - castleX);
         if (distToCastle <= this._config!.attackRange + 30) {
             if (!this.hasFightingAllyAhead(allUnits)) {
                 this._state = UnitState.FIGHTING;
                 this._target = null; // null target signals castle attack
+            }
+            return;
+        }
+
+        // 既无敌人在范围，也不在城堡攻击距离内
+        // 如果是 FIGHTING 状态（从 updateFighting 清空 target 后进入）：
+        //   - 有队友在前方战斗 → QUEUING 排队
+        //   - 没有队友在前方 → MOVING 继续前进
+        // 防止卡在 FIGHTING + null target 状态导致下一帧无距离限制攻击城堡
+        if (this._state === UnitState.FIGHTING) {
+            if (this.hasFightingAllyAhead(allUnits)) {
+                this._state = UnitState.QUEUING;
+            } else {
+                this._state = UnitState.MOVING;
             }
         }
     }
@@ -209,9 +234,31 @@ export class Unit extends Component {
             }
             // 执行攻击
             this.tryAttack(dt, this._target, allUnits);
+
+            // 攻击后检查目标是否死亡（包括被践踏等后续伤害击杀的情况）
+            // 立即清除 _target 引用，避免后续帧访问已销毁节点的 position
+            if (this._target && this._target.isDead()) {
+                this._target = null;
+                this.tryEngage(allUnits, playerCastleX, enemyCastleX);
+                return;
+            }
         } else {
-            // 攻击城堡
-            this.tryAttackCastle(dt, playerCastleX, enemyCastleX);
+            // 攻击城堡（仅在距离足够时）
+            const castleX = this._side === 'player' ? enemyCastleX : playerCastleX;
+            const distToCastle = Math.abs(this.getX() - castleX);
+            if (distToCastle <= this._config!.attackRange + 30) {
+                this.tryAttackCastle(dt, playerCastleX, enemyCastleX);
+            } else {
+                // 离城堡太远且没有敌人 → 退回 MOVING 继续前进
+                this._state = UnitState.MOVING;
+                return;
+            }
+
+            // 检查是否有敌人靠近，有则切换目标（避免无视敌人一直打城堡）
+            const nearbyEnemy = this.findNearestEnemy(allUnits);
+            if (nearbyEnemy) {
+                this._target = nearbyEnemy;
+            }
         }
     }
 
@@ -231,14 +278,23 @@ export class Unit extends Component {
             this._chargeUsed = true;
         }
 
-        // 激光聚焦：持续增伤
+        // 激光聚焦：持续攻击同一目标伤害递增，切换目标重置
         if (cfg.hasLaserFocus) {
+            if (target.getUnitId() !== this._laserTargetId) {
+                this._laserFocus = 1.0;
+                this._laserTargetId = target.getUnitId();
+            }
             this._laserFocus = Math.min(this._laserFocus + 0.15, 2.0);
             damage = Math.round(damage * this._laserFocus);
         }
 
         target.takeDamage(damage, this);
         this._attackCooldown = 1.0 / cfg.attackSpeed;
+
+        // 注：不在这里清除 _target——由 updateFighting 中的 post-attack 检查统一处理，
+        //     以立即触发 tryEngage 重新索敌，避免延迟一帧。
+        // 注2：但 processDeadUnits 会在销毁节点前强制清除所有活体的 _target 引用，
+        //     防止跨帧访问已销毁节点。
 
         // 猛犸践踏（随攻击触发）
         if (cfg.hasStomp) {
@@ -254,15 +310,15 @@ export class Unit extends Component {
      * 执行城堡攻击
      */
     private tryAttackCastle(dt: number, playerCastleX: number, enemyCastleX: number): void {
-        // Castle damage is handled by WarEvo when unit is within range
-        // This method is a placeholder - damage to castle is handled 
-        // in WarEvo's unit processing loop
         this._attackCooldown -= dt;
         if (this._attackCooldown > 0) return;
-        this._attackCooldown = 1.0 / this._config!.attackSpeed;
 
-        // Signal to WarEvo that this unit is attacking a castle
-        // Done via a flag that WarEvo checks
+        // 二层防御：必须在本方城堡朝向的敌方城堡方向且距离足够
+        const castleX = this._side === 'player' ? enemyCastleX : playerCastleX;
+        const distToCastle = Math.abs(this.getX() - castleX);
+        if (distToCastle > this._config!.attackRange + 30) return;
+
+        this._attackCooldown = 1.0 / this._config!.attackSpeed;
         this._attackingCastle = true;
     }
 
@@ -288,8 +344,8 @@ export class Unit extends Component {
             if (u === this || u.getSide() !== this._side || u.getState() !== UnitState.FIGHTING) continue;
             if (u.isDead()) continue;
             const ux = u.getX();
-            if (this._side === 'player' && ux > myX) return true;
-            if (this._side === 'enemy' && ux < myX) return true;
+            if (this._side === 'player' && ux >= myX) return true;
+            if (this._side === 'enemy' && ux <= myX) return true;
         }
         return false;
     }

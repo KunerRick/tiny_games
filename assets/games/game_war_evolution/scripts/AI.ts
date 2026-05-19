@@ -34,8 +34,8 @@ export class AI {
     public tick(dt: number): void {
         this._gameTime += dt;
 
-        // 金币自动增长
-        this._gold += AI_CONFIG.GOLD_RATE * dt;
+        // 金币由 WarEvo.update 通过 addGold 统一增长（避免与 WarEvo 重复给金币）
+        // AI 额外击杀奖励通过 addKillReward 获得
 
         // 产兵
         this._spawnTimer -= dt;
@@ -81,8 +81,8 @@ export class AI {
             chosen = affordable[Math.floor(Math.random() * affordable.length)];
         }
 
-        // 生产：保持至少 50 金币余额不打光
-        if (this._gold - chosen.cost >= 50 || this._gold >= chosen.cost) {
+        // 生产：保持至少 50 金币余额不打光（affordable 已保证 gold >= cost）
+        if (this._gold - chosen.cost >= 50) {
             this._gold -= chosen.cost;
             this._spawnFn(chosen.id, 'enemy');
         }
