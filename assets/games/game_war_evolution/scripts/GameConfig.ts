@@ -31,6 +31,9 @@ export interface UnitConfig {
     hasCharge?: boolean;    // 骑士冲锋（首击2倍+击退）
     hasShield?: boolean;    // 机甲护盾（50%额外血量）
     hasLaserFocus?: boolean;// 激光聚焦（持续增伤）
+    // 视觉配置
+    scale: number;           // 大小缩放（基准 1.0）
+    tint: { r: number; g: number; b: number }; // 兵种细分色调
 }
 
 export const UNIT_CONFIGS: UnitConfig[] = [
@@ -39,12 +42,16 @@ export const UNIT_CONFIGS: UnitConfig[] = [
         id: 'caveman', name: '穴居人', cost: 15,
         hp: 35, attack: 15, attackSpeed: 1.0, moveSpeed: 80,
         attackRange: 30, age: Age.PRIMITIVE, desc: '廉价近战',
+        scale: 1.0,
+        tint: { r: 68, g: 136, b: 255 },
     },
     {
         id: 'mammoth', name: '猛犸', cost: 80,
         hp: 120, attack: 35, attackSpeed: 0.6, moveSpeed: 60,
         attackRange: 35, age: Age.PRIMITIVE, desc: '重型践踏',
         hasStomp: true,
+        scale: 1.5,
+        tint: { r: 100, g: 80, b: 220 },
     },
     // ===== 中世纪 =====
     {
@@ -52,11 +59,15 @@ export const UNIT_CONFIGS: UnitConfig[] = [
         hp: 90, attack: 50, attackSpeed: 1.0, moveSpeed: 110,
         attackRange: 30, age: Age.MEDIEVAL, desc: '冲锋击退',
         hasCharge: true,
+        scale: 1.0,
+        tint: { r: 60, g: 180, b: 255 },
     },
     {
         id: 'archer', name: '弓箭手', cost: 60,
         hp: 25, attack: 30, attackSpeed: 1.5, moveSpeed: 80,
         attackRange: 200, age: Age.MEDIEVAL, desc: '远程攻击',
+        scale: 1.0,
+        tint: { r: 80, g: 200, b: 120 },
     },
     // ===== 未来时代 =====
     {
@@ -64,12 +75,16 @@ export const UNIT_CONFIGS: UnitConfig[] = [
         hp: 200, attack: 80, attackSpeed: 0.8, moveSpeed: 90,
         attackRange: 40, age: Age.FUTURE, desc: '能量护盾',
         hasShield: true,
+        scale: 1.5,
+        tint: { r: 140, g: 100, b: 255 },
     },
     {
         id: 'laser', name: '激光兵', cost: 350,
         hp: 50, attack: 45, attackSpeed: 1.2, moveSpeed: 95,
         attackRange: 260, age: Age.FUTURE, desc: '聚焦射击',
         hasLaserFocus: true,
+        scale: 0.75,
+        tint: { r: 100, g: 220, b: 255 },
     },
 ];
 

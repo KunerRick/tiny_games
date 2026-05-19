@@ -89,11 +89,20 @@ export class Unit extends Component {
         this._hpBarBgTransform = this.hpBarBg?.node.getComponent(UITransform) ?? null;
         this._hpBarFillTransform = this.hpBarFill?.node.getComponent(UITransform) ?? null;
 
-        // 外观：蓝色玩家 / 红色敌人
+        // 外观：阵营基准色与兵种细分色调混合
         if (this.body) {
-            const color = side === 'player' ? UNIT_COLORS.PLAYER : UNIT_COLORS.ENEMY;
-            this.body.color = new Color(color.r, color.g, color.b);
+            const base = side === 'player' ? UNIT_COLORS.PLAYER : UNIT_COLORS.ENEMY;
+            const tint = this._config!.tint;
+            // 混合比例：60% 阵营色 + 40% 兵种色调
+            const r = Math.round(base.r * 0.6 + tint.r * 0.4);
+            const g = Math.round(base.g * 0.6 + tint.g * 0.4);
+            const b = Math.round(base.b * 0.6 + tint.b * 0.4);
+            this.body.color = new Color(r, g, b);
         }
+
+        // 应用大小缩放
+        const scale = this._config!.scale;
+        this.node.setScale(scale, scale, 1);
 
         // 名字
         if (this.nameLabel) {
