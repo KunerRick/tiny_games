@@ -50,6 +50,9 @@ export class Unit extends Component {
     private _laserIndicator: Node | null = null;  // 头顶叠加指示器节点
     private _laserLabel: Label | null = null;      // 叠加倍率文字
 
+    // 机甲专属
+    private _hasSelfDestruct: boolean = false;   // 机甲死亡自爆标记
+
     // 视觉反馈
     private _flashTween: Tween<Sprite> | null = null;
 
@@ -84,6 +87,11 @@ export class Unit extends Component {
             this._shieldHp = Math.floor(config.hp * 0.5);
         } else {
             this._shieldHp = 0;
+        }
+
+        // 机甲专属：死亡自爆
+        if (config.id === 'mech') {
+            this._hasSelfDestruct = true;
         }
 
         // 位置
@@ -447,7 +455,7 @@ export class Unit extends Component {
             }
         }
 
-        target.takeDamage(damage, this);
+        target.takeDamage(damage, this, allUnits);
         this._attackCooldown = 1.0 / cfg.attackSpeed;
 
         // 触发攻击抖动效果
@@ -492,7 +500,7 @@ export class Unit extends Component {
 
     // ==================== 受伤害 & 死亡 ====================
 
-    public takeDamage(amount: number, attacker: Unit | null): void {
+    public takeDamage(amount: number, attacker: Unit | null, allUnits?: Unit[]): void {
         if (this._state === UnitState.DEAD) return;
         if (attacker) this._lastAttacker = attacker;
 
@@ -514,6 +522,10 @@ export class Unit extends Component {
         if (this._hp <= 0) {
             this._hp = 0;
             this._state = UnitState.DEAD;
+            // 机甲死亡自爆
+            if (this._hasSelfDestruct && allUnits) {
+                this.performSelfDestruct(allUnits);
+            }
             this.startFadeOut();
         }
     }
@@ -644,6 +656,40 @@ export class Unit extends Component {
                 u.takeDamage(30, this);
             }
         }
+    }
+
+    /**
+     * 机甲死亡自爆 — 对周围 100px 内所有敌方造成 60 点范围伤害
+     */
+    private performSelfDestruct(allUnits: Unit[]): void {
+        const cx = this.getX();
+        for (const u of allUnits) {
+            if (u.getSide() === this._side || u.isDying()) continue;
+            if (Math.abs(u.getX() - cx) <= 100) {
+                u.takeDamage(60, null);
+            }
+        }
+        this.triggerExplosionEffect();
+    }
+
+    /**
+     * 触发自爆扩散动画效果
+     */
+    private triggerExplosionEffect(): void {
+        if (!this.body || !this.body.isValid) return;
+
+        // 保存原始颜色
+        const originalColor = this.body.color.clone();
+
+        // 闪红
+        this.body.color = new Color(255, 80, 80);
+
+        // 100ms 后恢复
+        setTimeout(() => {
+            if (this.body && this.body.isValid) {
+                this.body.color = originalColor;
+            }
+        }, 100);
     }
 
     // ==================== 视觉更新 ====================
