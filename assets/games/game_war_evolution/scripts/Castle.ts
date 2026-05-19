@@ -42,7 +42,8 @@ export class Castle extends Component {
         if (this._attackCooldown <= 0) {
             const target = this.findNearestTarget(enemyUnits);
             if (target) {
-                target.takeDamage(CASTLE_CONFIG.ATTACK, null);
+                // 城堡作为攻击者传入，但单位死亡时会识别为城堡击杀（无击杀奖励）
+                target.takeDamage(CASTLE_CONFIG.ATTACK, this as unknown as Unit);
                 this._attackCooldown = 1.0 / CASTLE_CONFIG.ATTACK_SPEED;
             }
         }

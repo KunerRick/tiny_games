@@ -78,13 +78,14 @@ export interface AgeConfig {
     name: string;
     expRequired: number;    // 进化所需经验（累计）
     goldRequired: number;   // 进化所需金币
+    goldReserve: number;    // 进化后保留的最低金币余额（AI 用）
     unitIds: string[];      // 本时代解锁的兵种
 }
 
 export const AGE_CONFIGS: AgeConfig[] = [
-    { age: Age.PRIMITIVE, name: '原始时代', expRequired: 0, goldRequired: 0, unitIds: ['caveman', 'mammoth'] },
-    { age: Age.MEDIEVAL, name: '中世纪', expRequired: 800, goldRequired: 800, unitIds: ['knight', 'archer'] },
-    { age: Age.FUTURE, name: '未来时代', expRequired: 3000, goldRequired: 3000, unitIds: ['mech', 'laser'] },
+    { age: Age.PRIMITIVE, name: '原始时代', expRequired: 0, goldRequired: 0, goldReserve: 0, unitIds: ['caveman', 'mammoth'] },
+    { age: Age.MEDIEVAL, name: '中世纪', expRequired: 800, goldRequired: 800, goldReserve: 200, unitIds: ['knight', 'archer'] },
+    { age: Age.FUTURE, name: '未来时代', expRequired: 3000, goldRequired: 3000, goldReserve: 200, unitIds: ['mech', 'laser'] },
 ];
 
 /** 战场坐标系常量（基于 Canvas 720×1280 竖屏，与场景搭建一致） */
@@ -104,14 +105,17 @@ export const CASTLE_CONFIG = {
     ATTACK_RANGE: 380,
 };
 
+/** 金币收入配置（每秒） */
+export const GOLD_INCOME = {
+    PLAYER: 10,  // 玩家每秒金币收入
+    AI: 10,      // AI 每秒金币收入
+};
+
 /** AI 配置 */
 export const AI_CONFIG = {
     SPAWN_INTERVAL_MIN: 1.5,
     SPAWN_INTERVAL_MAX: 3.5,
-    GOLD_RATE: 10,   // AI 每秒金币收入
 };
-
-export const GOLD_RATE = 10; // 玩家每秒金币收入
 
 // ==================== 辅助函数 ====================
 
@@ -148,3 +152,9 @@ export enum UnitState {
     QUEUING = 'queuing',
     DEAD = 'dead',
 }
+
+/** 单位颜色配置 */
+export const UNIT_COLORS = {
+    PLAYER: { r: 68, g: 136, b: 255 },   // 蓝色
+    ENEMY: { r: 255, g: 68, b: 68 },     // 红色
+};

@@ -4,7 +4,7 @@ import {
 import { SceneManager } from '../../../common/managers/SceneManager';
 import { StorageManager } from '../../../common/managers/StorageManager';
 import {
-    Age, GOLD_RATE, WORLD, CASTLE_CONFIG,
+    Age, GOLD_INCOME, WORLD, CASTLE_CONFIG,
     getUnitConfig, getNextAgeConfig,
 } from './GameConfig';
 import { Unit } from './Unit';
@@ -13,9 +13,10 @@ import { AI } from './AI';
 import { UIController } from './UIController';
 
 // 存储键名
+const GAME_ID = 'war_evo';
 const STORAGE_KEYS = {
-    MAX_KILLS: 'war_evo_max_kills',
-    BEST_TIME: 'war_evo_best_time',
+    MAX_KILLS: 'max_kills',
+    BEST_TIME: 'best_time',
 };
 
 // Re-export for scene binding
@@ -57,7 +58,7 @@ export class WarEvo extends Component {
     private _playerAge: Age = Age.PRIMITIVE;
     private _playerKills: number = 0;
     private _gameOver: boolean = false;
-    private _unitIdCounter: number = 0;
+    private _nextUnitId: number = 0;
     private _goldTimer: number = 0;
     private _gameTime: number = 0;
 
@@ -82,7 +83,7 @@ export class WarEvo extends Component {
         this._playerAge = Age.PRIMITIVE;
         this._playerKills = 0;
         this._gameOver = false;
-        this._unitIdCounter = 0;
+        this._nextUnitId = 0;
         this._goldTimer = 0;
         this._gameTime = 0;
 
@@ -91,9 +92,13 @@ export class WarEvo extends Component {
         this.castleEnemy?.init(CASTLE_CONFIG.HP, 'enemy');
 
         // 初始化 AI
+        if (!this.castleEnemy) {
+            console.error('[WarEvo] castleEnemy 未绑定，请检查场景');
+            return;
+        }
         this._ai = new AI(
             (configId: string, side: 'enemy') => this.spawnUnit(configId, side),
-            this.castleEnemy!,
+            this.castleEnemy,
         );
 
         // 初始化 UI
@@ -127,8 +132,8 @@ export class WarEvo extends Component {
         this._goldTimer += dt;
         while (this._goldTimer >= 1.0) {
             this._goldTimer -= 1.0;
-            this._playerGold += GOLD_RATE;
-            this._ai?.addGold(GOLD_RATE);
+            this._playerGold += GOLD_INCOME.PLAYER;
+            this._ai?.addGold(GOLD_INCOME.AI);
         }
 
         // 2. AI 决策
@@ -198,7 +203,7 @@ export class WarEvo extends Component {
 
         const unit = node.getComponent(Unit)!;
         unit.init(cfg, side, startX);
-        unit.setUnitId(++this._unitIdCounter);
+        unit.setUnitId(++this._nextUnitId);
 
         this._units.push(unit);
         return unit;
@@ -212,7 +217,8 @@ export class WarEvo extends Component {
             if (!unit.isDead()) continue;
 
             const killer = unit.getLastAttacker();
-            if (killer) {
+            // 只有单位击杀才发放奖励（城堡击杀无奖励）
+            if (killer && killer instanceof Unit) {
                 const reward = Math.floor(unit.getConfig().cost * 0.25);
                 if (reward > 0) {
                     if (killer.getSide() === 'player') {
@@ -276,13 +282,13 @@ export class WarEvo extends Component {
 
     /** 获取最高击杀记录 */
     private getMaxKillsRecord(): number {
-        const stored = StorageManager.instance.getItem(STORAGE_KEYS.MAX_KILLS);
+        const stored = StorageManager.instance.getItem(GAME_ID, STORAGE_KEYS.MAX_KILLS);
         return stored ? parseInt(stored, 10) : 0;
     }
 
     /** 获取最快通关记录（秒） */
     private getBestTimeRecord(): number {
-        const stored = StorageManager.instance.getItem(STORAGE_KEYS.BEST_TIME);
+        const stored = StorageManager.instance.getItem(GAME_ID, STORAGE_KEYS.BEST_TIME);
         return stored ? parseInt(stored, 10) : Infinity;
     }
 
@@ -298,13 +304,13 @@ export class WarEvo extends Component {
 
         if (this._playerKills > maxKills) {
             newMaxKills = this._playerKills;
-            StorageManager.instance.setItem(STORAGE_KEYS.MAX_KILLS, newMaxKills.toString());
+            StorageManager.instance.setItem(GAME_ID, STORAGE_KEYS.MAX_KILLS, newMaxKills.toString());
             isNewKillRecord = true;
         }
 
         if (win && this._gameTime < bestTime) {
             newBestTime = this._gameTime;
-            StorageManager.instance.setItem(STORAGE_KEYS.BEST_TIME, Math.floor(newBestTime).toString());
+            StorageManager.instance.setItem(GAME_ID, STORAGE_KEYS.BEST_TIME, Math.floor(newBestTime).toString());
             isNewTimeRecord = true;
         }
 
@@ -350,11 +356,18 @@ export class WarEvo extends Component {
 
     private onRestart(): void {
         this.uiController?.hideGameOver();
-        // 清除所有单位
-        for (const u of this._units) {
-            u.node.destroy();
-        }
+        this.clearAllUnits();
         this.initGame();
+    }
+
+    /** 清除所有单位节点 */
+    private clearAllUnits(): void {
+        for (const u of this._units) {
+            if (u.node?.isValid) {
+                u.node.destroy();
+            }
+        }
+        this._units = [];
     }
 
     private onLobby(): void {

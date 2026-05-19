@@ -96,8 +96,8 @@ export class AI {
         const minTime = (this._currentAge + 1) * 20;
         if (this._gameTime < minTime) return;
 
-        // 检查经验和金币
-        if (this._exp >= next.expRequired && this._gold >= next.goldRequired + 200) {
+        // 检查经验和金币（AI 进化需要保留一定余额用于后续出兵）
+        if (this._exp >= next.expRequired && this._gold >= next.goldRequired + next.goldReserve) {
             // 进化！
             this._gold -= next.goldRequired;
             this._currentAge = next.age;

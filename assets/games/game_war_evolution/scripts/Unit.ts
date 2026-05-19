@@ -1,5 +1,5 @@
 import { _decorator, Component, Sprite, Color, Label, UITransform, tween, Tween, Vec3 } from 'cc';
-import { UnitConfig, UnitState, WORLD } from './GameConfig';
+import { UnitConfig, UnitState, WORLD, UNIT_COLORS } from './GameConfig';
 
 const { ccclass, property } = _decorator;
 
@@ -20,6 +20,10 @@ export class Unit extends Component {
 
     @property(Sprite)
     hpBarBg: Sprite | null = null;         // 血条背景（预制体 -> hpBarBg）
+
+    // UITransform 缓存，避免每帧重复获取
+    private _hpBarBgTransform: UITransform | null = null;
+    private _hpBarFillTransform: UITransform | null = null;
 
     @property(Label)
     nameLabel: Label | null = null;
@@ -44,8 +48,6 @@ export class Unit extends Component {
 
     // 视觉反馈
     private _flashTween: Tween<Color> | null = null;
-    private readonly ORIGINAL_COLOR_PLAYER = new Color(68, 136, 255);
-    private readonly ORIGINAL_COLOR_ENEMY = new Color(255, 68, 68);
 
     // 死亡淡出
     private _fadeTween: Tween<Node> | null = null;
@@ -83,11 +85,14 @@ export class Unit extends Component {
         // 位置
         this.node.setPosition(startX, WORLD.BATTLE_Y, 0);
 
+        // 缓存 UITransform 引用
+        this._hpBarBgTransform = this.hpBarBg?.node.getComponent(UITransform) ?? null;
+        this._hpBarFillTransform = this.hpBarFill?.node.getComponent(UITransform) ?? null;
+
         // 外观：蓝色玩家 / 红色敌人
         if (this.body) {
-            this.body.color = side === 'player'
-                ? new Color(68, 136, 255)   // 蓝
-                : new Color(255, 68, 68);   // 红
+            const color = side === 'player' ? UNIT_COLORS.PLAYER : UNIT_COLORS.ENEMY;
+            this.body.color = new Color(color.r, color.g, color.b);
         }
 
         // 名字
@@ -106,7 +111,7 @@ export class Unit extends Component {
     public getMaxHP(): number { return this._maxHp; }
     public getX(): number {
         // 防御性检查：node 可能已被销毁，避免 "Cannot read properties of undefined"
-        if (!this.node) return 0;
+        if (!this.node?.isValid) return 0;
         return this.node.position.x;
     }
     public getState(): UnitState { return this._state; }
@@ -138,8 +143,6 @@ export class Unit extends Component {
 
         }
 
-        // 技能冷却
-        this.updateSkills(dt, allUnits);
         this.updateHPBar();
     }
 
@@ -422,15 +425,15 @@ export class Unit extends Component {
         if (distToCastle > this._config!.attackRange + 30) return;
 
         this._attackCooldown = 1.0 / this._config!.attackSpeed;
-        this._attackingCastle = true;
+        this._pendingCastleAttack = true;
     }
 
-    private _attackingCastle: boolean = false;
+    private _pendingCastleAttack: boolean = false;
 
     /** 由 WarEvo 检查并消费 */
     public consumeCastleAttack(): boolean {
-        if (this._attackingCastle) {
-            this._attackingCastle = false;
+        if (this._pendingCastleAttack) {
+            this._pendingCastleAttack = false;
             return true;
         }
         return false;
@@ -474,9 +477,8 @@ export class Unit extends Component {
         }
 
         // 使用 tween 实现闪白：变白 -> 恢复原色
-        const originalColor = this._side === 'player'
-            ? this.ORIGINAL_COLOR_PLAYER
-            : this.ORIGINAL_COLOR_ENEMY;
+        const color = this._side === 'player' ? UNIT_COLORS.PLAYER : UNIT_COLORS.ENEMY;
+        const originalColor = new Color(color.r, color.g, color.b);
 
         this.body.color = Color.WHITE;
 
@@ -531,11 +533,6 @@ export class Unit extends Component {
 
     // ==================== 技能 ====================
 
-    private updateSkills(_dt: number, allUnits: Unit[]): void {
-        // 猛犸践踏（在 tryAttack 中累积计时，在此触发）
-        // 逻辑已移到 tryAttack 中
-    }
-
     private performStomp(allUnits: Unit[]): void {
         // 对周围 100px 内所有敌方单位造成 30 范围伤害
         const cx = this.getX();
@@ -550,13 +547,8 @@ export class Unit extends Component {
     // ==================== 视觉更新 ====================
 
     private updateHPBar(): void {
-        if (!this.hpBarFill || !this.hpBarBg) return;
+        if (!this._hpBarBgTransform || !this._hpBarFillTransform) return;
         const ratio = Math.max(0, this._hp / this._maxHp);
-        const bgTransform = this.hpBarBg.node.getComponent(UITransform);
-        if (!bgTransform) return;
-        const fillTransform = this.hpBarFill.node.getComponent(UITransform);
-        if (fillTransform) {
-            fillTransform.width = bgTransform.width * ratio;
-        }
+        this._hpBarFillTransform.width = this._hpBarBgTransform.width * ratio;
     }
 }

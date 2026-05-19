@@ -38,16 +38,41 @@ export class StorageManager {
     
     addRecentGame(gameId: string): void {
         const data = this.getUserData();
-        
+
         // Remove if exists
         data.recentGames = data.recentGames.filter(id => id !== gameId);
-        
+
         // Add to front
         data.recentGames.unshift(gameId);
-        
+
         // Keep only 3
         data.recentGames = data.recentGames.slice(0, 3);
-        
+
         this.setUserData(data);
+    }
+
+    // ==================== 通用键值存储 ====================
+
+    private getGameKey(gameId: string, key: string): string {
+        return `tiny_games_${gameId}_${key}`;
+    }
+
+    /** 获取游戏特定的存储项 */
+    getItem(gameId: string, key: string): string | null {
+        try {
+            return localStorage.getItem(this.getGameKey(gameId, key));
+        } catch (e) {
+            console.warn(`Failed to get item ${key} for ${gameId}:`, e);
+            return null;
+        }
+    }
+
+    /** 设置游戏特定的存储项 */
+    setItem(gameId: string, key: string, value: string): void {
+        try {
+            localStorage.setItem(this.getGameKey(gameId, key), value);
+        } catch (e) {
+            console.warn(`Failed to set item ${key} for ${gameId}:`, e);
+        }
     }
 }
