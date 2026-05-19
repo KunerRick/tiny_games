@@ -173,7 +173,8 @@ export class Unit extends Component {
         let minDist = this._config!.attackRange;
         const myX = this.getX();
         for (const u of allUnits) {
-            if (u.getSide() === this._side || u.isDead()) continue;
+            // 使用 isDying() 跳过所有死亡中的单位（包括动画期间）
+            if (u.getSide() === this._side || u.isDying()) continue;
             const dist = Math.abs(u.getX() - myX);
             if (dist <= minDist) {
                 minDist = dist;
@@ -232,7 +233,8 @@ export class Unit extends Component {
         let alliesAttackingSameTarget = 0;
         let myIndex = 0;
         for (const u of allUnits) {
-            if (u === this || u.getSide() !== this._side || u.isDead()) continue;
+            // 使用 isDying() 跳过死亡中的单位
+            if (u === this || u.getSide() !== this._side || u.isDying()) continue;
             if (u.getState() === UnitState.FIGHTING && u._target === this._target) {
                 if (u.getX() < myX) {
                     myIndex++;
@@ -337,7 +339,8 @@ export class Unit extends Component {
         const myX = this.getX();
         let blocked = false;
         for (const u of allUnits) {
-            if (u === this || u.getSide() !== this._side || u.isDead()) continue;
+            // 使用 isDying() 跳过死亡中的单位
+            if (u === this || u.getSide() !== this._side || u.isDying()) continue;
             const ux = u.getX();
             const dist = Math.abs(ux - myX);
             // 如果后方有己方单位且距离太近，不能后退
@@ -494,8 +497,21 @@ export class Unit extends Component {
             .start();
     }
 
+    /**
+     * 检查单位是否已完全死亡（可以被移除）
+     * 注意：死亡动画期间返回 false，避免被提前移除或跳过碰撞检测
+     */
     public isDead(): boolean {
+        // 只有在死亡动画完成后才视为"完全死亡"
         return this._state === UnitState.DEAD && !this._isFading;
+    }
+
+    /**
+     * 检查单位是否处于死亡状态（包括动画中）
+     * 用于碰撞检测，死亡中的单位不应阻挡其他单位
+     */
+    public isDying(): boolean {
+        return this._state === UnitState.DEAD;
     }
 
     /** 开始死亡淡出 - 颜色变暗 + 下沉 + 透明度淡出 */
@@ -503,7 +519,11 @@ export class Unit extends Component {
         if (this._isFading || !this.node?.isValid) return;
         this._isFading = true;
 
-        // 停止之前的 tween
+        // 停止之前的 tween（包括受击闪白）
+        if (this._flashTween) {
+            this._flashTween.stop();
+            this._flashTween = null;
+        }
         if (this._fadeTween) {
             this._fadeTween.stop();
             this._fadeTween = null;
@@ -514,26 +534,31 @@ export class Unit extends Component {
         const startY = this.node.position.y;
         const endY = startY - 15; // 向下移动 15 像素（倒地效果）
 
-        // 颜色变暗：变为深灰色
-        const deadColor = new Color(80, 80, 80, 255);
-        if (this.body) {
-            this.body.color = deadColor;
-        }
-
-        // 使用 tween 实现下沉 + 淡出
+        // 使用 tween 实现：下沉 + 颜色变暗 + 淡出
+        // 注意：直接对 Sprite 组件的 color 属性做动画
         this._fadeTween = tween(this.node)
             .to(0.3, { position: new Vec3(startX, endY, 0) }, { easing: 'quadOut' }) // 下沉
+            .call(() => {
+                // 颜色变暗为深灰色
+                if (this.body) {
+                    this.body.color = new Color(80, 80, 80, 255);
+                }
+            })
             .delay(0.5) // 停留片刻
             .call(() => {
-                // 淡出透明度
+                // 淡出透明度 - 对 Sprite 组件做动画
                 if (this.body) {
-                    tween(this.body.color)
-                        .to(0.7, { a: 0 }, { easing: 'linear' })
+                    const transparentColor = new Color(80, 80, 80, 0);
+                    tween(this.body)
+                        .to(0.7, { color: transparentColor }, { easing: 'linear' })
                         .call(() => {
                             this._isFading = false;
                             this._fadeTween = null;
                         })
                         .start();
+                } else {
+                    this._isFading = false;
+                    this._fadeTween = null;
                 }
             })
             .start();
@@ -565,7 +590,8 @@ export class Unit extends Component {
         // 对周围 100px 内所有敌方单位造成 30 范围伤害
         const cx = this.getX();
         for (const u of allUnits) {
-            if (u.getSide() === this._side || u.isDead()) continue;
+            // 使用 isDying() 跳过死亡中的单位
+            if (u.getSide() === this._side || u.isDying()) continue;
             if (Math.abs(u.getX() - cx) <= 100) {
                 u.takeDamage(30, this);
             }
