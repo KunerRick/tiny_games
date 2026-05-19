@@ -1,4 +1,4 @@
-import { _decorator, Component, Sprite, Color, Label, UITransform, tween, Tween, Vec3 } from 'cc';
+import { _decorator, Component, Sprite, Color, Label, UITransform, tween, Tween, Vec3, Node } from 'cc';
 import { UnitConfig, UnitState, WORLD, UNIT_COLORS } from './GameConfig';
 
 const { ccclass, property } = _decorator;
@@ -47,7 +47,7 @@ export class Unit extends Component {
     private _chargeUsed: boolean = false;    // 冲锋是否已用
 
     // 视觉反馈
-    private _flashTween: Tween<Color> | null = null;
+    private _flashTween: Tween<Sprite> | null = null;
 
     // 死亡淡出
     private _fadeTween: Tween<Node> | null = null;
@@ -73,7 +73,7 @@ export class Unit extends Component {
         this._laserTargetId = 0;
         this._stompTimer = 0;
 
-        this._attackingCastle = false;
+        this._pendingCastleAttack = false;
 
         // 护盾
         if (config.hasShield) {
@@ -485,16 +485,9 @@ export class Unit extends Component {
         // 设置白色（使用 clone 避免直接修改）
         this.body.color = Color.WHITE.clone();
 
-        // 创建一个临时的 color 对象用于 tween 动画
-        const tweenColor = this.body.color.clone();
-
-        this._flashTween = tween(tweenColor)
-            .to(0.1, originalColor, { easing: 'linear' })
-            .onUpdate(() => {
-                if (this.body && this.body.isValid) {
-                    this.body.color = tweenColor.clone();
-                }
-            })
+        // 对 Sprite 组件的 color 属性做动画（而非对 Color 对象做动画）
+        this._flashTween = tween(this.body)
+            .to(0.1, { color: originalColor }, { easing: 'linear' })
             .call(() => {
                 this._flashTween = null;
             })

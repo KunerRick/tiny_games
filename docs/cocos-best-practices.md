@@ -256,35 +256,41 @@ const uniqueTiles = Array.from(positionMap.values());
 
 ## 6. Tween 动画最佳实践
 
-### 6.1 不要直接 Tween Sprite 的 color 属性
+### 6.1 不要直接 Tween Color 对象
 
 **问题场景**：
-- 使用 `tween(this.body.color)` 直接对 Sprite 的 color 做动画
+- 使用 `tween(colorObject)` 直接对 Color 对象做动画
+- Cocos Creator 3.x 的 tween 对普通对象不支持 `onUpdate` 等链式调用
 - 节点在动画过程中被销毁，导致 `Uint8ClampedArray.set` 越界错误
 
 **根本原因**：
 - `Sprite.color` 返回的是内部共享的 `Color` 对象
-- 直接 tween 会修改这个共享对象，节点销毁后对象失效
+- 直接 tween Color 对象无法正确更新 Sprite 的显示
 
 **解决方案**：
 
 ```typescript
-// ❌ 错误：直接 tween Sprite 的 color
+// ❌ 错误：直接 tween Color 对象（无 onUpdate 支持）
+const tweenColor = this.body.color.clone();
+this._flashTween = tween(tweenColor)
+    .to(0.1, originalColor, { easing: 'linear' })
+    .onUpdate(() => {  // ❌ 报错：onUpdate is not a function
+        this.body.color = tweenColor.clone();
+    })
+    .start();
+
+// ❌ 错误：直接修改 Sprite 的 color 引用
 this.body.color = Color.WHITE;
 this._flashTween = tween(this.body.color)
     .to(0.1, originalColor, { easing: 'linear' })
     .start();
 
-// ✅ 正确：使用独立的 color 对象做动画
+// ✅ 正确：对 Sprite 组件的 color 属性做动画
 this.body.color = Color.WHITE.clone();
-const tweenColor = this.body.color.clone();
-
-this._flashTween = tween(tweenColor)
-    .to(0.1, originalColor, { easing: 'linear' })
-    .onUpdate(() => {
-        if (this.body?.isValid) {
-            this.body.color = tweenColor.clone();
-        }
+this._flashTween = tween(this.body)
+    .to(0.1, { color: originalColor }, { easing: 'linear' })
+    .call(() => {
+        this._flashTween = null;
     })
     .start();
 ```
