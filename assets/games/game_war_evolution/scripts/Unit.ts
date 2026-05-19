@@ -123,11 +123,7 @@ export class Unit extends Component {
                 this.updateFighting(dt, allUnits, playerCastleX, enemyCastleX);
                 break;
 
-            case UnitState.QUEUING:
-                this.updateQueueing(dt, allUnits);
-                // 排队中也检查是否可以顶上
-                this.tryStepUp(allUnits, playerCastleX, enemyCastleX);
-                break;
+
         }
 
         // 技能冷却
@@ -174,43 +170,75 @@ export class Unit extends Component {
 
     /**
      * 尝试进入战斗：检查是否有敌方单位在攻击范围内
+     * 修改后：允许多个单位同时攻击同一目标（打群架效果）
      */
     private tryEngage(allUnits: Unit[], playerCastleX: number, enemyCastleX: number): void {
         const enemy = this.findNearestEnemy(allUnits);
         if (enemy) {
-            // 检查前方是否有己方单位已在战斗（排队机制）
-            if (this.hasFightingAllyAhead(allUnits)) {
-                this._state = UnitState.QUEUING;
-            } else {
-                this._state = UnitState.FIGHTING;
-                this._target = enemy;
-                this._attackCooldown = 0; // 立即攻击
+            // 直接进入战斗状态，不再检查前方是否有队友
+            // 近战兵会有轻微的位置错开，远程兵站定射击
+            this._state = UnitState.FIGHTING;
+            this._target = enemy;
+            this._attackCooldown = 0; // 立即攻击
+
+            // 近战单位稍微调整位置避免完全重叠
+            if (this._config!.attackRange <= 100) {
+                this.adjustMeleePosition(allUnits);
             }
             return;
         }
 
-        // 无敌方单位 → 攻击城堡（需要距离判断）
+        // 无敌方单位 → 攻击城堡
         const castleX = this._side === 'player' ? enemyCastleX : playerCastleX;
         const distToCastle = Math.abs(this.getX() - castleX);
         if (distToCastle <= this._config!.attackRange + 30) {
-            if (!this.hasFightingAllyAhead(allUnits)) {
-                this._state = UnitState.FIGHTING;
-                this._target = null; // null target signals castle attack
-            }
+            this._state = UnitState.FIGHTING;
+            this._target = null; // null target signals castle attack
             return;
         }
 
         // 既无敌人在范围，也不在城堡攻击距离内
-        // 如果是 FIGHTING 状态（从 updateFighting 清空 target 后进入）：
-        //   - 有队友在前方战斗 → QUEUING 排队
-        //   - 没有队友在前方 → MOVING 继续前进
-        // 防止卡在 FIGHTING + null target 状态导致下一帧无距离限制攻击城堡
         if (this._state === UnitState.FIGHTING) {
-            if (this.hasFightingAllyAhead(allUnits)) {
-                this._state = UnitState.QUEUING;
-            } else {
-                this._state = UnitState.MOVING;
+            this._state = UnitState.MOVING;
+        }
+    }
+
+    /**
+     * 调整近战单位位置 - 让多个近战单位可以围攻同一目标
+     */
+    private adjustMeleePosition(allUnits: Unit[]): void {
+        if (!this._target) return;
+
+        const targetX = this._target.getX();
+        const myX = this.getX();
+        const direction = this._side === 'player' ? 1 : -1;
+
+        // 计算目标周围已有多少己方单位在攻击
+        let alliesAttackingSameTarget = 0;
+        let myIndex = 0;
+        for (const u of allUnits) {
+            if (u === this || u.getSide() !== this._side || u.isDead()) continue;
+            if (u.getState() === UnitState.FIGHTING && u._target === this._target) {
+                if (u.getX() < myX) {
+                    myIndex++;
+                }
+                alliesAttackingSameTarget++;
             }
+        }
+
+        // 根据序号错开位置（扇形围攻）
+        // 第0个正前方，第1个偏左，第2个偏右，以此类推
+        const offsetPatterns = [0, -25, 25, -50, 50, -75, 75];
+        const offset = offsetPatterns[Math.min(myIndex, offsetPatterns.length - 1)];
+
+        const idealX = targetX - direction * (this._config!.attackRange - 5) + offset;
+        const currentX = this.getX();
+        const diff = idealX - currentX;
+
+        // 平滑移动到理想位置
+        if (Math.abs(diff) > 2) {
+            const moveStep = Math.sign(diff) * Math.min(Math.abs(diff), 5);
+            this.node.setPosition(currentX + moveStep, WORLD.BATTLE_Y, 0);
         }
     }
 
@@ -226,17 +254,34 @@ export class Unit extends Component {
                 return;
             }
             const dist = Math.abs(this._target.getX() - this.getX());
-            if (dist > this._config!.attackRange * 1.2) {
-                this._target = null;
-                this._state = UnitState.MOVING;
-                this.tryEngage(allUnits, playerCastleX, enemyCastleX);
-                return;
-            }
-            // 执行攻击
-            this.tryAttack(dt, this._target, allUnits);
+            const cfg = this._config!;
 
-            // 攻击后检查目标是否死亡（包括被践踏等后续伤害击杀的情况）
-            // 立即清除 _target 引用，避免后续帧访问已销毁节点的 position
+            // 远程兵种：保持最优攻击距离
+            if (cfg.attackRange > 100) {
+                // 远程兵逻辑：敌人太靠近时后撤
+                if (dist < cfg.attackRange * 0.4) {
+                    // 敌人太近了，后撤
+                    this.retreat(dt, allUnits);
+                    return;
+                } else if (dist > cfg.attackRange) {
+                    // 敌人太远了，追击
+                    this.advance(dt, allUnits);
+                    return;
+                }
+                // 在最佳距离内，站定射击
+                this.tryAttack(dt, this._target, allUnits);
+            } else {
+                // 近战兵逻辑（保持原有）
+                if (dist > cfg.attackRange * 1.2) {
+                    this._target = null;
+                    this._state = UnitState.MOVING;
+                    this.tryEngage(allUnits, playerCastleX, enemyCastleX);
+                    return;
+                }
+                this.tryAttack(dt, this._target, allUnits);
+            }
+
+            // 攻击后检查目标是否死亡
             if (this._target && this._target.isDead()) {
                 this._target = null;
                 this.tryEngage(allUnits, playerCastleX, enemyCastleX);
@@ -254,12 +299,60 @@ export class Unit extends Component {
                 return;
             }
 
-            // 检查是否有敌人靠近，有则切换目标（避免无视敌人一直打城堡）
+            // 检查是否有敌人靠近，有则切换目标
             const nearbyEnemy = this.findNearestEnemy(allUnits);
             if (nearbyEnemy) {
                 this._target = nearbyEnemy;
             }
         }
+    }
+
+    /**
+     * 远程兵后撤 - 保持与敌人的距离
+     */
+    private retreat(dt: number, allUnits: Unit[]): void {
+        if (!this._target) return;
+
+        const direction = this._side === 'player' ? -1 : 1;
+        const retreatSpeed = this._config!.moveSpeed * 0.8; // 后撤速度稍慢
+        const dx = retreatSpeed * direction * dt;
+        let newX = this.node.position.x + dx;
+
+        // 检查是否会撞到己方单位
+        const myX = this.getX();
+        let blocked = false;
+        for (const u of allUnits) {
+            if (u === this || u.getSide() !== this._side || u.isDead()) continue;
+            const ux = u.getX();
+            const dist = Math.abs(ux - myX);
+            // 如果后方有己方单位且距离太近，不能后退
+            if (this._side === 'player' && ux < myX && dist < 30) {
+                blocked = true;
+                break;
+            }
+            if (this._side === 'enemy' && ux > myX && dist < 30) {
+                blocked = true;
+                break;
+            }
+        }
+
+        if (!blocked) {
+            this.node.setPosition(newX, WORLD.BATTLE_Y, 0);
+        }
+        // 即使被挡住，也可以继续攻击
+        if (this._target) {
+            this.tryAttack(dt, this._target, allUnits);
+        }
+    }
+
+    /**
+     * 远程兵追击 - 接近敌人到攻击范围
+     */
+    private advance(dt: number, allUnits: Unit[]): void {
+        const direction = this._side === 'player' ? 1 : -1;
+        const dx = this._config!.moveSpeed * direction * dt;
+        let newX = this.node.position.x + dx;
+        this.node.setPosition(newX, WORLD.BATTLE_Y, 0);
     }
 
     /**
@@ -331,79 +424,6 @@ export class Unit extends Component {
             return true;
         }
         return false;
-    }
-
-    // ==================== 排队逻辑 ====================
-
-    /**
-     * 检查前方是否有己方单位正在战斗（排队依据）
-     */
-    private hasFightingAllyAhead(allUnits: Unit[]): boolean {
-        const myX = this.getX();
-        for (const u of allUnits) {
-            if (u === this || u.getSide() !== this._side || u.getState() !== UnitState.FIGHTING) continue;
-            if (u.isDead()) continue;
-            const ux = u.getX();
-            if (this._side === 'player' && ux >= myX) return true;
-            if (this._side === 'enemy' && ux <= myX) return true;
-        }
-        return false;
-    }
-
-    /**
-     * 排队中保持位置
-     */
-    private updateQueueing(dt: number, allUnits: Unit[]): void {
-        // 找到最前方战斗的己方单位
-        const front = this.findFrontAlly(allUnits);
-        if (!front) {
-            // 没有前方战斗单位 → 尝试顶上
-            this._state = UnitState.MOVING;
-            return;
-        }
-        // 保持在战斗单位后方 QUEUE_DIST 处
-        const direction = this._side === 'player' ? -1 : 1;
-        const targetX = front.getX() + direction * WORLD.QUEUE_DIST;
-        const currentX = this.getX();
-        const diff = targetX - currentX;
-        if (Math.abs(diff) > 3) {
-            const speed = 300 * dt;
-            const newX = currentX + Math.sign(diff) * Math.min(Math.abs(diff), speed);
-            this.node.setPosition(newX, WORLD.BATTLE_Y, 0);
-        }
-    }
-
-    /**
-     * 尝试从排队→战斗（前方没人了）
-     */
-    private tryStepUp(allUnits: Unit[], playerCastleX: number, enemyCastleX: number): void {
-        if (!this.hasFightingAllyAhead(allUnits)) {
-            // 前方无敌方单位在战斗 → 检查是否有敌人可打
-            this._state = UnitState.MOVING;
-            this.tryEngage(allUnits, playerCastleX, enemyCastleX);
-        }
-    }
-
-    /**
-     * 找到前方最近的己方战斗单位
-     */
-    private findFrontAlly(allUnits: Unit[]): Unit | null {
-        let front: Unit | null = null;
-        let bestDist = Infinity;
-        const myX = this.getX();
-        for (const u of allUnits) {
-            if (u === this || u.getSide() !== this._side || u.getState() !== UnitState.FIGHTING) continue;
-            if (u.isDead()) continue;
-            const ux = u.getX();
-            const dist = Math.abs(ux - myX);
-            // 必须在前方
-            const isAhead = this._side === 'player' ? ux > myX : ux < myX;
-            if (isAhead && dist < bestDist) {
-                bestDist = dist;
-                front = u;
-            }
-        }
-        return front;
     }
 
     // ==================== 受伤害 & 死亡 ====================
