@@ -288,8 +288,8 @@ export class Unit extends Component {
                 // 在最佳距离内，站定射击
                 this.tryAttack(dt, this._target, allUnits);
             } else {
-                // 近战兵逻辑（保持原有）
-                if (dist > cfg.attackRange * 1.2) {
+                // 近战兵逻辑：严格在攻击范围内才能攻击
+                if (dist > cfg.attackRange) {
                     this._target = null;
                     this._state = UnitState.MOVING;
                     this.tryEngage(allUnits, playerCastleX, enemyCastleX);
@@ -379,6 +379,10 @@ export class Unit extends Component {
     private tryAttack(dt: number, target: Unit, allUnits: Unit[]): void {
         this._attackCooldown -= dt;
         if (this._attackCooldown > 0) return;
+
+        // 距离检查：必须在攻击范围内才能攻击
+        const dist = Math.abs(target.getX() - this.getX());
+        if (dist > this._config!.attackRange) return;
 
         const cfg = this._config!;
         let damage = cfg.attack;

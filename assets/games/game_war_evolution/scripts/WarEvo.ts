@@ -53,7 +53,7 @@ export class WarEvo extends Component {
 
     // ======== 游戏状态 ========
     private _units: Unit[] = [];
-    private _playerGold: number = 300;
+    private _playerGold: number = 100;
     private _playerExp: number = 0;
     private _playerAge: Age = Age.PRIMITIVE;
     private _playerKills: number = 0;
