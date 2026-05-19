@@ -60,7 +60,7 @@ export const UNIT_CONFIGS: UnitConfig[] = [
     },
     // ===== 未来时代 =====
     {
-        id: 'mech', name: '机甲', cost: 800,
+        id: 'mech', name: '机甲', cost: 500,
         hp: 200, attack: 80, attackSpeed: 0.8, moveSpeed: 90,
         attackRange: 40, age: Age.FUTURE, desc: '能量护盾',
         hasShield: true,
@@ -84,8 +84,8 @@ export interface AgeConfig {
 
 export const AGE_CONFIGS: AgeConfig[] = [
     { age: Age.PRIMITIVE, name: '原始时代', expRequired: 0, goldRequired: 0, goldReserve: 0, unitIds: ['caveman', 'mammoth'] },
-    { age: Age.MEDIEVAL, name: '中世纪', expRequired: 800, goldRequired: 800, goldReserve: 200, unitIds: ['knight', 'archer'] },
-    { age: Age.FUTURE, name: '未来时代', expRequired: 3000, goldRequired: 3000, goldReserve: 200, unitIds: ['mech', 'laser'] },
+    { age: Age.MEDIEVAL, name: '中世纪', expRequired: 400, goldRequired: 400, goldReserve: 200, unitIds: ['knight', 'archer'] },
+    { age: Age.FUTURE, name: '未来时代', expRequired: 1500, goldRequired: 1500, goldReserve: 200, unitIds: ['mech', 'laser'] },
 ];
 
 /** 战场坐标系常量（基于 Canvas 720×1280 竖屏，与场景搭建一致） */

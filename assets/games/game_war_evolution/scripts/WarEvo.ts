@@ -78,7 +78,7 @@ export class WarEvo extends Component {
 
     private initGame(): void {
         this._units = [];
-        this._playerGold = 300;
+        this._playerGold = 100;
         this._playerExp = 0;
         this._playerAge = Age.PRIMITIVE;
         this._playerKills = 0;
