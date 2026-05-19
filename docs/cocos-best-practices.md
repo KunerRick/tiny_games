@@ -254,14 +254,105 @@ const uniqueTiles = Array.from(positionMap.values());
 
 ---
 
-## 6. AI 协作相关
+## 6. Tween 动画最佳实践
 
-### 6.1 代码与场景的配合
+### 6.1 不要直接 Tween Sprite 的 color 属性
+
+**问题场景**：
+- 使用 `tween(this.body.color)` 直接对 Sprite 的 color 做动画
+- 节点在动画过程中被销毁，导致 `Uint8ClampedArray.set` 越界错误
+
+**根本原因**：
+- `Sprite.color` 返回的是内部共享的 `Color` 对象
+- 直接 tween 会修改这个共享对象，节点销毁后对象失效
+
+**解决方案**：
+
+```typescript
+// ❌ 错误：直接 tween Sprite 的 color
+this.body.color = Color.WHITE;
+this._flashTween = tween(this.body.color)
+    .to(0.1, originalColor, { easing: 'linear' })
+    .start();
+
+// ✅ 正确：使用独立的 color 对象做动画
+this.body.color = Color.WHITE.clone();
+const tweenColor = this.body.color.clone();
+
+this._flashTween = tween(tweenColor)
+    .to(0.1, originalColor, { easing: 'linear' })
+    .onUpdate(() => {
+        if (this.body?.isValid) {
+            this.body.color = tweenColor.clone();
+        }
+    })
+    .start();
+```
+
+### 6.2 Tween 前检查节点有效性
+
+```typescript
+// ✅ 正确：动画前检查节点是否有效
+private triggerHitFlash(): void {
+    if (!this.body || !this.body.isValid) return;
+    
+    // 停止之前的 tween
+    if (this._flashTween) {
+        this._flashTween.stop();
+        this._flashTween = null;
+    }
+    
+    // 开始新的 tween...
+}
+```
+
+### 6.3 Tween 清理规范
+
+```typescript
+// ✅ 正确：停止 tween 后清空引用
+if (this._flashTween) {
+    this._flashTween.stop();
+    this._flashTween = null;  // 清空引用，避免内存泄漏
+}
+```
+
+---
+
+## 7. 节点有效性检查
+
+### 7.1 使用 `isValid` 而非简单的空检查
+
+```typescript
+// ❌ 错误：只检查 null
+if (!this.node) return;
+
+// ✅ 正确：检查 isValid 属性
+if (!this.node?.isValid) return;
+
+// ✅ 正确：组件也支持 isValid
+if (!this.body?.isValid) return;
+```
+
+### 7.2 延迟操作中的有效性检查
+
+```typescript
+// 在回调或 tween 中访问节点前，务必检查有效性
+scheduleOnce(() => {
+    if (!this.node?.isValid) return;  // 节点可能已被销毁
+    this.doSomething();
+}, 1.0);
+```
+
+---
+
+## 8. AI 协作相关
+
+### 8.1 代码与场景的配合
 
 - **AI 负责**：`.ts` 脚本逻辑、组件代码
 - **人负责**：`.scene` 场景配置、节点绑定
 
-### 6.2 属性绑定检查清单
+### 8.2 属性绑定检查清单
 
 当 AI 修改了 `@property` 定义后，人需要检查：
 

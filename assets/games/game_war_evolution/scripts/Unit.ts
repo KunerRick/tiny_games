@@ -469,21 +469,32 @@ export class Unit extends Component {
 
     /** 触发受击闪白效果 */
     private triggerHitFlash(): void {
-        if (!this.body) return;
+        if (!this.body || !this.body.isValid) return;
 
         // 停止之前的 tween
         if (this._flashTween) {
             this._flashTween.stop();
+            this._flashTween = null;
         }
 
         // 使用 tween 实现闪白：变白 -> 恢复原色
+        // 注意：使用 clone() 避免修改 Sprite 内部共享的 color 对象
         const color = this._side === 'player' ? UNIT_COLORS.PLAYER : UNIT_COLORS.ENEMY;
         const originalColor = new Color(color.r, color.g, color.b);
 
-        this.body.color = Color.WHITE;
+        // 设置白色（使用 clone 避免直接修改）
+        this.body.color = Color.WHITE.clone();
 
-        this._flashTween = tween(this.body.color)
+        // 创建一个临时的 color 对象用于 tween 动画
+        const tweenColor = this.body.color.clone();
+
+        this._flashTween = tween(tweenColor)
             .to(0.1, originalColor, { easing: 'linear' })
+            .onUpdate(() => {
+                if (this.body && this.body.isValid) {
+                    this.body.color = tweenColor.clone();
+                }
+            })
             .call(() => {
                 this._flashTween = null;
             })
@@ -496,12 +507,13 @@ export class Unit extends Component {
 
     /** 开始死亡淡出 */
     private startFadeOut(): void {
-        if (this._isFading) return;
+        if (this._isFading || !this.node?.isValid) return;
         this._isFading = true;
 
         // 停止之前的 tween
         if (this._fadeTween) {
             this._fadeTween.stop();
+            this._fadeTween = null;
         }
 
         // 使用 tween 实现淡出：1秒内缩放到0.1
@@ -516,9 +528,12 @@ export class Unit extends Component {
 
     /** 触发攻击抖动效果 */
     private triggerAttackShake(): void {
+        if (!this.node?.isValid) return;
+
         // 停止之前的抖动
         if (this._shakeTween) {
             this._shakeTween.stop();
+            this._shakeTween = null;
         }
 
         // 使用 tween 实现抖动：放大 -> 恢复
