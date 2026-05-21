@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Button, ProgressBar } from 'cc';
+import { _decorator, Component, Node, Label, Button, ProgressBar, tween, Vec3 } from 'cc';
 import { Age, UnitConfig, AGE_NAMES, getNextAgeConfig, getAvailableUnits } from './GameConfig';
 
 const { ccclass, property } = _decorator;
@@ -77,6 +77,13 @@ export class UIController extends Component {
     @property(Button)
     lobbyButton: Button | null = null;
 
+    // ======== AI 进化提示 ========
+    @property(Node)
+    enemyEvolveNotice: Node | null = null;
+
+    @property(Label)
+    enemyEvolveLabel: Label | null = null;
+
     // ======== 运行时 ========
     // 回调
     private _onUnitSpawn: ((configId: string) => void) | null = null;
@@ -95,6 +102,11 @@ export class UIController extends Component {
         // 初始隐藏结算面板
         if (this.gameOverPanel) {
             this.gameOverPanel.active = false;
+        }
+
+        // 初始隐藏 AI 进化提示
+        if (this.enemyEvolveNotice) {
+            this.enemyEvolveNotice.active = false;
         }
     }
 
@@ -254,6 +266,42 @@ export class UIController extends Component {
     public hideGameOver(): void {
         if (this.gameOverPanel) {
             this.gameOverPanel.active = false;
+        }
+    }
+
+    // ======== AI 进化提示 ========
+
+    private _evolveNoticeTimer: number = 0;
+
+    public showEnemyEvolveNotice(age: Age): void {
+        if (!this.enemyEvolveNotice || !this.enemyEvolveLabel) return;
+
+        this.enemyEvolveLabel.string = `敌方进化到 ${AGE_NAMES[age]}！`;
+        this.enemyEvolveNotice.active = true;
+        this._evolveNoticeTimer = 2.0; // 显示 2 秒
+
+        // 淡入效果
+        this.enemyEvolveNotice.setScale(0.8, 0.8, 1);
+        tween(this.enemyEvolveNotice)
+            .to(0.2, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
+            .start();
+    }
+
+    update(dt: number): void {
+        // 处理进化提示计时器
+        if (this._evolveNoticeTimer > 0) {
+            this._evolveNoticeTimer -= dt;
+            if (this._evolveNoticeTimer <= 0 && this.enemyEvolveNotice) {
+                // 淡出效果
+                tween(this.enemyEvolveNotice)
+                    .to(0.3, { scale: new Vec3(0.8, 0.8, 1) })
+                    .call(() => {
+                        if (this.enemyEvolveNotice) {
+                            this.enemyEvolveNotice.active = false;
+                        }
+                    })
+                    .start();
+            }
         }
     }
 }

@@ -99,6 +99,7 @@ export class WarEvo extends Component {
         this._ai = new AI(
             (configId: string, side: 'enemy') => this.spawnUnit(configId, side),
             this.castleEnemy,
+            (age: Age) => this.onEnemyEvolve(age),
         );
 
         // 初始化 UI
@@ -260,6 +261,11 @@ export class WarEvo extends Component {
 
         // 更新 UI 按钮
         this.uiController?.setupUnitButtons(this._playerAge);
+    }
+
+    /** AI 进化回调 */
+    private onEnemyEvolve(age: Age): void {
+        this.uiController?.showEnemyEvolveNotice(age);
     }
 
     // ======== 胜负判定 ========

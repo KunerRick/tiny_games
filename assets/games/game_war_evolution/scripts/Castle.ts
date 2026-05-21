@@ -1,4 +1,5 @@
 import { _decorator, Component, Sprite, UITransform } from 'cc';
+import { CASTLE_CONFIG } from './GameConfig';
 
 const { ccclass, property } = _decorator;
 
@@ -16,8 +17,8 @@ export class Castle extends Component {
     hpBarBg: Sprite | null = null;     // 灰色背景条（脚下）
 
     // ---- 运行时 ----
-    private _hp: number = 3000;
-    private _maxHp: number = 3000;
+    private _hp: number = CASTLE_CONFIG.HP;
+    private _maxHp: number = CASTLE_CONFIG.HP;
     private _side: 'player' | 'enemy' = 'player';
     private _isDead: boolean = false;
 

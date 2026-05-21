@@ -17,13 +17,16 @@ export class AI {
     // 外部引用
     private _spawnFn: (configId: string, side: 'enemy') => Unit | null;
     private _castle: Castle;
+    private _onEvolve: ((age: Age) => void) | null = null;
 
     constructor(
         spawnFn: (configId: string, side: 'enemy') => Unit | null,
         castle: Castle,
+        onEvolve?: (age: Age) => void,
     ) {
         this._spawnFn = spawnFn;
         this._castle = castle;
+        this._onEvolve = onEvolve ?? null;
     }
 
     public getGold(): number { return this._gold; }
@@ -70,7 +73,8 @@ export class AI {
 
     private trySpawnUnit(): void {
         const available = getAvailableUnits(this._currentAge);
-        const affordable = available.filter(u => this._gold >= u.cost);
+        // 保留 50 金币余额，只考虑买得起的兵
+        const affordable = available.filter(u => this._gold >= u.cost + 50);
         if (affordable.length === 0) return;
 
         // 60% 概率造最贵的兵，40% 概率随机
@@ -81,11 +85,9 @@ export class AI {
             chosen = affordable[Math.floor(Math.random() * affordable.length)];
         }
 
-        // 生产：保持至少 50 金币余额不打光（affordable 已保证 gold >= cost）
-        if (this._gold - chosen.cost >= 50) {
-            this._gold -= chosen.cost;
-            this._spawnFn(chosen.id, 'enemy');
-        }
+        // 生产
+        this._gold -= chosen.cost;
+        this._spawnFn(chosen.id, 'enemy');
     }
 
     private tryEvolve(): void {
@@ -101,6 +103,8 @@ export class AI {
             // 进化！
             this._gold -= next.goldRequired;
             this._currentAge = next.age;
+            // 通知外部进化事件
+            this._onEvolve?.(this._currentAge);
         }
     }
 }

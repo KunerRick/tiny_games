@@ -63,6 +63,12 @@ export class Unit extends Component {
     // 攻击抖动
     private _shakeTween: Tween<Node> | null = null;
 
+    // 击退动画
+    private _knockbackTween: Tween<Node> | null = null;
+
+    // 原始颜色缓存（用于受击闪白后恢复）
+    private _originalColor: Color | null = null;
+
     // ==================== 初始化 ====================
 
     /** 由 WarEvo 在实例化后调用 */
@@ -109,7 +115,8 @@ export class Unit extends Component {
             const r = Math.round(base.r * 0.6 + tint.r * 0.4);
             const g = Math.round(base.g * 0.6 + tint.g * 0.4);
             const b = Math.round(base.b * 0.6 + tint.b * 0.4);
-            this.body.color = new Color(r, g, b);
+            this._originalColor = new Color(r, g, b);
+            this.body.color = this._originalColor.clone();
         }
 
         // 应用大小缩放
@@ -127,7 +134,9 @@ export class Unit extends Component {
         if (config.hasLaserFocus) {
             const indicatorNode = new Node('laserIndicator');
             indicatorNode.setParent(this.node);
-            indicatorNode.setPosition(0, 40, 0);  // 头顶 40px
+            // 根据单位大小调整指示器位置（基准 40px，按缩放比例调整）
+            const indicatorY = 40 * scale;
+            indicatorNode.setPosition(0, indicatorY, 0);
             const label = indicatorNode.addComponent(Label);
             label.string = '1.0×';
             label.fontSize = 14;
@@ -178,7 +187,10 @@ export class Unit extends Component {
 
         }
 
-        this.updateHPBar();
+        // 死亡动画期间跳过血条更新（优化）
+        if (this._state !== UnitState.DEAD) {
+            this.updateHPBar();
+        }
     }
 
     // ==================== 移动 ====================
@@ -280,7 +292,8 @@ export class Unit extends Component {
 
         // 根据序号错开位置（扇形围攻）
         // 第0个正前方，第1个偏左，第2个偏右，以此类推
-        const offsetPatterns = [0, -25, 25, -50, 50, -75, 75];
+        // 扩展模式支持最多 15 个单位同时围攻
+        const offsetPatterns = [0, -25, 25, -50, 50, -75, 75, -100, 100, -125, 125, -150, 150, -175, 175];
         const offset = offsetPatterns[Math.min(myIndex, offsetPatterns.length - 1)];
 
         const idealX = targetX - direction * (this._config!.attackRange - 5) + offset;
@@ -519,6 +532,12 @@ export class Unit extends Component {
 
         this._hp -= remaining;
         this.triggerHitFlash();
+
+        // 骑士冲锋击退效果
+        if (attacker && attacker.getConfig().hasCharge && !attacker.hasChargeUsed()) {
+            this.applyKnockback(attacker, allUnits);
+        }
+
         if (this._hp <= 0) {
             this._hp = 0;
             this._state = UnitState.DEAD;
@@ -528,6 +547,54 @@ export class Unit extends Component {
             }
             this.startFadeOut();
         }
+    }
+
+    /** 应用击退效果 */
+    private applyKnockback(attacker: Unit, allUnits?: Unit[]): void {
+        if (!this.node?.isValid) return;
+
+        // 击退方向：远离攻击者
+        const knockbackDir = attacker.getSide() === 'player' ? 1 : -1;
+        const knockbackDist = 35; // 击退距离 35 像素
+        const currentX = this.node.position.x;
+        let targetX = currentX + knockbackDist * knockbackDir;
+
+        // 检查后方是否有障碍物（己方单位）
+        if (allUnits) {
+            const minGap = 25; // 单位间最小间距
+            for (const u of allUnits) {
+                if (u === this || u.getSide() !== this._side || u.isDying()) continue;
+                const ux = u.getX();
+                // 检查后方单位
+                if (knockbackDir > 0 && ux > currentX && ux < targetX + minGap) {
+                    targetX = Math.min(targetX, ux - minGap);
+                } else if (knockbackDir < 0 && ux < currentX && ux > targetX - minGap) {
+                    targetX = Math.max(targetX, ux + minGap);
+                }
+            }
+        }
+
+        // 确保不超出战场边界
+        targetX = Math.max(-350, Math.min(350, targetX));
+
+        // 停止之前的击退动画
+        if (this._knockbackTween) {
+            this._knockbackTween.stop();
+            this._knockbackTween = null;
+        }
+
+        // 执行击退动画
+        this._knockbackTween = tween(this.node)
+            .to(0.2, { position: new Vec3(targetX, WORLD.BATTLE_Y, 0) }, { easing: 'quadOut' })
+            .call(() => {
+                this._knockbackTween = null;
+            })
+            .start();
+    }
+
+    /** 获取冲锋是否已使用（供外部查询） */
+    public hasChargeUsed(): boolean {
+        return this._chargeUsed;
     }
 
     /** 触发受击闪白效果 */
@@ -540,17 +607,18 @@ export class Unit extends Component {
             this._flashTween = null;
         }
 
-        // 使用 tween 实现闪白：变白 -> 恢复原色
-        // 注意：使用 clone() 避免修改 Sprite 内部共享的 color 对象
-        const color = this._side === 'player' ? UNIT_COLORS.PLAYER : UNIT_COLORS.ENEMY;
-        const originalColor = new Color(color.r, color.g, color.b);
+        // 使用缓存的原始混合色恢复，保持兵种色调
+        const restoreColor = this._originalColor ?? (
+            this._side === 'player' ? new Color(UNIT_COLORS.PLAYER.r, UNIT_COLORS.PLAYER.g, UNIT_COLORS.PLAYER.b)
+                                    : new Color(UNIT_COLORS.ENEMY.r, UNIT_COLORS.ENEMY.g, UNIT_COLORS.ENEMY.b)
+        );
 
         // 设置白色（使用 clone 避免直接修改）
         this.body.color = Color.WHITE.clone();
 
         // 对 Sprite 组件的 color 属性做动画（而非对 Color 对象做动画）
         this._flashTween = tween(this.body)
-            .to(0.1, { color: originalColor }, { easing: 'linear' })
+            .to(0.1, { color: restoreColor }, { easing: 'linear' })
             .call(() => {
                 this._flashTween = null;
             })
@@ -634,10 +702,14 @@ export class Unit extends Component {
             this._shakeTween = null;
         }
 
+        // 基于原始缩放比例进行相对缩放，保持单位大小差异
+        const baseScale = this._config?.scale ?? 1.0;
+        const shakeScale = baseScale * 1.15;
+
         // 使用 tween 实现抖动：放大 -> 恢复
         this._shakeTween = tween(this.node)
-            .to(0.075, { scale: new Vec3(1.15, 1.15, 1) }, { easing: 'quadOut' })
-            .to(0.075, { scale: new Vec3(1, 1, 1) }, { easing: 'quadIn' })
+            .to(0.075, { scale: new Vec3(shakeScale, shakeScale, 1) }, { easing: 'quadOut' })
+            .to(0.075, { scale: new Vec3(baseScale, baseScale, 1) }, { easing: 'quadIn' })
             .call(() => {
                 this._shakeTween = null;
             })
