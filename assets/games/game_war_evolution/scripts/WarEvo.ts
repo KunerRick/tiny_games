@@ -87,6 +87,9 @@ export class WarEvo extends Component {
         this._goldTimer = 0;
         this._gameTime = 0;
 
+        // 重置 UI 提示状态
+        this.uiController?.resetAll();
+
         // 初始化城堡
         this.castlePlayer?.init(CASTLE_CONFIG.HP, 'player');
         this.castleEnemy?.init(CASTLE_CONFIG.HP, 'enemy');
@@ -259,8 +262,9 @@ export class WarEvo extends Component {
         this._playerGold += 200; // 进化奖励
         this._playerAge = next.age;
 
-        // 更新 UI 按钮
+        // 更新 UI 按钮 + 显示进化提示
         this.uiController?.setupUnitButtons(this._playerAge);
+        this.uiController?.showPlayerEvolveNotice(this._playerAge);
     }
 
     /** AI 进化回调 */
@@ -271,12 +275,18 @@ export class WarEvo extends Component {
     // ======== 胜负判定 ========
 
     private checkGameOver(): void {
-        if (this.castlePlayer?.isDead()) {
+        const playerDead = this.castlePlayer?.isDead() ?? false;
+        const enemyDead = this.castleEnemy?.isDead() ?? false;
+
+        if (playerDead && enemyDead) {
             this._gameOver = true;
-            this.showResult(false);
-        } else if (this.castleEnemy?.isDead()) {
+            this.showResult('draw');
+        } else if (playerDead) {
             this._gameOver = true;
-            this.showResult(true);
+            this.showResult('lose');
+        } else if (enemyDead) {
+            this._gameOver = true;
+            this.showResult('win');
         }
     }
 
@@ -292,7 +302,7 @@ export class WarEvo extends Component {
         return stored ? parseInt(stored, 10) : Infinity;
     }
 
-    private showResult(win: boolean): void {
+    private showResult(result: 'win' | 'lose' | 'draw'): void {
         const maxKills = this.getMaxKillsRecord();
         const bestTime = this.getBestTimeRecord();
 
@@ -308,14 +318,14 @@ export class WarEvo extends Component {
             isNewKillRecord = true;
         }
 
-        if (win && this._gameTime < bestTime) {
+        if (result === 'win' && this._gameTime < bestTime) {
             newBestTime = this._gameTime;
             StorageManager.instance.setItem(GAME_ID, STORAGE_KEYS.BEST_TIME, Math.floor(newBestTime).toString());
             isNewTimeRecord = true;
         }
 
         this.uiController?.showGameOver(
-            win,
+            result,
             this._playerAge,
             this._playerKills,
             this._playerGold,

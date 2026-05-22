@@ -435,10 +435,9 @@ export class Unit extends Component {
         const cfg = this._config!;
         let damage = cfg.attack;
 
-        // 骑士冲锋：首次攻击 2 倍
+        // 骑士冲锋：首次攻击 2 倍（_chargeUsed 在 takeDamage 后设置，让击退判定能读到）
         if (cfg.hasCharge && !this._chargeUsed) {
             damage *= 2;
-            this._chargeUsed = true;
         }
 
         // 激光聚焦：持续攻击同一目标伤害递增，切换目标重置
@@ -469,6 +468,10 @@ export class Unit extends Component {
         }
 
         target.takeDamage(damage, this, allUnits);
+        // 标记冲锋已使用（在 takeDamage 之后设置，确保击退判定能读到）
+        if (cfg.hasCharge && !this._chargeUsed) {
+            this._chargeUsed = true;
+        }
         this._attackCooldown = 1.0 / cfg.attackSpeed;
 
         // 触发攻击抖动效果

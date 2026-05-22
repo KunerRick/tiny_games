@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Button, ProgressBar, tween, Vec3 } from 'cc';
+import { _decorator, Component, Node, Label, Button, ProgressBar, tween, Tween, Vec3, Color } from 'cc';
 import { Age, UnitConfig, AGE_NAMES, getNextAgeConfig, getAvailableUnits } from './GameConfig';
 
 const { ccclass, property } = _decorator;
@@ -214,7 +214,7 @@ export class UIController extends Component {
     // ======== 结算面板 ========
 
     public showGameOver(
-        win: boolean,
+        result: 'win' | 'lose' | 'draw',
         age: Age,
         kills: number,
         totalGold: number,
@@ -226,7 +226,9 @@ export class UIController extends Component {
     ): void {
         if (!this.gameOverPanel) return;
         if (this.resultLabel) {
-            this.resultLabel.string = win ? '胜利！' : '失败...';
+            if (result === 'win') this.resultLabel.string = '胜利！';
+            else if (result === 'lose') this.resultLabel.string = '失败...';
+            else this.resultLabel.string = '平局！';
         }
         if (this.statsLabel) {
             // 格式化时间显示
@@ -249,7 +251,7 @@ export class UIController extends Component {
             }
 
             // 时间记录（只有胜利时显示）
-            if (win) {
+            if (result === 'win') {
                 statsText += `本局用时: ${formatTime(gameTime)}\n`;
                 if (isNewTimeRecord) {
                     statsText += `最快通关: ${formatTime(bestTime)}  ← 新纪录！`;
@@ -263,18 +265,36 @@ export class UIController extends Component {
         this.gameOverPanel.active = true;
     }
 
+    /** 重置所有提示状态（重新开始时调用） */
+    public resetAll(): void {
+        this.resetEnemyEvolveNotice();
+    }
+
     public hideGameOver(): void {
         if (this.gameOverPanel) {
             this.gameOverPanel.active = false;
         }
     }
 
-    // ======== AI 进化提示 ========
+    // ======== 进化提示（AI + 玩家） ========
 
     private _evolveNoticeTimer: number = 0;
 
+    /** 重置进化提示状态（重新开始时调用） */
+    public resetEnemyEvolveNotice(): void {
+        if (this.enemyEvolveNotice) {
+            Tween.stopAllByTarget(this.enemyEvolveNotice);
+            this.enemyEvolveNotice.active = false;
+            this.enemyEvolveNotice.setScale(1, 1, 1);
+        }
+        this._evolveNoticeTimer = 0;
+    }
+
     public showEnemyEvolveNotice(age: Age): void {
         if (!this.enemyEvolveNotice || !this.enemyEvolveLabel) return;
+
+        // 停止旧的动画
+        Tween.stopAllByTarget(this.enemyEvolveNotice);
 
         this.enemyEvolveLabel.string = `敌方进化到 ${AGE_NAMES[age]}！`;
         this.enemyEvolveNotice.active = true;
@@ -284,6 +304,37 @@ export class UIController extends Component {
         this.enemyEvolveNotice.setScale(0.8, 0.8, 1);
         tween(this.enemyEvolveNotice)
             .to(0.2, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
+            .start();
+    }
+
+    /** 玩家进化提示（运行时动态创建，无需场景节点） */
+    public showPlayerEvolveNotice(age: Age): void {
+        // 创建临时标签
+        const noticeNode = new Node('PlayerEvolveNotice');
+        this.node.addChild(noticeNode);
+
+        const label = noticeNode.addComponent(Label);
+        label.string = `进化到 ${AGE_NAMES[age]}！`;
+        label.fontSize = 28;
+        label.color = new Color(100, 255, 100);
+        label.isBold = true;
+        label.horizontalAlign = Label.HorizontalAlign.CENTER;
+        label.verticalAlign = Label.VerticalAlign.CENTER;
+
+        // 定位（位于 enemyEvolveNotice 下方）
+        noticeNode.setPosition(0, 100, 0);
+
+        // 入场 → 停留 → 消失 → 销毁
+        noticeNode.setScale(0.8, 0.8, 1);
+        tween(noticeNode)
+            .to(0.2, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
+            .delay(1.5)
+            .to(0.3, { scale: new Vec3(0.8, 0.8, 1) })
+            .call(() => {
+                if (noticeNode.isValid) {
+                    noticeNode.destroy();
+                }
+            })
             .start();
     }
 
