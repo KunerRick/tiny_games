@@ -7,7 +7,7 @@ import { Castle } from './Castle';
  * 非 Cocos 组件，由 WarEvo 创建并驱动
  */
 export class AI {
-    private _gold: number = 300;            // AI 金币
+    private _gold: number = 100;            // AI 金币
     private _exp: number = 0;               // AI 经验
     private _currentAge: Age = Age.PRIMITIVE;
     private _spawnTimer: number = 0;
@@ -102,6 +102,7 @@ export class AI {
         if (this._exp >= next.expRequired && this._gold >= next.goldRequired + next.goldReserve) {
             // 进化！
             this._gold -= next.goldRequired;
+            this._gold += 200; // 进化奖励
             this._currentAge = next.age;
             // 通知外部进化事件
             this._onEvolve?.(this._currentAge);
