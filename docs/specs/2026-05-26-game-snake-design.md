@@ -1,20 +1,22 @@
-# 贪吃蛇 — 游戏设计文档
+# 贪吃蛇 — 游戏设计文档（v2：平滑移动版）
 
 ## 概述
 
-经典贪吃蛇手机版，触屏滑动控制，在网格中移动、吃食物、避免撞墙或撞自己。
+受《贪吃蛇大作战》启发，手机触屏平滑拖拽操控。单人模式，在地图中吃光点长大，撞墙结束。
 
-## 游戏规格
+## 核心设计
 
 | 属性 | 值 |
 |------|-----|
-| 网格 | 20×18（宽×高） |
-| 单元格大小 | 28px |
-| 初始蛇长 | 3 格 |
-| 移动方向 | 上下左右（触屏滑动） |
-| 速度 | 初速 5 格/秒，每吃 5 个食物加速 0.3 格/秒，上限 10 格/秒 |
-| 计分 | 每吃一个食物 +1 分 |
-| 结束条件 | 撞墙 / 撞自己 |
+| 操控方式 | 手指在屏幕上滑动 → 蛇头跟随手指方向转向 |
+| 移动方式 | 头持续前进，身体沿轨迹追踪，平滑无格子 |
+| 碰自己 | **不会死**（蛇身可从中间穿过） |
+| 碰墙 | **死亡** |
+| 生长 | 每吃 3 个光点增长一段 |
+| 光点刷新 | 地图上始终存在 20-30 个随机光点 |
+| 结束条件 | 蛇头碰到墙壁边界 |
+| 游戏区域 | 720×1280 竖屏视野内移动 |
+| 计分 | 总吃到的光点数量 |
 
 ## 架构
 
@@ -23,35 +25,64 @@
 ```
 assets/games/game_snake/
   scenes/
-    Snake.scene          ← 你搭建
+    Snake.scene              ← 你搭建
   scripts/
-    SnakeGame.ts          ← AI 写（主控制器）
-    Snake.ts              ← AI 写（蛇逻辑）
-    FoodSpawner.ts        ← AI 写（食物生成）
+    SnakeGame.ts              ← AI 写（主控制器 + 游戏循环）
+    Snake.ts                  ← AI 写（蛇逻辑：移动/生长/绘制）
+    FoodSpawner.ts            ← AI 写（光点生成/管理）
 ```
 
 ### 组件职责
 
 | 组件 | 职责 | 需要你绑定的 @property |
 |------|------|----------------------|
-| **SnakeGame** | 游戏状态管理、update 主循环、计分、游戏结束判定 | gridRoot（网格容器节点）、scoreLabel、gameOverNode（结束面板）、restartBtn |
-| **Snake** | 蛇身节点管理、移动逻辑、方向控制、自碰检测 | 无（纯数据 + 动态创建色块节点） |
-| **FoodSpawner** | 在空位随机生成食物、吃后重新生成 | 无（动态创建食物色块节点） |
+| **SnakeGame** | 游戏状态管理、update 循环、触屏事件、计分、死亡判定 | `scoreLabel`、`gameOverNode`、`restartBtn`、`gameArea` |
+| **Snake** | 蛇身路径点队列、每帧根据路径移动、生长逻辑、转向处理 | 无（纯数据 + dynamically draw） |
+| **FoodSpawner** | 在游戏区域内随机生成光点、吃后补充、保持 20-30 个在线 | 无（动态创建圆形节点） |
+
+### 蛇的移动原理（Boids 风格路径追踪）
+
+```
+蛇头：向前持续移动，每帧根据当前方向小幅推进
+  bodySegment[0] = 蛇头位置
+  bodySegment[1] = 延迟 N 帧的蛇头历史位置
+  bodySegment[2] = 延迟 2N 帧的蛇头历史位置
+  ...
+
+  实际上：维护一个「位置历史队列」
+          - 每帧将蛇头当前位置 push 到队列
+          - 第 i 段身体 = 队列中第 i * SEGMENT_DIST 个位置
+          - 吃光点时：增加 SEGMENT_DIST 值（让身体变长）或记录 extra 段数
+```
+
+更具体的说：
+1. **蛇头**：每帧朝当前方向移动 `speed * dt` 像素，`direction` 由触屏滑动角度决定
+2. **路径记录**：每帧把蛇头位置存到一个数组 `_path[]`
+3. **蛇身绘制**：第 i 段身体的位置 = `_path[_path.length - 1 - i * segmentGap]`
+4. **生长**：吃 3 个光点后，`segmentGap` 不变，但 `_headSegments` 计数 +1 段
+
+### 触屏控制
+
+- 在 `gameArea` 上监听 `TOUCH_MOVE` 事件
+- 每次 touch move 计算当前触摸点与蛇头的角度差
+- 蛇头方向平滑转向目标角度（最大转向角限制，防止瞬转）
 
 ### 数据流
 
 ```
-用户滑动 → SnakeGame 监听 touch → 更新 Snake.direction
+用户滑动 → SnakeGame.onTouchMove → 更新 targetAngle
          ↓
 update(dt):
-  Snake.tick(dt):
-    1. 计算前进方向
-    2. 如果到下一个格子的时间到了 → 移动一步
-    3. 检测吃食物 → SnakeGame.onEat()
-    4. 检测碰撞 → SnakeGame.onDeath()
-  FoodSpawner 空闲时刷新
-         ↓
-  SnakeGame 更新 UI（分数、Game Over 面板）
+  Snake.tick(dt, targetAngle):
+    1. 蛇头方向朝 targetAngle 平滑转向
+    2. 蛇头沿方向前进 speed * dt
+    3. 蛇头位置入历史队列
+    4. 绘制蛇身（从历史队列取点）
+  FoodSpawner 检测蛇头与光点碰撞
+    → 命中：蛇长大 + 计分 + 刷新光点
+  SnakeGame 检测蛇头是否超出边界
+    → 越界：游戏结束
+  SnakeGame 更新 UI（分数）
 ```
 
 ## 你需要搭建的场景（Snake.scene）
@@ -62,44 +93,40 @@ update(dt):
 2. 创建以下节点结构：
 
 ```
-Snake (Canvas)
-├── gridRoot (Node)             # 网格容器，所有蛇身和食物的父节点
-│   └── [动态创建色块]          # AI 代码动态生成
-├── scoreLabel (Label)          # 左上角显示 "分数: 0"
-│   ├── FontSize: 24
-│   └── Position: (0, 350)
-├── gameOverNode (Node)         # 游戏结束面板，默认隐藏
-│   ├── bg (Sprite, 黑色半透明)
-│   ├── title (Label) "游戏结束"
-│   ├── finalScore (Label) "得分: 0"
-│   └── restartBtn (Button) "重新开始"
+Snake (Canvas, DesignSize 720×1280)
+├── gameArea (Node)             # 游戏区域，蛇和食物都挂在这个节点下
+│   ├── [光点]  ← 动态创建
+│   └── [蛇身]  ← 动态创建
+├── topBar (Node)               # 顶部信息栏
+│   └── scoreLabel (Label)      # 显示 "长度: 0"
+│       ├── FontSize: 28
+│       ├── Position: (0, 350)
+│       └── 水平居中
+├── gameOverNode (Node)         # 游戏结束面板，默认 active=false
+│   ├── bg (Sprite, 黑色半透明，覆盖全屏)
+│   ├── title (Label) "游戏结束" (FontSize: 40, 粗体)
+│   ├── finalScore (Label) "长度: 0" (FontSize: 28)
+│   └── restartBtn (Button) "再来一次"
 │       └── btnLabel (Label)
-└── touchArea (Node)            # 全屏触控区域，挂 UITransform 填满 Canvas
 ```
 
 3. **在 SnakeGame 组件上绑定 @property：**
-   - `gridRoot` → 拖入 gridRoot 节点
+   - `gameArea` → 拖入 gameArea 节点
    - `scoreLabel` → 拖入 scoreLabel
    - `gameOverNode` → 拖入 gameOverNode
    - `restartBtn` → 拖入 restartBtn 节点上的 Button 组件
 
-## 代码逻辑（AI 负责）
+## 需要你做的
 
-### SnakeGame.ts
+1. 在 Cocos Creator 中创建 `Snake.scene`
+2. 按上述节点结构建好场景树
+3. 在 SnakeGame 组件上拖拽绑定 @property
+4. 告诉我场景做好了，我写代码逻辑
 
-- `onLoad()`: 初始化游戏，创建 Snake + FoodSpawner
-- `update(dt)`: 驱动游戏循环
-- 监听 touch 事件（在 gridRoot 或 Canvas 上监听触屏滑动）
-- 管理分数和游戏结束状态
+## 我来写的代码
 
-### Snake.ts
-
-- 蛇身：由节点数组表示，head 是 index 0
-- `tick(dt)`: 时间驱动移动
-- `grow()`: 增加长度
-- `checkCollision()`: 检测撞墙和撞自己
-
-### FoodSpawner.ts
-
-- `spawn()`: 在网格空位随机生成一个食物
-- 食物用色块节点表示（绿色圆圈或方块）
+| 文件 | 内容 |
+|------|------|
+| `SnakeGame.ts` | 游戏主循环、触屏事件、碰撞检测（光点 + 墙壁）、游戏状态管理 |
+| `Snake.ts` | 蛇头移动逻辑、路径历史队列、蛇身绘制、转向控制、生长 |
+| `FoodSpawner.ts` | 光点在地图随机位置生成、保持数量、碰撞响应 |
