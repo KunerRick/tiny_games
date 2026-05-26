@@ -87,7 +87,7 @@ export class Unit extends Component {
         this._chargeUsed = false;
         this._laserFocus = 1.0;
         this._laserTargetId = 0;
-        this._stompTimer = 0;
+        this._stompTimer = 8.0; // 践踏初始满 CD，战斗中倒计时
 
         this._pendingCastleAttack = false;
 
@@ -185,9 +185,9 @@ export class Unit extends Component {
 
             case UnitState.FIGHTING:
                 this.updateFighting(dt, allUnits, playerCastleX, enemyCastleX);
+                // 战斗中倒计时技能 CD
+                this.tickSkillCooldowns(dt);
                 break;
-
-
         }
 
         // 死亡动画期间跳过血条更新（优化）
@@ -480,13 +480,10 @@ export class Unit extends Component {
         // 触发攻击抖动效果
         this.triggerAttackShake();
 
-        // 猛犸践踏（随攻击触发）
-        if (cfg.hasStomp) {
-            this._stompTimer += 1.0 / cfg.attackSpeed;
-            if (this._stompTimer >= 8.0) {
-                this._stompTimer = 0;
-                this.performStomp(allUnits);
-            }
+        // 猛犸践踏：CD 由 tick 管理，这里只判断是否触发
+        if (cfg.hasStomp && this._stompTimer <= 0) {
+            this._stompTimer = 8.0; // 重置 CD
+            this.performStomp(allUnits);
         }
     }
 
@@ -515,6 +512,13 @@ export class Unit extends Component {
             return true;
         }
         return false;
+    }
+
+    /** 战斗中倒计时技能冷却，CD 归零时由 tryAttack 负责触发 */
+    private tickSkillCooldowns(dt: number): void {
+        if (this._config!.hasStomp && this._stompTimer > 0) {
+            this._stompTimer -= dt;
+        }
     }
 
     // ==================== 受伤害 & 死亡 ====================
