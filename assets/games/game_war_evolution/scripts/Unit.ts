@@ -1,4 +1,4 @@
-import { _decorator, Component, Sprite, Color, Label, UITransform, tween, Tween, Vec3, Node } from 'cc';
+import { _decorator, Component, Sprite, Color, Label, UITransform, tween, Tween, Vec3, Node, Graphics } from 'cc';
 import { UnitConfig, UnitState, WORLD, UNIT_COLORS } from './GameConfig';
 
 const { ccclass, property } = _decorator;
@@ -65,6 +65,9 @@ export class Unit extends Component {
 
     // 击退动画
     private _knockbackTween: Tween<Node> | null = null;
+
+    // 受击弹跳动画（践踏等群体技能触发）
+    private _floatTween: Tween<Node> | null = null;
 
     // 原始颜色缓存（用于受击闪白后恢复）
     private _originalColor: Color | null = null;
@@ -543,6 +546,7 @@ export class Unit extends Component {
 
         if (this._hp <= 0) {
             this._hp = 0;
+            this.updateHPBar();   // 死亡前将血条置空，避免死亡动画期间仍显示满血
             this._state = UnitState.DEAD;
             // 机甲死亡自爆
             if (this._hasSelfDestruct && allUnits) {
@@ -721,16 +725,80 @@ export class Unit extends Component {
 
     // ==================== 技能 ====================
 
+    private static readonly STOMP_RANGE = 100;
+    private static readonly STOMP_DAMAGE = 30;
+
     private performStomp(allUnits: Unit[]): void {
-        // 对周围 100px 内所有敌方单位造成 30 范围伤害
         const cx = this.getX();
+
+        // 视觉特效：震荡波
+        this.spawnShockwave();
+
         for (const u of allUnits) {
-            // 使用 isDying() 跳过死亡中的单位
             if (u.getSide() === this._side || u.isDying()) continue;
-            if (Math.abs(u.getX() - cx) <= 100) {
-                u.takeDamage(30, this);
+            if (Math.abs(u.getX() - cx) <= Unit.STOMP_RANGE) {
+                u.takeDamage(Unit.STOMP_DAMAGE, this);
+                // 受击特效：轻微弹跳
+                u.triggerFloatEffect();
             }
         }
+    }
+
+    /** 震荡波特效：扩散的白色圆形 */
+    private spawnShockwave(): void {
+        if (!this.node?.isValid) return;
+
+        const waveNode = new Node('Shockwave');
+        this.node.parent!.addChild(waveNode);
+
+        const pos = this.node.position;
+        waveNode.setPosition(pos.x, WORLD.BATTLE_Y, 0);
+
+        // 用 Graphics 绘制实心圆
+        const g = waveNode.addComponent(Graphics);
+        g.fillColor = Color.WHITE;
+        g.circle(0, 0, 12.5); // 半径 12.5px，缩放后覆盖践踏范围
+        g.fill();
+
+        // 初始透明度
+        g.color = new Color(255, 255, 255, 180);
+
+        // 扩散到 8x = 半径 100px（覆盖践踏范围 200px 直径）
+        const targetScale = (Unit.STOMP_RANGE * 2) / 25;
+
+        tween(waveNode)
+            .to(0.3, { scale: new Vec3(targetScale, targetScale, 1) }, { easing: 'quadOut' })
+            .call(() => {
+                if (waveNode.isValid) waveNode.destroy();
+            })
+            .start();
+
+        // alpha 淡出
+        tween(g)
+            .to(0.3, { color: new Color(255, 255, 255, 0) }, { easing: 'quadOut' })
+            .start();
+    }
+
+    /** 受击弹跳效果（践踏等范围技能触发） */
+    public triggerFloatEffect(): void {
+        if (!this.node?.isValid) return;
+        if (this.isDying()) return; // 已死亡不弹跳，避免与死亡动画冲突
+
+        if (this._floatTween) {
+            this._floatTween.stop();
+            this._floatTween = null;
+        }
+
+        const origX = this.node.position.x;
+        const origY = this.node.position.y;
+
+        this._floatTween = tween(this.node)
+            .to(0.08, { position: new Vec3(origX, origY + 8, 0) }, { easing: 'quadOut' })
+            .to(0.08, { position: new Vec3(origX, origY, 0) }, { easing: 'quadIn' })
+            .call(() => {
+                this._floatTween = null;
+            })
+            .start();
     }
 
     /**

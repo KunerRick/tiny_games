@@ -118,7 +118,7 @@ export class WarEvo extends Component {
                 const cfg = this.uiController?.getUnitConfigByIndex(idx);
                 if (cfg) this.playerSpawnUnit(cfg.id);
             },
-            () => this.playerEvolve(),
+            () => this.playerEvolveOrBuyExp(),
             () => this.onRestart(),
             () => this.onLobby(),
         );
@@ -251,15 +251,36 @@ export class WarEvo extends Component {
 
     // ======== 进化 ========
 
-    private playerEvolve(): void {
+    private static readonly BUY_EXP_COST = 50;     // 每次购买消耗金币
+    private static readonly BUY_EXP_GAIN = 20;     // 每次购买获得经验
+
+    /** 点击进化按钮时的统一入口：经验够就进化，不够就买经验 */
+    private playerEvolveOrBuyExp(): void {
         const next = getNextAgeConfig(this._playerAge);
         if (!next) return; // 已满级
 
-        if (this._playerExp < next.expRequired) return;
-        if (this._playerGold < next.goldRequired) return;
+        if (this._playerExp >= next.expRequired) {
+            this.playerEvolve();
+        } else if (this._playerGold >= WarEvo.BUY_EXP_COST) {
+            this.buyExp();
+        }
+    }
 
-        this._playerGold -= next.goldRequired;
-        this._playerGold += 200; // 进化奖励
+    /** 消耗金币购买经验 */
+    private buyExp(): void {
+        this._playerGold -= WarEvo.BUY_EXP_COST;
+        this._playerExp += WarEvo.BUY_EXP_GAIN;
+    }
+
+    /** 执行进化（纯经验门槛，不消耗金币） */
+    private playerEvolve(): void {
+        const next = getNextAgeConfig(this._playerAge);
+        if (!next) return;
+
+        if (this._playerExp < next.expRequired) return;
+
+        // 进化奖励
+        this._playerGold += 200;
         this._playerAge = next.age;
 
         // 更新 UI 按钮 + 显示进化提示
@@ -353,11 +374,11 @@ export class WarEvo extends Component {
             this._playerKills,
         );
 
-        // 进化按钮是否可用
+        // 进化按钮是否可用：经验够可进化，或金币够可买经验
         if (nextAge) {
-            const canEvolve = this._playerExp >= nextAge.expRequired
-                && this._playerGold >= nextAge.goldRequired;
-            this.uiController?.setEvolveButtonEnabled(canEvolve);
+            const canEvolve = this._playerExp >= nextAge.expRequired;
+            const canBuyExp = this._playerGold >= WarEvo.BUY_EXP_COST;
+            this.uiController?.setEvolveButtonEnabled(canEvolve || canBuyExp);
         } else {
             this.uiController?.setEvolveButtonEnabled(false);
         }

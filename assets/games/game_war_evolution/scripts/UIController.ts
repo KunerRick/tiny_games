@@ -1,5 +1,5 @@
 import { _decorator, Component, Node, Label, Button, ProgressBar, tween, Tween, Vec3, Color } from 'cc';
-import { Age, UnitConfig, AGE_NAMES, getNextAgeConfig, getAvailableUnits } from './GameConfig';
+import { Age, UnitConfig, AGE_NAMES, getNextAgeConfig, getUnitsByAge } from './GameConfig';
 
 const { ccclass, property } = _decorator;
 
@@ -132,10 +132,10 @@ export class UIController extends Component {
         this._onLobby = onLobby;
     }
 
-    /** 更新产兵按钮 */
+    /** 更新产兵按钮 — 显示当前时代的兵种 */
     public setupUnitButtons(age: Age): void {
         this._currentAge = age;
-        this._unitConfigs = getAvailableUnits(age);
+        this._unitConfigs = getUnitsByAge(age);
 
         this.updateButton(this.unitButton0, this.unitName0, this.unitCost0, 0);
         this.updateButton(this.unitButton1, this.unitName1, this.unitCost1, 1);
@@ -196,13 +196,21 @@ export class UIController extends Component {
         const next = getNextAgeConfig(age);
         if (this.evolveCostLabel) {
             if (next) {
-                this.evolveCostLabel.string = `${exp}/${next.expRequired}`;
+                if (exp >= next.expRequired) {
+                    this.evolveCostLabel.string = '可进化';
+                } else {
+                    this.evolveCostLabel.string = `50g→20exp  ${exp}/${next.expRequired}`;
+                }
             } else {
                 this.evolveCostLabel.string = '已满级';
             }
         }
         if (this.evolveNameLabel) {
-            this.evolveNameLabel.string = next ? '进化' : '已满级';
+            if (next) {
+                this.evolveNameLabel.string = exp >= next.expRequired ? '进化' : '购买经验';
+            } else {
+                this.evolveNameLabel.string = '已满级';
+            }
         }
     }
 
