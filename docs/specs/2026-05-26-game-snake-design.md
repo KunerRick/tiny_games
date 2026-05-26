@@ -16,7 +16,7 @@
 | 光点刷新 | 地图上始终存在 20-30 个随机光点 |
 | 结束条件 | 蛇头碰到墙壁边界 |
 | 游戏区域 | 720×1280 竖屏视野内移动 |
-| 计分 | 总吃到的光点数量 |
+| 计分 | 显示蛇的长度（段数） |
 
 ## 架构
 
@@ -98,7 +98,7 @@ Snake (Canvas, DesignSize 720×1280)
 │   ├── [光点]  ← 动态创建
 │   └── [蛇身]  ← 动态创建
 ├── topBar (Node)               # 顶部信息栏
-│   └── scoreLabel (Label)      # 显示 "长度: 0"
+│   └── scoreLabel (Label)      # 显示 "长度: 5"（初始5段）
 │       ├── FontSize: 28
 │       ├── Position: (0, 350)
 │       └── 水平居中
@@ -110,10 +110,11 @@ Snake (Canvas, DesignSize 720×1280)
 │       └── btnLabel (Label)
 ```
 
-3. **在 SnakeGame 组件上绑定 @property：**
+3. **给 Canvas 添加 SnakeGame 脚本组件**（创建空组件后选择 SnakeGame 脚本）
+4. **在 SnakeGame 组件上绑定 @property：**
    - `gameArea` → 拖入 gameArea 节点
    - `scoreLabel` → 拖入 scoreLabel
-   - `gameOverNode` → 拖入 gameOverNode
+   - `gameOverNode` → 拖入 gameOverNode（结束面板节点）
    - `restartBtn` → 拖入 restartBtn 节点上的 Button 组件
 
 ## 需要你做的
