@@ -65,8 +65,8 @@ export const UNIT_CONFIGS: UnitConfig[] = [
     },
     {
         id: 'archer', name: '弓箭手', cost: 60,
-        hp: 25, attack: 30, attackSpeed: 1.5, moveSpeed: 80,
-        attackRange: 200, age: Age.MEDIEVAL, desc: '远程攻击',
+        hp: 25, attack: 30, attackSpeed: 1.0, moveSpeed: 80,
+        attackRange: 150, age: Age.MEDIEVAL, desc: '远程攻击',
         closeRangePenalty: 0.5,
         scale: 1.0,
         tint: { r: 80, g: 200, b: 120 },
