@@ -1,4 +1,4 @@
-import { Age, AgeConfig, UnitConfig, AI_CONFIG, getAgeConfig, getAvailableUnits, getNextAgeConfig } from './GameConfig';
+import { Age, AgeConfig, UnitConfig, AI_CONFIG, getAgeConfig, getAvailableUnits, getNextAgeConfig, BUY_EXP } from './GameConfig';
 import { Unit } from './Unit';
 import { Castle } from './Castle';
 
@@ -47,6 +47,9 @@ export class AI {
             this.trySpawnUnit();
         }
 
+        // 买经验（用多余金币加速进化）
+        this.tryBuyExp();
+
         // 进化
         this.tryEvolve();
     }
@@ -70,7 +73,7 @@ export class AI {
             Math.random() * (AI_CONFIG.SPAWN_INTERVAL_MAX - AI_CONFIG.SPAWN_INTERVAL_MIN);
         return base;
     }
-
+    /** 产兵 */
     private trySpawnUnit(): void {
         const available = getAvailableUnits(this._currentAge);
         // 保留 50 金币余额，只考虑买得起的兵
@@ -90,6 +93,40 @@ export class AI {
         this._spawnFn(chosen.id, 'enemy');
     }
 
+    /**
+     * AI 买经验逻辑
+     * 在保证安全余额的前提下，用多余金币加速进化
+     */
+    private tryBuyExp(): void {
+        const next = getNextAgeConfig(this._currentAge);
+        if (!next) return; // 已满级
+
+        const expNeeded = next.expRequired - this._exp;
+        if (expNeeded <= 0) return; // 经验已经够了
+
+        // 每个时代至少等 30 秒才开始买经验，让 AI 先建基础部队
+        const minBuyTime = (this._currentAge + 1) * 30;
+        if (this._gameTime < minBuyTime) return;
+
+        // 城堡血量低于 50% 时不买经验 → 被压制了，优先出兵防御
+        if (this._castle.getHP() < this._castle.getMaxHP() * 0.5) return;
+
+        // 计算安全余额：至少保留 goldReserve 或 100 金
+        const reserve = Math.max(next.goldReserve, 100);
+        const excessGold = this._gold - reserve;
+        if (excessGold < BUY_EXP.COST) return; // 多余金币不够买一次
+
+        // 计算需要买几次 + 能买几次
+        const buysNeeded = Math.ceil(expNeeded / BUY_EXP.GAIN);
+        const maxBuys = Math.floor(excessGold / BUY_EXP.COST);
+        const actualBuys = Math.min(maxBuys, buysNeeded);
+        if (actualBuys <= 0) return;
+
+        this._gold -= actualBuys * BUY_EXP.COST;
+        this._exp += actualBuys * BUY_EXP.GAIN;
+    }
+
+    /** AI 进化（同时检查经验和金币门槛） */
     private tryEvolve(): void {
         const next = getNextAgeConfig(this._currentAge);
         if (!next) return; // 已满级

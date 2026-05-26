@@ -124,14 +124,20 @@ export const CASTLE_CONFIG = {
 
 /** 金币收入配置（每秒） */
 export const GOLD_INCOME = {
-    PLAYER: 10,  // 玩家每秒金币收入
-    AI: 10,      // AI 每秒金币收入
+    PLAYER: 6,  // 玩家每秒金币收入
+    AI: 6,      // AI 每秒金币收入
 };
 
 /** AI 配置 */
 export const AI_CONFIG = {
     SPAWN_INTERVAL_MIN: 1.5,
     SPAWN_INTERVAL_MAX: 3.5,
+};
+
+/** 购买经验配置 */
+export const BUY_EXP = {
+    COST: 50,     // 每次购买消耗金币
+    GAIN: 20,     // 每次购买获得经验
 };
 
 // ==================== 辅助函数 ====================
