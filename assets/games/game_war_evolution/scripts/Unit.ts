@@ -87,7 +87,7 @@ export class Unit extends Component {
         this._chargeUsed = false;
         this._laserFocus = 1.0;
         this._laserTargetId = 0;
-        this._stompTimer = 8.0; // 践踏初始满 CD，战斗中倒计时
+        this._stompTimer = 0; // 践踏初始就绪，遇到敌人立即触发
 
         this._pendingCastleAttack = false;
 
@@ -314,6 +314,9 @@ export class Unit extends Component {
      * 战斗中更新
      */
     private updateFighting(dt: number, allUnits: Unit[], playerCastleX: number, enemyCastleX: number): void {
+        // 每帧先检查践踏 —— 技能优先于普攻
+        this.tryTriggerStomp(allUnits);
+
         // 如果目标是单位
         if (this._target) {
             if (this._target.getState() === UnitState.DEAD) {
@@ -327,8 +330,8 @@ export class Unit extends Component {
             // 远程兵种：保持最优攻击距离
             if (cfg.attackRange > 100) {
                 // 远程兵逻辑：敌人太靠近时后撤
-                if (dist < cfg.attackRange * 0.4) {
-                    // 敌人太近了，后撤
+                if (dist < cfg.attackRange * 0.2) {
+                    // 敌人太近了，后撤（阈值从 40% 降至 20%）
                     this.retreat(dt, allUnits);
                     return;
                 } else if (dist > cfg.attackRange) {
@@ -382,7 +385,7 @@ export class Unit extends Component {
         if (!this._target) return;
 
         const direction = this._side === 'player' ? -1 : 1;
-        const retreatSpeed = this._config!.moveSpeed * 0.8; // 后撤速度稍慢
+        const retreatSpeed = this._config!.moveSpeed * 0.5; // 后撤速度减慢（从 80% 降至 50%）
         const dx = retreatSpeed * direction * dt;
         let newX = this.node.position.x + dx;
 
@@ -443,17 +446,13 @@ export class Unit extends Component {
             damage *= 2;
         }
 
-        // 激光聚焦：持续攻击同一目标伤害递增，切换目标重置
+        // 激光聚焦：持续攻击同一目标伤害递增，切换目标衰减 0.3（不重置）
         if (cfg.hasLaserFocus) {
             if (target.getUnitId() !== this._laserTargetId) {
-                this._laserFocus = 1.0;
+                this._laserFocus = Math.max(1.0, this._laserFocus - 0.3);
                 this._laserTargetId = target.getUnitId();
-                if (this._laserLabel) {
-                    this._laserLabel.string = '1.0×';
-                    this._laserLabel.color = Color.WHITE.clone();
-                }
             }
-            this._laserFocus = Math.min(this._laserFocus + 0.15, 2.0);
+            this._laserFocus = Math.min(this._laserFocus + 0.3, 2.0);
             damage = Math.round(damage * this._laserFocus);
 
             // 更新激光聚焦视觉
@@ -470,6 +469,11 @@ export class Unit extends Component {
             }
         }
 
+        // 近战惩罚：被贴身时伤害打折（如弓箭手 50%）
+        if (cfg.closeRangePenalty && dist <= 50) {
+            damage = Math.floor(damage * cfg.closeRangePenalty);
+        }
+
         target.takeDamage(damage, this, allUnits);
         // 标记冲锋已使用（在 takeDamage 之后设置，确保击退判定能读到）
         if (cfg.hasCharge && !this._chargeUsed) {
@@ -480,11 +484,7 @@ export class Unit extends Component {
         // 触发攻击抖动效果
         this.triggerAttackShake();
 
-        // 猛犸践踏：CD 由 tick 管理，这里只判断是否触发
-        if (cfg.hasStomp && this._stompTimer <= 0) {
-            this._stompTimer = 8.0; // 重置 CD
-            this.performStomp(allUnits);
-        }
+        // 践踏检测已迁移至 tryTriggerStomp()，由 updateFighting 每帧独立触发
     }
 
     /**
@@ -514,11 +514,32 @@ export class Unit extends Component {
         return false;
     }
 
-    /** 战斗中倒计时技能冷却，CD 归零时由 tryAttack 负责触发 */
+    /** 战斗中倒计时技能冷却 */
     private tickSkillCooldowns(dt: number): void {
         if (this._config!.hasStomp && this._stompTimer > 0) {
             this._stompTimer -= dt;
         }
+    }
+
+    /**
+     * 独立检测践踏触发
+     * - CD 就绪 + 附近有敌人 → 践踏 + 重置普攻 CD
+     * - 技能优先于普攻，踩完立刻接普攻
+     * @returns 是否触发了践踏
+     */
+    private tryTriggerStomp(allUnits: Unit[]): boolean {
+        if (!this._config!.hasStomp || this._stompTimer > 0) return false;
+
+        for (const u of allUnits) {
+            if (u.getSide() === this._side || u.isDying()) continue;
+            if (Math.abs(u.getX() - this.getX()) <= Unit.STOMP_RANGE) {
+                this._stompTimer = 8.0;
+                this.performStomp(allUnits);
+                this._attackCooldown = 0;
+                return true;
+            }
+        }
+        return false;
     }
 
     // ==================== 受伤害 & 死亡 ====================
@@ -733,23 +754,14 @@ export class Unit extends Component {
     private static readonly STOMP_DAMAGE = 30;
 
     private performStomp(allUnits: Unit[]): void {
-        const cx = this.getX();
-
-        // 视觉特效：震荡波
-        this.spawnShockwave();
-
-        for (const u of allUnits) {
-            if (u.getSide() === this._side || u.isDying()) continue;
-            if (Math.abs(u.getX() - cx) <= Unit.STOMP_RANGE) {
-                u.takeDamage(Unit.STOMP_DAMAGE, this);
-                // 受击特效：轻微弹跳
-                u.triggerFloatEffect();
-            }
-        }
+        // 视觉特效（扩散动画结束后结算伤害，确保视觉与受击同步）
+        this.spawnShockwave(() => {
+            this.applyStompDamage(allUnits);
+        });
     }
 
-    /** 震荡波特效：扩散的白色圆形 */
-    private spawnShockwave(): void {
+    /** 震荡波特效：扩散的白色圆环（动画结束后回调结算伤害） */
+    private spawnShockwave(onComplete: () => void): void {
         if (!this.node?.isValid) return;
 
         const waveNode = new Node('Shockwave');
@@ -758,11 +770,12 @@ export class Unit extends Component {
         const pos = this.node.position;
         waveNode.setPosition(pos.x, WORLD.BATTLE_Y, 0);
 
-        // 用 Graphics 绘制实心圆
+        // 用 Graphics 绘制圆环（不遮挡单位）
         const g = waveNode.addComponent(Graphics);
-        g.fillColor = Color.WHITE;
+        g.lineWidth = 3;
+        g.strokeColor = Color.WHITE;
         g.circle(0, 0, 12.5); // 半径 12.5px，缩放后覆盖践踏范围
-        g.fill();
+        g.stroke();
 
         // 初始透明度
         g.color = new Color(255, 255, 255, 180);
@@ -773,6 +786,7 @@ export class Unit extends Component {
         tween(waveNode)
             .to(0.3, { scale: new Vec3(targetScale, targetScale, 1) }, { easing: 'quadOut' })
             .call(() => {
+                onComplete();
                 if (waveNode.isValid) waveNode.destroy();
             })
             .start();
@@ -781,6 +795,20 @@ export class Unit extends Component {
         tween(g)
             .to(0.3, { color: new Color(255, 255, 255, 0) }, { easing: 'quadOut' })
             .start();
+    }
+
+    /** 践踏伤害结算（由扩散动画结束后回调调用） */
+    private applyStompDamage(allUnits: Unit[]): void {
+        if (!this.node?.isValid) return; // 猛犸可能在动画期间死亡
+        const cx = this.getX();
+
+        for (const u of allUnits) {
+            if (u.getSide() === this._side || u.isDying()) continue;
+            if (Math.abs(u.getX() - cx) <= Unit.STOMP_RANGE) {
+                u.takeDamage(Unit.STOMP_DAMAGE, this);
+                u.triggerFloatEffect();
+            }
+        }
     }
 
     /** 受击弹跳效果（践踏等范围技能触发） */

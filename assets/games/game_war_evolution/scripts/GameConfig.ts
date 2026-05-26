@@ -31,6 +31,7 @@ export interface UnitConfig {
     hasCharge?: boolean;    // 骑士冲锋（首击2倍+击退）
     hasShield?: boolean;    // 机甲护盾（50%额外血量）
     hasLaserFocus?: boolean;// 激光聚焦（持续增伤）
+    closeRangePenalty?: number; // 近战惩罚倍率（贴身时伤害 × 此值）
     // 视觉配置
     scale: number;           // 大小缩放（基准 1.0）
     tint: { r: number; g: number; b: number }; // 兵种细分色调
@@ -66,6 +67,7 @@ export const UNIT_CONFIGS: UnitConfig[] = [
         id: 'archer', name: '弓箭手', cost: 60,
         hp: 25, attack: 30, attackSpeed: 1.5, moveSpeed: 80,
         attackRange: 200, age: Age.MEDIEVAL, desc: '远程攻击',
+        closeRangePenalty: 0.5,
         scale: 1.0,
         tint: { r: 80, g: 200, b: 120 },
     },

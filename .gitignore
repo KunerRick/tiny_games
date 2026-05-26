@@ -23,5 +23,6 @@ node_modules/
 #//////////////////////////
 .idea/
 .trae
+.opencode
 .sisyphus
 .DS_Store
