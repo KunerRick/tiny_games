@@ -20,11 +20,16 @@ export class SettingsPanel extends Component {
     private _selectedSize: GridSize = 4;
     private _onConfirm: ((size: GridSize) => void) | null = null;
 
+    onDestroy(): void {
+        this.unbindEvents();
+    }
+
     show(currentSize: GridSize, onConfirm: (size: GridSize) => void): void {
         this._selectedSize = currentSize;
         this._onConfirm = onConfirm;
 
-        // 绑定事件（在 show 中绑定，确保 Slider/Button 已初始化完成）
+        // 先解绑再绑定，防止重复调用 show() 时事件累积
+        this.unbindEvents();
         this.bindEvents();
 
         // 设置滑条初始值 (4-8 映射到 0-1)

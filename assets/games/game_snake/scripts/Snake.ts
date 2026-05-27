@@ -191,14 +191,15 @@ export class Snake extends Component {
             }
             this._headNode = null;
         }
-        // 使用 Array.from 避免迭代过程中数组被修改的问题
-        const bodyNodesCopy = Array.from(this._bodyNodes);
-        for (const b of bodyNodesCopy) {
-            if (b && b.isValid) {
-                b.destroy();
+        if (this._bodyNodes) {
+            for (let i = this._bodyNodes.length - 1; i >= 0; i--) {
+                const b = this._bodyNodes[i];
+                if (b && b.isValid) {
+                    b.destroy();
+                }
             }
+            this._bodyNodes = [];
         }
-        this._bodyNodes = [];
         this._pathHistory = [];
     }
 

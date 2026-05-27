@@ -29,12 +29,18 @@ export class GameOverPanel extends Component {
         }
     }
 
+    onDestroy(): void {
+        this.unbindEvents();
+    }
+
     show(score: number, onRestart: () => void, onBack: () => void, bestScore: number = 0, isWin: boolean = false): void {
         this._showCalled = true;
 
         this._onRestart = onRestart;
         this._onBack = onBack;
 
+        // 先解绑再绑定，防止重复调用 show() 时事件累积
+        this.unbindEvents();
         this.bindEvents();
 
         if (this.titleLabel) {

@@ -70,6 +70,12 @@ export class SnakeGame extends Component {
     private _lastEatTime: number = 0;          // 上次吃食物时间
     private _comboTimer: number = 0;           // 连击计时器
 
+    // 存储 joystick 触摸 handler 引用，以便在 _cleanupGame 中正确解绑
+    private _joystickTouchStartHandler: ((event: EventTouch) => void) | null = null;
+    private _joystickTouchMoveHandler: ((event: EventTouch) => void) | null = null;
+    private _joystickTouchEndHandler: ((event: EventTouch) => void) | null = null;
+    private _joystickTouchCancelHandler: ((event: EventTouch) => void) | null = null;
+
     onLoad() {
         this._loadBestScore();
         this._initGame();
@@ -115,22 +121,27 @@ export class SnakeGame extends Component {
             this._snake?.setTargetAngle(angle);
         };
 
-        // 绑定触摸事件到摇杆
+        // 绑定触摸事件到摇杆（存储 handler 引用以便正确解绑）
         if (this.gameArea) {
-            this.gameArea.on(Node.EventType.TOUCH_START, (event: EventTouch) => {
+            this._joystickTouchStartHandler = (event: EventTouch) => {
                 if (this.joystick?.onTouchStart(event)) {
                     // 摇杆消费了事件
                 }
-            }, this);
-            this.gameArea.on(Node.EventType.TOUCH_MOVE, (event: EventTouch) => {
+            };
+            this._joystickTouchMoveHandler = (event: EventTouch) => {
                 this.joystick?.onTouchMove(event);
-            }, this);
-            this.gameArea.on(Node.EventType.TOUCH_END, (event: EventTouch) => {
+            };
+            this._joystickTouchEndHandler = (event: EventTouch) => {
                 this.joystick?.onTouchEnd(event);
-            }, this);
-            this.gameArea.on(Node.EventType.TOUCH_CANCEL, (event: EventTouch) => {
+            };
+            this._joystickTouchCancelHandler = (event: EventTouch) => {
                 this.joystick?.onTouchCancel(event);
-            }, this);
+            };
+
+            this.gameArea.on(Node.EventType.TOUCH_START, this._joystickTouchStartHandler, this);
+            this.gameArea.on(Node.EventType.TOUCH_MOVE, this._joystickTouchMoveHandler, this);
+            this.gameArea.on(Node.EventType.TOUCH_END, this._joystickTouchEndHandler, this);
+            this.gameArea.on(Node.EventType.TOUCH_CANCEL, this._joystickTouchCancelHandler, this);
         }
     }
 
@@ -346,6 +357,9 @@ export class SnakeGame extends Component {
     }
 
     private _cleanupGame(): void {
+        // 标记游戏结束——确保 update() 在清理期间不会继续执行
+        this._isPlaying = false;
+
         if (this._snake) {
             this._snake.destroyAll();
             // 注意：不要调用 this._snake.node.destroy()
@@ -358,8 +372,27 @@ export class SnakeGame extends Component {
             this._foodSpawner = null;
         }
 
-        // 移除触摸事件监听
+        // 移除全部触摸事件监听（覆盖 joystick 和回退两种模式）
         if (this.gameArea) {
+            // 移除 joystick 模式 handler（已存储引用）
+            if (this._joystickTouchStartHandler) {
+                this.gameArea.off(Node.EventType.TOUCH_START, this._joystickTouchStartHandler, this);
+                this._joystickTouchStartHandler = null;
+            }
+            if (this._joystickTouchMoveHandler) {
+                this.gameArea.off(Node.EventType.TOUCH_MOVE, this._joystickTouchMoveHandler, this);
+                this._joystickTouchMoveHandler = null;
+            }
+            if (this._joystickTouchEndHandler) {
+                this.gameArea.off(Node.EventType.TOUCH_END, this._joystickTouchEndHandler, this);
+                this._joystickTouchEndHandler = null;
+            }
+            if (this._joystickTouchCancelHandler) {
+                this.gameArea.off(Node.EventType.TOUCH_CANCEL, this._joystickTouchCancelHandler, this);
+                this._joystickTouchCancelHandler = null;
+            }
+
+            // 移除回退模式 handler（未注册时 off() 是无操作，安全）
             this.gameArea.off(Node.EventType.TOUCH_START, this._onTouchStart, this);
             this.gameArea.off(Node.EventType.TOUCH_MOVE, this._onTouchMove, this);
             this.gameArea.off(Node.EventType.TOUCH_END, this._onTouchEnd, this);
@@ -377,7 +410,36 @@ export class SnakeGame extends Component {
     }
 
     onDestroy() {
-        this._cleanupGame();
+        // 场景销毁时，Cocos 自动销毁所有子节点和组件
+        // 不调用 _cleanupGame()——它会在已销毁的 Snake 组件上执行方法导致 crash
+        // 这里只需清理事件监听和引用
+        this._isPlaying = false;
+        this._snake = null;
+        this._foodSpawner = null;
+
+        // 移除触摸事件监听
+        if (this.gameArea) {
+            if (this._joystickTouchStartHandler) {
+                this.gameArea.off(Node.EventType.TOUCH_START, this._joystickTouchStartHandler, this);
+                this._joystickTouchStartHandler = null;
+            }
+            if (this._joystickTouchMoveHandler) {
+                this.gameArea.off(Node.EventType.TOUCH_MOVE, this._joystickTouchMoveHandler, this);
+                this._joystickTouchMoveHandler = null;
+            }
+            if (this._joystickTouchEndHandler) {
+                this.gameArea.off(Node.EventType.TOUCH_END, this._joystickTouchEndHandler, this);
+                this._joystickTouchEndHandler = null;
+            }
+            if (this._joystickTouchCancelHandler) {
+                this.gameArea.off(Node.EventType.TOUCH_CANCEL, this._joystickTouchCancelHandler, this);
+                this._joystickTouchCancelHandler = null;
+            }
+            this.gameArea.off(Node.EventType.TOUCH_START, this._onTouchStart, this);
+            this.gameArea.off(Node.EventType.TOUCH_MOVE, this._onTouchMove, this);
+            this.gameArea.off(Node.EventType.TOUCH_END, this._onTouchEnd, this);
+            this.gameArea.off(Node.EventType.TOUCH_CANCEL, this._onTouchCancel, this);
+        }
 
         // 清理按钮监听
         if (this.restartBtn) {
