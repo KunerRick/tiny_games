@@ -1,36 +1,91 @@
-import { _decorator, Component, Node, Button, Label, EventTouch, Vec2, Vec3, UITransform, find } from 'cc';
+import { _decorator, Component, Node, Button, Label, EventTouch, Vec2, Vec3, UITransform, find, director } from 'cc';
 import { Snake } from './Snake';
 import { FoodSpawner } from './FoodSpawner';
 
 const { ccclass, property } = _decorator;
 
+// 存储键名
+const STORAGE_KEY_SNAKE = 'tiny_games_snake_data';
+
+interface SnakeStorageData {
+    bestScore: number;
+}
+
 @ccclass('SnakeGame')
 export class SnakeGame extends Component {
+    // ========== 游戏区域 ==========
     @property(Node)
-    gameArea: Node | null = null;          // 游戏区域父节点
+    gameArea: Node | null = null;
+
+    // ========== 顶部栏分数显示 ==========
+    @property(Label)
+    currentScoreLabel: Label | null = null;
 
     @property(Label)
-    scoreLabel: Label | null = null;       // 计分标签
+    bestScoreLabel: Label | null = null;
 
+    // ========== 游戏结束面板 ==========
     @property(Node)
-    gameOverNode: Node | null = null;      // 游戏结束面板
+    gameOverPanel: Node | null = null;
+
+    @property(Label)
+    finalScoreLabel: Label | null = null;
+
+    @property(Label)
+    finalBestScoreLabel: Label | null = null;
+
+    // ========== 按钮 ==========
+    @property(Button)
+    restartBtn: Button | null = null;
 
     @property(Button)
-    restartBtn: Button | null = null;     // 重新开始按钮
+    backBtn: Button | null = null;
+
+    @property(Button)
+    panelBackBtn: Button | null = null;
 
     // 运行时
     private _snake: Snake | null = null;
     private _foodSpawner: FoodSpawner | null = null;
     private _score: number = 0;
+    private _bestScore: number = 0;
     private _isPlaying: boolean = false;
     private _touchPrevPos: Vec2 | null = null;
     private _halfW: number = 360;
     private _halfH: number = 640;
 
     onLoad() {
+        this._loadBestScore();
         this._initGame();
+        this._bindButtons();
+    }
 
+    private _bindButtons(): void {
         this.restartBtn?.node.on(Node.EventType.TOUCH_END, this._onRestart, this);
+        this.backBtn?.node.on(Node.EventType.TOUCH_END, this._onBackToLobby, this);
+        this.panelBackBtn?.node.on(Node.EventType.TOUCH_END, this._onBackToLobby, this);
+    }
+
+    private _loadBestScore(): void {
+        try {
+            const data = localStorage.getItem(STORAGE_KEY_SNAKE);
+            if (data) {
+                const parsed: SnakeStorageData = JSON.parse(data);
+                this._bestScore = parsed.bestScore || 0;
+            }
+        } catch (e) {
+            console.warn('Failed to load best score:', e);
+            this._bestScore = 0;
+        }
+    }
+
+    private _saveBestScore(): void {
+        try {
+            const data: SnakeStorageData = { bestScore: this._bestScore };
+            localStorage.setItem(STORAGE_KEY_SNAKE, JSON.stringify(data));
+        } catch (e) {
+            console.warn('Failed to save best score:', e);
+        }
     }
 
     private _initGame(): void {
@@ -44,8 +99,8 @@ export class SnakeGame extends Component {
         }
 
         // 隐藏结束面板
-        if (this.gameOverNode) {
-            this.gameOverNode.active = false;
+        if (this.gameOverPanel) {
+            this.gameOverPanel.active = false;
         }
 
         // 清空子节点
@@ -70,7 +125,7 @@ export class SnakeGame extends Component {
 
         this._score = 0;
         this._isPlaying = true;
-        this._updateScoreLabel();
+        this._updateScoreLabels();
 
         // 触屏事件 — 绑定到 gameArea 上
         if (this.gameArea) {
@@ -132,25 +187,41 @@ export class SnakeGame extends Component {
 
     private _onSnakeEat(scoreChange: number): void {
         this._score += scoreChange;
-        this._updateScoreLabel();
+        if (this._score > this._bestScore) {
+            this._bestScore = this._score;
+            this._saveBestScore();
+        }
+        this._updateScoreLabels();
     }
 
     private _onSnakeDeath(): void {
         this._isPlaying = false;
 
-        if (this.gameOverNode) {
-            this.gameOverNode.active = true;
+        if (this.gameOverPanel) {
+            this.gameOverPanel.active = true;
         }
 
-        // 更新结束面板上的分数（命名为 scoreLabel 的子节点）
-        const finalScoreLabel = this.gameOverNode?.getComponentInChildren(Label);
-        if (finalScoreLabel) {
-            finalScoreLabel.string = `长度: ${this._snake?.getLength() ?? 0}`;
+        // 更新结束面板上的分数
+        const currentLength = this._snake?.getLength() ?? 0;
+        if (this.finalScoreLabel) {
+            this.finalScoreLabel.string = `最终长度: ${currentLength}`;
+        }
+        if (this.finalBestScoreLabel) {
+            this.finalBestScoreLabel.string = `历史最佳: ${this._bestScore}`;
         }
     }
 
     private _onRestart(): void {
         // 清理旧实例
+        this._cleanupGame();
+        this._initGame();
+    }
+
+    private _onBackToLobby(): void {
+        director.loadScene('Lobby');
+    }
+
+    private _cleanupGame(): void {
         if (this._snake) {
             this._snake.destroyAll();
             this._snake.node.destroy();
@@ -162,22 +233,30 @@ export class SnakeGame extends Component {
             this._foodSpawner = null;
         }
 
-        this._initGame();
-    }
-
-    private _updateScoreLabel(): void {
-        if (this.scoreLabel) {
-            this.scoreLabel.string = `长度: ${this._snake?.getLength() ?? 0}`;
-        }
-    }
-
-    onDestroy() {
-        // 清理监听
+        // 移除触屏事件监听
         if (this.gameArea) {
             this.gameArea.off(Node.EventType.TOUCH_START, this._onTouchStart, this);
             this.gameArea.off(Node.EventType.TOUCH_MOVE, this._onTouchMove, this);
             this.gameArea.off(Node.EventType.TOUCH_END, this._onTouchEnd, this);
         }
+    }
+
+    private _updateScoreLabels(): void {
+        const currentLength = this._snake?.getLength() ?? 0;
+        if (this.currentScoreLabel) {
+            this.currentScoreLabel.string = `长度: ${currentLength}`;
+        }
+        if (this.bestScoreLabel) {
+            this.bestScoreLabel.string = `最佳: ${this._bestScore}`;
+        }
+    }
+
+    onDestroy() {
+        this._cleanupGame();
+
+        // 清理按钮监听
         this.restartBtn?.node.off(Node.EventType.TOUCH_END, this._onRestart, this);
+        this.backBtn?.node.off(Node.EventType.TOUCH_END, this._onBackToLobby, this);
+        this.panelBackBtn?.node.off(Node.EventType.TOUCH_END, this._onBackToLobby, this);
     }
 }

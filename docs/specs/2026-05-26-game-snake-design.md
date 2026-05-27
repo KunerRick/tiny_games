@@ -1,4 +1,4 @@
-# 贪吃蛇 — 游戏设计文档（v2：平滑移动版）
+# 贪吃蛇 — 游戏设计文档（v3：完整版）
 
 ## 概述
 
@@ -16,7 +16,57 @@
 | 光点刷新 | 地图上始终存在 20-30 个随机光点 |
 | 结束条件 | 蛇头碰到墙壁边界 |
 | 游戏区域 | 720×1280 竖屏视野内移动 |
-| 计分 | 显示蛇的长度（段数） |
+| 计分 | 显示蛇的长度（段数）和历史最高分 |
+
+## 界面设计
+
+### 4.1 主界面布局
+
+```
+┌─────────────────────────────────────┐
+│  [←]    长度: 5    最佳: 12          │  ← 顶部导航栏（高度 100px）
+├─────────────────────────────────────┤
+│                                     │
+│                                     │
+│           [游戏区域]                 │  ← 蛇移动和吃光点
+│         [光点] [蛇]                  │
+│                                     │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+### 4.2 游戏结束弹窗
+
+```
+┌─────────────────────────────────────┐
+│                                     │
+│    ┌─────────────────────────┐      │
+│    │       游戏结束          │      │
+│    │                         │      │
+│    │    最终长度: 15         │      │
+│    │    历史最佳: 20         │      │
+│    │                         │      │
+│    │   [  再来一次  ]        │      │
+│    │   [  返回大厅  ]        │      │
+│    └─────────────────────────┘      │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+### 4.3 颜色方案
+
+| 元素 | 颜色值 | 说明 |
+|------|--------|------|
+| 游戏区域背景 | #696969 (深灰) | 蛇移动区域 |
+| 蛇头 | #44C8FF (亮蓝) | 蛇头颜色 |
+| 蛇身 | #32A0EB (蓝色) | 身体颜色 |
+| 光点 | #64FF78 (亮绿) | 可吃光点 |
+| 当前分数文字 | #FFFFFF (白色) | 顶部栏 |
+| 最佳分数文字 | #FFD700 (金黄) | 顶部栏 |
+| 结束面板卡片 | #FFFFFF (白色) | 半透明背景 |
+| 结束面板标题 | #333333 (深灰) | "游戏结束" |
+| 按钮-再来一次 | #2B6CB0 (蓝色) | 主按钮 |
+| 按钮-返回大厅 | #718096 (灰色) | 次按钮 |
 
 ## 架构
 
@@ -30,15 +80,17 @@ assets/games/game_snake/
     SnakeGame.ts              ← AI 写（主控制器 + 游戏循环）
     Snake.ts                  ← AI 写（蛇逻辑：移动/生长/绘制）
     FoodSpawner.ts            ← AI 写（光点生成/管理）
+    StorageManager.ts         ← AI 写（本地存储管理）
 ```
 
 ### 组件职责
 
 | 组件 | 职责 | 需要你绑定的 @property |
 |------|------|----------------------|
-| **SnakeGame** | 游戏状态管理、update 循环、触屏事件、计分、死亡判定 | `scoreLabel`、`gameOverNode`、`restartBtn`、`gameArea` |
+| **SnakeGame** | 游戏状态管理、update 循环、触屏事件、计分、死亡判定、最高分管理 | `gameArea`、`currentScoreLabel`、`bestScoreLabel`、`gameOverPanel`、`finalScoreLabel`、`finalBestScoreLabel`、`restartBtn`、`backBtn`、`panelBackBtn` |
 | **Snake** | 蛇身路径点队列、每帧根据路径移动、生长逻辑、转向处理 | 无（纯数据 + dynamically draw） |
 | **FoodSpawner** | 在游戏区域内随机生成光点、吃后补充、保持 20-30 个在线 | 无（动态创建圆形节点） |
+| **StorageManager** | 读写本地存储的最高分数据 | 无 |
 
 ### 蛇的移动原理（Boids 风格路径追踪）
 
@@ -82,7 +134,7 @@ update(dt):
     → 命中：蛇长大 + 计分 + 刷新光点
   SnakeGame 检测蛇头是否超出边界
     → 越界：游戏结束
-  SnakeGame 更新 UI（分数）
+  SnakeGame 更新 UI（分数、最高分）
 ```
 
 ## 你需要搭建的场景（Snake.scene）
@@ -97,37 +149,91 @@ Snake (Canvas, DesignSize 720×1280)
 ├── gameArea (Node)             # 游戏区域，蛇和食物都挂在这个节点下
 │   ├── [光点]  ← 动态创建
 │   └── [蛇身]  ← 动态创建
-├── topBar (Node)               # 顶部信息栏
-│   └── scoreLabel (Label)      # 显示 "长度: 5"（初始5段）
-│       ├── FontSize: 28
-│       ├── Position: (0, 350)
-│       └── 水平居中
-├── gameOverNode (Node)         # 游戏结束面板，默认 active=false
-│   ├── bg (Sprite, 黑色半透明，覆盖全屏)
-│   ├── title (Label) "游戏结束" (FontSize: 40, 粗体)
-│   ├── finalScore (Label) "长度: 0" (FontSize: 28)
-│   └── restartBtn (Button) "再来一次"
-│       └── btnLabel (Label)
+├── UI_Overlay (Node)           # UI 层
+│   ├── topBar (Node)           # 顶部信息栏
+│   │   ├── backBtn (Button)    # 返回按钮
+│   │   │   └── Label (Label)   # "←" 或 "返回"
+│   │   └── scorePanel (Node)   # 分数面板
+│   │       ├── currentScore (Label)  # "长度: 5"
+│   │       └── bestScore (Label)     # "最佳: 12"
+│   └── gameOverPanel (Node)    # 游戏结束面板，默认 active=false
+│       ├── bg (Sprite)         # 黑色半透明遮罩，覆盖全屏
+│       ├── card (Sprite)       # 白色圆角卡片
+│       │   ├── title (Label)   # "游戏结束" (FontSize: 36, 粗体)
+│       │   ├── finalScore (Label)    # "最终长度: 0" (FontSize: 28)
+│       │   ├── bestScore (Label)     # "历史最佳: 0" (FontSize: 24, 金黄色)
+│       │   ├── restartBtn (Button)   # "再来一次"
+│       │   │   └── Label (Label)
+│       │   └── backBtn (Button)      # "返回大厅"
+│       │       └── Label (Label)
+│       └── [其他装饰元素]
 ```
 
-3. **给 Canvas 添加 SnakeGame 脚本组件**（创建空组件后选择 SnakeGame 脚本）
-4. **在 SnakeGame 组件上绑定 @property：**
+3. **节点详细参数：**
+
+| 节点 | 父节点 | Position | Size | 颜色/其他 |
+|------|--------|----------|------|----------|
+| backBtn | topBar | (-320, 0) | 60×60 | 白色文字"←"或"返回" |
+| scorePanel | topBar | (0, 0) | 400×60 | 透明 |
+| currentScore | scorePanel | (-80, 0) | 180×40 | 白色 #FFFFFF, 28px |
+| bestScore | scorePanel | (80, 0) | 180×40 | 金黄 #FFD700, 28px |
+| gameOverPanel | UI_Overlay | (0, 0) | 720×1280 | 默认隐藏 |
+| bg | gameOverPanel | (0, 0) | 720×1280 | 黑色 #000000, 透明度 180 |
+| card | gameOverPanel | (0, 0) | 400×350 | 白色 #FFFFFF, 圆角 20px, 透明度 230 |
+| title | card | (0, 100) | 200×50 | 深灰 #333333, 36px, 粗体 |
+| finalScore | card | (0, 30) | 200×40 | 深灰 #333333, 28px |
+| bestScore | card | (0, -30) | 200×40 | 金黄 #FFD700, 24px |
+| restartBtn | card | (0, -100) | 200×60 | 蓝色 #2B6CB0, 白色文字 |
+| backBtn (面板内) | card | (0, -170) | 200×50 | 灰色 #718096, 白色文字 |
+
+4. **给 Canvas 添加 SnakeGame 脚本组件**（创建空组件后选择 SnakeGame 脚本）
+5. **在 SnakeGame 组件上绑定 @property：**
    - `gameArea` → 拖入 gameArea 节点
-   - `scoreLabel` → 拖入 scoreLabel
-   - `gameOverNode` → 拖入 gameOverNode（结束面板节点）
-   - `restartBtn` → 拖入 restartBtn 节点上的 Button 组件
+   - `currentScoreLabel` → 拖入 currentScore Label 组件
+   - `bestScoreLabel` → 拖入 bestScore Label 组件
+   - `gameOverPanel` → 拖入 gameOverPanel 节点
+   - `finalScoreLabel` → 拖入 finalScore Label 组件
+   - `finalBestScoreLabel` → 拖入 bestScore (面板内) Label 组件
+   - `restartBtn` → 拖入 restartBtn Button 组件
+   - `backBtn` → 拖入顶部 backBtn Button 组件
+   - `panelBackBtn` → 拖入面板内 backBtn Button 组件
 
-## 需要你做的
+## 存储数据结构
 
-1. 在 Cocos Creator 中创建 `Snake.scene`
-2. 按上述节点结构建好场景树
-3. 在 SnakeGame 组件上拖拽绑定 @property
-4. 告诉我场景做好了，我写代码逻辑
+```typescript
+// 存储键名
+const STORAGE_KEY_SNAKE = 'tiny_games_snake_data';
 
-## 我来写的代码
+interface SnakeStorageData {
+    bestScore: number;  // 历史最高长度
+}
+```
 
-| 文件 | 内容 |
+## 开发检查点
+
+完成以下检查点即表示贪吃蛇游戏开发完成：
+
+- [ ] 项目能在 Cocos Creator 中正常打开
+- [ ] 浏览器预览能显示游戏界面
+- [ ] 触屏滑动能控制蛇转向
+- [ ] 蛇能平滑移动并吃光点
+- [ ] 吃光点后蛇身正确增长
+- [ ] 撞墙后游戏结束
+- [ ] 游戏结束面板正确显示最终分数和最高分
+- [ ] "再来一次"按钮能重新开始游戏
+- [ ] "返回大厅"按钮能返回主菜单
+- [ ] 最高分正确保存和显示
+- [ ] 所有代码已提交到 git
+
+## 后续扩展点
+
+| 扩展 | 说明 |
 |------|------|
-| `SnakeGame.ts` | 游戏主循环、触屏事件、碰撞检测（光点 + 墙壁）、游戏状态管理 |
-| `Snake.ts` | 蛇头移动逻辑、路径历史队列、蛇身绘制、转向控制、生长 |
-| `FoodSpawner.ts` | 光点在地图随机位置生成、保持数量、碰撞响应 |
+| 音效 | 添加吃光点、撞墙、游戏结束的音效 |
+| 皮肤系统 | 支持更换蛇的颜色和样式 |
+| 成就系统 | 达成特定长度解锁成就 |
+
+---
+
+*文档版本: v3*  
+*更新日期: 2026-05-27*
