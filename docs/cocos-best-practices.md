@@ -403,6 +403,81 @@ scheduleOnce(() => {
 }, 1.0);
 ```
 
+### 7.3 节点销毁的最佳实践
+
+**问题场景**：
+- 游戏重新开始或返回大厅时，手动销毁节点
+- 场景切换时 Cocos 引擎自动销毁节点
+- 两者叠加导致「重复销毁」错误：`you are trying to destroy a object twice or more`
+
+**根本原因**：
+- 子节点被父节点 `removeAllChildren()` 销毁后，再次调用 `destroy()`
+- 场景切换时 `onDestroy()` 中再次清理已销毁的节点
+
+**解决方案**：
+
+```typescript
+// ❌ 错误：重复销毁
+_cleanupGame(): void {
+    if (this._snake) {
+        this._snake.destroyAll();      // 内部销毁蛇头和身体节点
+        this._snake.node.destroy();     // ❌ 重复销毁！
+        this._snake = null;
+    }
+}
+
+onDestroy() {
+    this._cleanupGame();  // 场景切换时再次销毁
+}
+
+// ✅ 正确：只清理组件数据，不重复销毁节点
+_cleanupGame(): void {
+    if (this._snake) {
+        this._snake.destroyAll();  // 组件内部清理
+        // 不要调用 this._snake.node.destroy()
+        // 子节点会随 gameArea.removeAllChildren() 或场景切换自动销毁
+        this._snake = null;
+    }
+}
+```
+
+**关键原则**：
+1. **父子关系明确时**：子节点随父节点自动销毁，不要手动 `destroy()`
+2. **动态创建的独立节点**：需要手动 `destroy()`，但要加 `isValid` 检查
+3. **数组遍历销毁**：使用 `Array.from()` 复制数组，避免迭代过程中修改原数组
+
+```typescript
+// ✅ 正确：安全的节点销毁方法
+clearNodes(): void {
+    // 销毁蛇头
+    if (this._headNode) {
+        if (this._headNode.isValid) {
+            this._headNode.destroy();
+        }
+        this._headNode = null;
+    }
+    
+    // 销毁身体节点（使用 Array.from 避免迭代问题）
+    const bodyNodesCopy = Array.from(this._bodyNodes);
+    for (const node of bodyNodesCopy) {
+        if (node && node.isValid) {
+            node.destroy();
+        }
+    }
+    this._bodyNodes = [];
+}
+
+// ✅ 正确：清理食物节点
+clearAll(): void {
+    for (const food of this._foodItems) {
+        if (food.node && food.node.isValid) {
+            food.node.destroy();
+        }
+    }
+    this._foodItems = [];
+}
+```
+
 ---
 
 ## 8. AI 协作相关

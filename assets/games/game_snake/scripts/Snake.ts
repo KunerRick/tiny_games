@@ -185,8 +185,19 @@ export class Snake extends Component {
     public getLength(): number { return this._currentSegments; }
 
     private clearNodes(): void {
-        if (this._headNode) { this._headNode.destroy(); this._headNode = null; }
-        for (const b of this._bodyNodes) b.destroy();
+        if (this._headNode) {
+            if (this._headNode.isValid) {
+                this._headNode.destroy();
+            }
+            this._headNode = null;
+        }
+        // 使用 Array.from 避免迭代过程中数组被修改的问题
+        const bodyNodesCopy = Array.from(this._bodyNodes);
+        for (const b of bodyNodesCopy) {
+            if (b && b.isValid) {
+                b.destroy();
+            }
+        }
         this._bodyNodes = [];
         this._pathHistory = [];
     }

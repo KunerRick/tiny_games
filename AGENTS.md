@@ -80,4 +80,8 @@ AI: "请在 Game2048 场景中：
 ## 相关文档
 
 - [Cocos Creator 最佳实践](./docs/cocos-best-practices.md) - 常见陷阱与解决方案
+  - 节点生命周期与 `active` 状态
+  - 事件绑定与解绑
+  - Tween 动画最佳实践
+  - **节点销毁与有效性检查**（重要）
 - [2048 游戏设计](./docs/specs/2026-05-13-game-2048-design.md)

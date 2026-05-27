@@ -162,7 +162,9 @@ export class FoodSpawner extends Component {
     /** 清理所有光点 */
     public clearAll(): void {
         for (const food of this._foodItems) {
-            food.node.destroy();
+            if (food.node && food.node.isValid) {
+                food.node.destroy();
+            }
         }
         this._foodItems = [];
     }

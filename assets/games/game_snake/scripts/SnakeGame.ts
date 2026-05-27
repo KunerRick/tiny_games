@@ -78,9 +78,23 @@ export class SnakeGame extends Component {
     }
 
     private _bindButtons(): void {
-        this.restartBtn?.node.on(Node.EventType.TOUCH_END, this._onRestart, this);
-        this.backBtn?.node.on(Node.EventType.TOUCH_END, this._onBackToLobby, this);
-        this.panelBackBtn?.node.on(Node.EventType.TOUCH_END, this._onBackToLobby, this);
+        if (this.restartBtn) {
+            this.restartBtn.node.on(Button.EventType.CLICK, this._onRestart, this);
+        } else {
+            console.warn('[SnakeGame] restartBtn not assigned');
+        }
+
+        if (this.backBtn) {
+            this.backBtn.node.on(Button.EventType.CLICK, this._onBackToLobby, this);
+        } else {
+            console.warn('[SnakeGame] backBtn not assigned');
+        }
+
+        if (this.panelBackBtn) {
+            this.panelBackBtn.node.on(Button.EventType.CLICK, this._onBackToLobby, this);
+        } else {
+            console.warn('[SnakeGame] panelBackBtn not assigned');
+        }
     }
 
     private _initJoystick(): void {
@@ -334,7 +348,8 @@ export class SnakeGame extends Component {
     private _cleanupGame(): void {
         if (this._snake) {
             this._snake.destroyAll();
-            this._snake.node.destroy();
+            // 注意：不要调用 this._snake.node.destroy()
+            // 因为蛇节点是 gameArea 的子节点，gameArea.removeAllChildren() 或场景切换时会自动销毁
             this._snake = null;
         }
         if (this._foodSpawner) {
@@ -365,8 +380,14 @@ export class SnakeGame extends Component {
         this._cleanupGame();
 
         // 清理按钮监听
-        this.restartBtn?.node.off(Node.EventType.TOUCH_END, this._onRestart, this);
-        this.backBtn?.node.off(Node.EventType.TOUCH_END, this._onBackToLobby, this);
-        this.panelBackBtn?.node.off(Node.EventType.TOUCH_END, this._onBackToLobby, this);
+        if (this.restartBtn) {
+            this.restartBtn.node.off(Button.EventType.CLICK, this._onRestart, this);
+        }
+        if (this.backBtn) {
+            this.backBtn.node.off(Button.EventType.CLICK, this._onBackToLobby, this);
+        }
+        if (this.panelBackBtn) {
+            this.panelBackBtn.node.off(Button.EventType.CLICK, this._onBackToLobby, this);
+        }
     }
 }
