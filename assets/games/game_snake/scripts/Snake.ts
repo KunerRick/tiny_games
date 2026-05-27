@@ -31,7 +31,6 @@ export class Snake extends Component {
     private _isDead: boolean = false;
 
     // 回调
-    public onEat: ((scoreChange: number) => void) | null = null;
     public onDeath: (() => void) | null = null;
 
     public init(gameArea: Node, startPos: Vec3, halfW: number, halfH: number): void {
@@ -170,14 +169,11 @@ export class Snake extends Component {
     /** 吃光点：累积计数器，够 EAT_GROW_STEP 个就长一段 */
     public grow(): void {
         this._eatCounter++;
-        let scoreChange = 0;
         if (this._eatCounter >= EAT_GROW_STEP) {
             this._currentSegments++;
             this._eatCounter = 0;
             this._speed = Math.min(this._speed + SPEED_INCREMENT, MAX_SPEED);
-            scoreChange = 1; // 每长一段计 1 分
         }
-        this.onEat?.(scoreChange);
     }
 
     private die(): void {
