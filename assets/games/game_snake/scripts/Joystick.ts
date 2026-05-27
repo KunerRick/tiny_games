@@ -39,8 +39,13 @@ export class Joystick extends Component {
 
     private _initGraphics(): void {
         // 初始化大圈 Graphics
-        if (this.baseNode && !this.baseNode.getComponent(Graphics)) {
-            const baseG = this.baseNode.addComponent(Graphics);
+        if (this.baseNode) {
+            let baseG = this.baseNode.getComponent(Graphics);
+            if (!baseG) {
+                baseG = this.baseNode.addComponent(Graphics);
+            }
+            // 清除并重新绘制，确保显示正确
+            baseG.clear();
             baseG.fillColor = new Color(255, 255, 255, 80);
             baseG.strokeColor = new Color(255, 255, 255, 120);
             baseG.lineWidth = 2;
@@ -50,8 +55,13 @@ export class Joystick extends Component {
         }
 
         // 初始化小圈 Graphics
-        if (this.buttonNode && !this.buttonNode.getComponent(Graphics)) {
-            const btnG = this.buttonNode.addComponent(Graphics);
+        if (this.buttonNode) {
+            let btnG = this.buttonNode.getComponent(Graphics);
+            if (!btnG) {
+                btnG = this.buttonNode.addComponent(Graphics);
+            }
+            // 清除并重新绘制，确保显示正确
+            btnG.clear();
             btnG.fillColor = new Color(255, 255, 255, 180);
             btnG.circle(0, 0, BUTTON_RADIUS);
             btnG.fill();
@@ -61,6 +71,9 @@ export class Joystick extends Component {
     private _showJoystick(worldPos: Vec3): void {
         this._state = JoystickState.ACTIVE;
         this._centerPos.set(worldPos);
+
+        // 强制重新绘制
+        this._redrawGraphics();
 
         if (this.baseNode) {
             this.baseNode.active = true;
@@ -75,6 +88,35 @@ export class Joystick extends Component {
         this._direction.set(0, 0);
         this._angle = 0;
         this.onActive?.();
+    }
+
+    private _redrawGraphics(): void {
+        // 重新绘制大圈
+        if (this.baseNode) {
+            let baseG = this.baseNode.getComponent(Graphics);
+            if (!baseG) {
+                baseG = this.baseNode.addComponent(Graphics);
+            }
+            baseG.clear();
+            baseG.fillColor = new Color(255, 255, 255, 80);
+            baseG.strokeColor = new Color(255, 255, 255, 120);
+            baseG.lineWidth = 2;
+            baseG.circle(0, 0, JOYSTICK_RADIUS);
+            baseG.fill();
+            baseG.stroke();
+        }
+
+        // 重新绘制小圈
+        if (this.buttonNode) {
+            let btnG = this.buttonNode.getComponent(Graphics);
+            if (!btnG) {
+                btnG = this.buttonNode.addComponent(Graphics);
+            }
+            btnG.clear();
+            btnG.fillColor = new Color(255, 255, 255, 180);
+            btnG.circle(0, 0, BUTTON_RADIUS);
+            btnG.fill();
+        }
     }
 
     private _hideJoystick(): void {
