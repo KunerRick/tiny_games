@@ -5,7 +5,7 @@ const { ccclass, property } = _decorator;
 const FOOD_COUNT_MIN = 20;
 const FOOD_COUNT_MAX = 30;
 const FOOD_RADIUS = 7;           // 光点半径
-const FOOD_COLOR = new Color(100, 255, 120);  // 亮绿色
+const FOOD_COLOR = new Color(57, 255, 20);    // #39FF14 荧光绿
 
 @ccclass('FoodSpawner')
 export class FoodSpawner extends Component {
