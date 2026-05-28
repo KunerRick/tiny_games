@@ -15,16 +15,11 @@
 
 小游戏集合，基于 Cocos Creator 3.x 开发，支持发布到微信小游戏和移动端 App。
 
-## 技术栈
-
 - **引擎**: Cocos Creator 3.x
 - **语言**: TypeScript
 - **首要平台**: 微信小游戏
 - **次要平台**: iOS/Android App
-
-## 架构模式
-
-独立模式：每个游戏是完全独立的场景，通过主入口（游戏大厅）进入，切换时重新加载。
+- **架构**: 独立场景模式，每游戏独立场景，通过游戏大厅切换时重新加载
 
 ## 项目结构
 
@@ -64,24 +59,71 @@ tiny_games/
 - 所有 `@property` 按用途分组、加注释，方便在 Inspector 中识别
 - 人在编辑器中完成 `@property` 的拖拽绑定
 
-### 示例流程
+## AI 写代码前必读 — Cocos Creator 防崩溃守则
 
-```
-AI: "请在 Game2048 场景中：
-1. 选中 scorePanel 节点
-2. 创建两个空子节点，命名 scoreCard / bestScoreCard
-3. 各添加 Sprite 组件（白色九宫格图，SLICED 模式，颜色 #646973），尺寸 310×80
-4. 每个卡片内放两个 Label——上为标题（16px，浅灰），下为数值（28px，白色加粗）
-5. 在 ScoreManager 组件上把新增的 Label 拖到对应属性槽"
+以下规则来自 [最佳实践文档](./docs/cocos-best-practices.md)（内有详细解释和更多代码示例），违反会导致运行时崩溃。
 
-人: 在 Cocos Creator 中按步骤操作（约 2 分钟），完成场景配置。
+### 🚨 规则 1：永远不用匿名 lambda 做事件 handler
+
+```typescript
+// ❌ 崩：无法解绑，每次重启泄露
+button.node.on(CLICK, () => this.onClick(), this);
+// ✅ 对：命名方法可解绑
+button.node.on(CLICK, this.onClick, this);
 ```
+
+详见 [§2.2](./docs/cocos-best-practices.md#22-使用箭头函数注意)
+
+### 🚨 规则 2：`onDestroy()` 中不访问任何 `@property(Node)`
+
+场景销毁时，被引用节点可能已被引擎销毁，`@property` getter 返回 `null`：
+
+```typescript
+// ❌ 崩：this.gameArea?.off(...) — gameArea getter 已返回 null
+// ✅ 对：onDestroy 中只清 JS 引用，不碰任何节点方法
+onDestroy() { this._snake = null; this._foodSpawner = null; }
+```
+
+事件由 Cocos 自动移除（注册时第三个参数 `this` 作为 target 的，全部自动清理）。
+
+详见 [§4.4](./docs/cocos-best-practices.md#44-property-getter-在节点销毁后返回-null)
+
+### 🚨 规则 3：重启清理 ≠ 场景销毁清理
+
+| 路径 | 调用链 | 能否访问 `@property(Node)` | 谁销毁节点 |
+|------|--------|---------------------------|-----------|
+| 重新开始 | `_onRestart()` → `_cleanupGame()` | ✅ 存活节点 | 手动 `_cleanupGame()` |
+| 返回大厅 | `loadScene()` → `onDestroy()` | ❌ 已被销毁 | Cocos 引擎 |
+
+两条路径必须分别实现，`onDestroy()` 不能调用 `_cleanupGame()`。
+
+详见 [§4.5](./docs/cocos-best-practices.md#45-cleanupgame-与-ondestroy-职责分离)
+
+### ⚠️ 规则 4：遍历销毁不用 `Array.from`
+
+引擎内部在场景销毁时可能清空组件字段，`Array.from(null)` 抛异常。用反向 `for` + null guard：
+
+```typescript
+if (this._bodyNodes) {
+    for (let i = this._bodyNodes.length - 1; i >= 0; i--) { ... }
+}
+```
+
+详见 [§4.3](./docs/cocos-best-practices.md#43-数组遍历销毁不用-arrayfrom)
+
+### ⚠️ 规则 5：destroy 前检查 `isValid`
+
+```typescript
+if (node && node.isValid) { node.destroy(); }
+```
+
+### ⚠️ 规则 6：面板类在 `show()` 中绑定事件
+
+未勾选的节点 `onLoad()` 不执行，事件绑定会丢失。
+
+详见 [§1.2](./docs/cocos-best-practices.md#12-弹窗面板类组件的最佳实践)
 
 ## 相关文档
 
-- [Cocos Creator 最佳实践](./docs/cocos-best-practices.md) - 常见陷阱与解决方案
-  - 节点生命周期与 `active` 状态
-  - 事件绑定与解绑
-  - Tween 动画最佳实践
-  - **节点销毁与有效性检查**（重要）
+- [Cocos Creator 最佳实践（完整版）](./docs/cocos-best-practices.md)
 - [2048 游戏设计](./docs/specs/2026-05-13-game-2048-design.md)

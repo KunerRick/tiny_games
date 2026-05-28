@@ -410,46 +410,16 @@ export class SnakeGame extends Component {
     }
 
     onDestroy() {
-        // 场景销毁时，Cocos 自动销毁所有子节点和组件
-        // 不调用 _cleanupGame()——它会在已销毁的 Snake 组件上执行方法导致 crash
-        // 这里只需清理事件监听和引用
-        this._isPlaying = false;
+        // 场景销毁时 Cocos 会自动：
+        //   1. 深度优先递归销毁所有子节点和组件
+        //   2. 自动移除所有以当前组件为 target 注册的事件监听
+        // 此时访问 @property(Node) 引用的节点可能已被销毁（getter 返回 null），
+        // 所以只清引用，不调任何节点/组件方法。
         this._snake = null;
         this._foodSpawner = null;
-
-        // 移除触摸事件监听
-        if (this.gameArea) {
-            if (this._joystickTouchStartHandler) {
-                this.gameArea.off(Node.EventType.TOUCH_START, this._joystickTouchStartHandler, this);
-                this._joystickTouchStartHandler = null;
-            }
-            if (this._joystickTouchMoveHandler) {
-                this.gameArea.off(Node.EventType.TOUCH_MOVE, this._joystickTouchMoveHandler, this);
-                this._joystickTouchMoveHandler = null;
-            }
-            if (this._joystickTouchEndHandler) {
-                this.gameArea.off(Node.EventType.TOUCH_END, this._joystickTouchEndHandler, this);
-                this._joystickTouchEndHandler = null;
-            }
-            if (this._joystickTouchCancelHandler) {
-                this.gameArea.off(Node.EventType.TOUCH_CANCEL, this._joystickTouchCancelHandler, this);
-                this._joystickTouchCancelHandler = null;
-            }
-            this.gameArea.off(Node.EventType.TOUCH_START, this._onTouchStart, this);
-            this.gameArea.off(Node.EventType.TOUCH_MOVE, this._onTouchMove, this);
-            this.gameArea.off(Node.EventType.TOUCH_END, this._onTouchEnd, this);
-            this.gameArea.off(Node.EventType.TOUCH_CANCEL, this._onTouchCancel, this);
-        }
-
-        // 清理按钮监听
-        if (this.restartBtn) {
-            this.restartBtn.node.off(Button.EventType.CLICK, this._onRestart, this);
-        }
-        if (this.backBtn) {
-            this.backBtn.node.off(Button.EventType.CLICK, this._onBackToLobby, this);
-        }
-        if (this.panelBackBtn) {
-            this.panelBackBtn.node.off(Button.EventType.CLICK, this._onBackToLobby, this);
-        }
+        this._joystickTouchStartHandler = null;
+        this._joystickTouchMoveHandler = null;
+        this._joystickTouchEndHandler = null;
+        this._joystickTouchCancelHandler = null;
     }
 }

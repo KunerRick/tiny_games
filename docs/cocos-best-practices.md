@@ -1,6 +1,15 @@
 # Cocos Creator 3.x 最佳实践与常见陷阱
 
-本文档汇总了项目开发中遇到的 Cocos Creator 3.x 常见问题和最佳实践，供开发参考。
+本文档汇总了项目开发中遇到的 Cocos Creator 3.x 常见问题和最佳实践，供开发参考。**防崩溃规则速查请直接看 [AGENTS.md](../AGENTS.md#ai-写代码前必读--cocos-creator-防崩溃守则)**。
+
+## 快速导航
+
+| 章节 | 关键内容 |
+|------|---------|
+| [§1](#1-节点生命周期与-active-状态) | 面板类 `show()` 中绑定事件，`onLoad()` 不执行于未激活节点 |
+| [§2](#2-事件绑定与解绑) | 成对绑定/解绑、避免匿名 lambda |
+| [§3](#3-tween-动画最佳实践) | Tween 前检查 `isValid`；不直接 tween Color 对象 |
+| [§4](#4-组件销毁安全规范) | **`onDestroy` 不碰 `@property(Node)`、`_cleanupGame` 与 `onDestroy` 分离、`Array.from` 陷阱** |
 
 ---
 
@@ -20,7 +29,7 @@
 - 代码中在 `onLoad()` 里绑定按钮事件
 - 结果：`onLoad()` 不执行，按钮事件未绑定，面板显示后按钮无法点击
 
-**解决方案**：像 SettingsPanel 一样，在 `show()` 方法中绑定事件
+**解决方案**：在 `show()` 方法中绑定事件
 
 ```typescript
 // ❌ 错误：在 onLoad 中绑定，如果节点未勾选则不执行
@@ -58,9 +67,7 @@ hide() {
 
 ### 1.4 防御性编程：处理场景配置错误
 
-**问题场景**：
-- 策划或开发者在场景中不小心勾选了面板节点（`active = true`）
-- 游戏启动时面板就显示出来，破坏游戏体验
+**问题场景**：策划或开发者在场景中不小心勾选了面板节点（`active = true`），游戏启动时面板就显示出来。
 
 **解决方案**：使用状态标志位确保初始状态正确
 
@@ -70,8 +77,6 @@ export class GameOverPanel extends Component {
     private _showCalled: boolean = false;
 
     onLoad() {
-        // 只有 show() 未被调用时才隐藏
-        // 防止场景配置错误（节点被勾选）导致面板提前显示
         if (!this._showCalled) {
             this.node.active = false;
         }
@@ -79,22 +84,11 @@ export class GameOverPanel extends Component {
 
     show() {
         this._showCalled = true;
-        // 绑定事件、更新数据...
+        this.bindEvents();
         this.node.active = true;
     }
 }
 ```
-
-**关键点**：
-- `_showCalled` 标志位确保 `onLoad()` 不会覆盖 `show()` 的状态
-- 即使节点在场景中被勾选，游戏开始时也不会显示
-- 只有显式调用 `show()` 后，面板才会显示
-
-**适用场景**：
-- 游戏结束面板
-- 设置面板
-- 弹窗/对话框
-- 任何需要代码控制显示时机的 UI 组件
 
 ---
 
@@ -103,24 +97,12 @@ export class GameOverPanel extends Component {
 ### 2.1 必须成对出现
 
 ```typescript
-// ✅ 正确：绑定和解绑成对
 bindEvents() {
     this.button?.node.on(Node.EventType.TOUCH_END, this.onClick, this);
 }
 
 unbindEvents() {
     this.button?.node.off(Node.EventType.TOUCH_END, this.onClick, this);
-}
-
-// 在 show/hide 中调用
-show() {
-    this.bindEvents();
-    this.node.active = true;
-}
-
-hide() {
-    this.unbindEvents();
-    this.node.active = false;
 }
 ```
 
@@ -133,7 +115,6 @@ show() {
         this.onClick();
     }, this);
 }
-
 hide() {
     // 无法解绑匿名函数！
 }
@@ -142,7 +123,6 @@ hide() {
 show() {
     this.button?.node.on(Node.EventType.TOUCH_END, this.onClick, this);
 }
-
 hide() {
     this.button?.node.off(Node.EventType.TOUCH_END, this.onClick, this);
 }
@@ -150,237 +130,78 @@ hide() {
 
 ---
 
-## 3. 渲染顺序与层级
+## 3. Tween 动画最佳实践
 
-### 3.1 确保面板在最上层
+### 3.1 不要直接 Tween Color 对象
 
-```typescript
-show() {
-    // 设置 siblingIndex 确保在最上层
-    this.node.setSiblingIndex(9999);
-    this.node.active = true;
-}
-```
-
-### 3.2 层级管理建议
-
-```
-Canvas
-├── 背景层 (zIndex: 0)
-├── 游戏层 (zIndex: 10)
-├── UI 层 (zIndex: 100)
-│   ├── HUD (zIndex: 100)
-│   └── 弹窗/面板 (zIndex: 200)
-└── 顶层遮罩 (zIndex: 999)
-```
-
----
-
-## 4. 数据与显示同步
-
-### 4.1 Tile ID 生成
-
-**问题**：随机 ID 可能冲突，导致 `move()` 逻辑错误
-
-**解决**：使用全局递增计数器
+**问题**：`tween(colorObject)` 对普通 Color 对象不支持 `onUpdate` 等链式调用，且 `Sprite.color` 返回内部共享对象。
 
 ```typescript
-// ❌ 错误：可能产生重复 ID
-function generateTileId(): number {
-    return Math.floor(Math.random() * 1000000);
-}
-
-// ✅ 正确：全局递增
-let _tileIdCounter = 0;
-function generateTileId(): number {
-    return ++_tileIdCounter;
-}
-```
-
-### 4.2 数组去重与有效性检查
-
-```typescript
-// 过滤无效 tile（位置未定义或超出边界）
-const validTiles = tiles.filter(t =>
-    t.row !== undefined && t.col !== undefined &&
-    t.row >= 0 && t.row < gridSize &&
-    t.col >= 0 && t.col < gridSize
-);
-
-// 使用 Map 去重（同一位置可能有多个 tile）
-const positionMap = new Map<string, TileData>();
-for (const t of validTiles) {
-    const key = `${t.row},${t.col}`;
-    if (!positionMap.has(key)) {
-        positionMap.set(key, t);
-    }
-}
-const uniqueTiles = Array.from(positionMap.values());
-```
-
----
-
-## 5. 常见错误排查清单
-
-### 5.1 UI 不显示
-
-| 检查项 | 排查方法 |
-|-------|---------|
-| 节点 `active` | 在场景中勾选节点 |
-| 父节点 `active` | 检查父节点层级 |
-| `siblingIndex` | 确保在最上层 |
-| `opacity` | 检查透明度是否为 0 |
-| `scale` | 检查缩放是否为 0 |
-| `position` | 检查是否在屏幕外 |
-| `UITransform` | 检查组件是否存在 |
-
-### 5.2 按钮点击无响应
-
-| 检查项 | 排查方法 |
-|-------|---------|
-| 节点 `active` | 确保节点已激活 |
-| 事件绑定 | 在 `show()` 中绑定而非 `onLoad()` |
-| 事件解绑 | 检查是否被意外解绑 |
-| 遮挡层 | 检查是否有透明节点遮挡 |
-
-### 5.3 游戏逻辑异常
-
-| 检查项 | 排查方法 |
-|-------|---------|
-| Tile ID 冲突 | 使用全局递增 ID |
-| 位置重复 | 使用 Map 去重 |
-| 边界检查 | 确保行列在有效范围内 |
-| 数组长度 | 检查 `tiles.length` 是否符合预期 |
-
----
-
-## 6. Tween 动画最佳实践
-
-### 6.1 不要直接 Tween Color 对象
-
-**问题场景**：
-- 使用 `tween(colorObject)` 直接对 Color 对象做动画
-- Cocos Creator 3.x 的 tween 对普通对象不支持 `onUpdate` 等链式调用
-- 节点在动画过程中被销毁，导致 `Uint8ClampedArray.set` 越界错误
-
-**根本原因**：
-- `Sprite.color` 返回的是内部共享的 `Color` 对象
-- 直接 tween Color 对象无法正确更新 Sprite 的显示
-
-**解决方案**：
-
-```typescript
-// ❌ 错误：直接 tween Color 对象（无 onUpdate 支持）
+// ❌ 错误：直接 tween Color 对象
 const tweenColor = this.body.color.clone();
 this._flashTween = tween(tweenColor)
-    .to(0.1, originalColor, { easing: 'linear' })
-    .onUpdate(() => {  // ❌ 报错：onUpdate is not a function
-        this.body.color = tweenColor.clone();
-    })
-    .start();
-
-// ❌ 错误：直接修改 Sprite 的 color 引用
-this.body.color = Color.WHITE;
-this._flashTween = tween(this.body.color)
-    .to(0.1, originalColor, { easing: 'linear' })
+    .to(0.1, originalColor)
+    .onUpdate(() => { this.body.color = tweenColor.clone(); }) // ❌ 报错
     .start();
 
 // ✅ 正确：对 Sprite 组件的 color 属性做动画
 this.body.color = Color.WHITE.clone();
 this._flashTween = tween(this.body)
-    .to(0.1, { color: originalColor }, { easing: 'linear' })
-    .call(() => {
-        this._flashTween = null;
-    })
+    .to(0.1, { color: originalColor })
+    .call(() => { this._flashTween = null; })
     .start();
 ```
 
-### 6.2 Tween 前检查节点有效性
+### 3.2 Tween 前检查节点有效性
 
 ```typescript
-// ✅ 正确：动画前检查节点是否有效
 private triggerHitFlash(): void {
     if (!this.body || !this.body.isValid) return;
-    
-    // 停止之前的 tween
     if (this._flashTween) {
         this._flashTween.stop();
         this._flashTween = null;
     }
-    
-    // 开始新的 tween...
 }
 ```
 
-### 6.3 Tween 清理规范
+### 3.3 Tween 清理规范
 
 ```typescript
-// ✅ 正确：停止 tween 后清空引用
 if (this._flashTween) {
     this._flashTween.stop();
-    this._flashTween = null;  // 清空引用，避免内存泄漏
+    this._flashTween = null;
 }
 ```
 
-### 6.4 触摸事件中的 Tween 安全
-
-**问题场景**：
-- 用户快速点击后，节点在动画完成前被销毁
-- 导致 `tween(this.node)` 访问已销毁节点
-
-**解决方案**：
+### 3.4 触摸事件中的 Tween 安全
 
 ```typescript
-// ❌ 错误：直接 tween，不检查节点有效性
+// ❌ 错误：节点可能在动画完成前被销毁
 private onTouchStart(event: EventTouch) {
-    tween(this.node)
-        .to(0.1, { scale: new Vec3(0.95, 0.95, 1) })
-        .start();
+    tween(this.node).to(0.1, { scale: 0.95 }).start();
 }
 
 // ✅ 正确：动画前检查节点有效性
 private onTouchStart(event: EventTouch) {
     if (!this.node?.isValid) return;
-    tween(this.node)
-        .to(0.1, { scale: new Vec3(0.95, 0.95, 1) })
-        .start();
-}
-
-// ✅ 正确：touchEnd 中也要检查（节点可能在按下和抬起之间被销毁）
-private onTouchEnd(event: EventTouch) {
-    if (this.node?.isValid) {
-        tween(this.node)
-            .to(0.1, { scale: new Vec3(1, 1, 1) })
-            .start();
-    }
-    // 执行业务逻辑...
+    tween(this.node).to(0.1, { scale: 0.95 }).start();
 }
 ```
 
-### 6.5 公共动画方法的安全检查
+### 3.5 公共动画方法的安全检查
 
 ```typescript
-// ❌ 错误：外部调用的动画方法不检查节点
-public playMergeAnimation(): void {
-    tween(this.node)
-        .to(0.1, { scale: new Vec3(1.25, 1.25, 1) })
-        .start();
-}
-
-// ✅ 正确：公共方法必须检查节点有效性
 public playMergeAnimation(): void {
     if (!this.node?.isValid) return;
-    tween(this.node)
-        .to(0.1, { scale: new Vec3(1.25, 1.25, 1) })
-        .start();
+    tween(this.node).to(0.1, { scale: 1.25 }).start();
 }
 ```
 
 ---
 
-## 7. 节点有效性检查
+## 4. 组件销毁安全规范
 
-### 7.1 使用 `isValid` 而非简单的空检查
+### 4.1 使用 `isValid` 而非简单的空检查
 
 ```typescript
 // ❌ 错误：只检查 null
@@ -388,117 +209,93 @@ if (!this.node) return;
 
 // ✅ 正确：检查 isValid 属性
 if (!this.node?.isValid) return;
-
-// ✅ 正确：组件也支持 isValid
 if (!this.body?.isValid) return;
 ```
 
-### 7.2 延迟操作中的有效性检查
+### 4.2 延迟操作中的有效性检查
 
 ```typescript
-// 在回调或 tween 中访问节点前，务必检查有效性
 scheduleOnce(() => {
     if (!this.node?.isValid) return;  // 节点可能已被销毁
     this.doSomething();
 }, 1.0);
 ```
 
-### 7.3 节点销毁的最佳实践
+### 4.3 数组遍历销毁不用 `Array.from`
 
-**问题场景**：
-- 游戏重新开始或返回大厅时，手动销毁节点
-- 场景切换时 Cocos 引擎自动销毁节点
-- 两者叠加导致「重复销毁」错误：`you are trying to destroy a object twice or more`
-
-**根本原因**：
-- 子节点被父节点 `removeAllChildren()` 销毁后，再次调用 `destroy()`
-- 场景切换时 `onDestroy()` 中再次清理已销毁的节点
-
-**解决方案**：
+**问题**：引擎内部在场景销毁时可能清空组件字段，`Array.from(null)` 抛 `"Can't call method on null"`。
 
 ```typescript
-// ❌ 错误：重复销毁
-_cleanupGame(): void {
-    if (this._snake) {
-        this._snake.destroyAll();      // 内部销毁蛇头和身体节点
-        this._snake.node.destroy();     // ❌ 重复销毁！
-        this._snake = null;
-    }
-}
+// ❌ 崩：_bodyNodes 可能为 null
+const copy = Array.from(this._bodyNodes);
 
-onDestroy() {
-    this._cleanupGame();  // 场景切换时再次销毁
-}
-
-// ✅ 正确：只清理组件数据，不重复销毁节点
-_cleanupGame(): void {
-    if (this._snake) {
-        this._snake.destroyAll();  // 组件内部清理
-        // 不要调用 this._snake.node.destroy()
-        // 子节点会随 gameArea.removeAllChildren() 或场景切换自动销毁
-        this._snake = null;
-    }
-}
-```
-
-**关键原则**：
-1. **父子关系明确时**：子节点随父节点自动销毁，不要手动 `destroy()`
-2. **动态创建的独立节点**：需要手动 `destroy()`，但要加 `isValid` 检查
-3. **数组遍历销毁**：使用 `Array.from()` 复制数组，避免迭代过程中修改原数组
-
-```typescript
-// ✅ 正确：安全的节点销毁方法
-clearNodes(): void {
-    // 销毁蛇头
-    if (this._headNode) {
-        if (this._headNode.isValid) {
-            this._headNode.destroy();
-        }
-        this._headNode = null;
-    }
-    
-    // 销毁身体节点（使用 Array.from 避免迭代问题）
-    const bodyNodesCopy = Array.from(this._bodyNodes);
-    for (const node of bodyNodesCopy) {
+// ✅ 对：反向 for + null guard
+if (this._bodyNodes) {
+    for (let i = this._bodyNodes.length - 1; i >= 0; i--) {
+        const node = this._bodyNodes[i];
         if (node && node.isValid) {
             node.destroy();
         }
     }
     this._bodyNodes = [];
 }
+```
 
-// ✅ 正确：清理食物节点
-clearAll(): void {
-    for (const food of this._foodItems) {
-        if (food.node && food.node.isValid) {
-            food.node.destroy();
-        }
+### 4.4 `@property` getter 在节点销毁后返回 null
+
+**Cocos Creator 3.x 的已知行为**：`@property(Node)` 装饰的属性通过 getter 访问。场景销毁时 Cocos 深度优先递归销毁子节点，如果 `@property` 引用的节点先于当前组件被销毁，后续访问 getter 会返回 `null`。
+
+```typescript
+@property(Node)
+gameArea: Node | null = null;
+
+onDestroy() {
+    // ❌ 崩：if 判断时 gameArea 非空，但执行到下一行时 getter 返回 null
+    if (this.gameArea) {
+        this.gameArea.off(...);  // Cannot read properties of null
     }
-    this._foodItems = [];
 }
 ```
 
----
+**解决方案**：
 
-## 8. AI 协作相关
+```typescript
+// ✅ onDestroy 中不访问任何 @property(Node)
+onDestroy() {
+    // Cocos 自动移除以当前组件为 target 的事件
+    this._snake = null;
+    this._foodSpawner = null;
+}
 
-### 8.1 代码与场景的配合
+// ✅ 非销毁场景下：缓存到局部变量，避免多次 getter
+restartGame(): void {
+    const area = this.gameArea;
+    if (area) {
+        area.removeAllChildren();
+    }
+}
+```
 
-- **AI 负责**：`.ts` 脚本逻辑、组件代码
-- **人负责**：`.scene` 场景配置、节点绑定
+### 4.5 `_cleanupGame()` 与 `onDestroy()` 职责分离
 
-### 8.2 属性绑定检查清单
+同一个组件中，**"同一场景内重新开始"** 和 **"场景销毁返回大厅"** 的清理逻辑必须分开：
 
-当 AI 修改了 `@property` 定义后，人需要检查：
+```typescript
+// ✅ 正确：两条路径各自独立
+private _onRestart(): void {
+    this._cleanupGame();  // 手动清理节点 + 事件（场景存活，节点可访问）
+    this._initGame();
+}
 
-- [ ] 新属性在 Inspector 中可见
-- [ ] 节点/组件已拖拽绑定
-- [ ] 节点 `active` 状态正确
-- [ ] 层级关系正确
+onDestroy() {
+    // 场景销毁，Cocos 会处理节点和事件
+    // 只清引用，不调任何节点/组件方法
+    this._snake = null;
+    this._foodSpawner = null;
+}
+```
 
----
-
-## 相关文档
-
-- [项目规范](../AGENTS.md)
-- [2048 游戏设计](./specs/2026-05-13-game-2048-design.md)
+| 路径 | 调用链 | 能否访问 `@property(Node)` | 谁销毁节点 |
+|------|--------|---------------------------|-----------|
+| 重新开始 | `_onRestart()` → `_cleanupGame()` | ✅ 存活节点 | 手动 `_cleanupGame()` |
+| 返回大厅 | `loadScene()` → `onDestroy()` | ❌ 已被销毁 | Cocos 引擎 |
