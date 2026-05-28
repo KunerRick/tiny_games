@@ -350,6 +350,7 @@ export class SnakeGame extends Component {
     private _onRestart(): void {
         this._cleanupGame();
         this._initGame();
+        this._initJoystick();
     }
 
     private _onBackToLobby(): void {
