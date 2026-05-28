@@ -12,7 +12,7 @@ const EAT_GROW_STEP = 3;          // 每吃 N 个光点增长一段
 const BASE_SPEED = 150;            // 像素/秒
 const MAX_SPEED = 220;
 const SPEED_INCREMENT = 2;
-const MARGIN = 30;                 // 死亡边界内缩
+const MARGIN = SEGMENT_SIZE / 2;    // 死亡边界内缩（蛇头半宽，使死亡时蛇头视觉边缘正好碰到边界）
 
 @ccclass('Snake')
 export class Snake extends Component {
