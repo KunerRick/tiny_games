@@ -62,17 +62,24 @@
 
 ### 3.2 Grid 根节点
 
-**挂载到**: 场景根节点下
+在场景根节点下创建以下层级：
 
-| 属性 | 值 |
-|------|-----|
-| 节点名 | **Grid** |
-| 位置 | (0, 0) |
-| 挂载组件 | **GridController** |
-| GridController -> gridContainer | 拖入 Grid 节点本身 |
-| GridController -> cellPrefab | 拖入 CellPrefab |
+```
+Grid (Node)
+  挂载: GridController 组件
+  位置: (0, 0)
+  └── GridContainer (Node)   ← 空的子节点，用作格子容器
+       位置: (0, 0)
+```
 
-> 注意：Grid 的坐标就是网格中心。代码中每个格子会以 80px 为单位从中心向四周排列。
+**在 Inspector 中绑定 GridController 的属性**:
+
+| @property 字段 | 拖入什么 |
+|---------------|---------|
+| **gridContainer** | 从层级拖入 **GridContainer** 子节点 |
+| **cellPrefab** | 从资源管理器拖入 **CellPrefab** |
+
+> 注意：Grid 的坐标就是网格中心。代码中每个格子会以 80px 为单位从中心向四周排列。单元格子由代码 `instantiate(cellPrefab)` 自动生成并添加到 GridContainer 下，你不需要手动创建 36 个。
 
 ---
 
@@ -186,11 +193,11 @@ UnitInfoPanel (Sprite, 半透黑背景)
 ```
 
 **BattleUI 绑定**:
-| @property | 绑定到 |
-|-----------|--------|
-| unitNameLabel | UnitNameLabel |
-| hpLabel | HpLabel |
-| energyLabel | EnergyLabel |
+| @property 字段 | 从哪拖入 |
+|---------------|---------|
+| unitNameLabel | 层级中拖入 UnitNameLabel |
+| hpLabel | 层级中拖入 HpLabel |
+| energyLabel | 层级中拖入 EnergyLabel |
 
 ### 5.3 回合信息（顶部中间）
 
@@ -361,11 +368,11 @@ RouteMapUI (ScrollView)
 | **NodesContainer** | 位置 (0, 0) |
 
 **RouteMapUI 绑定**:
-| @property | 绑定到 |
-|-----------|--------|
-| scrollView | ScrollView 组件 |
-| nodePrefab | NodePrefab |
-| nodesContainer | NodesContainer |
+| @property 字段 | 从哪拖入 |
+|---------------|---------|
+| scrollView | 层级中拖入 RouteMapUI 节点自身的 ScrollView 组件 |
+| nodePrefab | 资源管理器中拖入 NodePrefab |
+| nodesContainer | 层级中拖入 NodesContainer 子节点 |
 
 ### 6.3 NodePrefab 预制体
 
@@ -418,11 +425,11 @@ UpgradeUI (Sprite, 半透黑覆盖全屏)
 ```
 
 **UpgradeUI 绑定**:
-| @property | 绑定到 |
-|-----------|--------|
-| cardContainer | CardContainer |
-| cardPrefab | CardPrefab |
-| titleLabel | TitleLabel |
+| @property 字段 | 从哪拖入 |
+|---------------|---------|
+| cardContainer | 层级中拖入 CardContainer 节点 |
+| cardPrefab | 资源管理器中拖入 CardPrefab |
+| titleLabel | 层级中拖入 TitleLabel 节点 |
 
 ### 7.3 CardPrefab 预制体
 
@@ -470,12 +477,12 @@ EventUI (Sprite, 半透黑覆盖全屏)
 ```
 
 **EventUI 绑定**:
-| @property | 绑定到 |
-|-----------|--------|
-| eventTitleLabel | EventTitleLabel |
-| eventDescLabel | EventDescLabel |
-| choiceButtonPrefab | ChoiceBtnPrefab |
-| choiceContainer | ChoiceContainer |
+| @property 字段 | 从哪拖入 |
+|---------------|---------|
+| eventTitleLabel | 层级中拖入 EventTitleLabel |
+| eventDescLabel | 层级中拖入 EventDescLabel |
+| choiceButtonPrefab | 资源管理器中拖入 ChoiceBtnPrefab |
+| choiceContainer | 层级中拖入 ChoiceContainer |
 
 ### 8.3 ChoiceBtnPrefab 预制体
 
@@ -502,19 +509,21 @@ GameManager (Node)
   挂载组件: TinyVanguardMain
   
 TinyVanguardMain @property 绑定:
-├── routeMapUI          → 拖入 RouteMapUI 节点
-├── battleManager       → 拖入 BattleManager 节点
-├── battleUI            → 拖入 BattleUI 节点
-├── upgradeUI           → 拖入 UpgradeUI 节点
-├── eventUI             → 拖入 EventUI 节点
-├── gameOverPanel       → GameOverPanel (见下方)
-├── gameOverLabel       → 其中的 Label
-├── victoryPanel        → VictoryPanel
-├── shopPanel           → ShopPanel (见下方)
-├── restPanel           → RestPanel (见下方)
-├── goldLabel           → GoldLabel (见下方)
-├── continueButton      → ContinueButton (见下方)
-└── classSelectPanel    → ClassSelectPanel (见下方)
+| @property 字段 | 从哪拖入 |
+|---------------|---------|
+| routeMapUI | 层级中拖入 RouteMapUI 节点 |
+| battleManager | 层级中拖入 BattleManager 节点 |
+| battleUI | 层级中拖入 BattleUI 节点 |
+| upgradeUI | 层级中拖入 UpgradeUI 节点 |
+| eventUI | 层级中拖入 EventUI 节点 |
+| gameOverPanel | 层级中拖入 GameOverPanel 节点 |
+| gameOverLabel | 层级中拖入 GameOverLabel |
+| victoryPanel | 层级中拖入 VictoryPanel 节点 |
+| shopPanel | 层级中拖入 ShopPanel 节点 |
+| restPanel | 层级中拖入 RestPanel 节点 |
+| goldLabel | 层级中拖入 GoldLabel |
+| continueButton | 层级中拖入 ContinueButton |
+| classSelectPanel | 层级中拖入 ClassSelectPanel |
 ```
 
 ### 9.2 BattleManager
@@ -523,9 +532,9 @@ TinyVanguardMain @property 绑定:
 BattleManager (Node)
   位置: (0, 0)
   挂载组件: BattleManager
-  @property:
-    gridController    → 拖入 Grid 节点
-    unitPrefab        → 拖入 UnitPrefab
+  @property 绑定:
+    gridController → 从层级拖入 Grid 节点
+    unitPrefab     → 从资源管理器拖入 UnitPrefab
 ```
 
 ### 9.3 GameOverPanel / VictoryPanel
