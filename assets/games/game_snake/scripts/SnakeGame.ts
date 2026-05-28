@@ -41,10 +41,13 @@ export class SnakeGame extends Component {
     gameOverPanel: Node | null = null;
 
     @property(Label)
-    finalScoreLabel: Label | null = null;
+    finalScoreLabel: Label | null = null;       // 显示大数字（如 "128"）
 
     @property(Label)
-    finalBestScoreLabel: Label | null = null;
+    finalScoreDescLabel: Label | null = null;   // 显示 "本局得分"
+
+    @property(Label)
+    finalBestScoreLabel: Label | null = null;   // 显示 "历史最佳 xxx"
 
     // ========== 按钮 ==========
     @property(Button)
@@ -340,10 +343,13 @@ export class SnakeGame extends Component {
 
         // 更新结束面板上的分数
         if (this.finalScoreLabel) {
-            this.finalScoreLabel.string = `最终得分: ${this._score}`;
+            this.finalScoreLabel.string = `${this._score}`;
+        }
+        if (this.finalScoreDescLabel) {
+            this.finalScoreDescLabel.string = '本局得分';
         }
         if (this.finalBestScoreLabel) {
-            this.finalBestScoreLabel.string = `历史最佳: ${this._bestScore}`;
+            this.finalBestScoreLabel.string = `历史最佳 ${this._bestScore}`;
         }
     }
 
