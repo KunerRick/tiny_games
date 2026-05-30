@@ -21,7 +21,8 @@ export class SettingsPanel extends Component {
     private _onConfirm: ((size: GridSize) => void) | null = null;
 
     onDestroy(): void {
-        this.unbindEvents();
+        // 场景销毁时 @property(Node) getter 可能返回 null，不调任何节点方法
+        this._onConfirm = null;
     }
 
     show(currentSize: GridSize, onConfirm: (size: GridSize) => void): void {
