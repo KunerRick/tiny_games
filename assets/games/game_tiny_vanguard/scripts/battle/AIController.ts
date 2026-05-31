@@ -4,6 +4,7 @@ import { GridPosition } from './GridController';
 export class AIController {
   executeEnemyTurn(enemies: UnitController[], players: UnitController[]): void {
     const aliveEnemies = enemies.filter(u => u.data?.isAlive);
+    const allOccupied = this.getAllOccupiedPositions(enemies, players);
     for (const enemy of aliveEnemies) {
       if (!enemy.data?.isAlive) continue;
 
@@ -15,9 +16,20 @@ export class AIController {
       if (dist <= enemy.data.stats.range) {
         target.takeDamage(enemy.data.stats.attack);
       } else {
-        this.moveToward(enemy, target.data.gridPos);
+        this.moveToward(enemy, target.data.gridPos, allOccupied);
       }
     }
+  }
+
+  private getAllOccupiedPositions(enemies: UnitController[], players: UnitController[]): GridPosition[] {
+    const positions: GridPosition[] = [];
+    for (const u of enemies) {
+      if (u.data?.isAlive) positions.push(u.data.gridPos);
+    }
+    for (const u of players) {
+      if (u.data?.isAlive) positions.push(u.data.gridPos);
+    }
+    return positions;
   }
 
   private findTarget(enemy: UnitController, players: UnitController[]): UnitController | null {
@@ -33,7 +45,7 @@ export class AIController {
     return Math.abs(a.row - b.row) + Math.abs(a.col - b.col);
   }
 
-  private moveToward(enemy: UnitController, targetPos: GridPosition): void {
+  private moveToward(enemy: UnitController, targetPos: GridPosition, occupied: GridPosition[]): void {
     if (!enemy.data) return;
     const pos = enemy.data.gridPos;
     const moveRange = enemy.data.stats.move;
@@ -46,10 +58,13 @@ export class AIController {
         const newRow = pos.row + r;
         const newCol = pos.col + c;
         if (newRow < 0 || newRow >= 6 || newCol < 0 || newCol >= 6) continue;
-        const dist = this.manhattanDist({ row: newRow, col: newCol }, targetPos);
+        const candidate = { row: newRow, col: newCol };
+        const isOccupied = occupied.some(o => o.row === newRow && o.col === newCol);
+        if (isOccupied) continue;
+        const dist = this.manhattanDist(candidate, targetPos);
         if (dist < closestDist) {
           closestDist = dist;
-          bestPos = { row: newRow, col: newCol };
+          bestPos = candidate;
         }
       }
     }

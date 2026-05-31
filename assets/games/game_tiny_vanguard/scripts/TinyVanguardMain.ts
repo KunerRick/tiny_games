@@ -96,6 +96,26 @@ export class TinyVanguardMain extends Component {
         this.continueButton.node.on(Button.EventType.CLICK, this.onContinueRun, this);
       }
     }
+
+    if (this.classSelectPanel) {
+      const startBtnNode = this.classSelectPanel.getChildByName('StartBtn');
+      if (startBtnNode) {
+        const startBtn = startBtnNode.getComponent(Button);
+        if (startBtn) {
+          startBtn.node.on(Button.EventType.CLICK, this.startClassSelect, this);
+        }
+      }
+    }
+
+    if (this.gameOverPanel) {
+      const restartBtnNode = this.gameOverPanel.getChildByName('RestartButton');
+      if (restartBtnNode) {
+        const restartBtn = restartBtnNode.getComponent(Button);
+        if (restartBtn) {
+          restartBtn.node.on(Button.EventType.CLICK, this.restartFromRouteMap, this);
+        }
+      }
+    }
   }
 
   startClassSelect(): void {

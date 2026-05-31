@@ -1,7 +1,7 @@
 [
   {
     "__type__": "cc.Prefab",
-    "_name": "SkillBtnPrefab",
+    "_name": "ChoiceBtnPrefab",
     "_objFlags": 0,
     "__editorExtras__": {},
     "_native": "",
@@ -13,7 +13,7 @@
   },
   {
     "__type__": "cc.Node",
-    "_name": "SkillBtnPrefab",
+    "_name": "ChoiceBtnPrefab",
     "_objFlags": 0,
     "__editorExtras__": {},
     "_parent": null,
@@ -65,7 +65,7 @@
   },
   {
     "__type__": "cc.Node",
-    "_name": "skillLabel",
+    "_name": "choiceLabel",
     "_objFlags": 0,
     "__editorExtras__": {},
     "_parent": {
@@ -139,7 +139,7 @@
   },
   {
     "__type__": "cc.CompPrefabInfo",
-    "fileId": "/LLfSaBeTrtu2Ct+ipZjgh"
+    "fileId": "Pg5opY9lBxxz4b1sn2WzlT"
   },
   {
     "__type__": "cc.Label",
@@ -174,7 +174,7 @@
   },
   {
     "__type__": "cc.CompPrefabInfo",
-    "fileId": "+GSWi29uIn6HP/GIrMAR9J"
+    "fileId": "hVQYGGQP0P8T3Smu8nvF2A"
   },
   {
     "__type__": "cc.PrefabInfo",
@@ -184,7 +184,7 @@
     "asset": {
       "__id__": 0
     },
-    "fileId": "5bAt5rtbdBr4zh70VS0fjN",
+    "fileId": "26Au4W895In6YuSmre5wuS",
     "targetOverrides": null,
     "nestedPrefabInstanceRoots": null,
     "instance": null
@@ -215,7 +215,7 @@
   },
   {
     "__type__": "cc.CompPrefabInfo",
-    "fileId": "IoCi73MQ8g3j7+ShS7xrxj"
+    "fileId": "w5OFEK7pf2YLhhh2M8Xq8Q"
   },
   {
     "__type__": "cc.Button",
@@ -273,7 +273,7 @@
   },
   {
     "__type__": "cc.CompPrefabInfo",
-    "fileId": "kJI8wLeFZrzR5/A8sEIdpn"
+    "fileId": "yphe4gVGUJj6tO0PI2zPsb"
   },
   {
     "__type__": "cc.PrefabInfo",
@@ -283,7 +283,7 @@
     "asset": {
       "__id__": 0
     },
-    "fileId": "71/V5Cw4JCCrh8J446FrgO",
+    "fileId": "a4eNO7r2FBs4g8a0+aCis5",
     "targetOverrides": null,
     "nestedPrefabInstanceRoots": null,
     "instance": null

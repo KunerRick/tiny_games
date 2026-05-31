@@ -2,13 +2,13 @@
   "ver": "1.1.50",
   "importer": "prefab",
   "imported": true,
-  "uuid": "f15f6d34-c4a8-4bea-a75e-785f613e137c",
+  "uuid": "002e6ff2-a7a9-40b9-a669-53b77755d486",
   "files": [
     ".json"
   ],
   "subMetas": {},
   "userData": {
-    "syncNodeName": "SkillBtnPrefab",
+    "syncNodeName": "NodePrefab",
     "hasIcon": false
   }
 }

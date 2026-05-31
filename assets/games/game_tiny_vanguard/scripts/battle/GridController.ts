@@ -40,21 +40,15 @@ export class GridController extends Component {
         this.gridContainer.addChild(cell);
         this._cells[row][col] = cell;
 
-        cell._data = { row, col };
-
         const button = cell.getComponent(Button);
         if (button) {
-          button.node.on(Button.EventType.CLICK, this.onCellButtonClick, this);
+          const r = row;
+          const c = col;
+          button.node.on(Button.EventType.CLICK, () => {
+            this.onCellTapped(r, c);
+          }, this);
         }
       }
-    }
-  }
-
-  private onCellButtonClick(button: Button): void {
-    const cell = button.node;
-    if (cell && cell._data) {
-      const { row, col } = cell._data as { row: number; col: number };
-      this.onCellTapped(row, col);
     }
   }
 
@@ -100,7 +94,12 @@ export class GridController extends Component {
   }
 
   positionToGrid(worldPos: { x: number; y: number }): GridPosition | null {
-    const localPos = this.gridContainer.getComponent(Node)?.getComponent(Node).getPosition();
-    return null;
+    const col = Math.round(worldPos.x / GridController.CELL_SIZE + 2.5);
+    const row = Math.round(worldPos.y / GridController.CELL_SIZE + 2.5);
+
+    if (row < 0 || row >= GridController.GRID_SIZE || col < 0 || col >= GridController.GRID_SIZE) {
+      return null;
+    }
+    return { row, col };
   }
 }
