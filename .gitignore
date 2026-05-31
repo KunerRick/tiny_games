@@ -29,6 +29,5 @@ node_modules/
 #//////////////////////////
 # Extensions（插件自带 .git，每人本地装）
 #//////////////////////////
-extensions/
 
 .DS_Store
