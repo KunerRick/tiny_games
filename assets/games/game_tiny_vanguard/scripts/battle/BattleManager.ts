@@ -306,9 +306,10 @@ export class BattleManager extends Component {
   onSkillUsed(skillIndex: number): void {
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive) return;
-    unit.data.hasActed = true;
-    unit.data.energy -= 2;
-    this.selectNextPlayerUnit();
+    const skill = unit.useSkill(skillIndex);
+    if (skill) {
+      this.selectNextPlayerUnit();
+    }
   }
 
   endCurrentUnitTurn(): void {

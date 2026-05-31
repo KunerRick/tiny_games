@@ -41,23 +41,55 @@ tiny_games/
 
 | 谁做 | 负责 | 原因 |
 |------|------|------|
-| **人** | `.scene` / `.prefab` / `.meta` / 资源导入 | Cocos Creator 可视化编辑器操作，AI 直接改场景 JSON 极其脆弱（`__id__` 是数组下标，增删易错且无视觉反馈） |
-| **AI** | `.ts` 脚本逻辑、bug 诊断、代码结构设计、文档编写 | 代码是纯文本，AI 擅长 |
+| **人** | 视觉资产制作（绘图/UI素材/音频）、资源导入 | 创作类工作，AI 无法替代 |
+| **AI** | `.ts` 脚本逻辑、**场景操作（节点/组件/属性，通过 MCP）**、**bug 诊断（MCP 调试工具）**、场景问题排查、代码结构设计、文档编写 | MCP 工具通过编辑器引擎安全操作，比直接改 JSON 可靠 |
+| **人 + AI 协作** | `.prefab` 管理、复杂布局调整 | AI 通过 MCP 创建/更新，人确认视觉效果 |
 
 ### 场景变更协作流程
 
-1. **AI 需要改动场景（节点树、组件、布局、资源引用）时，不直接修改 `.scene` 文件**，而是给出精确的"操作说明"，由人在 Cocos Creator 编辑器中执行。
-2. 操作说明按以下格式给出：
-   - 操作目标（选中哪个节点）
-   - 具体步骤（创建/修改/删除什么，参数值）
-   - 预期的最终结构（树状图或布局示意图）
-3. 对于**纯数值修复**（如修改一个字段的值、改一个 `__id__` 引用），不涉及数组结构变动的，AI 可以直接修改 `.scene` JSON。
+1. **AI 优先通过 MCP 工具操作场景**，包括但不限于：
+   - 创建/删除/移动节点（`create_node`、`delete_node`、`move_node`）
+   - 添加/移除组件（`add_component`、`remove_component`）
+   - 设置组件属性（`set_component_property`）
+   - 修改节点变换（`set_node_transform`）
+   - 绑定脚本到节点（`attach_script`）
+   - 管理 Prefab（`create_prefab`、`instantiate_prefab`）
+   - 场景资源操作（`import_asset`、`create_asset`）
+
+2. **MCP 操作安全规范：**
+   - 结构性变更（创建/删除节点、增删组件）前调用 `begin_undo_recording`，操作后调用 `end_undo_recording`
+   - 操作完成后调用 `validate_scene` 检查场景一致性
+   - 对修改的脚本文件运行 `lsp_diagnostics` 确认无类型错误
+
+3. **MCP 预制体修改注意事项：**
+   - `update_prefab` 只更新编辑器内存数据库，**不会自动写回 `.prefab` 文件**
+   - 修改预制体后，需调用 `reimport_asset` 触发编辑器从内存同步到文件
+   - `save_asset(url, content)` 是**文件内容写入**操作，传空内容会清空文件，不要用它做"保存"操作
+   - 如果 MCP `instantiate_prefab` 返回成功但未返回 `nodeUuid`，用 `get_all_nodes` 确认节点是否创建成功
+   - 对场景中**已有的**预制体实例直接调用 `update_prefab` 可能触发场景切换，优先用实例化出的临时节点操作
+
+4. **以下情况仍给人操作说明：**
+   - 复杂视觉布局调整（AI 看不到视觉效果）
+   - 新的 UI 页面搭建（需要人在编辑器中看效果微调）
+   - 操作说明格式：操作目标（选中哪个节点）→ 具体步骤（创建/修改/删除什么，参数值）→ 预期的最终结构（树状图或布局示意图）
+
+### 场景问题排查
+
+利用 Cocos Creator MCP 调试工具进行问题定位，排查顺序如下：
+
+1. **查看节点结构** → `get_scene_hierarchy` 获取完整节点树
+2. **查看节点详情** → `get_node_info` / `get_components` 检查特定节点和组件状态
+3. **验证场景** → `validate_scene` 检查缺失引用、性能问题等
+4. **查编辑器日志** → `get_console_logs` / `get_project_logs` / `search_project_logs`
+5. **运行时调试** → `execute_script` 在场景上下文中执行 JS 代码辅助定位
 
 ### 脚本与场景的接口规范
 
 - AI 在脚本中用 `@property` 装饰器定义需要场景连接的组件/节点引用
 - 所有 `@property` 按用途分组、加注释，方便在 Inspector 中识别
-- 人在编辑器中完成 `@property` 的拖拽绑定
+- **绑定方式（二选一）**：
+  - AI 通过 MCP `set_component_property(propertyType="node")` 直接绑定节点引用
+  - 人在编辑器中拖拽绑定（适合需要视觉确认的复杂绑定）
 
 ## AI 写代码前必读 — Cocos Creator 防崩溃守则
 

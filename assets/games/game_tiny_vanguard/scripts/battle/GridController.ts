@@ -10,6 +10,7 @@ export interface GridPosition {
 export class GridController extends Component {
   public static readonly GRID_SIZE = 6;
   public static readonly CELL_SIZE = 80;
+  public static readonly DEFAULT_CELL_COLOR = Color.WHITE;
 
   @property({ type: Node, tooltip: '网格容器节点' })
   gridContainer: Node = null;
@@ -42,11 +43,9 @@ export class GridController extends Component {
 
         const button = cell.getComponent(Button);
         if (button) {
-          const r = row;
-          const c = col;
-          button.node.on(Button.EventType.CLICK, () => {
-            this.onCellTapped(r, c);
-          }, this);
+          cell['_gridRow'] = row;
+          cell['_gridCol'] = col;
+          button.node.on(Button.EventType.CLICK, this.onCellButtonClicked, this);
         }
       }
     }
@@ -60,6 +59,12 @@ export class GridController extends Component {
     if (this._onCellClickCallback) {
       this._onCellClickCallback({ row, col });
     }
+  }
+
+  private onCellButtonClicked(button: Button): void {
+    const row = button.node['_gridRow'] as number;
+    const col = button.node['_gridCol'] as number;
+    this.onCellTapped(row, col);
   }
 
   getCell(row: number, col: number): Node | null {
@@ -86,7 +91,7 @@ export class GridController extends Component {
       if (cell?.isValid) {
         const sprite = cell.getComponent(Sprite);
         if (sprite) {
-          sprite.color = Color.WHITE;
+          sprite.color = GridController.DEFAULT_CELL_COLOR;
         }
       }
     }

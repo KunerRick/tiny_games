@@ -17,6 +17,11 @@ export class AIController {
         target.takeDamage(enemy.data.stats.attack);
       } else {
         this.moveToward(enemy, target.data.gridPos, allOccupied);
+        // 移动后重新检查是否进入攻击范围
+        const newDist = this.manhattanDist(enemy.data.gridPos, target.data.gridPos);
+        if (newDist <= enemy.data.stats.range) {
+          target.takeDamage(enemy.data.stats.attack);
+        }
       }
     }
   }
