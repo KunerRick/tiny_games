@@ -25,9 +25,11 @@ node_modules/
 .trae
 .opencode
 .sisyphus
+.omo
 
 #//////////////////////////
 # Extensions（插件自带 .git，每人本地装）
 #//////////////////////////
+extensions/**/node_modules/
 
 .DS_Store

@@ -54,7 +54,7 @@ tiny_games/
    - 修改节点变换（`set_node_transform`）
    - 绑定脚本到节点（`attach_script`）
    - 管理 Prefab（`create_prefab`、`instantiate_prefab`）
-   - 场景资源操作（`import_asset`、`create_asset`）
+    - 场景资源操作（`import_asset`、`create_asset`、`read_asset_content`）
 
 2. **MCP 操作安全规范：**
    - 结构性变更（创建/删除节点、增删组件）前调用 `begin_undo_recording`，操作后调用 `end_undo_recording`
@@ -62,16 +62,32 @@ tiny_games/
    - 对修改的脚本文件运行 `lsp_diagnostics` 确认无类型错误
 
 3. **MCP 预制体修改注意事项：**
-   - `update_prefab` 只更新编辑器内存数据库，**不会自动写回 `.prefab` 文件**
-   - 修改预制体后，需调用 `reimport_asset` 触发编辑器从内存同步到文件
+   - **`update_prefab` 操作方向是 Prefab→Instance（还原/回退），不是 Instance→Prefab（同步）**。实测 `update_prefab` 调用 `scene/apply-prefab`，会将场景中实例还原为预制体原始状态，预制体文件不受影响
+   - 正确修改预制体内容的工作流：`read_asset_content` 读取 → 修改 JSON → `save_asset(url, content)` 写入文件 → `reimport_asset(url)` 刷新引擎
    - `save_asset(url, content)` 是**文件内容写入**操作，传空内容会清空文件，不要用它做"保存"操作
    - 如果 MCP `instantiate_prefab` 返回成功但未返回 `nodeUuid`，用 `get_all_nodes` 确认节点是否创建成功
-   - 对场景中**已有的**预制体实例直接调用 `update_prefab` 可能触发场景切换，优先用实例化出的临时节点操作
 
-4. **以下情况仍给人操作说明：**
+4. **MCP 属性修改确认的工作流：**
+
+   以下两条路径已通过实际测试验证可行：
+
+   **场景节点属性修改**（修改 → 保存 → 重新打开依然有效）：
+   - `component_set_component_property` → `scene_save_scene`
+   - 实时修改场景中节点的组件属性（Label 文字、Sprite 颜色等）
+   - 调用 `scene_save_scene` 后关闭并重新打开场景，修改持久化保留
+   - 注意：需要 `scene_save_scene`，不是 `project_save_asset`
+
+   **预制体资产内容修改**（读取 → 修改 → 写入 → 刷新 → 验证）：
+   - `read_asset_content` → 内存中修改 JSON → `save_asset(url, content)` → `reimport_asset(url)`
+   - `read_asset_content` 通过 `asset-db/query-asset-info` 获取资产信息，优先尝试 `asset-db/read-asset` API，不可用时回退到文件系统读取
+   - `save_asset(url, jsonContent)` 直接将修改后的 JSON 写入 `.prefab` 文件
+   - `reimport_asset(url)` 通知引擎重新导入文件，新实例化显示更新后的内容
+   - 测试结果：新建实例显示修改内容，关闭场景后重新实例化依然保留修改
+
+5. **以下情况仍给人操作说明：**
    - 复杂视觉布局调整（AI 看不到视觉效果）
    - 新的 UI 页面搭建（需要人在编辑器中看效果微调）
-   - 操作说明格式：操作目标（选中哪个节点）→ 具体步骤（创建/修改/删除什么，参数值）→ 预期的最终结构（树状图或布局示意图）
+    - 操作说明格式：操作目标（选中哪个节点）→ 具体步骤（创建/修改/删除什么，参数值）→ 预期的最终结构（树状图或布局示意图）
 
 ### 场景问题排查
 
