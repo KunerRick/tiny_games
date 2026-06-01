@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Button, UITransform } from 'cc';
+import { _decorator, Component, Node, Label, Button, Sprite, Color } from 'cc';
 import { RouteMapUI, RouteNode } from './ui/RouteMapUI';
 import { BattleManager, BattleResult } from './battle/BattleManager';
 import { UpgradeUI, UpgradeOption } from './ui/UpgradeUI';
@@ -12,6 +12,8 @@ import {
 import { UnitController } from './battle/UnitController';
 
 const { ccclass, property } = _decorator;
+
+const CLASS_ORDER = ['warrior', 'archer', 'mage', 'cleric'];
 
 export type GameState =
   | 'route_map' | 'deploy' | 'battle' | 'upgrade'
@@ -59,6 +61,7 @@ export class TinyVanguardMain extends Component {
   classSelectPanel: Node = null;
 
   private _state: GameState = 'class_select';
+  private _selectedClasses: string[] = ['warrior', 'archer', 'mage'];
   private _runData: RunData = {
     currentRouteNode: 0,
     playerClasses: [],
@@ -82,18 +85,7 @@ export class TinyVanguardMain extends Component {
     if (this.restPanel) this.restPanel.active = false;
     if (this.classSelectPanel) {
       this.classSelectPanel.active = true;
-      const panelTransform = this.classSelectPanel.getComponent(UITransform);
-      if (panelTransform) {
-        panelTransform.setContentSize(360, 380);
-      }
-      const titleLabel = this.classSelectPanel.getChildByName('TitleLabel');
-      if (titleLabel) titleLabel.setPosition(0, 150);
-      const descLabel = this.classSelectPanel.getChildByName('DescLabel');
-      if (descLabel) descLabel.setPosition(0, 70);
-      const classBtn = this.classSelectPanel.getChildByName('Class1Btn');
-      if (classBtn) classBtn.setPosition(0, -10);
-      const startBtn = this.classSelectPanel.getChildByName('StartBtn');
-      if (startBtn) startBtn.setPosition(0, -120);
+      this.setupClassSelectionUI();
     }
 
     if (this.battleManager?.gridController?.node) {
@@ -137,9 +129,128 @@ export class TinyVanguardMain extends Component {
         }
       }
     }
+
+    this.bindShopPanelEvents();
+    this.bindRestPanelEvents();
+  }
+
+  private bindShopPanelEvents(): void {
+    if (!this.shopPanel) return;
+    const buyBtn = this.shopPanel.getChildByName('BuySkillBtn');
+    if (buyBtn) {
+      const btn = buyBtn.getComponent(Button);
+      if (btn) btn.node.on(Button.EventType.CLICK, this.onShopBuySkill, this);
+    }
+    const healBtn = this.shopPanel.getChildByName('HealBtn');
+    if (healBtn) {
+      const btn = healBtn.getComponent(Button);
+      if (btn) btn.node.on(Button.EventType.CLICK, this.onShopHeal, this);
+    }
+    const closeBtn = this.shopPanel.getChildByName('CloseBtn');
+    if (closeBtn) {
+      const btn = closeBtn.getComponent(Button);
+      if (btn) btn.node.on(Button.EventType.CLICK, this.closeShop, this);
+    }
+  }
+
+  private bindRestPanelEvents(): void {
+    if (!this.restPanel) return;
+    const confirmBtn = this.restPanel.getChildByName('ConfirmRestBtn');
+    if (confirmBtn) {
+      const btn = confirmBtn.getComponent(Button);
+      if (btn) btn.node.on(Button.EventType.CLICK, this.confirmRest, this);
+    }
+    const skipBtn = this.restPanel.getChildByName('SkipBtn');
+    if (skipBtn) {
+      const btn = skipBtn.getComponent(Button);
+      if (btn) btn.node.on(Button.EventType.CLICK, this.skipRest, this);
+    }
+  }
+
+  private unbindShopPanelEvents(): void {
+    if (!this.shopPanel?.isValid) return;
+    const buyBtn = this.shopPanel.getChildByName('BuySkillBtn');
+    if (buyBtn?.isValid) {
+      const btn = buyBtn.getComponent(Button);
+      if (btn) btn.node.off(Button.EventType.CLICK, this.onShopBuySkill, this);
+    }
+    const healBtn = this.shopPanel.getChildByName('HealBtn');
+    if (healBtn?.isValid) {
+      const btn = healBtn.getComponent(Button);
+      if (btn) btn.node.off(Button.EventType.CLICK, this.onShopHeal, this);
+    }
+    const closeBtn = this.shopPanel.getChildByName('CloseBtn');
+    if (closeBtn?.isValid) {
+      const btn = closeBtn.getComponent(Button);
+      if (btn) btn.node.off(Button.EventType.CLICK, this.closeShop, this);
+    }
+  }
+
+  private unbindRestPanelEvents(): void {
+    if (!this.restPanel?.isValid) return;
+    const confirmBtn = this.restPanel.getChildByName('ConfirmRestBtn');
+    if (confirmBtn?.isValid) {
+      const btn = confirmBtn.getComponent(Button);
+      if (btn) btn.node.off(Button.EventType.CLICK, this.confirmRest, this);
+    }
+    const skipBtn = this.restPanel.getChildByName('SkipBtn');
+    if (skipBtn?.isValid) {
+      const btn = skipBtn.getComponent(Button);
+      if (btn) btn.node.off(Button.EventType.CLICK, this.skipRest, this);
+    }
+  }
+
+  private setupClassSelectionUI(): void {
+    for (let i = 0; i < CLASS_ORDER.length; i++) {
+      const btnName = `Class${i + 1}Btn`;
+      const btnNode = this.classSelectPanel.getChildByName(btnName);
+      if (!btnNode) continue;
+
+      const btn = btnNode.getComponent(Button);
+      if (!btn) continue;
+
+      const classId = CLASS_ORDER[i];
+      btnNode['_classId'] = classId;
+      btn.node.on(Button.EventType.CLICK, this.onClassToggleClicked, this);
+
+      if (this._selectedClasses.includes(classId)) {
+        this.setClassButtonVisual(btnNode, true);
+      }
+    }
+
+    const startBtnNode = this.classSelectPanel.getChildByName('StartBtn');
+    if (startBtnNode) {
+      const startBtn = startBtnNode.getComponent(Button);
+      if (startBtn) {
+        startBtn.node.on(Button.EventType.CLICK, this.startClassSelect, this);
+      }
+    }
+  }
+
+  private onClassToggleClicked(btn: Button): void {
+    const classId = btn.node['_classId'] as string;
+    if (!classId) return;
+
+    if (this._selectedClasses.includes(classId)) {
+      if (this._selectedClasses.length <= 1) return;
+      this._selectedClasses = this._selectedClasses.filter(c => c !== classId);
+      this.setClassButtonVisual(btn.node, false);
+    } else {
+      this._selectedClasses.push(classId);
+      this.setClassButtonVisual(btn.node, true);
+    }
+  }
+
+  private setClassButtonVisual(btnNode: Node, selected: boolean): void {
+    const sprite = btnNode.getComponent(Sprite);
+    if (sprite) {
+      sprite.color = selected ? new Color(80, 200, 80, 255) : new Color(150, 150, 150, 255);
+    }
   }
 
   startClassSelect(): void {
+    if (this._selectedClasses.length < 3) return;
+
     if (this.classSelectPanel) {
       this.classSelectPanel.active = false;
     }
@@ -147,7 +258,7 @@ export class TinyVanguardMain extends Component {
       this.continueButton.node.active = false;
     }
 
-    this._runData.playerClasses = ['warrior', 'archer', 'mage'];
+    this._runData.playerClasses = [...this._selectedClasses];
     this._runData.gold = 0;
     this._runData.currentRouteNode = 0;
 
@@ -380,6 +491,35 @@ export class TinyVanguardMain extends Component {
     }
   }
 
+  private onShopBuySkill(): void {
+    if (this._runData.gold < 10) return;
+    this._runData.gold -= 10;
+
+    const firstUnit = this.battleManager?.playerUnits?.[0];
+    if (firstUnit?.data) {
+      const classConfig = CLASSES.find(c => c.id === firstUnit.data.classId);
+      if (classConfig) {
+        const skills = getRandomSkillsFromPool(classConfig.skillPool, 1);
+        if (skills.length > 0) {
+          firstUnit.addSkill(skills[0]);
+        }
+      }
+    }
+    this.updateGoldDisplay();
+  }
+
+  private onShopHeal(): void {
+    if (this._runData.gold < 5) return;
+    this._runData.gold -= 5;
+
+    for (const unit of this.battleManager.playerUnits) {
+      if (unit.data?.isAlive) {
+        unit.heal(2);
+      }
+    }
+    this.updateGoldDisplay();
+  }
+
   private closeShop(): void {
     if (this.shopPanel) {
       this.shopPanel.active = false;
@@ -433,56 +573,89 @@ export class TinyVanguardMain extends Component {
     if (event.type === 'choice' && event.choices?.[choiceIndex]) {
       const effects = event.choices[choiceIndex].effects;
       for (const effect of effects) {
-        if (effect.type === 'heal_all') {
-          for (const unit of this.battleManager.playerUnits) {
-            unit.heal(effect.params.amount ?? 3);
-          }
-        }
-        if (effect.type === 'gain_gold') {
-          this._runData.gold += effect.params.amount ?? 10;
-        }
-        if (effect.type === 'spend_gold') {
-          this._runData.gold = Math.max(0, this._runData.gold - (effect.params.amount ?? 10));
-        }
-        if (effect.type === 'learn_skill' || effect.type === 'learn_rare_skill') {
-          const firstUnit = this.battleManager.playerUnits[0];
-          if (firstUnit?.data) {
-            const classConfig = CLASSES.find(c => c.id === firstUnit.data.classId);
-            if (classConfig) {
-              const skills = getRandomSkillsFromPool(classConfig.skillPool, 1);
-              if (skills.length > 0) {
-                firstUnit.addSkill(skills[0]);
-              }
-            }
-          }
-        }
+        this.applySingleEffect(effect.type, effect.params);
       }
     } else if (event.type === 'random' && event.randomOutcomes?.[choiceIndex]) {
       const effects = event.randomOutcomes[choiceIndex].effects;
       for (const effect of effects) {
-        if (effect.type === 'gain_gold') {
-          this._runData.gold += effect.params.amount ?? 10;
-        }
-        if (effect.type === 'learn_rare_skill') {
-          const firstUnit = this.battleManager.playerUnits[0];
-          if (firstUnit?.data) {
-            const classConfig = CLASSES.find(c => c.id === firstUnit.data.classId);
-            if (classConfig) {
-              const skills = getRandomSkillsFromPool(classConfig.skillPool, 1);
-              if (skills.length > 0) {
-                firstUnit.addSkill(skills[0]);
-              }
-            }
-          }
-        }
-        if (effect.type === 'damage_all') {
-          for (const unit of this.battleManager.playerUnits) {
-            unit.takeDamage(effect.params.amount ?? 1);
-          }
-        }
+        this.applySingleEffect(effect.type, effect.params);
       }
     }
     this.updateGoldDisplay();
+  }
+
+  private applySingleEffect(type: string, params: Record<string, number>): void {
+    switch (type) {
+      case 'heal_all':
+        for (const unit of this.battleManager.playerUnits) {
+          unit.heal(params.amount ?? 3);
+        }
+        break;
+
+      case 'gain_gold':
+        this._runData.gold += params.amount ?? 10;
+        break;
+
+      case 'spend_gold':
+        this._runData.gold = Math.max(0, this._runData.gold - (params.amount ?? 10));
+        break;
+
+      case 'damage_all':
+        for (const unit of this.battleManager.playerUnits) {
+          unit.takeDamage(params.amount ?? 1);
+        }
+        break;
+
+      case 'learn_skill':
+      case 'learn_rare_skill': {
+        const firstUnit = this.battleManager.playerUnits[0];
+        if (firstUnit?.data) {
+          const classConfig = CLASSES.find(c => c.id === firstUnit.data.classId);
+          if (classConfig) {
+            const skills = getRandomSkillsFromPool(classConfig.skillPool, 1);
+            if (skills.length > 0) {
+              firstUnit.addSkill(skills[0]);
+            }
+          }
+        }
+        break;
+      }
+
+      case 'buff_all_attack':
+        for (const unit of this.battleManager.playerUnits) {
+          if (unit.data) {
+            unit.data.stats.attack += params.amount ?? 1;
+          }
+        }
+        break;
+
+      case 'debuff_random_attack': {
+        const alive = this.battleManager.playerUnits.filter(u => u.data?.isAlive);
+        if (alive.length > 0) {
+          const target = alive[Math.floor(Math.random() * alive.length)];
+          if (target.data) {
+            target.data.stats.attack = Math.max(0, target.data.stats.attack - (params.amount ?? 1));
+          }
+        }
+        break;
+      }
+
+      case 'sacrifice_hp': {
+        const unit = this.battleManager.playerUnits[0];
+        if (unit?.data?.isAlive) {
+          unit.takeDamage(params.amount ?? 1);
+        }
+        break;
+      }
+
+      case 'buff_energy_max':
+        for (const unit of this.battleManager.playerUnits) {
+          if (unit.data) {
+            unit.data.maxEnergy += params.amount ?? 1;
+          }
+        }
+        break;
+    }
   }
 
   private completeNonBattleNode(): void {
@@ -572,6 +745,39 @@ export class TinyVanguardMain extends Component {
   }
 
   onDestroy(): void {
+    if (this.continueButton?.node?.isValid) {
+      this.continueButton.node.off(Button.EventType.CLICK, this.onContinueRun, this);
+    }
+    if (this.classSelectPanel?.isValid) {
+      const startBtnNode = this.classSelectPanel.getChildByName('StartBtn');
+      if (startBtnNode) {
+        const startBtn = startBtnNode.getComponent(Button);
+        if (startBtn?.node?.isValid) {
+          startBtn.node.off(Button.EventType.CLICK, this.startClassSelect, this);
+        }
+      }
+      for (let i = 0; i < CLASS_ORDER.length; i++) {
+        const btnName = `Class${i + 1}Btn`;
+        const btnNode = this.classSelectPanel.getChildByName(btnName);
+        if (btnNode?.isValid) {
+          const btn = btnNode.getComponent(Button);
+          if (btn) {
+            btn.node.off(Button.EventType.CLICK, this.onClassToggleClicked, this);
+          }
+        }
+      }
+    }
+    if (this.gameOverPanel?.isValid) {
+      const restartBtnNode = this.gameOverPanel.getChildByName('RestartButton');
+      if (restartBtnNode) {
+        const restartBtn = restartBtnNode.getComponent(Button);
+        if (restartBtn?.node?.isValid) {
+          restartBtn.node.off(Button.EventType.CLICK, this.restartFromRouteMap, this);
+        }
+      }
+    }
+    this.unbindShopPanelEvents();
+    this.unbindRestPanelEvents();
     this.battleManager = null;
     this.routeMapUI = null;
     this.battleUI = null;
