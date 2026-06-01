@@ -1,8 +1,5 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "rules": [
-    "AGENTS.md"
-  ],
   "mcp": {
     "cocos-creator": {
       "type": "remote",

@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Button } from 'cc';
+import { _decorator, Component, Node, Label, Button, UITransform } from 'cc';
 import { RouteMapUI, RouteNode } from './ui/RouteMapUI';
 import { BattleManager, BattleResult } from './battle/BattleManager';
 import { UpgradeUI, UpgradeOption } from './ui/UpgradeUI';
@@ -80,7 +80,28 @@ export class TinyVanguardMain extends Component {
     if (this.victoryPanel) this.victoryPanel.active = false;
     if (this.shopPanel) this.shopPanel.active = false;
     if (this.restPanel) this.restPanel.active = false;
-    if (this.classSelectPanel) this.classSelectPanel.active = true;
+    if (this.classSelectPanel) {
+      this.classSelectPanel.active = true;
+      const panelTransform = this.classSelectPanel.getComponent(UITransform);
+      if (panelTransform) {
+        panelTransform.setContentSize(360, 380);
+      }
+      const titleLabel = this.classSelectPanel.getChildByName('TitleLabel');
+      if (titleLabel) titleLabel.setPosition(0, 150);
+      const descLabel = this.classSelectPanel.getChildByName('DescLabel');
+      if (descLabel) descLabel.setPosition(0, 70);
+      const classBtn = this.classSelectPanel.getChildByName('Class1Btn');
+      if (classBtn) classBtn.setPosition(0, -10);
+      const startBtn = this.classSelectPanel.getChildByName('StartBtn');
+      if (startBtn) startBtn.setPosition(0, -120);
+    }
+
+    if (this.battleManager?.gridController?.node) {
+      this.battleManager.gridController.node.active = false;
+    }
+    if (this.goldLabel?.node) {
+      this.goldLabel.node.active = false;
+    }
 
     const meta = SaveManager.loadMeta();
     if (meta) {
@@ -146,6 +167,10 @@ export class TinyVanguardMain extends Component {
     this._state = 'route_map';
     this._battleCount = 0;
 
+    if (this.goldLabel?.node) {
+      this.goldLabel.node.active = true;
+    }
+
     if (this.routeMapUI) {
       this.routeMapUI.show();
       const nodes = this.routeMapUI.generateRoute();
@@ -156,6 +181,11 @@ export class TinyVanguardMain extends Component {
     if (this.battleUI) {
       this.battleUI.setEndTurnCallback(() => this.onEndTurn());
       this.battleUI.setConfirmDeployCallback(() => this.onConfirmDeploy());
+    }
+    if (this.battleManager) {
+      this.battleManager.setDamageDealtCallback((targetNode, amount) => {
+        this.battleUI.showDamageNumber(targetNode, amount);
+      });
     }
 
     this.updateGoldDisplay();
@@ -192,6 +222,9 @@ export class TinyVanguardMain extends Component {
   private startBattle(isElite: boolean, isBoss: boolean): void {
     this._state = 'battle';
     this.routeMapUI.hide();
+    if (this.battleManager?.gridController?.node) {
+      this.battleManager.gridController.node.active = true;
+    }
     this.battleUI.show();
     this.battleUI.showDeployPhase();
 
@@ -259,6 +292,9 @@ export class TinyVanguardMain extends Component {
         this.scheduleOnce(() => {
           this.battleManager.reviveAllUnits();
           this.battleUI.hide();
+          if (this.battleManager?.gridController?.node) {
+            this.battleManager.gridController.node.active = false;
+          }
           this.showUpgradeScreen();
         }, 1.0);
       }
@@ -330,6 +366,9 @@ export class TinyVanguardMain extends Component {
     this.routeMapUI.show();
     this.routeMapUI.renderRoute(this.routeMapUI.nodes);
     this.battleManager.node.active = false;
+    if (this.battleManager?.gridController?.node) {
+      this.battleManager.gridController.node.active = false;
+    }
   }
 
   private openShop(): void {
@@ -453,6 +492,14 @@ export class TinyVanguardMain extends Component {
   }
 
   private onRunComplete(victory: boolean): void {
+    if (this.battleUI) this.battleUI.hide();
+    if (this.battleManager?.gridController?.node) {
+      this.battleManager.gridController.node.active = false;
+    }
+    if (this.goldLabel?.node) {
+      this.goldLabel.node.active = false;
+    }
+
     if (victory) {
       this._runData.honor += 100;
 
@@ -507,6 +554,15 @@ export class TinyVanguardMain extends Component {
     this._state = 'class_select';
     SaveManager.clearRun();
 
+    if (this.battleManager) {
+      this.battleManager.node.active = false;
+      if (this.battleManager.gridController?.node) {
+        this.battleManager.gridController.node.active = false;
+      }
+    }
+    if (this.goldLabel?.node) {
+      this.goldLabel.node.active = false;
+    }
     if (this.classSelectPanel) {
       this.classSelectPanel.active = true;
     }

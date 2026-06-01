@@ -42,6 +42,13 @@ export class UnitController extends Component {
   private _data: UnitData | null = null;
   private _isSelected: boolean = false;
 
+  private static readonly CLASS_COLORS: Record<string, Color> = {
+    warrior: new Color(100, 180, 255),
+    archer:  new Color(100, 220, 100),
+    mage:    new Color(180, 100, 220),
+    cleric:  new Color(240, 210, 80),
+  };
+
   init(classId: string, isPlayer: boolean, gridPos: GridPosition): void {
     const classConfig = getClassById(classId);
     if (!classConfig) return;
@@ -74,7 +81,8 @@ export class UnitController extends Component {
     }
 
     if (isPlayer) {
-      this.setTintColor(new Color(100, 180, 255));
+      const classColor = UnitController.CLASS_COLORS[classId];
+      this.setTintColor(classColor ?? new Color(100, 180, 255));
     } else {
       this.setTintColor(new Color(255, 100, 100));
     }

@@ -48,6 +48,20 @@ export class BattleUI extends Component {
     }
     if (this.victoryPanel) this.victoryPanel.active = false;
     if (this.defeatPanel) this.defeatPanel.active = false;
+
+    if (this.endTurnButton) {
+      const etTransform = this.endTurnButton.node.getComponent(UITransform);
+      if (etTransform) {
+        etTransform.setContentSize(140, 46);
+      }
+      this.endTurnButton.node.setPosition(290, -280);
+    }
+    if (this.confirmDeployButton) {
+      this.confirmDeployButton.node.setPosition(0, -320);
+    }
+    if (this.deployPrompt) {
+      this.deployPrompt.setPosition(0, 260);
+    }
   }
 
   show(): void {
@@ -131,10 +145,25 @@ export class BattleUI extends Component {
     this._skillClickCallbacks = [];
     if (this.skillButtonContainer) {
       this.skillButtonContainer.removeAllChildren();
-      for (let i = 0; i < skillNames.length; i++) {
+
+      const btnWidth = 100;
+      const gap = 10;
+      const count = skillNames.length;
+      const totalWidth = count * btnWidth + (count - 1) * gap;
+      const startX = -totalWidth / 2 + btnWidth / 2;
+
+      const containerTransform = this.skillButtonContainer.getComponent(UITransform);
+      if (containerTransform) {
+        containerTransform.setContentSize(Math.max(totalWidth, 100), btnWidth + 20);
+      }
+
+      for (let i = 0; i < count; i++) {
         const btnNode = instantiate(this.skillButtonPrefab);
         const label = btnNode.getComponentInChildren(Label);
-        if (label) label.string = skillNames[i];
+        if (label) {
+          label.string = skillNames[i];
+          label.fontSize = 24;
+        }
         const btn = btnNode.getComponent(Button);
         if (btn) {
           btn.interactable = canUse[i];
@@ -143,6 +172,7 @@ export class BattleUI extends Component {
             callback(index);
           }, this);
         }
+        btnNode.setPosition(startX + i * (btnWidth + gap), 0, 0);
         this.skillButtonContainer.addChild(btnNode);
       }
     }
@@ -154,27 +184,26 @@ export class BattleUI extends Component {
     }
   }
 
-  showDamageNumber(worldPos: Vec3, amount: number): void {
-    if (!this.damageNumberPrefab) return;
+  showDamageNumber(targetNode: Node, amount: number): void {
+    if (!this.damageNumberPrefab || !targetNode?.isValid) return;
 
     const node = instantiate(this.damageNumberPrefab);
-    node.setPosition(worldPos);
-    this.node.addChild(node);
+    node.setPosition(0, 40, 0);
+    targetNode.addChild(node);
 
     const label = node.getComponentInChildren(Label);
     if (label) {
-      label.string = `-${amount}`;
+      label.string = amount > 0 ? `-${amount}` : `${amount}`;
+      label.fontSize = 28;
     }
 
     const sprite = node.getComponent(Sprite);
     if (sprite) {
-      sprite.color = amount >= 0 ? Color.RED : Color.GREEN;
+      sprite.color = amount > 0 ? Color.RED : Color.GREEN;
     }
 
     tween(node)
-      .to(0.6, {
-        position: new Vec3(worldPos.x, worldPos.y + 60, worldPos.z)
-      })
+      .to(0.6, { position: new Vec3(0, 100, 0) })
       .call(() => {
         if (node?.isValid) {
           node.destroy();

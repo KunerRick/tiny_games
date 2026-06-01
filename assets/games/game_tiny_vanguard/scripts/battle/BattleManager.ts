@@ -28,6 +28,7 @@ export class BattleManager extends Component {
   private _turnCount: number = 0;
   private _aiController: AIController = new AIController();
   private _onBattleEndCallback: ((result: BattleResult) => void) | null = null;
+  private _onDamageDealtCallback: ((targetNode: Node, amount: number) => void) | null = null;
   private _deployedPositions: GridPosition[] = [];
   private _selectedUnit: UnitController | null = null;
 
@@ -135,8 +136,7 @@ export class BattleManager extends Component {
 
     const unitCtrl = unitNode.getComponent(UnitController);
     if (unitCtrl) {
-      const existingId = config.id === BOSS_CONFIG.id ? 'warrior' : 'warrior';
-      unitCtrl.init(existingId, false, pos);
+    unitCtrl.init('warrior', false, pos);
       if (unitCtrl.data) {
         unitCtrl.data.name = config.name;
         unitCtrl.data.stats = { ...config.stats };
@@ -153,6 +153,10 @@ export class BattleManager extends Component {
   private startDeployPhase(): void {
     this._phase = 'deploy';
     this.gridController.setCellClickCallback((pos) => this.onDeployCellClicked(pos));
+  }
+
+  setDamageDealtCallback(callback: (targetNode: Node, amount: number) => void): void {
+    this._onDamageDealtCallback = callback;
   }
 
   confirmDeploy(): void {
@@ -298,6 +302,9 @@ export class BattleManager extends Component {
 
   private executeAttack(attacker: UnitController, target: UnitController): void {
     const damage = target.takeDamage(attacker.data?.stats.attack ?? 0);
+    if (this._onDamageDealtCallback && target.node?.isValid) {
+      this._onDamageDealtCallback(target.node, damage);
+    }
     if (!target.data?.isAlive) {
       this.checkBattleEnd();
     }
