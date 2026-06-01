@@ -167,10 +167,9 @@ export class BattleUI extends Component {
         const btn = btnNode.getComponent(Button);
         if (btn) {
           btn.interactable = canUse[i];
-          const index = i;
-          btn.node.on(Button.EventType.CLICK, () => {
-            callback(index);
-          }, this);
+          btnNode['_skillBtnIndex'] = i;
+          btnNode['_skillBtnCallback'] = callback;
+          btn.node.on(Button.EventType.CLICK, this.onSkillBtnClicked, this);
         }
         btnNode.setPosition(startX + i * (btnWidth + gap), 0, 0);
         this.skillButtonContainer.addChild(btnNode);
@@ -230,7 +229,20 @@ export class BattleUI extends Component {
     }
   }
 
+  private onSkillBtnClicked(btn: Button): void {
+    const node = btn.node;
+    const index = node['_skillBtnIndex'] as number;
+    const callback = node['_skillBtnCallback'] as (index: number) => void;
+    if (callback) {
+      callback(index);
+    }
+  }
+
   onDestroy(): void {
+    this.unbindEvents();
+    if (this.skillButtonContainer) {
+      this.skillButtonContainer.removeAllChildren();
+    }
     this._skillClickCallbacks = [];
     this._onEndTurn = null;
     this._onConfirmDeploy = null;

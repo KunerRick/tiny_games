@@ -98,6 +98,23 @@ export class GridController extends Component {
     this._highlightedCells = [];
   }
 
+  onDestroy(): void {
+    this._onCellClickCallback = null;
+    for (let row = 0; row < GridController.GRID_SIZE; row++) {
+      for (let col = 0; col < GridController.GRID_SIZE; col++) {
+        const cell = this._cells[row]?.[col];
+        if (cell?.isValid) {
+          const btn = cell.getComponent(Button);
+          if (btn) {
+            btn.node.off(Button.EventType.CLICK, this.onCellButtonClicked, this);
+          }
+        }
+      }
+    }
+    this._cells = [];
+    this._highlightedCells = [];
+  }
+
   positionToGrid(worldPos: { x: number; y: number }): GridPosition | null {
     const col = Math.round(worldPos.x / GridController.CELL_SIZE + 2.5);
     const row = Math.round(worldPos.y / GridController.CELL_SIZE + 2.5);

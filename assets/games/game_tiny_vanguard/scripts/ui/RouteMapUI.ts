@@ -84,10 +84,8 @@ export class RouteMapUI extends Component {
       const button = btnNode.getComponent(Button);
       if (button) {
         button.interactable = this.isReachable(node.id);
-        const nodeId = node.id;
-        button.node.on(Button.EventType.CLICK, () => {
-          this.onNodeTapped(nodeId);
-        }, this);
+        btnNode['_routeNodeId'] = node.id;
+        button.node.on(Button.EventType.CLICK, this.onRouteNodeClicked, this);
       }
 
       this.nodesContainer.addChild(btnNode);
@@ -129,8 +127,16 @@ export class RouteMapUI extends Component {
     return this._nodes;
   }
 
+  private onRouteNodeClicked(button: Button): void {
+    const nodeId = button.node['_routeNodeId'] as number;
+    this.onNodeTapped(nodeId);
+  }
+
   onDestroy(): void {
     this._onNodeClickCallback = null;
     this._nodes = [];
+    if (this.nodesContainer) {
+      this.nodesContainer.removeAllChildren();
+    }
   }
 }

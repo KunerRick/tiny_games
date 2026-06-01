@@ -91,5 +91,8 @@ export class EventUI extends Component {
   }
 
   onDestroy(): void {
+    if (this.choiceContainer) {
+      this.choiceContainer.removeAllChildren();
+    }
   }
 }

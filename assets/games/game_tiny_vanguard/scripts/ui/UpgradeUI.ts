@@ -60,11 +60,9 @@ export class UpgradeUI extends Component {
 
         const btn = card.getComponent(Button);
         if (btn) {
-          const index = i;
-          btn.node.on(Button.EventType.CLICK, () => {
-            onSelect(index);
-            this.node.active = false;
-          }, this);
+          card['_upgradeIndex'] = i;
+          card['_upgradeOnSelect'] = onSelect;
+          btn.node.on(Button.EventType.CLICK, this.onUpgradeCardClicked, this);
         }
 
         this.cardContainer.addChild(card);
@@ -72,6 +70,24 @@ export class UpgradeUI extends Component {
     }
   }
 
+  private onUpgradeCardClicked(btn: Button): void {
+    const card = btn.node;
+    const index = card['_upgradeIndex'] as number;
+    const callback = card['_upgradeOnSelect'] as (index: number) => void;
+    if (callback) {
+      callback(index);
+    }
+    this.node.active = false;
+  }
+
   onDestroy(): void {
+    if (this.cardContainer) {
+      for (const child of this.cardContainer.children) {
+        const btn = child.getComponent(Button);
+        if (btn) {
+          btn.node.off(Button.EventType.CLICK, this.onUpgradeCardClicked, this);
+        }
+      }
+    }
   }
 }
