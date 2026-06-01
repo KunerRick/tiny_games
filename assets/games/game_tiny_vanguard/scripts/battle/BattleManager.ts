@@ -6,7 +6,7 @@ import { EnemyConfig, ENEMIES, ELITE_ENEMIES, BOSS_CONFIG, getClassById, getRand
 
 const { ccclass, property } = _decorator;
 
-export type BattlePhase = 'deploy' | 'player_turn' | 'enemy_turn' | 'victory' | 'defeat';
+export type BattlePhase = 'deploy' | 'player_turn' | 'enemy_turn' | 'skill_target' | 'victory' | 'defeat';
 
 export interface BattleResult {
   victory: boolean;
@@ -31,6 +31,8 @@ export class BattleManager extends Component {
   private _onDamageDealtCallback: ((targetNode: Node, amount: number) => void) | null = null;
   private _deployedPositions: GridPosition[] = [];
   private _selectedUnit: UnitController | null = null;
+  private _pendingSkill: import('../config/GameData').SkillConfig | null = null;
+  private _skillTargets: GridPosition[] = [];
 
   get phase(): BattlePhase { return this._phase; }
   get playerUnits(): UnitController[] { return this._playerUnits; }
@@ -136,14 +138,7 @@ export class BattleManager extends Component {
 
     const unitCtrl = unitNode.getComponent(UnitController);
     if (unitCtrl) {
-    unitCtrl.init('warrior', false, pos);
-      if (unitCtrl.data) {
-        unitCtrl.data.name = config.name;
-        unitCtrl.data.stats = { ...config.stats };
-        unitCtrl.data.maxHp = config.stats.hp;
-        unitCtrl.data.currentHp = config.stats.hp;
-        unitCtrl.data.baseStats = { ...config.stats };
-      }
+      unitCtrl.initFromEnemyConfig(config, pos);
       this._enemyUnits.push(unitCtrl);
       return unitCtrl;
     }
@@ -264,6 +259,10 @@ export class BattleManager extends Component {
   }
 
   onCellClicked(gridPos: GridPosition): void {
+    if (this._phase === 'skill_target') {
+      this.handleSkillTargetClick(gridPos);
+      return;
+    }
     if (this._phase !== 'player_turn') return;
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive) return;
@@ -300,6 +299,207 @@ export class BattleManager extends Component {
     }
   }
 
+  private handleSkillTargetClick(gridPos: GridPosition): void {
+    const isTarget = this._skillTargets.some(t => t.row === gridPos.row && t.col === gridPos.col);
+    if (!isTarget) {
+      this._pendingSkill = null;
+      this._skillTargets = [];
+      this._phase = 'player_turn';
+      this.highlightUnitActions(this._selectedUnit!);
+      return;
+    }
+
+    const unit = this._selectedUnit;
+    if (!unit?.data || !this._pendingSkill) return;
+    const skillIndex = this._pendingSkill['_skillIndex'] as number;
+    unit.useSkill(skillIndex);
+
+    const targetUnit = [...this._enemyUnits, ...this._playerUnits].find(u =>
+      u.data?.isAlive && u.data.gridPos.row === gridPos.row && u.data.gridPos.col === gridPos.col
+    );
+
+    if (targetUnit) {
+      this.applySkillEffects(unit, targetUnit, this._pendingSkill);
+    }
+
+    this._pendingSkill = null;
+    this._skillTargets = [];
+    this.gridController.clearHighlights();
+    this.selectNextPlayerUnit();
+  }
+
+  private applySkillEffects(caster: UnitController, target: UnitController, skill: import('../config/GameData').SkillConfig): void {
+    if (!caster.data) return;
+    for (const effect of skill.effects) {
+      switch (effect.type) {
+        case 'damage': {
+          const dmg = target.takeDamage(effect.params.amount ?? 0, skill.id === 'smite');
+          if (this._onDamageDealtCallback && target.node?.isValid) {
+            this._onDamageDealtCallback(target.node, dmg);
+          }
+          break;
+        }
+        case 'damage_multiplier': {
+          const rawDmg = Math.floor((caster.data.stats.attack) * (effect.params.multiplier ?? 1));
+          const dmg = target.takeDamage(rawDmg, skill.id === 'precise_shot');
+          if (this._onDamageDealtCallback && target.node?.isValid) {
+            this._onDamageDealtCallback(target.node, dmg);
+          }
+          break;
+        }
+        case 'multi_attack': {
+          const count = effect.params.count ?? 2;
+          const mult = effect.params.multiplier ?? 0.7;
+          for (let i = 0; i < count; i++) {
+            const rawDmg = Math.floor(caster.data.stats.attack * mult);
+            const dmg = target.takeDamage(rawDmg);
+            if (this._onDamageDealtCallback && target.node?.isValid) {
+              this._onDamageDealtCallback(target.node, dmg);
+            }
+            if (!target.data?.isAlive) break;
+          }
+          break;
+        }
+        case 'heal': {
+          target.heal(effect.params.amount ?? 4);
+          if (this._onDamageDealtCallback && target.node?.isValid) {
+            this._onDamageDealtCallback(target.node, effect.params.amount ?? 4);
+          }
+          break;
+        }
+        case 'aoe_heal': {
+          const radius = effect.params.radius ?? 2;
+          const amount = effect.params.amount ?? 3;
+          for (const ally of this._playerUnits) {
+            if (ally.data?.isAlive) {
+              const dist = Math.abs(ally.data.gridPos.row - target.data!.gridPos.row) +
+                Math.abs(ally.data.gridPos.col - target.data!.gridPos.col);
+              if (dist <= radius) {
+                ally.heal(amount);
+              }
+            }
+          }
+          break;
+        }
+        case 'aoe_adjacent': {
+          const mult2 = effect.params.multiplier ?? 1.0;
+          for (const enemy of this._enemyUnits) {
+            if (enemy.data?.isAlive && caster.data) {
+              const dist = Math.abs(enemy.data.gridPos.row - caster.data.gridPos.row) +
+                Math.abs(enemy.data.gridPos.col - caster.data.gridPos.col);
+              if (dist <= 1) {
+                const dmg = Math.floor(caster.data.stats.attack * mult2);
+                enemy.takeDamage(dmg);
+                if (this._onDamageDealtCallback && enemy.node?.isValid) {
+                  this._onDamageDealtCallback(enemy.node, dmg);
+                }
+              }
+            }
+          }
+          break;
+        }
+        case 'aoe_1radius': {
+          const mult3 = effect.params.multiplier ?? 1.5;
+          const baseDmg = Math.floor((caster.data.stats.attack) * mult3);
+          const center = target.data?.gridPos ?? caster.data.gridPos;
+          for (const enemy of this._enemyUnits) {
+            if (enemy.data?.isAlive) {
+              const dist = Math.abs(enemy.data.gridPos.row - center.row) +
+                Math.abs(enemy.data.gridPos.col - center.col);
+              if (dist <= 1) {
+                const dmg = enemy.takeDamage(baseDmg);
+                if (this._onDamageDealtCallback && enemy.node?.isValid) {
+                  this._onDamageDealtCallback(enemy.node, dmg);
+                }
+              }
+            }
+          }
+          break;
+        }
+        case 'aoe_3x3': {
+          const mult4 = effect.params.multiplier ?? 0.6;
+          const baseDmg2 = Math.floor(caster.data.stats.attack * mult4);
+          const center2 = target.data?.gridPos ?? caster.data.gridPos;
+          for (const enemy of this._enemyUnits) {
+            if (enemy.data?.isAlive) {
+              const dist = Math.abs(enemy.data.gridPos.row - center2.row) +
+                Math.abs(enemy.data.gridPos.col - center2.col);
+              if (dist <= 1) {
+                const dmg = enemy.takeDamage(baseDmg2);
+                if (this._onDamageDealtCallback && enemy.node?.isValid) {
+                  this._onDamageDealtCallback(enemy.node, dmg);
+                }
+              }
+            }
+          }
+          break;
+        }
+        case 'execute': {
+          const threshold = effect.params.threshold ?? 0.3;
+          const mult5 = effect.params.multiplier ?? 3.0;
+          const isLowHp = target.data && (target.data.currentHp / target.data.maxHp) <= threshold;
+          const rawDmg2 = isLowHp
+            ? Math.floor(caster.data.stats.attack * mult5)
+            : caster.data.stats.attack;
+          const dmg2 = target.takeDamage(rawDmg2);
+          if (this._onDamageDealtCallback && target.node?.isValid) {
+            this._onDamageDealtCallback(target.node, dmg2);
+          }
+          break;
+        }
+        case 'buff_attack': {
+          target.addBuff('buff_attack', effect.params.duration ?? 99, { amount: effect.params.amount ?? 2 });
+          break;
+        }
+        case 'buff_move': {
+          target.addBuff('buff_move', effect.params.duration ?? 1, { amount: effect.params.amount ?? 2 });
+          break;
+        }
+        case 'mark': {
+          target.addBuff('mark', effect.params.duration ?? 2, { amount: effect.params.amount ?? 2 });
+          break;
+        }
+        case 'shield': {
+          if (target.data) {
+            target.data.shieldAmount += effect.params.amount ?? 3;
+          }
+          break;
+        }
+        case 'knockback': {
+          if (!target.data) break;
+          const distance = effect.params.distance ?? 1;
+          const dir = {
+            row: target.data.gridPos.row - caster.data.gridPos.row,
+            col: target.data.gridPos.col - caster.data.gridPos.col,
+          };
+          const newRow = target.data.gridPos.row + (dir.row !== 0 ? Math.sign(dir.row) * distance : 0);
+          const newCol = target.data.gridPos.col + (dir.col !== 0 ? Math.sign(dir.col) * distance : 0);
+          if (newRow >= 0 && newRow < 6 && newCol >= 0 && newCol < 6 && !this.isOccupied({ row: newRow, col: newCol })) {
+            target.setGridPosition({ row: newRow, col: newCol });
+          }
+          break;
+        }
+        case 'bonus_damage': {
+          const bonusRaw = (caster.data.stats.attack) + (effect.params.amount ?? 2);
+          const bonusDmg = target.takeDamage(bonusRaw);
+          if (this._onDamageDealtCallback && target.node?.isValid) {
+            this._onDamageDealtCallback(target.node, bonusDmg);
+          }
+          break;
+        }
+        case 'immobilize': {
+          target.addBuff('immobilize', effect.params.duration ?? 1, {});
+          break;
+        }
+        case 'buff_next_skill': {
+          caster.addBuff('buff_next_skill', 99, { multiplier: effect.params.multiplier ?? 1.5 });
+          break;
+        }
+      }
+    }
+    this.checkBattleEnd();
+  }
+
   private executeAttack(attacker: UnitController, target: UnitController): void {
     const damage = target.takeDamage(attacker.data?.stats.attack ?? 0);
     if (this._onDamageDealtCallback && target.node?.isValid) {
@@ -313,10 +513,39 @@ export class BattleManager extends Component {
   onSkillUsed(skillIndex: number): void {
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive) return;
-    const skill = unit.useSkill(skillIndex);
-    if (skill) {
+    const skill = unit.peekSkill(skillIndex);
+    if (!skill) return;
+    if (skill.targetType === 'self') {
+      unit.useSkill(skillIndex);
+      this.applySkillEffects(unit, unit, skill);
       this.selectNextPlayerUnit();
+    } else {
+      this._pendingSkill = skill;
+      this._pendingSkill['_skillIndex'] = skillIndex;
+      this._phase = 'skill_target';
+      this._skillTargets = this.getValidSkillTargets(unit, skill);
+      this.gridController.highlightCells(this._skillTargets, new Color(255, 200, 50, 200));
     }
+  }
+
+  private getValidSkillTargets(unit: UnitController, skill: import('../config/GameData').SkillConfig): GridPosition[] {
+    if (!unit.data) return [];
+    if (skill.targetType === 'enemy') {
+      return this._enemyUnits
+        .filter(e => e.data?.isAlive)
+        .map(e => e.data!.gridPos);
+    }
+    if (skill.targetType === 'ally') {
+      return this._playerUnits
+        .filter(p => p.data?.isAlive && p.data.id !== unit.data.id)
+        .map(p => p.data!.gridPos);
+    }
+    if (skill.targetType === 'aoe') {
+      return this._enemyUnits
+        .filter(e => e.data?.isAlive)
+        .map(e => e.data!.gridPos);
+    }
+    return [];
   }
 
   endCurrentUnitTurn(): void {

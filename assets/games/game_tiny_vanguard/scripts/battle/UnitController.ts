@@ -1,6 +1,6 @@
 import { _decorator, Component, Node, Sprite, Color } from 'cc';
 import { GridPosition, GridController } from './GridController';
-import { SkillConfig, getClassById } from '../config/GameData';
+import { SkillConfig, getClassById, EnemyConfig } from '../config/GameData';
 
 const { ccclass, property } = _decorator;
 
@@ -48,6 +48,37 @@ export class UnitController extends Component {
     mage:    new Color(180, 100, 220),
     cleric:  new Color(240, 210, 80),
   };
+
+  initFromEnemyConfig(config: EnemyConfig, gridPos: GridPosition): void {
+    this._data = {
+      id: `e_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      name: config.name,
+      classId: config.id,
+      isPlayer: false,
+      stats: { ...config.stats },
+      currentHp: config.stats.hp,
+      maxHp: config.stats.hp,
+      energy: 0,
+      maxEnergy: 0,
+      energyRegen: 0,
+      baseStats: { ...config.stats },
+      skills: [],
+      gridPos: { ...gridPos },
+      isAlive: true,
+      hasMoved: false,
+      hasActed: false,
+      buffs: [],
+      shieldAmount: 0,
+    };
+
+    this.updatePosition();
+
+    if (this.selectionIndicator) {
+      this.selectionIndicator.active = false;
+    }
+
+    this.setTintColor(new Color(255, 100, 100));
+  }
 
   init(classId: string, isPlayer: boolean, gridPos: GridPosition): void {
     const classConfig = getClassById(classId);
@@ -168,6 +199,11 @@ export class UnitController extends Component {
     if (!this._data) return false;
     if (skillIndex < 0 || skillIndex >= this._data.skills.length) return false;
     return this._data.energy >= this._data.skills[skillIndex].energyCost;
+  }
+
+  peekSkill(skillIndex: number): SkillConfig | null {
+    if (!this._data || skillIndex < 0 || skillIndex >= this._data.skills.length) return null;
+    return this._data.skills[skillIndex];
   }
 
   useSkill(skillIndex: number): SkillConfig | null {
