@@ -1,6 +1,6 @@
 import { _decorator, Component, Node, Sprite, Color } from 'cc';
 import { GridPosition, GridController } from './GridController';
-import { SkillConfig, getClassById, EnemyConfig } from '../config/GameData';
+import { SkillConfig, getClassById, EnemyConfig, AIType } from '../config/GameData';
 
 const { ccclass, property } = _decorator;
 
@@ -23,6 +23,8 @@ export interface UnitData {
   hasActed: boolean;
   buffs: { type: string; turnsLeft: number; params: Record<string, number> }[];
   shieldAmount: number;
+  passiveApplied: string[];
+  aiBehavior: AIType;
 }
 
 export interface BuffEntry {
@@ -41,6 +43,7 @@ export class UnitController extends Component {
 
   private _data: UnitData | null = null;
   private _isSelected: boolean = false;
+  private _countering: boolean = false;
 
   private static readonly CLASS_COLORS: Record<string, Color> = {
     warrior: new Color(100, 180, 255),
@@ -69,6 +72,8 @@ export class UnitController extends Component {
       hasActed: false,
       buffs: [],
       shieldAmount: 0,
+      passiveApplied: [],
+      aiBehavior: config.aiBehavior,
     };
 
     this.updatePosition();
@@ -103,6 +108,8 @@ export class UnitController extends Component {
       hasActed: false,
       buffs: [],
       shieldAmount: 0,
+      passiveApplied: [],
+      aiBehavior: 'aggressive',
     };
 
     this.updatePosition();
@@ -159,7 +166,7 @@ export class UnitController extends Component {
     this.updatePosition();
   }
 
-  takeDamage(rawAmount: number, ignoreDefense: boolean = false): number {
+  takeDamage(rawAmount: number, ignoreDefense: boolean = false, attacker?: UnitController): number {
     if (!this._data || !this._data.isAlive) return 0;
 
     let actualDamage = rawAmount;
@@ -182,7 +189,18 @@ export class UnitController extends Component {
       this._data.isAlive = false;
     }
 
+    if (attacker && this._data.isAlive && !this._countering && this.hasPassive('counter')) {
+      this._countering = true;
+      const counterDmg = Math.max(1, Math.floor(this._data.stats.attack * 0.5));
+      attacker.takeDamage(counterDmg, false, this);
+      this._countering = false;
+    }
+
     return actualDamage;
+  }
+
+  private hasPassive(skillId: string): boolean {
+    return this._data?.skills.some(s => s.id === skillId) ?? false;
   }
 
   heal(amount: number): void {
@@ -240,14 +258,28 @@ export class UnitController extends Component {
       this._data.maxHp += 1;
       this._data.currentHp = Math.min(this._data.currentHp + 1, this._data.maxHp);
       this._data.stats.defense += 1;
+      if (!this._data.passiveApplied.includes('toughness')) {
+        this._data.passiveApplied.push('toughness');
+      }
     }
     if (skillId === 'arcane_flow') {
       this._data.energyRegen += 1;
+      if (!this._data.passiveApplied.includes('arcane_flow')) {
+        this._data.passiveApplied.push('arcane_flow');
+      }
     }
   }
 
-  onTurnStart(): void {
+  onTurnStart(allies?: UnitController[]): void {
     if (!this._data || !this._data.isAlive) return;
+
+    for (let i = this._data.buffs.length - 1; i >= 0; i--) {
+      const buff = this._data.buffs[i];
+      if (buff.type === 'poison') {
+        const poisonDmg = buff.params.damage ?? 1;
+        this.takeDamage(poisonDmg, true);
+      }
+    }
 
     this._data.energy = Math.min(this._data.maxEnergy, this._data.energy + this._data.energyRegen);
     this._data.hasMoved = false;
@@ -259,6 +291,46 @@ export class UnitController extends Component {
       if (buff.turnsLeft <= 0) {
         this.removeBuff(buff);
         this._data.buffs.splice(i, 1);
+      }
+    }
+
+    for (const skill of this._data.skills) {
+      if (skill.type !== 'passive' || skill.triggerCondition !== 'on_turn_start') continue;
+      if (this._data.passiveApplied.includes(skill.id)) continue;
+
+      for (const effect of skill.effects) {
+        switch (effect.type) {
+          case 'passive_toughness':
+            this._data.maxHp += effect.params.hp ?? 1;
+            this._data.currentHp = Math.min(this._data.currentHp + (effect.params.hp ?? 1), this._data.maxHp);
+            this._data.stats.defense += effect.params.defense ?? 1;
+            this._data.passiveApplied.push(skill.id);
+            break;
+          case 'passive_eagle_eye':
+            this._data.stats.range += effect.params.range ?? 1;
+            this._data.passiveApplied.push(skill.id);
+            break;
+          case 'passive_energy_regen':
+            this._data.energyRegen += effect.params.amount ?? 1;
+            this._data.passiveApplied.push(skill.id);
+            break;
+          case 'passive_aura_heal': {
+            if (allies) {
+              const radius = effect.params.radius ?? 1;
+              const amount = effect.params.amount ?? 1;
+              for (const ally of allies) {
+                if (ally !== this && ally.data?.isAlive) {
+                  const dist = Math.abs(ally.data.gridPos.row - this._data.gridPos.row) +
+                    Math.abs(ally.data.gridPos.col - this._data.gridPos.col);
+                  if (dist <= radius) {
+                    ally.heal(amount);
+                  }
+                }
+              }
+            }
+            break;
+          }
+        }
       }
     }
   }

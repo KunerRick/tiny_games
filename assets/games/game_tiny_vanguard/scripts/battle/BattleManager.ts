@@ -2,7 +2,7 @@ import { _decorator, Component, Node, Color, instantiate, Prefab } from 'cc';
 import { GridController, GridPosition } from './GridController';
 import { UnitController } from './UnitController';
 import { AIController } from './AIController';
-import { EnemyConfig, ENEMIES, ELITE_ENEMIES, BOSS_CONFIG, getClassById, getRandomSkillsFromPool } from '../config/GameData';
+import { EnemyConfig, SkillEffect, ENEMIES, ELITE_ENEMIES, BOSS_CONFIG, getClassById, getRandomSkillsFromPool } from '../config/GameData';
 
 const { ccclass, property } = _decorator;
 
@@ -180,7 +180,7 @@ export class BattleManager extends Component {
     this._currentUnitIndex = 0;
     for (const unit of this._playerUnits) {
       if (unit.data?.isAlive) {
-        unit.onTurnStart();
+        unit.onTurnStart(this._playerUnits);
       }
     }
     this.selectNextPlayerUnit();
@@ -318,9 +318,7 @@ export class BattleManager extends Component {
       u.data?.isAlive && u.data.gridPos.row === gridPos.row && u.data.gridPos.col === gridPos.col
     );
 
-    if (targetUnit) {
-      this.applySkillEffects(unit, targetUnit, this._pendingSkill);
-    }
+    this.executeSkillEffects(unit, targetUnit, gridPos, this._pendingSkill.effects);
 
     this._pendingSkill = null;
     this._skillTargets = [];
@@ -328,52 +326,151 @@ export class BattleManager extends Component {
     this.selectNextPlayerUnit();
   }
 
-  private applySkillEffects(caster: UnitController, target: UnitController, skill: import('../config/GameData').SkillConfig): void {
+  private executeSkillEffects(
+    caster: UnitController,
+    target: UnitController | null,
+    targetPos: GridPosition | null,
+    effects: SkillEffect[]
+  ): void {
     if (!caster.data) return;
-    for (const effect of skill.effects) {
+    const ignoreDefense = effects.some(e => e.type === 'ignore_defense' && e.params.value === 1);
+
+    for (const effect of effects) {
       switch (effect.type) {
+        case 'ignore_defense':
+          break;
+
         case 'damage': {
-          const dmg = target.takeDamage(effect.params.amount ?? 0, skill.id === 'smite');
-          if (this._onDamageDealtCallback && target.node?.isValid) {
+          if (!target?.data) break;
+          const rawDmg = effect.params.amount ?? 0;
+          const dmg = target.takeDamage(rawDmg, ignoreDefense);
+          if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
             this._onDamageDealtCallback(target.node, dmg);
           }
           break;
         }
+
         case 'damage_multiplier': {
-          const rawDmg = Math.floor((caster.data.stats.attack) * (effect.params.multiplier ?? 1));
-          const dmg = target.takeDamage(rawDmg, skill.id === 'precise_shot');
-          if (this._onDamageDealtCallback && target.node?.isValid) {
+          if (!target?.data) break;
+          const mult = effect.params.multiplier ?? 1;
+          const rawDmg = Math.floor(caster.data.stats.attack * mult);
+          const dmg = target.takeDamage(rawDmg, ignoreDefense);
+          if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
             this._onDamageDealtCallback(target.node, dmg);
           }
           break;
         }
+
+        case 'heal': {
+          if (!target?.data) break;
+          target.heal(effect.params.amount ?? 4);
+          break;
+        }
+
         case 'multi_attack': {
+          if (!target?.data) break;
           const count = effect.params.count ?? 2;
           const mult = effect.params.multiplier ?? 0.7;
           for (let i = 0; i < count; i++) {
             const rawDmg = Math.floor(caster.data.stats.attack * mult);
-            const dmg = target.takeDamage(rawDmg);
-            if (this._onDamageDealtCallback && target.node?.isValid) {
+            const dmg = target.takeDamage(rawDmg, ignoreDefense);
+            if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
               this._onDamageDealtCallback(target.node, dmg);
             }
-            if (!target.data?.isAlive) break;
+            if (!target.data.isAlive) break;
           }
           break;
         }
-        case 'heal': {
-          target.heal(effect.params.amount ?? 4);
-          if (this._onDamageDealtCallback && target.node?.isValid) {
-            this._onDamageDealtCallback(target.node, effect.params.amount ?? 4);
+
+        case 'execute': {
+          if (!target?.data) break;
+          const threshold = effect.params.threshold ?? 0.3;
+          const multiplier = effect.params.multiplier ?? 3.0;
+          const isLowHp = (target.data.currentHp / target.data.maxHp) <= threshold;
+          const rawDmg = isLowHp
+            ? Math.floor(caster.data.stats.attack * multiplier)
+            : caster.data.stats.attack;
+          const dmg = target.takeDamage(rawDmg, ignoreDefense);
+          if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
+            this._onDamageDealtCallback(target.node, dmg);
           }
           break;
         }
+
+        case 'bonus_damage': {
+          if (!target?.data) break;
+          const bonusRaw = caster.data.stats.attack + (effect.params.amount ?? 2);
+          const dmg = target.takeDamage(bonusRaw, ignoreDefense);
+          if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
+            this._onDamageDealtCallback(target.node, dmg);
+          }
+          break;
+        }
+
+        case 'aoe_adjacent': {
+          const mult2 = effect.params.multiplier ?? 1.0;
+          const baseDmg = Math.floor(caster.data.stats.attack * mult2);
+          for (const enemy of this._enemyUnits) {
+            if (enemy.data?.isAlive && caster.data) {
+              const dist = Math.abs(enemy.data.gridPos.row - caster.data.gridPos.row) +
+                Math.abs(enemy.data.gridPos.col - caster.data.gridPos.col);
+              if (dist <= 1) {
+                const dmg = enemy.takeDamage(baseDmg, ignoreDefense);
+                if (dmg > 0 && this._onDamageDealtCallback && enemy.node?.isValid) {
+                  this._onDamageDealtCallback(enemy.node, dmg);
+                }
+              }
+            }
+          }
+          break;
+        }
+
+        case 'aoe_1radius': {
+          const mult3 = effect.params.multiplier ?? 1.5;
+          const baseDmg = Math.floor(caster.data.stats.attack * mult3);
+          const center = target?.data?.gridPos ?? targetPos ?? caster.data.gridPos;
+          for (const enemy of this._enemyUnits) {
+            if (enemy.data?.isAlive) {
+              const dist = Math.abs(enemy.data.gridPos.row - center.row) +
+                Math.abs(enemy.data.gridPos.col - center.col);
+              if (dist <= 1) {
+                const dmg = enemy.takeDamage(baseDmg, ignoreDefense);
+                if (dmg > 0 && this._onDamageDealtCallback && enemy.node?.isValid) {
+                  this._onDamageDealtCallback(enemy.node, dmg);
+                }
+              }
+            }
+          }
+          break;
+        }
+
+        case 'aoe_3x3': {
+          const mult4 = effect.params.multiplier ?? 0.6;
+          const baseDmg = Math.floor(caster.data.stats.attack * mult4);
+          const center = target?.data?.gridPos ?? targetPos ?? caster.data.gridPos;
+          for (const enemy of this._enemyUnits) {
+            if (enemy.data?.isAlive) {
+              const dr = Math.abs(enemy.data.gridPos.row - center.row);
+              const dc = Math.abs(enemy.data.gridPos.col - center.col);
+              if (dr <= 1 && dc <= 1) {
+                const dmg = enemy.takeDamage(baseDmg, ignoreDefense);
+                if (dmg > 0 && this._onDamageDealtCallback && enemy.node?.isValid) {
+                  this._onDamageDealtCallback(enemy.node, dmg);
+                }
+              }
+            }
+          }
+          break;
+        }
+
         case 'aoe_heal': {
           const radius = effect.params.radius ?? 2;
           const amount = effect.params.amount ?? 3;
+          const center = target?.data?.gridPos ?? targetPos ?? caster.data.gridPos;
           for (const ally of this._playerUnits) {
             if (ally.data?.isAlive) {
-              const dist = Math.abs(ally.data.gridPos.row - target.data!.gridPos.row) +
-                Math.abs(ally.data.gridPos.col - target.data!.gridPos.col);
+              const dist = Math.abs(ally.data.gridPos.row - center.row) +
+                Math.abs(ally.data.gridPos.col - center.col);
               if (dist <= radius) {
                 ally.heal(amount);
               }
@@ -381,92 +478,39 @@ export class BattleManager extends Component {
           }
           break;
         }
-        case 'aoe_adjacent': {
-          const mult2 = effect.params.multiplier ?? 1.0;
-          for (const enemy of this._enemyUnits) {
-            if (enemy.data?.isAlive && caster.data) {
-              const dist = Math.abs(enemy.data.gridPos.row - caster.data.gridPos.row) +
-                Math.abs(enemy.data.gridPos.col - caster.data.gridPos.col);
-              if (dist <= 1) {
-                const dmg = Math.floor(caster.data.stats.attack * mult2);
-                enemy.takeDamage(dmg);
-                if (this._onDamageDealtCallback && enemy.node?.isValid) {
-                  this._onDamageDealtCallback(enemy.node, dmg);
-                }
-              }
+
+        case 'chain': {
+          if (!target?.data) break;
+          const chainCount = effect.params.chainCount ?? 2;
+          const chainMult = effect.params.multiplier ?? 0.8;
+          const baseChainDmg = Math.floor(caster.data.stats.attack * chainMult);
+          const mainDmg = target.takeDamage(baseChainDmg, ignoreDefense);
+          if (mainDmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
+            this._onDamageDealtCallback(target.node, mainDmg);
+          }
+          const otherEnemies = this._enemyUnits.filter(e =>
+            e !== target && e.data?.isAlive
+          );
+          otherEnemies.sort((a, b) => {
+            const da = Math.abs(a.data!.gridPos.row - target!.data!.gridPos.row) +
+              Math.abs(a.data!.gridPos.col - target!.data!.gridPos.col);
+            const db = Math.abs(b.data!.gridPos.row - target!.data!.gridPos.row) +
+              Math.abs(b.data!.gridPos.col - target!.data!.gridPos.col);
+            return da - db;
+          });
+          for (let i = 0; i < Math.min(chainCount, otherEnemies.length); i++) {
+            const chainTarget = otherEnemies[i];
+            const chainDmg = chainTarget.takeDamage(baseChainDmg, ignoreDefense);
+            if (chainDmg > 0 && this._onDamageDealtCallback && chainTarget.node?.isValid) {
+              this._onDamageDealtCallback(chainTarget.node, chainDmg);
             }
+            if (!chainTarget.data?.isAlive) break;
           }
           break;
         }
-        case 'aoe_1radius': {
-          const mult3 = effect.params.multiplier ?? 1.5;
-          const baseDmg = Math.floor((caster.data.stats.attack) * mult3);
-          const center = target.data?.gridPos ?? caster.data.gridPos;
-          for (const enemy of this._enemyUnits) {
-            if (enemy.data?.isAlive) {
-              const dist = Math.abs(enemy.data.gridPos.row - center.row) +
-                Math.abs(enemy.data.gridPos.col - center.col);
-              if (dist <= 1) {
-                const dmg = enemy.takeDamage(baseDmg);
-                if (this._onDamageDealtCallback && enemy.node?.isValid) {
-                  this._onDamageDealtCallback(enemy.node, dmg);
-                }
-              }
-            }
-          }
-          break;
-        }
-        case 'aoe_3x3': {
-          const mult4 = effect.params.multiplier ?? 0.6;
-          const baseDmg2 = Math.floor(caster.data.stats.attack * mult4);
-          const center2 = target.data?.gridPos ?? caster.data.gridPos;
-          for (const enemy of this._enemyUnits) {
-            if (enemy.data?.isAlive) {
-              const dist = Math.abs(enemy.data.gridPos.row - center2.row) +
-                Math.abs(enemy.data.gridPos.col - center2.col);
-              if (dist <= 1) {
-                const dmg = enemy.takeDamage(baseDmg2);
-                if (this._onDamageDealtCallback && enemy.node?.isValid) {
-                  this._onDamageDealtCallback(enemy.node, dmg);
-                }
-              }
-            }
-          }
-          break;
-        }
-        case 'execute': {
-          const threshold = effect.params.threshold ?? 0.3;
-          const mult5 = effect.params.multiplier ?? 3.0;
-          const isLowHp = target.data && (target.data.currentHp / target.data.maxHp) <= threshold;
-          const rawDmg2 = isLowHp
-            ? Math.floor(caster.data.stats.attack * mult5)
-            : caster.data.stats.attack;
-          const dmg2 = target.takeDamage(rawDmg2);
-          if (this._onDamageDealtCallback && target.node?.isValid) {
-            this._onDamageDealtCallback(target.node, dmg2);
-          }
-          break;
-        }
-        case 'buff_attack': {
-          target.addBuff('buff_attack', effect.params.duration ?? 99, { amount: effect.params.amount ?? 2 });
-          break;
-        }
-        case 'buff_move': {
-          target.addBuff('buff_move', effect.params.duration ?? 1, { amount: effect.params.amount ?? 2 });
-          break;
-        }
-        case 'mark': {
-          target.addBuff('mark', effect.params.duration ?? 2, { amount: effect.params.amount ?? 2 });
-          break;
-        }
-        case 'shield': {
-          if (target.data) {
-            target.data.shieldAmount += effect.params.amount ?? 3;
-          }
-          break;
-        }
+
         case 'knockback': {
-          if (!target.data) break;
+          if (!target?.data || !caster.data) break;
           const distance = effect.params.distance ?? 1;
           const dir = {
             row: target.data.gridPos.row - caster.data.gridPos.row,
@@ -479,31 +523,83 @@ export class BattleManager extends Component {
           }
           break;
         }
-        case 'bonus_damage': {
-          const bonusRaw = (caster.data.stats.attack) + (effect.params.amount ?? 2);
-          const bonusDmg = target.takeDamage(bonusRaw);
-          if (this._onDamageDealtCallback && target.node?.isValid) {
-            this._onDamageDealtCallback(target.node, bonusDmg);
+
+        case 'retreat': {
+          if (!caster.data || !target?.data) break;
+          const retreatDist = effect.params.distance ?? 1;
+          const retreatDir = {
+            row: caster.data.gridPos.row - target.data.gridPos.row,
+            col: caster.data.gridPos.col - target.data.gridPos.col,
+          };
+          const newRow = caster.data.gridPos.row + (retreatDir.row !== 0 ? Math.sign(retreatDir.row) * retreatDist : 0);
+          const newCol = caster.data.gridPos.col + (retreatDir.col !== 0 ? Math.sign(retreatDir.col) * retreatDist : 0);
+          if (newRow >= 0 && newRow < 6 && newCol >= 0 && newCol < 6 && !this.isOccupied({ row: newRow, col: newCol })) {
+            caster.setGridPosition({ row: newRow, col: newCol });
           }
           break;
         }
-        case 'immobilize': {
-          target.addBuff('immobilize', effect.params.duration ?? 1, {});
+
+        case 'teleport': {
+          if (!caster.data || !targetPos) break;
+          caster.setGridPosition(targetPos);
           break;
         }
+
+        case 'shield': {
+          const targetUnit = target ?? caster;
+          if (targetUnit?.data) {
+            targetUnit.data.shieldAmount += effect.params.amount ?? 3;
+          }
+          break;
+        }
+
+        case 'buff_attack': {
+          const buffTarget = target ?? caster;
+          buffTarget?.addBuff('buff_attack', effect.params.duration ?? 99, { amount: effect.params.amount ?? 2 });
+          break;
+        }
+
+        case 'buff_move': {
+          const buffTarget = target ?? caster;
+          buffTarget?.addBuff('buff_move', effect.params.duration ?? 1, { amount: effect.params.amount ?? 2 });
+          break;
+        }
+
+        case 'mark': {
+          if (target) {
+            target.addBuff('mark', effect.params.duration ?? 2, { amount: effect.params.amount ?? 2 });
+          }
+          break;
+        }
+
+        case 'immobilize': {
+          if (target) {
+            target.addBuff('immobilize', effect.params.duration ?? 1, {});
+          }
+          break;
+        }
+
         case 'buff_next_skill': {
           caster.addBuff('buff_next_skill', 99, { multiplier: effect.params.multiplier ?? 1.5 });
           break;
         }
       }
     }
+    // 技能攻击后触发淬毒箭被动（仅对敌人生效）
+    if (caster.data && caster.hasPassive('poison_arrows') && target?.data && !target.data.isPlayer) {
+      target.addBuff('poison', 2, { damage: 1 });
+    }
     this.checkBattleEnd();
   }
 
   private executeAttack(attacker: UnitController, target: UnitController): void {
-    const damage = target.takeDamage(attacker.data?.stats.attack ?? 0);
+    const damage = target.takeDamage(attacker.data?.stats.attack ?? 0, false, attacker);
     if (this._onDamageDealtCallback && target.node?.isValid) {
       this._onDamageDealtCallback(target.node, damage);
+    }
+    // 攻击后触发被动
+    if (attacker.data && attacker.hasPassive('poison_arrows')) {
+      target.addBuff('poison', 2, { damage: 1 });
     }
     if (!target.data?.isAlive) {
       this.checkBattleEnd();
@@ -517,7 +613,9 @@ export class BattleManager extends Component {
     if (!skill) return;
     if (skill.targetType === 'self') {
       unit.useSkill(skillIndex);
-      this.applySkillEffects(unit, unit, skill);
+      if (unit.data) {
+        this.executeSkillEffects(unit, unit, unit.data.gridPos, skill.effects);
+      }
       this.selectNextPlayerUnit();
     } else {
       this._pendingSkill = skill;

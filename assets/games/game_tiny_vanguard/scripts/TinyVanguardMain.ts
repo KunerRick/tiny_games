@@ -419,55 +419,98 @@ export class TinyVanguardMain extends Component {
   }
 
   private showUpgradeScreen(): void {
-    const options = this.generateUpgradeOptions();
-    this.upgradeUI.show();
-    this.upgradeUI.showUpgradeOptions(options, (index) => {
-      this.applyUpgrade(options[index]);
-      this.upgradeUI.hide();
+    const allOptions = this.generateUpgradeOptions();
+    const unitNames = this.battleManager.playerUnits
+      .filter(u => u.data?.isAlive)
+      .map(u => u.data!.name);
+
+    if (allOptions.length === 0 || unitNames.length === 0) {
       this.returnToRouteMap();
-    });
-  }
+      return;
+    }
 
-  private generateUpgradeOptions(): UpgradeOption[] {
-    const options: UpgradeOption[] = [];
-    const unit = this.battleManager.playerUnits[0];
-    if (!unit?.data) return options;
-
-    const classConfig = CLASSES.find(c => c.id === unit.data.classId);
-    if (classConfig) {
-      const skills = getRandomSkillsFromPool(classConfig.skillPool, 3);
-      for (const skill of skills) {
-        options.push({
-          name: skill.name,
-          description: skill.description,
-          type: 'skill',
-          skillId: skill.id,
-        });
+    this.upgradeUI.show();
+    this.upgradeUI.showUpgradeOptions(
+      allOptions,
+      unitNames,
+      (unitIndex, optionIndex) => {
+        this.applyUpgrade(unitIndex, optionIndex, allOptions);
+      },
+      () => {
+        this.returnToRouteMap();
       }
-    }
-
-    options.push({
-      name: '+1 \u6C38\u4E45\u8840\u91CF',
-      description: '\u5168\u5458 +1 \u6700\u5927\u8840\u91CF',
-      type: 'buff',
-      buffType: 'hp',
-      buffAmount: 1,
-    });
-
-    if (options.length > 3) {
-      return options.sort(() => Math.random() - 0.5).slice(0, 3);
-    }
-    return options;
+    );
   }
 
-  private applyUpgrade(option: UpgradeOption): void {
+  private generateUpgradeOptions(): UpgradeOption[][] {
+    const result: UpgradeOption[][] = [];
+
+    for (const unit of this.battleManager.playerUnits) {
+      if (!unit.data?.isAlive) continue;
+
+      const unitOptions: UpgradeOption[] = [];
+      const classConfig = CLASSES.find(c => c.id === unit.data.classId);
+
+      if (classConfig) {
+        const skills = getRandomSkillsFromPool(classConfig.skillPool, 3);
+        for (const skill of skills) {
+          unitOptions.push({
+            name: skill.name,
+            description: skill.description,
+            type: 'skill',
+            skillId: skill.id,
+          });
+        }
+      }
+
+      const buffVariants = [
+        { name: `+1 血量`, buffType: 'hp', buffAmount: 1 },
+        { name: `+1 攻击`, buffType: 'attack', buffAmount: 1 },
+        { name: `+1 能量上限`, buffType: 'energy', buffAmount: 1 },
+      ];
+      const chosenBuff = buffVariants[Math.floor(Math.random() * buffVariants.length)];
+      unitOptions.push({
+        name: chosenBuff.name,
+        description: `${unit.data.classId} ${chosenBuff.name}`,
+        type: 'buff',
+        buffType: chosenBuff.buffType,
+        buffAmount: chosenBuff.buffAmount,
+      });
+
+      const shuffled = unitOptions.sort(() => Math.random() - 0.5);
+      result.push(shuffled.slice(0, Math.min(3, shuffled.length)));
+    }
+
+    return result;
+  }
+
+  private applyUpgrade(unitIndex: number, optionIndex: number, allOptions: UpgradeOption[][]): void {
+    const option = allOptions[unitIndex]?.[optionIndex];
+    if (!option) return;
+
+    const unit = this.battleManager.playerUnits[unitIndex];
+    if (!unit?.data) return;
+
     if (option.type === 'skill' && option.skillId) {
       const skill = getSkillById(option.skillId);
       if (skill) {
-        const firstUnit = this.battleManager.playerUnits[0];
-        if (firstUnit) {
-          firstUnit.addSkill(skill);
-        }
+        unit.addSkill(skill);
+      }
+      return;
+    }
+
+    if (option.type === 'buff') {
+      switch (option.buffType) {
+        case 'hp':
+          unit.data.maxHp += option.buffAmount ?? 1;
+          unit.data.currentHp = Math.min(unit.data.currentHp + (option.buffAmount ?? 1), unit.data.maxHp);
+          break;
+        case 'attack':
+          unit.data.stats.attack += option.buffAmount ?? 1;
+          break;
+        case 'energy':
+          unit.data.maxEnergy += option.buffAmount ?? 1;
+          break;
       }
     }
   }

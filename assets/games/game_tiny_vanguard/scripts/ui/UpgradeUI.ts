@@ -22,6 +22,11 @@ export class UpgradeUI extends Component {
   titleLabel: Label = null;
 
   private _showCalled: boolean = false;
+  private _currentUnitIndex: number = 0;
+  private _allOptions: UpgradeOption[][] = [];
+  private _unitNames: string[] = [];
+  private _onSelect: ((unitIndex: number, optionIndex: number) => void) | null = null;
+  private _onComplete: (() => void) | null = null;
 
   onLoad(): void {
     if (!this._showCalled) {
@@ -38,19 +43,40 @@ export class UpgradeUI extends Component {
     this.node.active = false;
   }
 
-  showUpgradeOptions(options: UpgradeOption[], onSelect: (index: number) => void): void {
+  showUpgradeOptions(
+    allOptions: UpgradeOption[][],
+    unitNames: string[],
+    onSelect: (unitIndex: number, optionIndex: number) => void,
+    onComplete: () => void
+  ): void {
+    this._currentUnitIndex = 0;
+    this._allOptions = allOptions;
+    this._unitNames = unitNames;
+    this._onSelect = onSelect;
+    this._onComplete = onComplete;
     this.node.active = true;
+    this.showCurrentUnitOptions();
+  }
 
+  private showCurrentUnitOptions(): void {
+    if (this._currentUnitIndex >= this._allOptions.length) {
+      this.node.active = false;
+      this._onComplete?.();
+      return;
+    }
+
+    const unitName = this._unitNames[this._currentUnitIndex] || `Unit ${this._currentUnitIndex + 1}`;
     if (this.titleLabel) {
-      this.titleLabel.string = '\u5347\u7EA7\u9009\u62E9';
+      this.titleLabel.string = `为${unitName}选技能`;
     }
 
     if (this.cardContainer) {
       this.cardContainer.removeAllChildren();
 
+      const options = this._allOptions[this._currentUnitIndex];
       for (let i = 0; i < options.length; i++) {
         const card = instantiate(this.cardPrefab);
-        card.name = `Card_${i}`;
+        card.name = `Card_${this._currentUnitIndex}_${i}`;
 
         const labels = card.getComponentsInChildren(Label);
         if (labels.length >= 2) {
@@ -60,8 +86,7 @@ export class UpgradeUI extends Component {
 
         const btn = card.getComponent(Button);
         if (btn) {
-          card['_upgradeIndex'] = i;
-          card['_upgradeOnSelect'] = onSelect;
+          card['_upgradeOptionIndex'] = i;
           btn.node.on(Button.EventType.CLICK, this.onUpgradeCardClicked, this);
         }
 
@@ -72,20 +97,24 @@ export class UpgradeUI extends Component {
 
   private onUpgradeCardClicked(btn: Button): void {
     const card = btn.node;
-    const index = card['_upgradeIndex'] as number;
-    const callback = card['_upgradeOnSelect'] as (index: number) => void;
-    if (callback) {
-      callback(index);
-    }
-    this.node.active = false;
+    const optionIndex = card['_upgradeOptionIndex'] as number;
+    const unitIndex = this._currentUnitIndex;
+
+    this._onSelect?.(unitIndex, optionIndex);
+
+    this._currentUnitIndex++;
+    this.showCurrentUnitOptions();
   }
 
   onDestroy(): void {
     if (this.cardContainer) {
-      for (const child of this.cardContainer.children) {
-        const btn = child.getComponent(Button);
-        if (btn) {
-          btn.node.off(Button.EventType.CLICK, this.onUpgradeCardClicked, this);
+      const children = this.cardContainer.children.slice();
+      for (const child of children) {
+        if (child?.isValid) {
+          const btn = child.getComponent(Button);
+          if (btn?.node?.isValid) {
+            btn.node.off(Button.EventType.CLICK, this.onUpgradeCardClicked, this);
+          }
         }
       }
     }
