@@ -151,47 +151,87 @@ export class GameGrid extends Component {
         // 根据方向处理每一行/列
         const isHorizontal = direction === Direction.LEFT || direction === Direction.RIGHT;
         const isReverse = direction === Direction.RIGHT || direction === Direction.DOWN;
+        const posKey = isHorizontal ? 'col' : 'row';
         
         for (let i = 0; i < gridSize; i++) {
-            // 获取该行/列的方块
+            // 第1步：获取该行/列的方块，按位置排序
             let lineTiles = tiles.filter(t => isHorizontal ? t.row === i : t.col === i);
+            lineTiles.sort((a, b) => (a as any)[posKey] - (b as any)[posKey]);
             
-            // 按位置排序
-            const key = isHorizontal ? 'col' : 'row';
-            lineTiles.sort((a, b) => (a as any)[key] - (b as any)[key]);
+            if (lineTiles.length === 0) continue;
             
-            // 反向时反转数组
+            // 第2步：Compact — 所有方块向滑动方向紧凑排列
+            // 反向方向时从远端开始紧凑
             if (isReverse) {
-                lineTiles.reverse();
+                let wp = gridSize - 1;
+                for (let rp = lineTiles.length - 1; rp >= 0; rp--) {
+                    (lineTiles[rp] as any)[posKey] = wp--;
+                }
+            } else {
+                let wp = 0;
+                for (let rp = 0; rp < lineTiles.length; rp++) {
+                    (lineTiles[rp] as any)[posKey] = wp++;
+                }
             }
             
-            // 合并相同数字
-            const merged: TileData[] = [];
-            let pos = 0;
-            
-            for (let j = 0; j < lineTiles.length; j++) {
-                const current = lineTiles[j];
-                const next = lineTiles[j + 1];
-                
-                if (next && current.value === next.value) {
-                    // 合并
-                    merged.push({
-                        ...current,
-                        [isHorizontal ? 'col' : 'row']: isReverse ? gridSize - 1 - pos : pos,
-                        value: current.value * 2,
-                        isMerged: true,
-                    });
-                    scoreGained += current.value * 2;
-                    j++;
-                } else {
-                    // 只移动（清除可能残留的合并标记）
-                    const { isMerged: _ignored, ...clean } = current;
-                    merged.push({
-                        ...clean,
-                        [isHorizontal ? 'col' : 'row']: isReverse ? gridSize - 1 - pos : pos,
-                    });
+            // 第3步：Merge — 从滑动的远方方向开始合并相邻同值方块
+            let merged: TileData[] = [];
+            if (isReverse) {
+                // 从右向左处理（远端是右侧）
+                let wp = gridSize - 1;
+                let rp = lineTiles.length - 1;
+                while (rp >= 0) {
+                    const current = lineTiles[rp];
+                    const next = rp - 1 >= 0 ? lineTiles[rp - 1] : null;
+                    
+                    if (next && current.value === next.value) {
+                        const { isMerged: _ignored, ...clean } = current;
+                        merged.unshift({
+                            ...clean,
+                            [posKey]: wp,
+                            value: current.value * 2,
+                            isMerged: true,
+                        });
+                        scoreGained += current.value * 2;
+                        rp -= 2; // 跳过被合并的 next
+                    } else {
+                        const { isMerged: _ignored, ...clean } = current;
+                        merged.unshift({
+                            ...clean,
+                            [posKey]: wp,
+                        });
+                        rp--;
+                    }
+                    wp--;
                 }
-                pos++;
+            } else {
+                // 从左向右处理（远端是左侧）
+                let wp = 0;
+                let rp = 0;
+                while (rp < lineTiles.length) {
+                    const current = lineTiles[rp];
+                    const next = rp + 1 < lineTiles.length ? lineTiles[rp + 1] : null;
+                    
+                    if (next && current.value === next.value) {
+                        const { isMerged: _ignored, ...clean } = current;
+                        merged.push({
+                            ...clean,
+                            [posKey]: wp,
+                            value: current.value * 2,
+                            isMerged: true,
+                        });
+                        scoreGained += current.value * 2;
+                        rp += 2; // 跳过被合并的 next
+                    } else {
+                        const { isMerged: _ignored, ...clean } = current;
+                        merged.push({
+                            ...clean,
+                            [posKey]: wp,
+                        });
+                        rp++;
+                    }
+                    wp++;
+                }
             }
             
             newTiles.push(...merged);
