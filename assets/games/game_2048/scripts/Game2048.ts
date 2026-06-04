@@ -63,6 +63,18 @@ export class Game2048 extends Component {
         // 记录最近游玩
         CommonStorageManager.instance.addRecentGame('2048');
     }
+
+    onDestroy(): void {
+        if (this.settingsButton) {
+            this.settingsButton.node.off(Node.EventType.TOUCH_END, this.onSettingsClick, this);
+        }
+        if (this.newGameButton) {
+            this.newGameButton.node.off(Node.EventType.TOUCH_END, this.onNewGameClick, this);
+        }
+        if (this.backButton) {
+            this.backButton.node.off(Node.EventType.TOUCH_END, this.onBackClick, this);
+        }
+    }
     
     start() {
         const progress = StorageManager.instance.loadProgress();
@@ -148,6 +160,7 @@ export class Game2048 extends Component {
             // 检查是否达到 2048
             if (!this._hasWon && this._tiles.some(t => t.value >= 2048)) {
                 this._hasWon = true;
+                this.saveProgress();
                 this.showWin();
                 this._isGameOver = true;
                 return;

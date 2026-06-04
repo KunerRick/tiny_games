@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Sprite, tween, Vec3, UITransform, Size } from 'cc';
+import { _decorator, Component, Node, Label, Sprite, tween, Tween, Vec3, UITransform, Size } from 'cc';
 import { getTileColor, TileData } from './GameConfig';
 
 const { ccclass, property } = _decorator;
@@ -74,6 +74,10 @@ export class Tile extends Component {
         tween(this.node)
             .to(0.2, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
             .start();
+    }
+
+    onDestroy(): void {
+        Tween.stopAllByTarget(this.node);
     }
 
     private updateVisual(): void {
