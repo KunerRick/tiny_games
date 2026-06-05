@@ -21,8 +21,8 @@ export class SettingsPanel extends Component {
     private _onConfirm: ((size: GridSize) => void) | null = null;
 
     onDestroy(): void {
-        // 场景销毁时 @property(Node) getter 可能返回 null，不调任何节点方法
-        this._onConfirm = null;
+        // ❌ 不能访问 @property(Node)，场景销毁时节点已被引擎清理
+        // 事件由 Cocos 自动解除（注册时第三个参数 this 作为 target）
     }
 
     show(currentSize: GridSize, onConfirm: (size: GridSize) => void): void {

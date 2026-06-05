@@ -30,9 +30,8 @@ export class GameOverPanel extends Component {
     }
 
     onDestroy(): void {
-        // 场景销毁时，@property(Node) getter 可能返回 null（节点已被销毁）
-        // Cocos 自动清理以 this 为 target 的事件监听，无需手动解绑
-        // 只清 JS 引用，不调任何节点/组件方法
+        // ❌ 不能访问 @property(Node)，场景销毁时节点已被引擎清理
+        // 事件由 Cocos 自动解除（注册时第三个参数 this 作为 target）
         this._onRestart = null;
         this._onBack = null;
     }

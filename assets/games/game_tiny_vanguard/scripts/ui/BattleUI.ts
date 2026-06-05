@@ -52,7 +52,7 @@ export class BattleUI extends Component {
     if (this.endTurnButton) {
       const etTransform = this.endTurnButton.node.getComponent(UITransform);
       if (etTransform) {
-        etTransform.setContentSize(140, 46);
+        etTransform.setContentSize(100, 60);
       }
       this.endTurnButton.node.setPosition(290, -280);
     }
