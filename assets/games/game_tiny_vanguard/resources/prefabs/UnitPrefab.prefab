@@ -25,7 +25,7 @@
         "__id__": 8
       },
       {
-        "__id__": 23
+        "__id__": 21
       }
     ],
     "_active": true,
@@ -38,9 +38,6 @@
       },
       {
         "__id__": 18
-      },
-      {
-        "__id__": 21
       }
     ],
     "_prefab": {
@@ -457,64 +454,6 @@
     "targetOverrides": null
   },
   {
-    "__type__": "cc.Button",
-    "_name": "",
-    "_objFlags": 0,
-    "__editorExtras__": {},
-    "node": {
-      "__id__": 1
-    },
-    "_enabled": true,
-    "_interactable": true,
-    "_transition": 1,
-    "_normalColor": {
-      "__type__": "cc.Color",
-      "r": 255,
-      "g": 255,
-      "b": 255,
-      "a": 255
-    },
-    "_hoverColor": {
-      "__type__": "cc.Color",
-      "r": 211,
-      "g": 211,
-      "b": 211,
-      "a": 255
-    },
-    "_pressedColor": {
-      "__type__": "cc.Color",
-      "r": 100,
-      "g": 180,
-      "b": 255,
-      "a": 200
-    },
-    "_disabledColor": {
-      "__type__": "cc.Color",
-      "r": 124,
-      "g": 124,
-      "b": 124,
-      "a": 255
-    },
-    "_normalSprite": null,
-    "_hoverSprite": null,
-    "_pressedSprite": null,
-    "_disabledSprite": null,
-    "_duration": 0.1,
-    "_zoomScale": 1.0,
-    "_target": {
-      "__id__": 1
-    },
-    "_clickEvents": [],
-    "_id": "",
-    "__prefab": {
-      "__id__": 22
-    }
-  },
-  {
-    "__type__": "cc.CompPrefabInfo",
-    "fileId": "newBtn1234567890abcdef01"
-  },
-  {
     "__type__": "cc.Node",
     "_name": "HpBar",
     "_objFlags": 0,
@@ -524,16 +463,16 @@
     },
     "_children": [
       {
-        "__id__": 29
+        "__id__": 27
       }
     ],
     "_active": true,
     "_components": [
       {
-        "__id__": 24
+        "__id__": 22
       },
       {
-        "__id__": 26
+        "__id__": 24
       }
     ],
     "_lpos": {
@@ -565,7 +504,7 @@
     },
     "_id": "",
     "__prefab": {
-      "__id__": 28
+      "__id__": 26
     }
   },
   {
@@ -574,7 +513,7 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "node": {
-      "__id__": 23
+      "__id__": 21
     },
     "_enabled": true,
     "_contentSize": {
@@ -589,7 +528,7 @@
     },
     "_id": "",
     "__prefab": {
-      "__id__": 25
+      "__id__": 23
     }
   },
   {
@@ -602,7 +541,7 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "node": {
-      "__id__": 23
+      "__id__": 21
     },
     "_enabled": true,
     "_customMaterial": null,
@@ -631,7 +570,7 @@
     "_atlas": null,
     "_id": "",
     "__prefab": {
-      "__id__": 27
+      "__id__": 25
     }
   },
   {
@@ -657,16 +596,16 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "_parent": {
-      "__id__": 23
+      "__id__": 21
     },
     "_children": [],
     "_active": true,
     "_components": [
       {
-        "__id__": 30
+        "__id__": 28
       },
       {
-        "__id__": 32
+        "__id__": 30
       }
     ],
     "_lpos": {
@@ -698,7 +637,7 @@
     },
     "_id": "",
     "__prefab": {
-      "__id__": 34
+      "__id__": 32
     }
   },
   {
@@ -707,7 +646,7 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "node": {
-      "__id__": 29
+      "__id__": 27
     },
     "_enabled": true,
     "_contentSize": {
@@ -722,7 +661,7 @@
     },
     "_id": "",
     "__prefab": {
-      "__id__": 31
+      "__id__": 29
     }
   },
   {
@@ -735,7 +674,7 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "node": {
-      "__id__": 29
+      "__id__": 27
     },
     "_enabled": true,
     "_customMaterial": null,
@@ -764,7 +703,7 @@
     "_atlas": null,
     "_id": "",
     "__prefab": {
-      "__id__": 33
+      "__id__": 31
     }
   },
   {
