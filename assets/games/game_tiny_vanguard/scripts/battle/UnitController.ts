@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Sprite, Color } from 'cc';
+import { _decorator, Component, Node, Sprite, Color, tween, Vec3 } from 'cc';
 import { GridPosition, GridController } from './GridController';
 import { SkillConfig, getClassById, EnemyConfig, AIType } from '../config/GameData';
 
@@ -164,6 +164,21 @@ export class UnitController extends Component {
     this._data.gridPos = { ...pos };
     this._data.hasMoved = true;
     this.updatePosition();
+  }
+
+  moveToPositionAnimated(pos: GridPosition, duration: number = 0.3, onComplete?: () => void): void {
+    if (!this._data || !this.node?.isValid) {
+      if (onComplete) onComplete();
+      return;
+    }
+    this._data.gridPos = { ...pos };
+    this._data.hasMoved = true;
+    const targetX = (pos.col - 2.5) * GridController.CELL_SIZE;
+    const targetY = (pos.row - 2.5) * GridController.CELL_SIZE;
+    tween(this.node)
+      .to(duration, { position: new Vec3(targetX, targetY, 0) })
+      .call(() => { if (onComplete) onComplete(); })
+      .start();
   }
 
   takeDamage(rawAmount: number, ignoreDefense: boolean = false, attacker?: UnitController): number {
