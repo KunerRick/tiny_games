@@ -1,6 +1,6 @@
 import { _decorator, Component, Node, Label, Button, Sprite, Color } from 'cc';
 import { RouteMapUI, RouteNode } from './ui/RouteMapUI';
-import { BattleManager, BattleResult } from './battle/BattleManager';
+import { BattleManager, BattleResult, UnitActionPhase } from './battle/BattleManager';
 import { UpgradeUI, UpgradeOption } from './ui/UpgradeUI';
 import { EventUI } from './ui/EventUI';
 import { BattleUI } from './ui/BattleUI';
@@ -317,6 +317,9 @@ export class TinyVanguardMain extends Component {
       this.battleManager.setDamageDealtCallback((targetNode, amount) => {
         this.battleUI.showDamageNumber(targetNode, amount);
       });
+      this.battleManager.setUnitPhaseChangedCallback((phase, unit, actionPhase) => {
+        this.updateBattlePhaseUI(phase, unit, actionPhase);
+      });
     }
 
     this.updateGoldDisplay();
@@ -380,6 +383,37 @@ export class TinyVanguardMain extends Component {
     this.updateBattleUI();
   }
 
+  private updateBattlePhaseUI(phase: import('./battle/BattleManager').BattlePhase, unit: UnitController | null, actionPhase: UnitActionPhase | null): void {
+    if (!this.battleUI) return;
+    const aliveUnits = this.battleManager.playerUnits.filter(u => u.data?.isAlive);
+    const totalAlive = aliveUnits.length;
+
+    switch (phase) {
+      case 'deploy':
+        this.battleUI.updatePhase('\u5E03\u9635\u9636\u6BB5', '\u70B9\u51FB\u524D\u4E24\u884C\u653E\u7F6E\u5355\u4F4D');
+        break;
+
+      case 'player_turn':
+        if (unit?.data) {
+          const idx = aliveUnits.findIndex(u => u === unit) + 1;
+          const hint = actionPhase === 'move' ? '\u70B9\u51FB\u53EF\u79FB\u52A8\u4F4D\u7F6E' : '\u9009\u62E9\u653B\u51FB\u76EE\u6807\u6216\u7B49\u5F85';
+          this.battleUI.updatePhase(
+            `\u6211\u65B9\u56DE\u5408 \u7B2C${this.battleManager.turnCount}\u8F6E`,
+            unit.data.name,
+            idx,
+            totalAlive,
+            this.battleManager.turnCount,
+            hint
+          );
+        }
+        break;
+
+      case 'enemy_turn':
+        this.battleUI.updatePhase('\u654C\u65B9\u56DE\u5408', '\u654C\u4EBA\u884C\u52A8\u4E2D...');
+        break;
+    }
+  }
+
   private updateBattleUI(): void {
     const selected = this.battleManager.selectedUnit;
     if (selected?.data) {
@@ -415,6 +449,7 @@ export class TinyVanguardMain extends Component {
       SaveManager.saveRun(this._runData);
       this.updateGoldDisplay();
 
+      this.battleUI.clearPhase();
       this.battleUI.showVictory(result.goldReward);
 
       if (this._currentNode?.type === 'boss') {
@@ -431,6 +466,7 @@ export class TinyVanguardMain extends Component {
       }
     } else {
       this._runData.honor += Math.max(1, this._battleCount * 2);
+      this.battleUI.clearPhase();
       this.battleUI.showDefeat();
       this.scheduleOnce(() => {
         this.onRunComplete(false);

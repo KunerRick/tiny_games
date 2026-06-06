@@ -39,6 +39,15 @@ export class BattleUI extends Component {
   @property({ type: Node, tooltip: '失败界面' })
   defeatPanel: Node = null;
 
+  @property({ type: Label, tooltip: '阶段文字（我方回合/敌方回合）' })
+  phaseLabel: Label = null;
+
+  @property({ type: Label, tooltip: '当前单位 (1/3)' })
+  unitTurnLabel: Label = null;
+
+  @property({ type: Label, tooltip: '操作提示' })
+  actionHintLabel: Label = null;
+
   private _skillClickCallbacks: ((index: number) => void)[] = [];
   private _showCalled: boolean = false;
 
@@ -227,6 +236,35 @@ export class BattleUI extends Component {
     if (this.endTurnButton) {
       this.endTurnButton.node.active = false;
     }
+  }
+
+  updatePhase(
+    phase: string,
+    unitName?: string,
+    unitIndex?: number,
+    totalUnits?: number,
+    turn?: number,
+    actionHint?: string
+  ): void {
+    if (this.phaseLabel) {
+      this.phaseLabel.string = phase;
+    }
+    if (this.unitTurnLabel) {
+      if (unitName && unitIndex !== undefined && totalUnits !== undefined) {
+        this.unitTurnLabel.string = `${unitName} (${unitIndex}/${totalUnits})`;
+      } else {
+        this.unitTurnLabel.string = unitName ?? '';
+      }
+    }
+    if (this.actionHintLabel) {
+      this.actionHintLabel.string = actionHint ?? '';
+    }
+  }
+
+  clearPhase(): void {
+    if (this.phaseLabel) this.phaseLabel.string = '';
+    if (this.unitTurnLabel) this.unitTurnLabel.string = '';
+    if (this.actionHintLabel) this.actionHintLabel.string = '';
   }
 
   private onSkillBtnClicked(btn: Button): void {
