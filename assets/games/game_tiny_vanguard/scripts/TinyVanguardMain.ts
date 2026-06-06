@@ -202,21 +202,26 @@ export class TinyVanguardMain extends Component {
     }
   }
 
-  private setupClassSelectionUI(): void {
+  private bindClassSelectionEvents(): void {
     for (let i = 0; i < CLASS_ORDER.length; i++) {
       const btnName = `Class${i + 1}Btn`;
       const btnNode = this.classSelectPanel.getChildByName(btnName);
       if (!btnNode) continue;
-
       const btn = btnNode.getComponent(Button);
       if (!btn) continue;
-
       const classId = CLASS_ORDER[i];
       btnNode['_classId'] = classId;
       btn.node.on(Button.EventType.CLICK, this.onClassToggleClicked, this);
+    }
+  }
+
+  private resetClassSelectionVisual(): void {
+    for (let i = 0; i < CLASS_ORDER.length; i++) {
+      const btnName = `Class${i + 1}Btn`;
+      const btnNode = this.classSelectPanel.getChildByName(btnName);
+      if (!btnNode) continue;
       this.setClassButtonVisual(btnNode, false);
     }
-
     const startBtnNode = this.classSelectPanel.getChildByName('StartBtn');
     if (startBtnNode) {
       const startBtn = startBtnNode.getComponent(Button);
@@ -224,6 +229,11 @@ export class TinyVanguardMain extends Component {
         startBtn.interactable = false;
       }
     }
+  }
+
+  private setupClassSelectionUI(): void {
+    this.bindClassSelectionEvents();
+    this.resetClassSelectionVisual();
   }
 
   private onClassToggleClicked(btn: Button): void {
@@ -780,7 +790,7 @@ export class TinyVanguardMain extends Component {
     this._state = 'class_select';
     this._selectedClasses = [];
     SaveManager.clearRun();
-    this.setupClassSelectionUI();
+    this.resetClassSelectionVisual();
 
     if (this.battleManager) {
       this.battleManager.node.active = false;
