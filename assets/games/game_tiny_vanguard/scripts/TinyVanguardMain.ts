@@ -6,7 +6,7 @@ import { EventUI } from './ui/EventUI';
 import { BattleUI } from './ui/BattleUI';
 import { SaveManager, RunData } from './ui/SaveManager';
 import {
-  CLASSES, EVENTS, getSkillById, getRandomSkillsFromPool,
+  CLASSES, EVENTS, getClassById, getSkillById, getRandomSkillsFromPool,
   SkillConfig, SKILLS
 } from './config/GameData';
 import { UnitController } from './battle/UnitController';
@@ -347,7 +347,7 @@ export class TinyVanguardMain extends Component {
   }
 
   private onNodeSelected(nodeId: number): void {
-    this._currentNode = this.routeMapUI.getNodeById(nodeId) ?? null;
+    this._currentNode = this.routeMapUI?.getNodeById(nodeId) ?? null;
     if (!this._currentNode) return;
 
     this._currentDifficulty = this._battleCount;
@@ -614,9 +614,13 @@ export class TinyVanguardMain extends Component {
 
   private returnToRouteMap(): void {
     this._state = 'route_map';
-    this.routeMapUI.show();
-    this.routeMapUI.renderRoute(this.routeMapUI.nodes);
-    this.battleManager.node.active = false;
+    if (this.routeMapUI?.node?.isValid) {
+      this.routeMapUI.show();
+      this.routeMapUI.renderRoute(this.routeMapUI.nodes);
+    }
+    if (this.battleManager?.node?.isValid) {
+      this.battleManager.node.active = false;
+    }
     if (this.battleManager?.gridController?.node) {
       this.battleManager.gridController.node.active = false;
     }

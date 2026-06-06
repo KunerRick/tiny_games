@@ -6163,7 +6163,7 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 36,
+      "width": 180,
       "height": 50.4
     },
     "_anchorPoint": {
@@ -6200,8 +6200,8 @@
     "_fontSize": 18,
     "_fontFamily": "Arial",
     "_lineHeight": 40,
-    "_overflow": 2,
-    "_enableWrapText": true,
+    "_overflow": 1,
+    "_enableWrapText": false,
     "_font": null,
     "_isSystemFontUsed": true,
     "_spacingX": 0,
@@ -6247,7 +6247,7 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 100,
+      "width": 200,
       "height": 40
     },
     "_anchorPoint": {

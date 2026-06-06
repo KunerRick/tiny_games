@@ -128,7 +128,9 @@ export class RouteMapUI extends Component {
   }
 
   private onRouteNodeClicked(button: Button): void {
+    if (!button?.node?.isValid) return;
     const nodeId = button.node['_routeNodeId'] as number;
+    if (nodeId === undefined || nodeId === null) return;
     this.onNodeTapped(nodeId);
   }
 
