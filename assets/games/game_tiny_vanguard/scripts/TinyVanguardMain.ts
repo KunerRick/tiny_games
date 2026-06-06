@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Button, Sprite, Color } from 'cc';
+import { _decorator, Component, Node, Label, Button, Sprite, Color, tween, Vec3 } from 'cc';
 import { RouteMapUI, RouteNode } from './ui/RouteMapUI';
 import { BattleManager, BattleResult, UnitActionPhase } from './battle/BattleManager';
 import { UpgradeUI, UpgradeOption } from './ui/UpgradeUI';
@@ -62,8 +62,8 @@ export class TinyVanguardMain extends Component {
 
   private _state: GameState = 'class_select';
   private _selectedClasses: string[] = [];
-  private readonly SELECTED_COLOR = new Color(80, 200, 80, 255);
-  private readonly UNSELECTED_COLOR = new Color(150, 150, 150, 255);
+  private readonly SELECTED_COLOR = new Color(60, 180, 60, 255);
+  private readonly UNSELECTED_COLOR = new Color(80, 80, 80, 255);
   private _runData: RunData = {
     currentRouteNode: 0,
     playerClasses: [],
@@ -251,11 +251,24 @@ export class TinyVanguardMain extends Component {
   }
 
   private setClassButtonVisual(btnNode: Node, selected: boolean): void {
-    const btn = btnNode.getComponent(Button);
-    if (!btn?.target) return;
-    const sprite = btn.target.getComponent(Sprite);
+    // 主图标 Sprite
+    const sprite = btnNode.getComponent(Sprite);
     if (sprite) {
       sprite.color = selected ? this.SELECTED_COLOR : this.UNSELECTED_COLOR;
+    }
+    // 高亮边框节点
+    const border = btnNode.getChildByName('HighlightBorder');
+    if (border) border.active = selected;
+    // 选中勾标记
+    const checkMark = btnNode.getChildByName('CheckMark');
+    if (checkMark) checkMark.active = selected;
+    // 缩放动画
+    if (selected) {
+      tween(btnNode)
+        .to(0.15, { scale: new Vec3(1.1, 1.1, 1) })
+        .start();
+    } else {
+      btnNode.setScale(new Vec3(1, 1, 1));
     }
   }
 
@@ -264,7 +277,14 @@ export class TinyVanguardMain extends Component {
     if (!startBtnNode) return;
     const startBtn = startBtnNode.getComponent(Button);
     if (startBtn) {
-      startBtn.interactable = this._selectedClasses.length >= 3;
+      const canStart = this._selectedClasses.length >= 3;
+      startBtn.interactable = canStart;
+      const label = startBtnNode.getComponentInChildren(Label);
+      if (label) {
+        label.string = canStart
+          ? `\u5F00\u59CB\u6E38\u620F (${this._selectedClasses.length}/3)`
+          : `\u9009\u62E9\u961F\u53CB (${this._selectedClasses.length}/3)`;
+      }
     }
   }
 
@@ -312,6 +332,7 @@ export class TinyVanguardMain extends Component {
     if (this.battleUI) {
       this.battleUI.setEndTurnCallback(() => this.onEndTurn());
       this.battleUI.setConfirmDeployCallback(() => this.onConfirmDeploy());
+      this.battleUI.setWaitCallback(() => this.onWaitClicked());
     }
     if (this.battleManager) {
       this.battleManager.setDamageDealtCallback((targetNode, amount) => {
@@ -362,6 +383,21 @@ export class TinyVanguardMain extends Component {
     this.battleUI.show();
     this.battleUI.showDeployPhase();
 
+    const unitNames = this._runData.playerClasses.map(c => {
+      const config = getClassById(c);
+      return config ? config.name : c;
+    });
+    const unitIcons = this._runData.playerClasses.map(c => {
+      const config = getClassById(c);
+      return config ? config.icon : '';
+    });
+    this.battleUI.showDeployUnitList(unitNames, unitIcons, (index) => {
+      this.battleManager.selectDeployUnit(index);
+    });
+    this.battleManager.setDeployUnitPlacedCallback((placed, total) => {
+      this.battleUI.updateDeployItemState(placed - 1, true);
+    });
+
     this.battleManager.startBattle(
       this._runData.playerClasses,
       this._currentDifficulty,
@@ -380,6 +416,11 @@ export class TinyVanguardMain extends Component {
 
   private onEndTurn(): void {
     this.battleManager.endCurrentUnitTurn();
+    this.updateBattleUI();
+  }
+
+  private onWaitClicked(): void {
+    this.battleManager.waitCurrentUnit();
     this.updateBattleUI();
   }
 

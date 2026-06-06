@@ -21,8 +21,14 @@ export class BattleUI extends Component {
   @property({ type: Button, tooltip: '确认布阵按钮' })
   confirmDeployButton: Button = null;
 
+  @property({ type: Button, tooltip: '等待（跳过行动）按钮' })
+  waitButton: Button = null;
+
   @property({ type: Node, tooltip: '布阵提示文本' })
   deployPrompt: Node = null;
+
+  @property({ type: Node, tooltip: '布阵单位列表容器' })
+  deployUnitList: Node = null;
 
   @property({ type: Node, tooltip: '技能按钮容器' })
   skillButtonContainer: Node = null;
@@ -91,6 +97,9 @@ export class BattleUI extends Component {
     if (this.confirmDeployButton) {
       this.confirmDeployButton.node.on(Button.EventType.CLICK, this.onConfirmDeployClicked, this);
     }
+    if (this.waitButton) {
+      this.waitButton.node.on(Button.EventType.CLICK, this.onWaitClicked, this);
+    }
   }
 
   private unbindEvents(): void {
@@ -100,10 +109,14 @@ export class BattleUI extends Component {
     if (this.confirmDeployButton) {
       this.confirmDeployButton.node.off(Button.EventType.CLICK, this.onConfirmDeployClicked, this);
     }
+    if (this.waitButton) {
+      this.waitButton.node.off(Button.EventType.CLICK, this.onWaitClicked, this);
+    }
   }
 
   private _onEndTurn: (() => void) | null = null;
   private _onConfirmDeploy: (() => void) | null = null;
+  private _onWait: (() => void) | null = null;
 
   setEndTurnCallback(callback: () => void): void {
     this._onEndTurn = callback;
@@ -111,6 +124,10 @@ export class BattleUI extends Component {
 
   setConfirmDeployCallback(callback: () => void): void {
     this._onConfirmDeploy = callback;
+  }
+
+  setWaitCallback(callback: () => void): void {
+    this._onWait = callback;
   }
 
   private onEndTurnClicked(): void {
@@ -121,27 +138,80 @@ export class BattleUI extends Component {
     if (this._onConfirmDeploy) this._onConfirmDeploy();
   }
 
+  private onWaitClicked(): void {
+    if (this._onWait) this._onWait();
+  }
+
   showDeployPhase(): void {
     if (this.deployPrompt) this.deployPrompt.active = true;
     if (this.confirmDeployButton) this.confirmDeployButton.node.active = true;
     if (this.endTurnButton) this.endTurnButton.node.active = false;
+    if (this.waitButton) this.waitButton.node.active = false;
     if (this.unitNameLabel) this.unitNameLabel.string = '\u90E8\u7F72\u9635\u5BB9';
-    if (this.hpLabel) this.hpLabel.string = '\u70B9\u51FB\u524D\u4E24\u884C\u653E\u7F6E\u5355\u4F4D';
+    if (this.hpLabel) this.hpLabel.string = '\u70B9\u51FB\u5DE6\u4FA7\u5355\u4F4D\u518D\u70B9\u683C\u5B50\u653E\u7F6E';
     if (this.energyLabel) this.energyLabel.string = '';
     if (this.turnLabel) this.turnLabel.string = '';
+    if (this.deployUnitList) this.deployUnitList.active = true;
   }
 
   hideDeployPhase(): void {
     if (this.deployPrompt) this.deployPrompt.active = false;
     if (this.confirmDeployButton) this.confirmDeployButton.node.active = false;
     if (this.endTurnButton) this.endTurnButton.node.active = true;
+    if (this.waitButton) this.waitButton.node.active = true;
+    if (this.deployUnitList) this.deployUnitList.active = false;
   }
 
-  updateUnitInfo(name: string, hp: number, maxHp: number, energy: number, maxEnergy: number, turn: number): void {
-    if (this.unitNameLabel) this.unitNameLabel.string = name;
-    if (this.hpLabel) this.hpLabel.string = `HP: ${hp}/${maxHp}`;
+  updateUnitInfo(name: string, hp: number, maxHp: number, energy: number, maxEnergy: number, turn: number, isEnemy: boolean = false): void {
+    if (this.unitNameLabel) {
+      this.unitNameLabel.string = name;
+      this.unitNameLabel.color = isEnemy ? new Color(255, 100, 100) : Color.WHITE;
+    }
+    if (this.hpLabel) {
+      this.hpLabel.string = `HP: ${hp}/${maxHp}`;
+      this.hpLabel.color = isEnemy ? new Color(255, 80, 80) : new Color(80, 200, 255);
+    }
     if (this.energyLabel) this.energyLabel.string = `\u26A1 ${energy}/${maxEnergy}`;
     if (this.turnLabel) this.turnLabel.string = `\u8F6E\u6B21 ${turn}`;
+  }
+
+  showDeployUnitList(
+    unitNames: string[],
+    unitIcons: string[],
+    callback: (index: number) => void
+  ): void {
+    if (!this.deployUnitList) return;
+    this.deployUnitList.removeAllChildren();
+
+    for (let i = 0; i < unitNames.length; i++) {
+      const item = new Node(`DeployItem_${i}`);
+      const label = item.addComponent(Label);
+      label.string = `${unitNames[i]}`;
+      label.fontSize = 20;
+      label.color = Color.WHITE;
+      const trans = item.addComponent(UITransform);
+      trans.setContentSize(200, 40);
+      item.setPosition(0, -i * 50, 0);
+      item['_deployIdx'] = i;
+      item['_deployCb'] = callback;
+      item.on(Node.EventType.TOUCH_END, (evt) => {
+        const idx = evt.target['_deployIdx'];
+        const cb = evt.target['_deployCb'];
+        if (cb) cb(idx);
+      });
+      this.deployUnitList.addChild(item);
+    }
+  }
+
+  updateDeployItemState(index: number, placed: boolean): void {
+    if (!this.deployUnitList) return;
+    const child = this.deployUnitList.children[index];
+    if (child) {
+      const label = child.getComponent(Label);
+      if (label) {
+        label.color = placed ? new Color(100, 100, 100) : Color.WHITE;
+      }
+    }
   }
 
   clearUnitInfo(): void {
@@ -284,5 +354,6 @@ export class BattleUI extends Component {
     this._skillClickCallbacks = [];
     this._onEndTurn = null;
     this._onConfirmDeploy = null;
+    this._onWait = null;
   }
 }

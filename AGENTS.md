@@ -110,13 +110,24 @@ export class GameName extends Component {
 6. **面板类在 `show()` 中绑定事件** — 未激活节点 `onLoad()` 不执行
 7. **Tween 前检查 `isValid`**，不直接 tween `Color` 对象
 
-## MCP 操作要点
+## MCP 使用守则（重要）
+
+> ⚠️ 以下规则覆盖旧版"ＭCP 操作要点"中的全部内容，旧版已废弃。
+
+### 核心原则
+
+**所有 Cocos 场景相关的查询和修改，必须通过 Cocos MCP 完成。只有纯代码逻辑（TypeScript 源码增删改）才可以直接修改文件。**
+
+这意味着：
+- ❌ **禁止** 直接读取/写入 `.scene` 文件、`.prefab` 文件等 Cocos 编辑器管理的二进制资产
+- ❌ **禁止** 通过 `write` / `edit` 等文件工具直接篡改场景 JSON
+- ✅ Cocos 场景操作（创建节点、添加组件、修改属性、保存场景等）一律走 MCP 工具调用
+- ✅ 纯 `.ts` 代码文件的增删改可以正常使用文件编辑工具
+
+### MCP 工具调用约定
 
 - 结构性变更前调用 `begin_undo_recording` → 操作后 `end_undo_recording`
 - 操作后 `validate_scene` 检查一致性 + 修改的脚本 `lsp_diagnostics`
-- **`update_prefab` 方向是 Prefab→Instance（还原），不是 Instance→Prefab（同步）**
-- 修改预制体：`read_asset_content` → 修改 JSON → `save_asset(url, content)` → `reimport_asset(url)`
-- 场景属性修改：`set_component_property` → `scene_save_scene`（不是 `project_save_asset`）
 - 场景排查顺序：`get_scene_hierarchy` → `get_node_info` → `validate_scene` → 日志 → `execute_script`
 
 ## Git 规范

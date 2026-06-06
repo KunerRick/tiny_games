@@ -26,7 +26,7 @@ node_modules/
 .opencode
 .sisyphus
 .omo
-
+.superpowers/
 #//////////////////////////
 # Extensions（插件自带 .git，每人本地装）
 #//////////////////////////

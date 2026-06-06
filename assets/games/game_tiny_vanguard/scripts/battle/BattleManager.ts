@@ -34,6 +34,8 @@ export class BattleManager extends Component {
   private _onBattleEndCallback: ((result: BattleResult) => void) | null = null;
   private _onDamageDealtCallback: ((targetNode: Node, amount: number) => void) | null = null;
   private _deployedPositions: GridPosition[] = [];
+  private _selectedDeployUnitIndex: number = -1;
+  private _onDeployUnitPlacedCallback: ((placedCount: number, totalCount: number) => void) | null = null;
   private _selectedUnit: UnitController | null = null;
   private _pendingSkill: import('../config/GameData').SkillConfig | null = null;
   private _skillTargets: GridPosition[] = [];
@@ -155,7 +157,21 @@ export class BattleManager extends Component {
 
   private startDeployPhase(): void {
     this._phase = 'deploy';
+    this._highlightDeployArea();
     this.gridController.setCellClickCallback((pos) => this.onDeployCellClicked(pos));
+  }
+
+  public highlightDeployArea(): void {
+    this._highlightDeployArea();
+  }
+
+  private _highlightDeployArea(): void {
+    const positions: GridPosition[] = [];
+    for (let c = 0; c < 6; c++) {
+      positions.push({ row: 0, col: c });
+      positions.push({ row: 1, col: c });
+    }
+    this.gridController.highlightCells(positions, new Color(100, 200, 100, 120));
   }
 
   setDamageDealtCallback(callback: (targetNode: Node, amount: number) => void): void {
@@ -172,16 +188,35 @@ export class BattleManager extends Component {
     this.startPlayerTurn();
   }
 
+  setDeployUnitPlacedCallback(cb: (placedCount: number, totalCount: number) => void): void {
+    this._onDeployUnitPlacedCallback = cb;
+  }
+
+  selectDeployUnit(index: number): void {
+    if (index < 0 || index >= this._playerUnits.length) return;
+    const unit = this._playerUnits[index];
+    if (unit.data && unit.data.gridPos.col >= 0) return;
+    this._selectedDeployUnitIndex = index;
+    this._highlightDeployArea();
+  }
+
   private onDeployCellClicked(pos: GridPosition): void {
     if (pos.row > 1) return;
     if (this.isOccupied(pos)) return;
+    if (this._selectedDeployUnitIndex < 0) return;
 
-    const nextUnit = this._playerUnits.find(u => u.data?.gridPos.col === -1);
-    if (!nextUnit) return;
+    const unit = this._playerUnits[this._selectedDeployUnitIndex];
+    if (!unit?.data) return;
+    if (unit.data.gridPos.col >= 0) return;
 
-    nextUnit.setGridPosition(pos);
+    unit.setGridPosition(pos);
     this._deployedPositions.push(pos);
     this.gridController.highlightCells(this._deployedPositions, new Color(100, 200, 100, 255));
+    this._selectedDeployUnitIndex = -1;
+
+    if (this._onDeployUnitPlacedCallback) {
+      this._onDeployUnitPlacedCallback(this._deployedPositions.length, this._playerUnits.length);
+    }
   }
 
   private startPlayerTurn(): void {
@@ -283,6 +318,7 @@ export class BattleManager extends Component {
       if (this._onUnitPhaseChanged) {
         this._onUnitPhaseChanged('player_turn', unit, 'action');
       }
+      this._checkAutoSkipIfNoTargets(unit);
       return;
     }
     if (unit.data.hasMoved) return;
@@ -294,6 +330,22 @@ export class BattleManager extends Component {
     this.highlightAttackRange(unit);
     if (this._onUnitPhaseChanged) {
       this._onUnitPhaseChanged('player_turn', unit, 'action');
+    }
+    this._checkAutoSkipIfNoTargets(unit);
+  }
+
+  private _checkAutoSkipIfNoTargets(unit: UnitController): void {
+    const attacks = this.getAttackableEnemies(unit);
+    if (attacks.length === 0 && !unit.data?.hasActed) {
+      this.scheduleOnce(() => {
+        if (unit.data?.isAlive && !unit.data.hasActed) {
+          unit.data.hasActed = true;
+          if (this._onUnitPhaseChanged) {
+            this._onUnitPhaseChanged('player_turn', unit, 'done');
+          }
+          this.finishUnitTurn();
+        }
+      }, 0.3);
     }
   }
 
@@ -324,6 +376,13 @@ export class BattleManager extends Component {
     this.selectNextPlayerUnit();
   }
 
+  waitCurrentUnit(): void {
+    const unit = this._selectedUnit;
+    if (!unit?.data?.isAlive) return;
+    unit.data.hasActed = true;
+    this.finishUnitTurn();
+  }
+
   onCellClicked(gridPos: GridPosition): void {
     if (this._phase === 'skill_target') {
       this.handleSkillTargetClick(gridPos);
@@ -332,6 +391,12 @@ export class BattleManager extends Component {
     if (this._phase !== 'player_turn') return;
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive) return;
+
+    // 点击自己 = 等待（结束当前单位行动）
+    if (unit.data.gridPos.row === gridPos.row && unit.data.gridPos.col === gridPos.col) {
+      this.waitCurrentUnit();
+      return;
+    }
 
     const clickedPlayer = this._playerUnits.find(u =>
       u.data?.isAlive && u.data.gridPos.row === gridPos.row && u.data.gridPos.col === gridPos.col

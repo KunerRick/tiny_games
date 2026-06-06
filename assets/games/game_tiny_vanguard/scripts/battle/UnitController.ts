@@ -41,6 +41,9 @@ export class UnitController extends Component {
   @property({ type: Node, tooltip: '选中高亮节点' })
   selectionIndicator: Node = null;
 
+  @property({ type: Node, tooltip: '阵营光环节点' })
+  factionGlow: Node = null;
+
   private _data: UnitData | null = null;
   private _isSelected: boolean = false;
   private _countering: boolean = false;
@@ -83,6 +86,7 @@ export class UnitController extends Component {
     }
 
     this.setTintColor(new Color(255, 100, 100));
+    this.setupFactionVisual();
   }
 
   init(classId: string, isPlayer: boolean, gridPos: GridPosition): void {
@@ -124,6 +128,7 @@ export class UnitController extends Component {
     } else {
       this.setTintColor(new Color(255, 100, 100));
     }
+    this.setupFactionVisual();
   }
 
   get data(): UnitData | null {
@@ -139,6 +144,13 @@ export class UnitController extends Component {
     if (this.selectionIndicator) {
       this.selectionIndicator.active = selected;
     }
+    if (selected && this.node?.isValid) {
+      tween(this.node)
+        .to(0.2, { scale: new Vec3(1.08, 1.08, 1) })
+        .start();
+    } else if (this.node?.isValid) {
+      this.node.setScale(new Vec3(1, 1, 1));
+    }
   }
 
   private setTintColor(color: Color): void {
@@ -148,6 +160,18 @@ export class UnitController extends Component {
         sprite.color = color;
       }
     }
+  }
+
+  private setupFactionVisual(): void {
+    if (!this.factionGlow) return;
+    const glowSprite = this.factionGlow.getComponent(Sprite);
+    if (!glowSprite) return;
+    if (this._data?.isPlayer) {
+      glowSprite.color = new Color(60, 140, 255, 100);
+    } else {
+      glowSprite.color = new Color(255, 60, 60, 100);
+    }
+    this.factionGlow.active = true;
   }
 
   private updatePosition(): void {
