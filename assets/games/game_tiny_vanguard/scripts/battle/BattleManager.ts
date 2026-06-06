@@ -1,7 +1,7 @@
 import { _decorator, Component, Node, Color, instantiate, Prefab } from 'cc';
 import { GridController, GridPosition } from './GridController';
 import { UnitController } from './UnitController';
-import { AIController } from './AIController';
+import { AIController, AIAction } from './AIController';
 import { EnemyConfig, SkillEffect, ENEMIES, ELITE_ENEMIES, BOSS_CONFIG, getClassById, getRandomSkillsFromPool } from '../config/GameData';
 
 const { ccclass, property } = _decorator;
@@ -661,7 +661,22 @@ export class BattleManager extends Component {
     }
     this.gridController.clearHighlights();
 
-    this._aiController.executeEnemyTurn(this._enemyUnits, this._playerUnits);
+    for (const enemy of this._enemyUnits) {
+      if (enemy.data?.isAlive) {
+        enemy.onTurnStart();
+      }
+    }
+    const actions: AIAction[] = this._aiController.decideAll(this._enemyUnits, this._playerUnits);
+    const aliveEnemies = this._enemyUnits.filter(u => u.data?.isAlive);
+    for (let i = 0; i < actions.length; i++) {
+      const enemy = aliveEnemies[i];
+      if (!enemy || !enemy.data?.isAlive) continue;
+      const action = actions[i];
+      enemy.setGridPosition(action.moveTo);
+      if (action.attackTarget?.data?.isAlive) {
+        action.attackTarget.takeDamage(enemy.data.stats.attack);
+      }
+    }
 
     this.checkBattleEnd();
     if (this._phase === 'enemy_turn') {
