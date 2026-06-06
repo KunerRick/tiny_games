@@ -778,7 +778,9 @@ export class TinyVanguardMain extends Component {
     if (this.battleUI) this.battleUI.hide();
 
     this._state = 'class_select';
+    this._selectedClasses = [];
     SaveManager.clearRun();
+    this.setupClassSelectionUI();
 
     if (this.battleManager) {
       this.battleManager.node.active = false;
