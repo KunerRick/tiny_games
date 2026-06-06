@@ -61,7 +61,9 @@ export class TinyVanguardMain extends Component {
   classSelectPanel: Node = null;
 
   private _state: GameState = 'class_select';
-  private _selectedClasses: string[] = ['warrior', 'archer', 'mage'];
+  private _selectedClasses: string[] = [];
+  private readonly SELECTED_COLOR = new Color(80, 200, 80, 255);
+  private readonly UNSELECTED_COLOR = new Color(150, 150, 150, 255);
   private _runData: RunData = {
     currentRouteNode: 0,
     playerClasses: [],
@@ -212,17 +214,14 @@ export class TinyVanguardMain extends Component {
       const classId = CLASS_ORDER[i];
       btnNode['_classId'] = classId;
       btn.node.on(Button.EventType.CLICK, this.onClassToggleClicked, this);
-
-      if (this._selectedClasses.includes(classId)) {
-        this.setClassButtonVisual(btnNode, true);
-      }
+      this.setClassButtonVisual(btnNode, false);
     }
 
     const startBtnNode = this.classSelectPanel.getChildByName('StartBtn');
     if (startBtnNode) {
       const startBtn = startBtnNode.getComponent(Button);
       if (startBtn) {
-        startBtn.node.on(Button.EventType.CLICK, this.startClassSelect, this);
+        startBtn.interactable = false;
       }
     }
   }
@@ -230,7 +229,6 @@ export class TinyVanguardMain extends Component {
   private onClassToggleClicked(btn: Button): void {
     const classId = btn.node['_classId'] as string;
     if (!classId) return;
-
     if (this._selectedClasses.includes(classId)) {
       if (this._selectedClasses.length <= 1) return;
       this._selectedClasses = this._selectedClasses.filter(c => c !== classId);
@@ -239,12 +237,24 @@ export class TinyVanguardMain extends Component {
       this._selectedClasses.push(classId);
       this.setClassButtonVisual(btn.node, true);
     }
+    this.updateStartBtnInteractable();
   }
 
   private setClassButtonVisual(btnNode: Node, selected: boolean): void {
-    const sprite = btnNode.getComponent(Sprite);
+    const btn = btnNode.getComponent(Button);
+    if (!btn?.target) return;
+    const sprite = btn.target.getComponent(Sprite);
     if (sprite) {
-      sprite.color = selected ? new Color(80, 200, 80, 255) : new Color(150, 150, 150, 255);
+      sprite.color = selected ? this.SELECTED_COLOR : this.UNSELECTED_COLOR;
+    }
+  }
+
+  private updateStartBtnInteractable(): void {
+    const startBtnNode = this.classSelectPanel.getChildByName('StartBtn');
+    if (!startBtnNode) return;
+    const startBtn = startBtnNode.getComponent(Button);
+    if (startBtn) {
+      startBtn.interactable = this._selectedClasses.length >= 3;
     }
   }
 
