@@ -330,9 +330,9 @@ export class TinyVanguardMain extends Component {
     }
 
     if (this.battleUI) {
-      this.battleUI.setEndTurnCallback(() => this.onEndTurn());
       this.battleUI.setConfirmDeployCallback(() => this.onConfirmDeploy());
       this.battleUI.setWaitCallback(() => this.onWaitClicked());
+      this.battleUI.setVictoryContinueCallback(() => this.onVictoryContinue());
     }
     if (this.battleManager) {
       this.battleManager.setDamageDealtCallback((targetNode, amount) => {
@@ -395,7 +395,12 @@ export class TinyVanguardMain extends Component {
       this.battleManager.selectDeployUnit(index);
     });
     this.battleManager.setDeployUnitPlacedCallback((placed, total) => {
-      this.battleUI.updateDeployItemState(placed - 1, true);
+      // 计算每个 index 的状态（支持取消）
+      for (let i = 0; i < this.battleManager.playerUnits.length; i++) {
+        const unit = this.battleManager.playerUnits[i];
+        const isPlaced = unit.data?.gridPos.col >= 0;
+        this.battleUI.updateDeployItemState(i, isPlaced);
+      }
     });
 
     this.battleManager.startBattle(
@@ -408,15 +413,14 @@ export class TinyVanguardMain extends Component {
   }
 
   private onConfirmDeploy(): void {
-    this.battleManager.confirmDeploy();
+    if (!this.battleManager.confirmDeploy()) return;
     this.battleUI.hideDeployPhase();
 
-    this.updateBattleUI();
-  }
-
-  private onEndTurn(): void {
-    this.battleManager.endCurrentUnitTurn();
-    this.updateBattleUI();
+    // 播放战前动画，动画完成后开始战斗
+    this.battleUI.playBattleStartAnimation(() => {
+        this.battleManager.startBattleAfterAnimation();
+        this.updateBattleUI();
+    });
   }
 
   private onWaitClicked(): void {
@@ -493,18 +497,8 @@ export class TinyVanguardMain extends Component {
       this.battleUI.clearPhase();
       this.battleUI.showVictory(result.goldReward);
 
-      if (this._currentNode?.type === 'boss') {
-        this.onRunComplete(true);
-      } else {
-        this.scheduleOnce(() => {
-          this.battleManager.reviveAllUnits();
-          this.battleUI.hide();
-          if (this.battleManager?.gridController?.node) {
-            this.battleManager.gridController.node.active = false;
-          }
-          this.showUpgradeScreen();
-        }, 1.0);
-      }
+      // 不自动跳转，等待玩家点击胜利面板的"继续"按钮
+      // Boss 战的胜利处理在 onVictoryContinue 中判断
     } else {
       this._runData.honor += Math.max(1, this._battleCount * 2);
       this.battleUI.clearPhase();
@@ -513,6 +507,22 @@ export class TinyVanguardMain extends Component {
         this.onRunComplete(false);
       }, 2.0);
     }
+  }
+
+  private onVictoryContinue(): void {
+    if (this._currentNode?.type === 'boss') {
+      this.onRunComplete(true);
+      return;
+    }
+
+    this.scheduleOnce(() => {
+      this.battleManager.reviveAllUnits();
+      this.battleUI.hide();
+      if (this.battleManager?.gridController?.node) {
+        this.battleManager.gridController.node.active = false;
+      }
+      this.showUpgradeScreen();
+    }, 0.3);
   }
 
   private showUpgradeScreen(): void {

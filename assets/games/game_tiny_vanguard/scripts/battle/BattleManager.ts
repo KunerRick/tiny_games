@@ -39,12 +39,14 @@ export class BattleManager extends Component {
   private _selectedUnit: UnitController | null = null;
   private _pendingSkill: import('../config/GameData').SkillConfig | null = null;
   private _skillTargets: GridPosition[] = [];
+  private _totalDamageDealt: number = 0;
 
   get phase(): BattlePhase { return this._phase; }
   get playerUnits(): UnitController[] { return this._playerUnits; }
   get enemyUnits(): UnitController[] { return this._enemyUnits; }
   get selectedUnit(): UnitController | null { return this._selectedUnit; }
   get turnCount(): number { return this._turnCount; }
+  get totalDamageDealt(): number { return this._totalDamageDealt; }
 
   setUnitPhaseChangedCallback(cb: typeof this._onUnitPhaseChanged): void {
     this._onUnitPhaseChanged = cb;
@@ -78,6 +80,7 @@ export class BattleManager extends Component {
     this._playerUnits = [];
     this._enemyUnits = [];
     this._selectedUnit = null;
+    this._totalDamageDealt = 0;
   }
 
   private createPlayerUnits(playerClasses: string[]): void {
@@ -178,10 +181,15 @@ export class BattleManager extends Component {
     this._onDamageDealtCallback = callback;
   }
 
-  confirmDeploy(): void {
+  confirmDeploy(): boolean {
     if (this._deployedPositions.length < this._playerUnits.length) {
-      return;
+      return false;
     }
+    return true;
+  }
+
+  // 动画完成后调用，真正开始战斗
+  startBattleAfterAnimation(): void {
     this._phase = 'player_turn';
     this._turnCount = 1;
     this.gridController.setCellClickCallback((pos) => this.onCellClicked(pos));
@@ -195,7 +203,34 @@ export class BattleManager extends Component {
   selectDeployUnit(index: number): void {
     if (index < 0 || index >= this._playerUnits.length) return;
     const unit = this._playerUnits[index];
-    if (unit.data && unit.data.gridPos.col >= 0) return;
+    if (!unit.data) return;
+
+    // 如果该单位已放置（col >= 0），则取消放置
+    if (unit.data.gridPos.col >= 0) {
+      const oldPos = unit.data.gridPos;
+      // 从已部署列表中移除
+      this._deployedPositions = this._deployedPositions.filter(
+        p => !(p.row === oldPos.row && p.col === oldPos.col)
+      );
+      // 重置单位位置到棋盘外
+      unit.data.gridPos = { row: index, col: -1 };
+      unit.data.hasMoved = false;
+      // 重新定位节点到棋盘外
+      unit.node.setPosition(
+        (-2.5) * GridController.CELL_SIZE,
+        (-3 - index) * GridController.CELL_SIZE
+      );
+      // 通知 UI 取消状态
+      if (this._onDeployUnitPlacedCallback) {
+        this._onDeployUnitPlacedCallback(this._deployedPositions.length, this._playerUnits.length);
+      }
+      // 重新高亮部署区域
+      this._highlightDeployArea();
+      this._selectedDeployUnitIndex = -1;
+      return;
+    }
+
+    // 未放置，正常进入选中
     this._selectedDeployUnitIndex = index;
     this._highlightDeployArea();
   }
@@ -460,6 +495,7 @@ export class BattleManager extends Component {
           if (!target?.data) break;
           const rawDmg = effect.params.amount ?? 0;
           const dmg = target.takeDamage(rawDmg, ignoreDefense);
+          this._totalDamageDealt += dmg;
           if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
             this._onDamageDealtCallback(target.node, dmg);
           }
@@ -471,6 +507,7 @@ export class BattleManager extends Component {
           const mult = effect.params.multiplier ?? 1;
           const rawDmg = Math.floor(caster.data.stats.attack * mult);
           const dmg = target.takeDamage(rawDmg, ignoreDefense);
+          this._totalDamageDealt += dmg;
           if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
             this._onDamageDealtCallback(target.node, dmg);
           }
@@ -490,6 +527,7 @@ export class BattleManager extends Component {
           for (let i = 0; i < count; i++) {
             const rawDmg = Math.floor(caster.data.stats.attack * mult);
             const dmg = target.takeDamage(rawDmg, ignoreDefense);
+            this._totalDamageDealt += dmg;
             if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
               this._onDamageDealtCallback(target.node, dmg);
             }
@@ -507,6 +545,7 @@ export class BattleManager extends Component {
             ? Math.floor(caster.data.stats.attack * multiplier)
             : caster.data.stats.attack;
           const dmg = target.takeDamage(rawDmg, ignoreDefense);
+          this._totalDamageDealt += dmg;
           if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
             this._onDamageDealtCallback(target.node, dmg);
           }
@@ -517,6 +556,7 @@ export class BattleManager extends Component {
           if (!target?.data) break;
           const bonusRaw = caster.data.stats.attack + (effect.params.amount ?? 2);
           const dmg = target.takeDamage(bonusRaw, ignoreDefense);
+          this._totalDamageDealt += dmg;
           if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
             this._onDamageDealtCallback(target.node, dmg);
           }
@@ -532,6 +572,7 @@ export class BattleManager extends Component {
                 Math.abs(enemy.data.gridPos.col - caster.data.gridPos.col);
               if (dist <= 1) {
                 const dmg = enemy.takeDamage(baseDmg, ignoreDefense);
+                this._totalDamageDealt += dmg;
                 if (dmg > 0 && this._onDamageDealtCallback && enemy.node?.isValid) {
                   this._onDamageDealtCallback(enemy.node, dmg);
                 }
@@ -551,6 +592,7 @@ export class BattleManager extends Component {
                 Math.abs(enemy.data.gridPos.col - center.col);
               if (dist <= 1) {
                 const dmg = enemy.takeDamage(baseDmg, ignoreDefense);
+                this._totalDamageDealt += dmg;
                 if (dmg > 0 && this._onDamageDealtCallback && enemy.node?.isValid) {
                   this._onDamageDealtCallback(enemy.node, dmg);
                 }
@@ -570,6 +612,7 @@ export class BattleManager extends Component {
               const dc = Math.abs(enemy.data.gridPos.col - center.col);
               if (dr <= 1 && dc <= 1) {
                 const dmg = enemy.takeDamage(baseDmg, ignoreDefense);
+                this._totalDamageDealt += dmg;
                 if (dmg > 0 && this._onDamageDealtCallback && enemy.node?.isValid) {
                   this._onDamageDealtCallback(enemy.node, dmg);
                 }
@@ -601,6 +644,7 @@ export class BattleManager extends Component {
           const chainMult = effect.params.multiplier ?? 0.8;
           const baseChainDmg = Math.floor(caster.data.stats.attack * chainMult);
           const mainDmg = target.takeDamage(baseChainDmg, ignoreDefense);
+          this._totalDamageDealt += mainDmg;
           if (mainDmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
             this._onDamageDealtCallback(target.node, mainDmg);
           }
@@ -617,6 +661,7 @@ export class BattleManager extends Component {
           for (let i = 0; i < Math.min(chainCount, otherEnemies.length); i++) {
             const chainTarget = otherEnemies[i];
             const chainDmg = chainTarget.takeDamage(baseChainDmg, ignoreDefense);
+            this._totalDamageDealt += chainDmg;
             if (chainDmg > 0 && this._onDamageDealtCallback && chainTarget.node?.isValid) {
               this._onDamageDealtCallback(chainTarget.node, chainDmg);
             }
@@ -710,6 +755,7 @@ export class BattleManager extends Component {
 
   private executeAttack(attacker: UnitController, target: UnitController): void {
     const damage = target.takeDamage(attacker.data?.stats.attack ?? 0, false, attacker);
+    this._totalDamageDealt += damage;
     if (this._onDamageDealtCallback && target.node?.isValid) {
       this._onDamageDealtCallback(target.node, damage);
     }

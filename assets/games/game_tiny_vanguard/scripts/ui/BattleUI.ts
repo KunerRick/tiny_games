@@ -54,8 +54,17 @@ export class BattleUI extends Component {
   @property({ type: Label, tooltip: '操作提示' })
   actionHintLabel: Label = null;
 
+  @property({ type: Sprite, tooltip: '阶段背景色' })
+  phaseBg: Sprite = null;
+
+  @property({ type: Node, tooltip: '布阵卡片容器' })
+  deployCardContainer: Node = null;
+
   private _skillClickCallbacks: ((index: number) => void)[] = [];
   private _showCalled: boolean = false;
+  private _deployCards: Node[] = [];
+  private _battleStartOverlay: Node | null = null;
+  private _onBattleStartComplete: (() => void) | null = null;
 
   onLoad(): void {
     if (!this._showCalled) {
@@ -77,6 +86,57 @@ export class BattleUI extends Component {
     if (this.deployPrompt) {
       this.deployPrompt.setPosition(0, 260);
     }
+
+    if (!this.deployCardContainer) {
+      this.deployCardContainer = new Node('DeployCardContainer');
+      const containerTransform = this.deployCardContainer.addComponent(UITransform);
+      containerTransform.setContentSize(400, 80);
+      this.deployCardContainer.setPosition(0, -280, 0);
+      this.node.addChild(this.deployCardContainer);
+    }
+    this.deployCardContainer.active = false;
+
+    // 创建战前遮罩
+    this._battleStartOverlay = new Node('BattleStartOverlay');
+    const overlayTransform = this._battleStartOverlay.addComponent(UITransform);
+    overlayTransform.setContentSize(750, 1330); // 全屏
+    this._battleStartOverlay.setPosition(0, 0, 0);
+    const overlaySprite = this._battleStartOverlay.addComponent(Sprite);
+    overlaySprite.color = new Color(0, 0, 0, 0);
+    this._battleStartOverlay.active = false;
+    this.node.addChild(this._battleStartOverlay);
+
+    // 大字
+    const titleNode = new Node('BattleStartTitle');
+    const titleLabel = titleNode.addComponent(Label);
+    titleLabel.string = '\u2694 \u6218\u6597\u5F00\u59CB\uff01';
+    titleLabel.fontSize = 48;
+    titleLabel.color = new Color(255, 215, 0);
+    titleLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+    titleLabel.verticalAlign = Label.VerticalAlign.CENTER;
+    titleNode.setPosition(0, 0, 0);
+    titleNode.setScale(0, 0, 1);
+    this._battleStartOverlay.addChild(titleNode);
+
+    // waitButton 文字
+    if (this.waitButton) {
+      const wtLabel = this.waitButton.node.getComponentInChildren(Label);
+      if (wtLabel) {
+        wtLabel.string = '\u7ED3\u675F\u884C\u52A8';
+      }
+    }
+
+    // 阶段背景色（编辑器未绑定时自动创建）
+    if (!this.phaseBg && this.phaseLabel) {
+      const bgNode = new Node('PhaseBg');
+      const bgSprite = bgNode.addComponent(Sprite);
+      bgSprite.color = new Color(0, 100, 200, 100);
+      const bgTrans = bgNode.addComponent(UITransform);
+      bgTrans.setContentSize(400, 40);
+      bgNode.setPosition(0, 260, -1);
+      this.node.addChild(bgNode);
+      this.phaseBg = bgSprite;
+    }
   }
 
   show(): void {
@@ -91,9 +151,6 @@ export class BattleUI extends Component {
   }
 
   private bindEvents(): void {
-    if (this.endTurnButton) {
-      this.endTurnButton.node.on(Button.EventType.CLICK, this.onEndTurnClicked, this);
-    }
     if (this.confirmDeployButton) {
       this.confirmDeployButton.node.on(Button.EventType.CLICK, this.onConfirmDeployClicked, this);
     }
@@ -103,9 +160,6 @@ export class BattleUI extends Component {
   }
 
   private unbindEvents(): void {
-    if (this.endTurnButton) {
-      this.endTurnButton.node.off(Button.EventType.CLICK, this.onEndTurnClicked, this);
-    }
     if (this.confirmDeployButton) {
       this.confirmDeployButton.node.off(Button.EventType.CLICK, this.onConfirmDeployClicked, this);
     }
@@ -117,6 +171,7 @@ export class BattleUI extends Component {
   private _onEndTurn: (() => void) | null = null;
   private _onConfirmDeploy: (() => void) | null = null;
   private _onWait: (() => void) | null = null;
+  private _onContinueVictory: (() => void) | null = null;
 
   setEndTurnCallback(callback: () => void): void {
     this._onEndTurn = callback;
@@ -128,6 +183,10 @@ export class BattleUI extends Component {
 
   setWaitCallback(callback: () => void): void {
     this._onWait = callback;
+  }
+
+  setVictoryContinueCallback(callback: () => void): void {
+    this._onContinueVictory = callback;
   }
 
   private onEndTurnClicked(): void {
@@ -142,24 +201,34 @@ export class BattleUI extends Component {
     if (this._onWait) this._onWait();
   }
 
+  private onVictoryContinueClicked(): void {
+    if (this._onContinueVictory) {
+      this._onContinueVictory();
+    }
+  }
+
   showDeployPhase(): void {
     if (this.deployPrompt) this.deployPrompt.active = true;
     if (this.confirmDeployButton) this.confirmDeployButton.node.active = true;
-    if (this.endTurnButton) this.endTurnButton.node.active = false;
     if (this.waitButton) this.waitButton.node.active = false;
     if (this.unitNameLabel) this.unitNameLabel.string = '\u90E8\u7F72\u9635\u5BB9';
-    if (this.hpLabel) this.hpLabel.string = '\u70B9\u51FB\u5DE6\u4FA7\u5355\u4F4D\u518D\u70B9\u683C\u5B50\u653E\u7F6E';
+    if (this.hpLabel) this.hpLabel.string = '\u70B9\u51FB\u5361\u7247\u2192\u70B9\u51FB\u683C\u5B50\u653E\u7F6E';
     if (this.energyLabel) this.energyLabel.string = '';
     if (this.turnLabel) this.turnLabel.string = '';
-    if (this.deployUnitList) this.deployUnitList.active = true;
+    if (this.deployUnitList) this.deployUnitList.active = false;
+    if (this.deployCardContainer) {
+      this.deployCardContainer.active = true;
+    }
   }
 
   hideDeployPhase(): void {
     if (this.deployPrompt) this.deployPrompt.active = false;
     if (this.confirmDeployButton) this.confirmDeployButton.node.active = false;
-    if (this.endTurnButton) this.endTurnButton.node.active = true;
     if (this.waitButton) this.waitButton.node.active = true;
     if (this.deployUnitList) this.deployUnitList.active = false;
+    if (this.deployCardContainer) {
+      this.deployCardContainer.active = false;
+    }
   }
 
   updateUnitInfo(name: string, hp: number, maxHp: number, energy: number, maxEnergy: number, turn: number, isEnemy: boolean = false): void {
@@ -180,38 +249,86 @@ export class BattleUI extends Component {
     unitIcons: string[],
     callback: (index: number) => void
   ): void {
-    if (!this.deployUnitList) return;
-    this.deployUnitList.removeAllChildren();
+    if (!this.deployCardContainer) return;
+    this.deployCardContainer.removeAllChildren();
+    this._deployCards = [];
 
-    for (let i = 0; i < unitNames.length; i++) {
-      const item = new Node(`DeployItem_${i}`);
-      const label = item.addComponent(Label);
-      label.string = `${unitNames[i]}`;
-      label.fontSize = 20;
-      label.color = Color.WHITE;
-      const trans = item.addComponent(UITransform);
-      trans.setContentSize(200, 40);
-      item.setPosition(0, -i * 50, 0);
-      item['_deployIdx'] = i;
-      item['_deployCb'] = callback;
-      item.on(Node.EventType.TOUCH_END, (evt) => {
-        const idx = evt.target['_deployIdx'];
-        const cb = evt.target['_deployCb'];
+    const cardWidth = 120;
+    const cardHeight = 70;
+    const gap = 15;
+    const count = unitNames.length;
+    const totalWidth = count * cardWidth + (count - 1) * gap;
+    const startX = -totalWidth / 2 + cardWidth / 2;
+
+    for (let i = 0; i < count; i++) {
+      const card = new Node(`DeployCard_${i}`);
+      card.setPosition(startX + i * (cardWidth + gap), 0, 0);
+
+      // 背景
+      const bg = card.addComponent(Sprite);
+      bg.color = new Color(60, 60, 80, 200);
+      bg.sizeMode = Sprite.SizeMode.CUSTOM;
+      const bgTransform = card.addComponent(UITransform);
+      bgTransform.setContentSize(cardWidth, cardHeight);
+
+      // 图标 (用文字代替)
+      const iconLabel = card.addComponent(Label);
+      iconLabel.string = unitIcons[i] || '';
+      iconLabel.fontSize = 24;
+      iconLabel.color = Color.WHITE;
+      iconLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+      iconLabel.verticalAlign = Label.VerticalAlign.CENTER;
+      iconLabel.node.setPosition(0, 10, 0);
+
+      // 名字
+      const nameLabel = new Node('NameLabel');
+      const nl = nameLabel.addComponent(Label);
+      nl.string = unitNames[i];
+      nl.fontSize = 14;
+      nl.color = Color.WHITE;
+      nl.horizontalAlign = Label.HorizontalAlign.CENTER;
+      nl.verticalAlign = Label.VerticalAlign.CENTER;
+      nameLabel.setPosition(0, -20, 0);
+      card.addChild(nameLabel);
+
+      // 选中勾（默认隐藏）
+      const checkMark = new Node('CheckMark');
+      const cmLabel = checkMark.addComponent(Label);
+      cmLabel.string = '\u2713';
+      cmLabel.fontSize = 20;
+      cmLabel.color = new Color(80, 220, 80);
+      checkMark.setPosition(cardWidth / 2 - 15, cardHeight / 2 - 10, 0);
+      checkMark.active = false;
+      card.addChild(checkMark);
+
+      // 交互
+      card['_deployIdx'] = i;
+      card['_deployCb'] = callback;
+      card.on(Node.EventType.TOUCH_END, (evt) => {
+        const idx = evt.target['_deployIdx'] as number;
+        const cb = evt.target['_deployCb'] as (index: number) => void;
         if (cb) cb(idx);
       });
-      this.deployUnitList.addChild(item);
+
+      this.deployCardContainer.addChild(card);
+      this._deployCards.push(card);
     }
+
+    this.deployCardContainer.active = true;
   }
 
   updateDeployItemState(index: number, placed: boolean): void {
-    if (!this.deployUnitList) return;
-    const child = this.deployUnitList.children[index];
-    if (child) {
-      const label = child.getComponent(Label);
-      if (label) {
-        label.color = placed ? new Color(100, 100, 100) : Color.WHITE;
-      }
+    if (!this._deployCards[index]) return;
+    const card = this._deployCards[index];
+    const bg = card.getComponent(Sprite);
+    if (bg) {
+      bg.color = placed
+        ? new Color(40, 40, 60, 150)   // 已放置：暗色
+        : new Color(60, 60, 80, 200);   // 未放置：亮色
     }
+    // 勾标记
+    const checkMark = card.getChildByName('CheckMark');
+    if (checkMark) checkMark.active = placed;
   }
 
   clearUnitInfo(): void {
@@ -297,6 +414,44 @@ export class BattleUI extends Component {
     if (this.endTurnButton) {
       this.endTurnButton.node.active = false;
     }
+
+    // 确保有"继续"按钮
+    let continueBtn = this.victoryPanel?.getChildByName('ContinueBtn');
+    if (!continueBtn && this.victoryPanel) {
+      continueBtn = new Node('ContinueBtn');
+      const btn = continueBtn.addComponent(Button);
+      const btnTransform = continueBtn.addComponent(UITransform);
+      btnTransform.setContentSize(160, 50);
+      continueBtn.setPosition(0, -80, 0);
+      const btnLabel = continueBtn.addComponent(Label);
+      btnLabel.string = '\u7EE7\u7EED';
+      btnLabel.fontSize = 24;
+      btnLabel.color = Color.WHITE;
+      btnLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+      btnLabel.verticalAlign = Label.VerticalAlign.CENTER;
+      const btnSprite = continueBtn.addComponent(Sprite);
+      btnSprite.color = new Color(0, 120, 200);
+      btnSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+      btn.node.on(Button.EventType.CLICK, this.onVictoryContinueClicked, this);
+      this.victoryPanel.addChild(continueBtn);
+    }
+
+    // 显示金币
+    let goldLabel = this.victoryPanel?.getChildByName('GoldLabel');
+    if (!goldLabel && this.victoryPanel) {
+      goldLabel = new Node('GoldLabel');
+      const gl = goldLabel.addComponent(Label);
+      gl.fontSize = 28;
+      gl.color = new Color(255, 215, 0);
+      gl.horizontalAlign = Label.HorizontalAlign.CENTER;
+      gl.verticalAlign = Label.VerticalAlign.CENTER;
+      goldLabel.setPosition(0, -20, 0);
+      this.victoryPanel.addChild(goldLabel);
+    }
+    const glComp = goldLabel?.getComponent(Label);
+    if (glComp) {
+      glComp.string = `\uD83D\uDCB0 +${gold}`;
+    }
   }
 
   showDefeat(): void {
@@ -329,12 +484,79 @@ export class BattleUI extends Component {
     if (this.actionHintLabel) {
       this.actionHintLabel.string = actionHint ?? '';
     }
+
+    // 根据阶段设置背景色
+    if (this.phaseBg) {
+      if (phase.includes('\u5E03\u9635')) {
+        // 布阵 - 绿色
+        this.phaseBg.color = new Color(0, 120, 60, 120);
+      } else if (phase.includes('\u654C\u65B9')) {
+        // 敌方 - 红色
+        this.phaseBg.color = new Color(180, 40, 40, 120);
+      } else if (phase.includes('\u6211\u65B9')) {
+        // 我方 - 蓝色
+        this.phaseBg.color = new Color(0, 80, 180, 120);
+      } else if (phase.includes('\u80DC\u5229')) {
+        this.phaseBg.color = new Color(180, 140, 0, 120);
+      } else if (phase.includes('\u5931\u8D25')) {
+        this.phaseBg.color = new Color(80, 80, 80, 120);
+      } else {
+        this.phaseBg.color = new Color(0, 0, 0, 0);
+      }
+    }
   }
 
   clearPhase(): void {
     if (this.phaseLabel) this.phaseLabel.string = '';
     if (this.unitTurnLabel) this.unitTurnLabel.string = '';
     if (this.actionHintLabel) this.actionHintLabel.string = '';
+    if (this.phaseBg) {
+      this.phaseBg.color = new Color(0, 0, 0, 0);
+    }
+  }
+
+  playBattleStartAnimation(onComplete: () => void): void {
+    this._onBattleStartComplete = onComplete;
+    if (!this._battleStartOverlay) {
+      if (onComplete) onComplete();
+      return;
+    }
+
+    this._battleStartOverlay.active = true;
+    const overlaySprite = this._battleStartOverlay.getComponent(Sprite);
+    const titleNode = this._battleStartOverlay.getChildByName('BattleStartTitle');
+
+    if (!overlaySprite || !titleNode) {
+      this._battleStartOverlay.active = false;
+      if (onComplete) onComplete();
+      return;
+    }
+
+    // 步骤1: 遮罩渐暗 (0.3s)
+    tween(overlaySprite)
+      .to(0.3, { color: new Color(0, 0, 0, 180) })
+      .call(() => {
+        // 步骤2: 大字出现 (1.2s)
+        tween(titleNode)
+          .to(0.4, { scale: new Vec3(1.2, 1.2, 1) })
+          .to(0.6, { scale: new Vec3(1, 1, 1) })
+          .delay(0.2)
+          .call(() => {
+            // 步骤3: 遮罩淡出 (0.3s)
+            tween(overlaySprite)
+              .to(0.3, { color: new Color(0, 0, 0, 0) })
+              .call(() => {
+                this._battleStartOverlay.active = false;
+                if (this._onBattleStartComplete) {
+                  this._onBattleStartComplete();
+                  this._onBattleStartComplete = null;
+                }
+              })
+              .start();
+          })
+          .start();
+      })
+      .start();
   }
 
   private onSkillBtnClicked(btn: Button): void {
@@ -347,13 +569,15 @@ export class BattleUI extends Component {
   }
 
   onDestroy(): void {
-    this.unbindEvents();
-    if (this.skillButtonContainer) {
-      this.skillButtonContainer.removeAllChildren();
-    }
+    // onDestroy 中不访问 @property(Node) — 已由 hide() 中的 unbindEvents() 清理
+    // 只清 JS 引用
     this._skillClickCallbacks = [];
+    this._deployCards = [];
     this._onEndTurn = null;
     this._onConfirmDeploy = null;
     this._onWait = null;
+    this._battleStartOverlay = null;
+    this._onBattleStartComplete = null;
+    this._onContinueVictory = null;
   }
 }
