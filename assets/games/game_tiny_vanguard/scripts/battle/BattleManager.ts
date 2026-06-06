@@ -7,6 +7,7 @@ import { EnemyConfig, SkillEffect, ENEMIES, ELITE_ENEMIES, BOSS_CONFIG, getClass
 const { ccclass, property } = _decorator;
 
 export type BattlePhase = 'deploy' | 'player_turn' | 'enemy_turn' | 'skill_target' | 'victory' | 'defeat';
+export type UnitActionPhase = 'move' | 'action' | 'done';
 
 export interface BattleResult {
   victory: boolean;
@@ -26,6 +27,9 @@ export class BattleManager extends Component {
   private _currentUnitIndex: number = 0;
   private _phase: BattlePhase = 'deploy';
   private _turnCount: number = 0;
+  private _unitPhase: UnitActionPhase = 'move';
+  private _aiQueue: { enemy: UnitController; action: AIAction }[] = [];
+  private _onUnitPhaseChanged: ((phase: BattlePhase, unit: UnitController | null, actionPhase: UnitActionPhase | null) => void) | null = null;
   private _aiController: AIController = new AIController();
   private _onBattleEndCallback: ((result: BattleResult) => void) | null = null;
   private _onDamageDealtCallback: ((targetNode: Node, amount: number) => void) | null = null;
@@ -39,6 +43,10 @@ export class BattleManager extends Component {
   get enemyUnits(): UnitController[] { return this._enemyUnits; }
   get selectedUnit(): UnitController | null { return this._selectedUnit; }
   get turnCount(): number { return this._turnCount; }
+
+  setUnitPhaseChangedCallback(cb: typeof this._onUnitPhaseChanged): void {
+    this._onUnitPhaseChanged = cb;
+  }
 
   startBattle(
     playerClasses: string[],
@@ -198,7 +206,11 @@ export class BattleManager extends Component {
       if (unit.data?.isAlive) {
         this._selectedUnit = unit;
         unit.setSelected(true);
-        this.highlightUnitActions(unit);
+        this._unitPhase = 'move';
+        this.highlightMoveRange(unit);
+        if (this._onUnitPhaseChanged) {
+          this._onUnitPhaseChanged('player_turn', unit, 'move');
+        }
         return;
       }
       this._currentUnitIndex++;
@@ -206,15 +218,21 @@ export class BattleManager extends Component {
     this.endPlayerTurn();
   }
 
-  private highlightUnitActions(unit: UnitController): void {
-    if (!unit.data) return;
+  private highlightMoveRange(unit: UnitController): void {
     this.gridController.clearHighlights();
-
+    if (!unit.data) return;
     if (!unit.data.hasMoved) {
       const moves = this.getReachablePositions(unit.data.gridPos, unit.data.stats.move);
       this.gridController.highlightCells(moves, new Color(100, 200, 100, 180));
+    } else {
+      this._unitPhase = 'action';
+      this.highlightAttackRange(unit);
     }
+  }
 
+  private highlightAttackRange(unit: UnitController): void {
+    this.gridController.clearHighlights();
+    if (!unit.data) return;
     const attacks = this.getAttackableEnemies(unit);
     this.gridController.highlightCells(attacks, new Color(200, 100, 100, 180));
   }
@@ -258,6 +276,54 @@ export class BattleManager extends Component {
     return false;
   }
 
+  private handleMovePhase(unit: UnitController, gridPos: GridPosition): void {
+    if (unit.data.gridPos.row === gridPos.row && unit.data.gridPos.col === gridPos.col) {
+      this._unitPhase = 'action';
+      this.highlightAttackRange(unit);
+      if (this._onUnitPhaseChanged) {
+        this._onUnitPhaseChanged('player_turn', unit, 'action');
+      }
+      return;
+    }
+    if (unit.data.hasMoved) return;
+    const moves = this.getReachablePositions(unit.data.gridPos, unit.data.stats.move);
+    const canMove = moves.some(m => m.row === gridPos.row && m.col === gridPos.col);
+    if (!canMove) return;
+    unit.setGridPosition(gridPos);
+    this._unitPhase = 'action';
+    this.highlightAttackRange(unit);
+    if (this._onUnitPhaseChanged) {
+      this._onUnitPhaseChanged('player_turn', unit, 'action');
+    }
+  }
+
+  private handleActionPhase(unit: UnitController, gridPos: GridPosition): void {
+    if (unit.data.hasActed) return;
+    const targetEnemy = this._enemyUnits.find(e =>
+      e.data?.isAlive && e.data.gridPos.row === gridPos.row && e.data.gridPos.col === gridPos.col
+    );
+    if (targetEnemy) {
+      const dist = Math.abs(gridPos.row - unit.data.gridPos.row) + Math.abs(gridPos.col - unit.data.gridPos.col);
+      if (dist <= unit.data.stats.range) {
+        this.executeAttack(unit, targetEnemy);
+        unit.data.hasActed = true;
+        this.finishUnitTurn();
+        return;
+      }
+    }
+  }
+
+  private finishUnitTurn(): void {
+    this._unitPhase = 'done';
+    if (this._selectedUnit) {
+      this._selectedUnit.setSelected(false);
+      this._selectedUnit = null;
+    }
+    this.gridController.clearHighlights();
+    this._currentUnitIndex++;
+    this.selectNextPlayerUnit();
+  }
+
   onCellClicked(gridPos: GridPosition): void {
     if (this._phase === 'skill_target') {
       this.handleSkillTargetClick(gridPos);
@@ -267,35 +333,19 @@ export class BattleManager extends Component {
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive) return;
 
-    const targetEnemy = this._enemyUnits.find(e =>
-      e.data?.isAlive && e.data.gridPos.row === gridPos.row && e.data.gridPos.col === gridPos.col
-    );
-
-    if (targetEnemy && !unit.data.hasActed) {
-      const dist = Math.abs(gridPos.row - unit.data.gridPos.row) + Math.abs(gridPos.col - unit.data.gridPos.col);
-      if (dist <= unit.data.stats.range) {
-        this.executeAttack(unit, targetEnemy);
-        unit.data.hasActed = true;
-      }
-      return;
-    }
-
-    if (!unit.data.hasMoved) {
-      const moves = this.getReachablePositions(unit.data.gridPos, unit.data.stats.move);
-      const canMove = moves.some(m => m.row === gridPos.row && m.col === gridPos.col);
-      if (canMove) {
-        unit.setGridPosition(gridPos);
-        this.highlightUnitActions(unit);
-        return;
-      }
-    }
-
     const clickedPlayer = this._playerUnits.find(u =>
       u.data?.isAlive && u.data.gridPos.row === gridPos.row && u.data.gridPos.col === gridPos.col
     );
-    if (clickedPlayer) {
+    if (clickedPlayer && clickedPlayer !== unit) {
       this._currentUnitIndex = this._playerUnits.indexOf(clickedPlayer);
       this.selectNextPlayerUnit();
+      return;
+    }
+
+    if (this._unitPhase === 'move') {
+      this.handleMovePhase(unit, gridPos);
+    } else if (this._unitPhase === 'action') {
+      this.handleActionPhase(unit, gridPos);
     }
   }
 
@@ -305,7 +355,7 @@ export class BattleManager extends Component {
       this._pendingSkill = null;
       this._skillTargets = [];
       this._phase = 'player_turn';
-      this.highlightUnitActions(this._selectedUnit!);
+      this.highlightAttackRange(this._selectedUnit!);
       return;
     }
 
@@ -322,8 +372,9 @@ export class BattleManager extends Component {
 
     this._pendingSkill = null;
     this._skillTargets = [];
-    this.gridController.clearHighlights();
-    this.selectNextPlayerUnit();
+
+    unit.data.hasActed = true;
+    this.finishUnitTurn();
   }
 
   private executeSkillEffects(
@@ -616,7 +667,8 @@ export class BattleManager extends Component {
       if (unit.data) {
         this.executeSkillEffects(unit, unit, unit.data.gridPos, skill.effects);
       }
-      this.selectNextPlayerUnit();
+      unit.data.hasActed = true;
+      this.finishUnitTurn();
     } else {
       this._pendingSkill = skill;
       this._pendingSkill['_skillIndex'] = skillIndex;
@@ -647,8 +699,10 @@ export class BattleManager extends Component {
   }
 
   endCurrentUnitTurn(): void {
-    this._currentUnitIndex++;
-    this.selectNextPlayerUnit();
+    const unit = this._selectedUnit;
+    if (!unit?.data?.isAlive) return;
+    unit.data.hasActed = true;
+    this.finishUnitTurn();
   }
 
   private endPlayerTurn(): void {
@@ -661,28 +715,63 @@ export class BattleManager extends Component {
     }
     this.gridController.clearHighlights();
 
-    for (const enemy of this._enemyUnits) {
-      if (enemy.data?.isAlive) {
-        enemy.onTurnStart();
-      }
-    }
-    const actions: AIAction[] = this._aiController.decideAll(this._enemyUnits, this._playerUnits);
-    const aliveEnemies = this._enemyUnits.filter(u => u.data?.isAlive);
-    for (let i = 0; i < actions.length; i++) {
-      const enemy = aliveEnemies[i];
-      if (!enemy || !enemy.data?.isAlive) continue;
-      const action = actions[i];
-      enemy.setGridPosition(action.moveTo);
-      if (action.attackTarget?.data?.isAlive) {
-        action.attackTarget.takeDamage(enemy.data.stats.attack);
-      }
+    if (this._onUnitPhaseChanged) {
+      this._onUnitPhaseChanged('enemy_turn', null, null);
     }
 
+    const aliveEnemies = this._enemyUnits.filter(u => u.data?.isAlive);
+    for (const enemy of aliveEnemies) {
+      enemy.onTurnStart();
+    }
+    const actions = this._aiController.decideAll(this._enemyUnits, this._playerUnits);
+    this._aiQueue = aliveEnemies.map((enemy, i) => ({
+      enemy,
+      action: actions[i] ?? { moveTo: { ...enemy.data?.gridPos ?? { row: 0, col: 0 } }, attackTarget: null },
+    }));
+
+    this._processNextAIUnit();
+  }
+
+  private _processNextAIUnit(): void {
+    if (this._phase !== 'enemy_turn') {
+      this._aiQueue = [];
+      return;
+    }
+    if (this._aiQueue.length === 0) {
+      this.finishAITurn();
+      return;
+    }
+    const item = this._aiQueue.shift()!;
+    const { enemy, action } = item;
+    if (!enemy.data?.isAlive) {
+      this._processNextAIUnit();
+      return;
+    }
+
+    const moveDuration = 0.25;
+    const moveTarget = action.moveTo ?? enemy.data.gridPos;
+    enemy.moveToPositionAnimated(moveTarget, moveDuration, () => {
+      if (action.attackTarget?.data?.isAlive) {
+        this.executeAttack(enemy, action.attackTarget);
+      }
+      this.scheduleOnce(() => {
+        this._processNextAIUnit();
+      }, 0.5);
+    });
+  }
+
+  private finishAITurn(): void {
     this.checkBattleEnd();
     if (this._phase === 'enemy_turn') {
       this._turnCount++;
       this._phase = 'player_turn';
-      this.startPlayerTurn();
+      for (const unit of this._playerUnits) {
+        if (unit.data?.isAlive) {
+          unit.onTurnStart(this._playerUnits);
+        }
+      }
+      this._currentUnitIndex = 0;
+      this.selectNextPlayerUnit();
     }
   }
 
