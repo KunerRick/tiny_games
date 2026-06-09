@@ -255,6 +255,10 @@ export class BattleUI extends Component {
     callback: (index: number) => void
   ): void {
     if (!this.deployCardContainer) return;
+    // 安全性：搜索同级节点中旧的 DeployUnitList 并隐藏
+    const oldList = this.node.getChildByName('DeployUnitList');
+    if (oldList?.active) oldList.active = false;
+    if (this.deployUnitList?.active) this.deployUnitList.active = false;
     this.deployCardContainer.removeAllChildren();
     this._deployCards = [];
 
@@ -276,14 +280,16 @@ export class BattleUI extends Component {
       const bgTransform = card.addComponent(UITransform);
       bgTransform.setContentSize(cardWidth, cardHeight);
 
-      // 图标 (用文字代替)
-      const iconLabel = card.addComponent(Label);
+      // 图标 (用文字代替，放在子节点以避免与 Sprite 冲突)
+      const iconNode = new Node('IconLabel');
+      const iconLabel = iconNode.addComponent(Label);
       iconLabel.string = unitIcons[i] || '';
       iconLabel.fontSize = 24;
       iconLabel.color = Color.WHITE;
       iconLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
       iconLabel.verticalAlign = Label.VerticalAlign.CENTER;
-      iconLabel.node.setPosition(0, 10, 0);
+      iconNode.setPosition(0, 10, 0);
+      card.addChild(iconNode);
 
       // 名字
       const nameLabel = new Node('NameLabel');

@@ -229,10 +229,10 @@ export class BattleManager extends Component {
       // 重置单位位置到棋盘外
       unit.data.gridPos = { row: index, col: -1 };
       unit.data.hasMoved = false;
-      // 重新定位节点到棋盘外
+      // 重新定位节点到棋盘外（与 init 时 updatePosition 的计算一致）
       unit.node.setPosition(
-        (-2.5) * GridController.CELL_SIZE,
-        (-3 - index) * GridController.CELL_SIZE
+        (-1 - 2.5) * GridController.CELL_SIZE,
+        (index - 2.5) * GridController.CELL_SIZE
       );
       // 通知 UI 取消状态
       if (this._onDeployUnitPlacedCallback) {
@@ -259,8 +259,18 @@ export class BattleManager extends Component {
 
   private onDeployCellClicked(pos: GridPosition): void {
     if (pos.row > 1) return;
-    if (this.isOccupied(pos)) return;
+
+    // 如果该格子有己方单位 → 撤回（通过 selectDeployUnit 触发）
+    const existingIndex = this._playerUnits.findIndex(
+      u => u.data?.gridPos.row === pos.row && u.data?.gridPos.col === pos.col
+    );
+    if (existingIndex >= 0) {
+      this.selectDeployUnit(existingIndex);
+      return;
+    }
+
     if (this._selectedDeployUnitIndex < 0) return;
+    if (this.isOccupied(pos)) return;
 
     const unit = this._playerUnits[this._selectedDeployUnitIndex];
     if (!unit?.data) return;
