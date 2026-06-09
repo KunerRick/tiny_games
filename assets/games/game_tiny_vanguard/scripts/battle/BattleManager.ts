@@ -170,6 +170,12 @@ export class BattleManager extends Component {
     }
     // 禁用后 4 行格子交互
     this.gridController.setRowsInteractable([2, 3, 4, 5], false);
+    // 隐藏棋盘外单位（防左侧出现重复的"三个方框"）
+    for (const unit of this._playerUnits) {
+      if (unit.node?.isValid && unit.data?.gridPos.col < 0) {
+        unit.node.active = false;
+      }
+    }
   }
 
   public highlightDeployArea(): void {
@@ -201,8 +207,13 @@ export class BattleManager extends Component {
     this._phase = 'player_turn';
     this._turnCount = 1;
     this.gridController.setCellClickCallback((pos) => this.onCellClicked(pos));
-    // 恢复所有格子交互
     this.gridController.setRowsInteractable([2, 3, 4, 5], true);
+    // 确保所有单位节点可见（防止 col=-1 的单位因为之前的隐藏而不可见）
+    for (const unit of this._playerUnits) {
+      if (unit.node?.isValid && unit.data?.isAlive) {
+        unit.node.active = true;
+      }
+    }
     this.startPlayerTurn();
   }
 
@@ -234,6 +245,10 @@ export class BattleManager extends Component {
         (-1 - 2.5) * GridController.CELL_SIZE,
         (index - 2.5) * GridController.CELL_SIZE
       );
+      // 隐藏单位节点（撤回后不显示在棋盘外）
+      if (unit.node?.isValid) {
+        unit.node.active = false;
+      }
       // 通知 UI 取消状态
       if (this._onDeployUnitPlacedCallback) {
         this._onDeployUnitPlacedCallback(this._deployedPositions.length, this._playerUnits.length);
@@ -278,6 +293,12 @@ export class BattleManager extends Component {
 
     unit.setGridPosition(pos);
     this._deployedPositions.push(pos);
+
+    // 显示单位节点（放置到棋盘上后可见）
+    if (unit.node?.isValid) {
+      unit.node.active = true;
+    }
+
     this.gridController.highlightCells(this._deployedPositions, new Color(100, 200, 100, 255));
     // 先通知 UI 卡片放置状态变化，再切换选中（避免选中态被覆盖）
     if (this._onDeployUnitPlacedCallback) {

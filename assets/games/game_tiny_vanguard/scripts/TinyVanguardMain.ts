@@ -395,7 +395,7 @@ export class TinyVanguardMain extends Component {
       const config = getClassById(c);
       return config ? config.icon : '';
     });
-    this.battleUI.showDeployUnitList(unitNames, unitIcons, (index) => {
+    this.battleUI.setupPlatoonCards(unitNames, unitIcons, (index) => {
       this.battleManager.selectDeployUnit(index);
     });
     this.battleManager.setDeployUnitPlacedCallback((placed, total) => {

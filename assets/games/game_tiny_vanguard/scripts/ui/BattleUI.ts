@@ -57,9 +57,6 @@ export class BattleUI extends Component {
   @property({ type: Sprite, tooltip: '阶段背景色' })
   phaseBg: Sprite = null;
 
-  @property({ type: Node, tooltip: '布阵卡片容器' })
-  deployCardContainer: Node = null;
-
   private _skillClickCallbacks: ((index: number) => void)[] = [];
   private _showCalled: boolean = false;
   private _deployCards: Node[] = [];
@@ -86,15 +83,6 @@ export class BattleUI extends Component {
     if (this.deployPrompt) {
       this.deployPrompt.setPosition(0, 260);
     }
-
-    if (!this.deployCardContainer) {
-      this.deployCardContainer = new Node('DeployCardContainer');
-      const containerTransform = this.deployCardContainer.addComponent(UITransform);
-      containerTransform.setContentSize(400, 80);
-      this.deployCardContainer.setPosition(0, -280, 0);
-      this.node.addChild(this.deployCardContainer);
-    }
-    this.deployCardContainer.active = false;
 
     // 创建战前遮罩
     this._battleStartOverlay = new Node('BattleStartOverlay');
@@ -221,9 +209,6 @@ export class BattleUI extends Component {
     if (this.unitTurnLabel) this.unitTurnLabel.string = '';
     if (this.actionHintLabel) this.actionHintLabel.string = '';
     if (this.deployUnitList) this.deployUnitList.active = false;
-    if (this.deployCardContainer) {
-      this.deployCardContainer.active = true;
-    }
   }
 
   hideDeployPhase(): void {
@@ -231,9 +216,6 @@ export class BattleUI extends Component {
     if (this.confirmDeployButton) this.confirmDeployButton.node.active = false;
     if (this.waitButton) this.waitButton.node.active = true;
     if (this.deployUnitList) this.deployUnitList.active = false;
-    if (this.deployCardContainer) {
-      this.deployCardContainer.active = false;
-    }
   }
 
   updateUnitInfo(name: string, hp: number, maxHp: number, energy: number, maxEnergy: number, turn: number, isEnemy: boolean = false): void {
@@ -249,29 +231,31 @@ export class BattleUI extends Component {
     if (this.turnLabel) this.turnLabel.string = `\u8F6E\u6B21 ${turn}`;
   }
 
-  showDeployUnitList(
+  setupPlatoonCards(
     unitNames: string[],
     unitIcons: string[],
     callback: (index: number) => void
   ): void {
-    if (!this.deployCardContainer) return;
-    // 安全性：搜索同级节点中旧的 DeployUnitList 并隐藏
-    const oldList = this.node.getChildByName('DeployUnitList');
-    if (oldList?.active) oldList.active = false;
-    if (this.deployUnitList?.active) this.deployUnitList.active = false;
-    this.deployCardContainer.removeAllChildren();
+    // 清除旧的兵牌
+    for (const card of this._deployCards) {
+      if (card?.isValid) {
+        card.removeFromParent();
+      }
+    }
     this._deployCards = [];
 
     const cardWidth = 120;
     const cardHeight = 70;
-    const gap = 15;
+    const gap = 10;
     const count = unitNames.length;
-    const totalWidth = count * cardWidth + (count - 1) * gap;
-    const startX = -totalWidth / 2 + cardWidth / 2;
+    // 竖排居中：总高度 = count * cardHeight + (count-1) * gap
+    const totalHeight = count * cardHeight + (count - 1) * gap;
+    const startY = totalHeight / 2 - cardHeight / 2;
 
     for (let i = 0; i < count; i++) {
-      const card = new Node(`DeployCard_${i}`);
-      card.setPosition(startX + i * (cardWidth + gap), 0, 0);
+      const card = new Node(`PlatoonCard_${i}`);
+      // 棋盘左边缘 x=-200，兵牌放在 x=-380 (左侧 180px)
+      card.setPosition(-380, startY - i * (cardHeight + gap), 0);
 
       // 背景
       const bg = card.addComponent(Sprite);
@@ -280,7 +264,7 @@ export class BattleUI extends Component {
       const bgTransform = card.addComponent(UITransform);
       bgTransform.setContentSize(cardWidth, cardHeight);
 
-      // 图标 (用文字代替，放在子节点以避免与 Sprite 冲突)
+      // 图标 (文字 emoji，放在上半部分)
       const iconNode = new Node('IconLabel');
       const iconLabel = iconNode.addComponent(Label);
       iconLabel.string = unitIcons[i] || '';
@@ -288,10 +272,10 @@ export class BattleUI extends Component {
       iconLabel.color = Color.WHITE;
       iconLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
       iconLabel.verticalAlign = Label.VerticalAlign.CENTER;
-      iconNode.setPosition(0, 10, 0);
+      iconNode.setPosition(0, 12, 0);
       card.addChild(iconNode);
 
-      // 名字
+      // 名字（放在下半部分）
       const nameLabel = new Node('NameLabel');
       const nl = nameLabel.addComponent(Label);
       nl.string = unitNames[i];
@@ -299,10 +283,10 @@ export class BattleUI extends Component {
       nl.color = Color.WHITE;
       nl.horizontalAlign = Label.HorizontalAlign.CENTER;
       nl.verticalAlign = Label.VerticalAlign.CENTER;
-      nameLabel.setPosition(0, -20, 0);
+      nameLabel.setPosition(0, -15, 0);
       card.addChild(nameLabel);
 
-      // 选中勾（默认隐藏）
+      // 选中勾（默认隐藏，placed 时显示）
       const checkMark = new Node('CheckMark');
       const cmLabel = checkMark.addComponent(Label);
       cmLabel.string = '\u2713';
@@ -321,11 +305,9 @@ export class BattleUI extends Component {
         if (cb) cb(idx);
       });
 
-      this.deployCardContainer.addChild(card);
+      this.node.addChild(card);
       this._deployCards.push(card);
     }
-
-    this.deployCardContainer.active = true;
   }
 
   setDeployCardState(index: number, state: 'unplaced' | 'selected' | 'placed'): void {
