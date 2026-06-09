@@ -341,6 +341,10 @@ export class TinyVanguardMain extends Component {
       this.battleManager.setUnitPhaseChangedCallback((phase, unit, actionPhase) => {
         this.updateBattlePhaseUI(phase, unit, actionPhase);
       });
+      // 布阵卡片选中回调 → 更新 UI 卡片高亮
+      this.battleManager.setDeploySelectionChangedCallback((index) => {
+        this.battleUI.selectDeployCard(index);
+      });
     }
 
     this.updateGoldDisplay();
@@ -395,11 +399,11 @@ export class TinyVanguardMain extends Component {
       this.battleManager.selectDeployUnit(index);
     });
     this.battleManager.setDeployUnitPlacedCallback((placed, total) => {
-      // 计算每个 index 的状态（支持取消）
+      // 三态更新：遍历所有单位，根据放置状态更新卡片
       for (let i = 0; i < this.battleManager.playerUnits.length; i++) {
         const unit = this.battleManager.playerUnits[i];
         const isPlaced = unit.data?.gridPos.col >= 0;
-        this.battleUI.updateDeployItemState(i, isPlaced);
+        this.battleUI.setDeployCardState(i, isPlaced ? 'placed' : 'unplaced');
       }
     });
 

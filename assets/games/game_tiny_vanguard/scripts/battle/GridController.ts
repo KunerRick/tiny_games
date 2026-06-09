@@ -98,6 +98,23 @@ export class GridController extends Component {
     this._highlightedCells = [];
   }
 
+  setRowsInteractable(rows: number[], interactable: boolean): void {
+    for (const row of rows) {
+      for (let col = 0; col < GridController.GRID_SIZE; col++) {
+        const cell = this._cells[row]?.[col];
+        if (!cell?.isValid) continue;
+        const btn = cell.getComponent(Button);
+        if (btn) btn.interactable = interactable;
+        const sprite = cell.getComponent(Sprite);
+        if (sprite) {
+          sprite.color = interactable
+            ? GridController.DEFAULT_CELL_COLOR
+            : new Color(60, 60, 60, 100);
+        }
+      }
+    }
+  }
+
   onDestroy(): void {
     this._onCellClickCallback = null;
     for (let row = 0; row < GridController.GRID_SIZE; row++) {

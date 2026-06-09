@@ -211,10 +211,15 @@ export class BattleUI extends Component {
     if (this.deployPrompt) this.deployPrompt.active = true;
     if (this.confirmDeployButton) this.confirmDeployButton.node.active = true;
     if (this.waitButton) this.waitButton.node.active = false;
-    if (this.unitNameLabel) this.unitNameLabel.string = '\u90E8\u7F72\u9635\u5BB9';
-    if (this.hpLabel) this.hpLabel.string = '\u70B9\u51FB\u5361\u7247\u2192\u70B9\u51FB\u683C\u5B50\u653E\u7F6E';
+    if (this.endTurnButton) this.endTurnButton.node.active = false;
+    // 设置顶部阶段标签，清空其余文本
+    if (this.phaseLabel) this.phaseLabel.string = '\u5E03\u9635\u9636\u6BB5';
+    if (this.unitNameLabel) this.unitNameLabel.string = '';
+    if (this.hpLabel) this.hpLabel.string = '';
     if (this.energyLabel) this.energyLabel.string = '';
     if (this.turnLabel) this.turnLabel.string = '';
+    if (this.unitTurnLabel) this.unitTurnLabel.string = '';
+    if (this.actionHintLabel) this.actionHintLabel.string = '';
     if (this.deployUnitList) this.deployUnitList.active = false;
     if (this.deployCardContainer) {
       this.deployCardContainer.active = true;
@@ -317,18 +322,62 @@ export class BattleUI extends Component {
     this.deployCardContainer.active = true;
   }
 
-  updateDeployItemState(index: number, placed: boolean): void {
-    if (!this._deployCards[index]) return;
+  setDeployCardState(index: number, state: 'unplaced' | 'selected' | 'placed'): void {
     const card = this._deployCards[index];
+    if (!card?.isValid) return;
+
     const bg = card.getComponent(Sprite);
-    if (bg) {
-      bg.color = placed
-        ? new Color(40, 40, 60, 150)   // 已放置：暗色
-        : new Color(60, 60, 80, 200);   // 未放置：亮色
-    }
-    // 勾标记
     const checkMark = card.getChildByName('CheckMark');
-    if (checkMark) checkMark.active = placed;
+
+    // 找到或创建 HighlightBorder
+    let border = card.getChildByName('HighlightBorder');
+
+    switch (state) {
+      case 'unplaced':
+        if (bg) bg.color = new Color(60, 60, 80, 200);
+        card.setScale(new Vec3(1, 1, 1));
+        if (checkMark) checkMark.active = false;
+        if (border) border.active = false;
+        break;
+
+      case 'selected':
+        if (bg) bg.color = new Color(80, 200, 80, 220);
+        card.setScale(new Vec3(1.1, 1.1, 1));
+        if (checkMark) checkMark.active = false;
+        if (!border) {
+          border = new Node('HighlightBorder');
+          const bSprite = border.addComponent(Sprite);
+          bSprite.color = new Color(80, 220, 80, 255);
+          bSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+          const bTrans = border.addComponent(UITransform);
+          bTrans.setContentSize(130, 80);
+          border.setPosition(0, 0, -1);
+          card.addChild(border);
+        }
+        border.active = true;
+        break;
+
+      case 'placed':
+        if (bg) bg.color = new Color(40, 40, 60, 150);
+        card.setScale(new Vec3(1, 1, 1));
+        if (checkMark) checkMark.active = true;
+        if (border) border.active = false;
+        break;
+    }
+  }
+
+  selectDeployCard(index: number): void {
+    // 先重置所有卡片为 unplaced
+    for (let i = 0; i < this._deployCards.length; i++) {
+      const card = this._deployCards[i];
+      if (!card?.isValid) continue;
+      // 不重置已放置的卡片
+      const checkMark = card.getChildByName('CheckMark');
+      if (checkMark?.active) continue;
+      this.setDeployCardState(i, 'unplaced');
+    }
+    // 设置目标卡片为选中态
+    this.setDeployCardState(index, 'selected');
   }
 
   clearUnitInfo(): void {

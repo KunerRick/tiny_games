@@ -36,6 +36,7 @@ export class BattleManager extends Component {
   private _deployedPositions: GridPosition[] = [];
   private _selectedDeployUnitIndex: number = -1;
   private _onDeployUnitPlacedCallback: ((placedCount: number, totalCount: number) => void) | null = null;
+  private _onDeploySelectionChanged: ((index: number) => void) | null = null;
   private _selectedUnit: UnitController | null = null;
   private _pendingSkill: import('../config/GameData').SkillConfig | null = null;
   private _skillTargets: GridPosition[] = [];
@@ -162,6 +163,13 @@ export class BattleManager extends Component {
     this._phase = 'deploy';
     this._highlightDeployArea();
     this.gridController.setCellClickCallback((pos) => this.onDeployCellClicked(pos));
+    // 自动选中第一张卡
+    this._selectedDeployUnitIndex = 0;
+    if (this._onDeploySelectionChanged) {
+      this._onDeploySelectionChanged(0);
+    }
+    // 禁用后 4 行格子交互
+    this.gridController.setRowsInteractable([2, 3, 4, 5], false);
   }
 
   public highlightDeployArea(): void {
@@ -193,11 +201,17 @@ export class BattleManager extends Component {
     this._phase = 'player_turn';
     this._turnCount = 1;
     this.gridController.setCellClickCallback((pos) => this.onCellClicked(pos));
+    // 恢复所有格子交互
+    this.gridController.setRowsInteractable([2, 3, 4, 5], true);
     this.startPlayerTurn();
   }
 
   setDeployUnitPlacedCallback(cb: (placedCount: number, totalCount: number) => void): void {
     this._onDeployUnitPlacedCallback = cb;
+  }
+
+  setDeploySelectionChangedCallback(cb: (index: number) => void): void {
+    this._onDeploySelectionChanged = cb;
   }
 
   selectDeployUnit(index: number): void {
@@ -226,13 +240,21 @@ export class BattleManager extends Component {
       }
       // 重新高亮部署区域
       this._highlightDeployArea();
-      this._selectedDeployUnitIndex = -1;
+      // 自动选中刚才撤回的卡
+      this._selectedDeployUnitIndex = index;
+      if (this._onDeploySelectionChanged) {
+        this._onDeploySelectionChanged(index);
+      }
       return;
     }
 
     // 未放置，正常进入选中
     this._selectedDeployUnitIndex = index;
     this._highlightDeployArea();
+    // 分发选中通知
+    if (this._onDeploySelectionChanged) {
+      this._onDeploySelectionChanged(this._selectedDeployUnitIndex);
+    }
   }
 
   private onDeployCellClicked(pos: GridPosition): void {
@@ -247,10 +269,21 @@ export class BattleManager extends Component {
     unit.setGridPosition(pos);
     this._deployedPositions.push(pos);
     this.gridController.highlightCells(this._deployedPositions, new Color(100, 200, 100, 255));
-    this._selectedDeployUnitIndex = -1;
-
+    // 先通知 UI 卡片放置状态变化，再切换选中（避免选中态被覆盖）
     if (this._onDeployUnitPlacedCallback) {
       this._onDeployUnitPlacedCallback(this._deployedPositions.length, this._playerUnits.length);
+    }
+    // 自动选中下一张未放置的卡
+    const nextIndex = this._playerUnits.findIndex(
+      (u, i) => i !== this._selectedDeployUnitIndex && u.data?.gridPos.col < 0
+    );
+    if (nextIndex >= 0) {
+      this._selectedDeployUnitIndex = nextIndex;
+      if (this._onDeploySelectionChanged) {
+        this._onDeploySelectionChanged(nextIndex);
+      }
+    } else {
+      this._selectedDeployUnitIndex = -1;
     }
   }
 
