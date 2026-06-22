@@ -248,14 +248,16 @@ export class BattleUI extends Component {
     const cardHeight = 70;
     const gap = 10;
     const count = unitNames.length;
-    // 竖排居中：总高度 = count * cardHeight + (count-1) * gap
-    const totalHeight = count * cardHeight + (count - 1) * gap;
-    const startY = totalHeight / 2 - cardHeight / 2;
+    // 左下角，底部对齐
+    // x=-320：棋盘左边界-200，左侧留 120px
+    // baseY=-350：确认按钮在-500，兵牌在其上方不遮挡
+    const baseX = -320;
+    const baseY = -350;
 
     for (let i = 0; i < count; i++) {
       const card = new Node(`PlatoonCard_${i}`);
-      // 棋盘左边缘 x=-200，兵牌放在 x=-380 (左侧 180px)
-      card.setPosition(-380, startY - i * (cardHeight + gap), 0);
+      // 从下往上排列：i=0 最底，i=2 最高
+      card.setPosition(baseX, baseY + i * (cardHeight + gap), 0);
 
       // 背景
       const bg = card.addComponent(Sprite);
@@ -322,23 +324,24 @@ export class BattleUI extends Component {
 
     switch (state) {
       case 'unplaced':
-        if (bg) bg.color = new Color(60, 60, 80, 200);
+        if (bg) bg.color = new Color(55, 55, 75, 180);
         card.setScale(new Vec3(1, 1, 1));
         if (checkMark) checkMark.active = false;
         if (border) border.active = false;
         break;
 
       case 'selected':
-        if (bg) bg.color = new Color(80, 200, 80, 220);
-        card.setScale(new Vec3(1.1, 1.1, 1));
+        // 高亮加强：背景直接变亮绿，scale 放大，边框更宽更亮
+        if (bg) bg.color = new Color(50, 180, 50, 240);
+        card.setScale(new Vec3(1.18, 1.18, 1));
         if (checkMark) checkMark.active = false;
         if (!border) {
           border = new Node('HighlightBorder');
           const bSprite = border.addComponent(Sprite);
-          bSprite.color = new Color(80, 220, 80, 255);
+          bSprite.color = new Color(100, 255, 100, 255);
           bSprite.sizeMode = Sprite.SizeMode.CUSTOM;
           const bTrans = border.addComponent(UITransform);
-          bTrans.setContentSize(130, 80);
+          bTrans.setContentSize(136, 86);
           border.setPosition(0, 0, -1);
           card.addChild(border);
         }
@@ -346,7 +349,7 @@ export class BattleUI extends Component {
         break;
 
       case 'placed':
-        if (bg) bg.color = new Color(40, 40, 60, 150);
+        if (bg) bg.color = new Color(35, 35, 50, 120);
         card.setScale(new Vec3(1, 1, 1));
         if (checkMark) checkMark.active = true;
         if (border) border.active = false;
