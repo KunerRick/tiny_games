@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Sprite, Color, tween, Vec3 } from 'cc';
+import { _decorator, Component, Node, Sprite, Color, tween, Vec3, Label } from 'cc';
 import { GridPosition, GridController } from './GridController';
 import { SkillConfig, getClassById, EnemyConfig, AIType } from '../config/GameData';
 
@@ -55,6 +55,13 @@ export class UnitController extends Component {
     cleric:  new Color(240, 210, 80),
   };
 
+  private static readonly CLASS_ICONS: Record<string, string> = {
+    warrior: '\u2694',   // ⚔
+    archer:  '\uD83C\uDFF9', // 🏹
+    mage:    '\uD83D\uDD2E', // 🔮
+    cleric:  '\u271D',   // ✝
+  };
+
   initFromEnemyConfig(config: EnemyConfig, gridPos: GridPosition): void {
     this._data = {
       id: `e_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -87,6 +94,7 @@ export class UnitController extends Component {
 
     this.setTintColor(new Color(255, 100, 100));
     this.setupFactionVisual();
+    this.setupClassIcon();
   }
 
   init(classId: string, isPlayer: boolean, gridPos: GridPosition): void {
@@ -129,6 +137,7 @@ export class UnitController extends Component {
       this.setTintColor(new Color(255, 100, 100));
     }
     this.setupFactionVisual();
+    this.setupClassIcon();
   }
 
   get data(): UnitData | null {
@@ -172,6 +181,32 @@ export class UnitController extends Component {
       glowSprite.color = new Color(255, 60, 60, 100);
     }
     this.factionGlow.active = true;
+  }
+
+  private setupClassIcon(): void {
+    if (!this.unitSprite) return;
+    const classId = this._data?.classId;
+    if (!classId) return;
+    const icon = UnitController.CLASS_ICONS[classId];
+    if (!icon) return;
+
+    // 复用已有图标节点，避免重复创建
+    let iconNode = this.unitSprite.getChildByName('ClassIcon');
+    if (!iconNode) {
+      iconNode = new Node('ClassIcon');
+      const iconLabel = iconNode.addComponent(Label);
+      iconLabel.fontSize = 32;
+      iconLabel.color = Color.WHITE;
+      iconLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+      iconLabel.verticalAlign = Label.VerticalAlign.CENTER;
+      // 居中于 unitSprite
+      iconNode.setPosition(0, 0, 0);
+      this.unitSprite.addChild(iconNode);
+    }
+    const iconLabel = iconNode.getComponent(Label);
+    if (iconLabel) {
+      iconLabel.string = icon;
+    }
   }
 
   private updatePosition(): void {
