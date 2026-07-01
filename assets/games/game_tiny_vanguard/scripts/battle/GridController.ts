@@ -99,18 +99,13 @@ export class GridController extends Component {
   }
 
   setRowsInteractable(rows: number[], interactable: boolean): void {
+    // 只改变交互性，不改变颜色（颜色由 highlightCells 统一管理）
     for (const row of rows) {
       for (let col = 0; col < GridController.GRID_SIZE; col++) {
         const cell = this._cells[row]?.[col];
         if (!cell?.isValid) continue;
         const btn = cell.getComponent(Button);
         if (btn) btn.interactable = interactable;
-        const sprite = cell.getComponent(Sprite);
-        if (sprite) {
-          sprite.color = interactable
-            ? GridController.DEFAULT_CELL_COLOR
-            : new Color(60, 60, 60, 100);
-        }
       }
     }
   }

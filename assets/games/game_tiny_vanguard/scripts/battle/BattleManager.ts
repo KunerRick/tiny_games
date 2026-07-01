@@ -183,12 +183,29 @@ export class BattleManager extends Component {
   }
 
   private _highlightDeployArea(): void {
-    const positions: GridPosition[] = [];
+    // 顶部两行：浅绿色（可部署区域）
+    const deployableColor = new Color(150, 230, 150, 180);
+    const deployablePositions: GridPosition[] = [];
     for (let c = 0; c < 6; c++) {
-      positions.push({ row: 0, col: c });
-      positions.push({ row: 1, col: c });
+      deployablePositions.push({ row: 0, col: c });
+      deployablePositions.push({ row: 1, col: c });
     }
-    this.gridController.highlightCells(positions, new Color(100, 200, 100, 120));
+    this.gridController.highlightCells(deployablePositions, deployableColor);
+
+    // 底部四行：淡灰色（不可部署区域）
+    const disabledColor = new Color(200, 200, 200, 100);
+    const disabledPositions: GridPosition[] = [];
+    for (let r = 2; r < 6; r++) {
+      for (let c = 0; c < 6; c++) {
+        disabledPositions.push({ row: r, col: c });
+      }
+    }
+    this.gridController.highlightCells(disabledPositions, disabledColor);
+
+    // 已部署位置：深绿色（需要单独处理，保持可见）
+    if (this._deployedPositions.length > 0) {
+      this.gridController.highlightCells(this._deployedPositions, new Color(100, 200, 100, 220));
+    }
   }
 
   setDamageDealtCallback(callback: (targetNode: Node, amount: number) => void): void {
@@ -299,7 +316,8 @@ export class BattleManager extends Component {
       unit.node.active = true;
     }
 
-    this.gridController.highlightCells(this._deployedPositions, new Color(100, 200, 100, 255));
+    // 重新高亮整个部署区域（顶部两行绿色 + 底部四行灰色 + 已部署位置深绿）
+    this._highlightDeployArea();
     // 先通知 UI 卡片放置状态变化，再切换选中（避免选中态被覆盖）
     if (this._onDeployUnitPlacedCallback) {
       this._onDeployUnitPlacedCallback(this._deployedPositions.length, this._playerUnits.length);

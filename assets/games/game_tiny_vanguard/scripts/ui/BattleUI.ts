@@ -244,15 +244,16 @@ export class BattleUI extends Component {
     }
     this._deployCards = [];
 
-    const cardWidth = 120;
-    const cardHeight = 70;
-    const gap = 10;
+    const cardWidth = 110;
+    const cardHeight = 65;
+    const gap = 8;
     const count = unitNames.length;
-    // 左下角，底部对齐
-    // x=-320：棋盘左边界-200，左侧留 120px
-    // baseY=-350：确认按钮在-500，兵牌在其上方不遮挡
-    const baseX = -320;
-    const baseY = -350;
+    // 棋盘左边界 x=-200，棋盘底部 y=-200
+    // 兵牌位于棋盘左侧，与棋盘底部平齐
+    // baseX = 棋盘左边界 - 兵牌宽度 - 间隙 = -200 - 110 - 15 = -325（完全在棋盘左侧）
+    // baseY = 棋盘底部 y = -200
+    const baseX = -325;
+    const baseY = -200;
 
     for (let i = 0; i < count; i++) {
       const card = new Node(`PlatoonCard_${i}`);
@@ -261,7 +262,7 @@ export class BattleUI extends Component {
 
       // 背景
       const bg = card.addComponent(Sprite);
-      bg.color = new Color(60, 60, 80, 200);
+      bg.color = new Color(50, 55, 75, 230);
       bg.sizeMode = Sprite.SizeMode.CUSTOM;
       const bgTransform = card.addComponent(UITransform);
       bgTransform.setContentSize(cardWidth, cardHeight);
@@ -270,31 +271,32 @@ export class BattleUI extends Component {
       const iconNode = new Node('IconLabel');
       const iconLabel = iconNode.addComponent(Label);
       iconLabel.string = unitIcons[i] || '';
-      iconLabel.fontSize = 24;
+      iconLabel.fontSize = 22;
       iconLabel.color = Color.WHITE;
       iconLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
       iconLabel.verticalAlign = Label.VerticalAlign.CENTER;
-      iconNode.setPosition(0, 12, 0);
+      iconNode.setPosition(0, 10, 0);
       card.addChild(iconNode);
 
       // 名字（放在下半部分）
       const nameLabel = new Node('NameLabel');
       const nl = nameLabel.addComponent(Label);
       nl.string = unitNames[i];
-      nl.fontSize = 14;
+      nl.fontSize = 13;
       nl.color = Color.WHITE;
       nl.horizontalAlign = Label.HorizontalAlign.CENTER;
       nl.verticalAlign = Label.VerticalAlign.CENTER;
-      nameLabel.setPosition(0, -15, 0);
+      nameLabel.setPosition(0, -14, 0);
       card.addChild(nameLabel);
 
-      // 选中勾（默认隐藏，placed 时显示）
+      // 选中勾（默认隐藏，placed 时显示）- 放在左上角，向内缩避免超出卡片
       const checkMark = new Node('CheckMark');
       const cmLabel = checkMark.addComponent(Label);
       cmLabel.string = '\u2713';
-      cmLabel.fontSize = 20;
-      cmLabel.color = new Color(80, 220, 80);
-      checkMark.setPosition(cardWidth / 2 - 15, cardHeight / 2 - 10, 0);
+      cmLabel.fontSize = 22;
+      cmLabel.color = new Color(80, 240, 100);
+      // 放在左上角内缩位置，不遮挡棋盘
+      checkMark.setPosition(-cardWidth / 2 + 14, cardHeight / 2 - 10, 0);
       checkMark.active = false;
       card.addChild(checkMark);
 
@@ -324,24 +326,29 @@ export class BattleUI extends Component {
 
     switch (state) {
       case 'unplaced':
-        if (bg) bg.color = new Color(55, 55, 75, 180);
+        // 深蓝灰色背景，白色边框提示可交互
+        if (bg) bg.color = new Color(45, 50, 70, 220);
         card.setScale(new Vec3(1, 1, 1));
         if (checkMark) checkMark.active = false;
-        if (border) border.active = false;
+        if (border) {
+          border.color = new Color(120, 130, 160, 200);
+          const bTrans = border.getComponent(UITransform);
+          if (bTrans) bTrans.setContentSize(116, 71);
+        }
         break;
 
       case 'selected':
-        // 高亮加强：背景直接变亮绿，scale 放大，边框更宽更亮
-        if (bg) bg.color = new Color(50, 180, 50, 240);
-        card.setScale(new Vec3(1.18, 1.18, 1));
+        // 亮绿色背景表示当前选中
+        if (bg) bg.color = new Color(60, 180, 60, 240);
+        card.setScale(new Vec3(1.12, 1.12, 1));
         if (checkMark) checkMark.active = false;
         if (!border) {
           border = new Node('HighlightBorder');
           const bSprite = border.addComponent(Sprite);
-          bSprite.color = new Color(100, 255, 100, 255);
+          bSprite.color = new Color(120, 255, 120, 255);
           bSprite.sizeMode = Sprite.SizeMode.CUSTOM;
           const bTrans = border.addComponent(UITransform);
-          bTrans.setContentSize(136, 86);
+          bTrans.setContentSize(116, 71);
           border.setPosition(0, 0, -1);
           card.addChild(border);
         }
@@ -349,7 +356,8 @@ export class BattleUI extends Component {
         break;
 
       case 'placed':
-        if (bg) bg.color = new Color(35, 35, 50, 120);
+        // 深色半透明背景，表示已完成部署
+        if (bg) bg.color = new Color(30, 35, 50, 150);
         card.setScale(new Vec3(1, 1, 1));
         if (checkMark) checkMark.active = true;
         if (border) border.active = false;
