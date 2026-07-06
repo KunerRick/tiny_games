@@ -62,6 +62,7 @@ export class BattleUI extends Component {
   private _deployCards: Node[] = [];
   private _battleStartOverlay: Node | null = null;
   private _onBattleStartComplete: (() => void) | null = null;
+  private _skillButtonPool: Node[] = [];
 
   onLoad(): void {
     if (!this._showCalled) {
@@ -248,17 +249,20 @@ export class BattleUI extends Component {
     const cardHeight = 65;
     const gap = 8;
     const count = unitNames.length;
-    // 棋盘左边界 x=-200，棋盘底部 y=-200
-    // 兵牌位于棋盘左侧，与棋盘底部平齐
-    // baseX = 棋盘左边界 - 兵牌宽度 - 间隙 = -200 - 110 - 15 = -325（完全在棋盘左侧）
-    // baseY = 棋盘底部 y = -200
-    const baseX = -325;
-    const baseY = -200;
+    
+    const container = this.deployUnitList || this.node;
+    const containerTransform = container.getComponent(UITransform);
+    const containerWidth = containerTransform ? containerTransform.contentSize.width : 120;
+    const containerHeight = containerTransform ? containerTransform.contentSize.height : 300;
+    
+    const startX = -containerWidth / 2 + cardWidth / 2;
+    const totalCardHeight = count * cardHeight + (count - 1) * gap;
+    const startY = -containerHeight / 2 + cardHeight / 2;
 
     for (let i = 0; i < count; i++) {
       const card = new Node(`PlatoonCard_${i}`);
       // 从下往上排列：i=0 最底，i=2 最高
-      card.setPosition(baseX, baseY + i * (cardHeight + gap), 0);
+      card.setPosition(startX, startY + i * (cardHeight + gap), 0);
 
       // 背景
       const bg = card.addComponent(Sprite);
@@ -309,7 +313,8 @@ export class BattleUI extends Component {
         if (cb) cb(idx);
       });
 
-      this.node.addChild(card);
+      const container = this.deployUnitList || this.node;
+      container.addChild(card);
       this._deployCards.push(card);
     }
   }
@@ -331,7 +336,8 @@ export class BattleUI extends Component {
         card.setScale(new Vec3(1, 1, 1));
         if (checkMark) checkMark.active = false;
         if (border) {
-          border.color = new Color(120, 130, 160, 200);
+          const bSprite = border.getComponent(Sprite);
+          if (bSprite) bSprite.color = new Color(120, 130, 160, 200);
           const bTrans = border.getComponent(UITransform);
           if (bTrans) bTrans.setContentSize(116, 71);
         }
@@ -387,43 +393,59 @@ export class BattleUI extends Component {
 
   showSkillButtons(skillNames: string[], canUse: boolean[], callback: (index: number) => void): void {
     this._skillClickCallbacks = [];
-    if (this.skillButtonContainer) {
-      this.skillButtonContainer.removeAllChildren();
-
-      const btnWidth = 100;
-      const gap = 10;
-      const count = skillNames.length;
-      const totalWidth = count * btnWidth + (count - 1) * gap;
-      const startX = -totalWidth / 2 + btnWidth / 2;
-
-      const containerTransform = this.skillButtonContainer.getComponent(UITransform);
-      if (containerTransform) {
-        containerTransform.setContentSize(Math.max(totalWidth, 100), btnWidth + 20);
+    if (!this.skillButtonContainer) return;
+    
+    const btnWidth = 100;
+    const gap = 10;
+    const count = skillNames.length;
+    const totalWidth = count * btnWidth + (count - 1) * gap;
+    const startX = -totalWidth / 2 + btnWidth / 2;
+    
+    const containerTransform = this.skillButtonContainer.getComponent(UITransform);
+    if (containerTransform) {
+      containerTransform.setContentSize(Math.max(totalWidth, 100), btnWidth + 20);
+    }
+    
+    while (this.skillButtonContainer.children.length > count) {
+      const extraBtn = this.skillButtonContainer.children[this.skillButtonContainer.children.length - 1];
+      extraBtn.removeFromParent();
+      this._skillButtonPool.push(extraBtn);
+    }
+    
+    while (this.skillButtonContainer.children.length < count) {
+      const btnNode = this._skillButtonPool.length > 0 
+        ? this._skillButtonPool.shift()! 
+        : instantiate(this.skillButtonPrefab);
+      this.skillButtonContainer.addChild(btnNode);
+    }
+    
+    for (let i = 0; i < count; i++) {
+      const btnNode = this.skillButtonContainer.children[i];
+      const label = btnNode.getComponentInChildren(Label);
+      if (label) {
+        label.string = skillNames[i];
+        label.fontSize = 24;
       }
-
-      for (let i = 0; i < count; i++) {
-        const btnNode = instantiate(this.skillButtonPrefab);
-        const label = btnNode.getComponentInChildren(Label);
-        if (label) {
-          label.string = skillNames[i];
-          label.fontSize = 24;
-        }
-        const btn = btnNode.getComponent(Button);
-        if (btn) {
-          btn.interactable = canUse[i];
-          btnNode['_skillBtnIndex'] = i;
-          btnNode['_skillBtnCallback'] = callback;
-          btn.node.on(Button.EventType.CLICK, this.onSkillBtnClicked, this);
-        }
-        btnNode.setPosition(startX + i * (btnWidth + gap), 0, 0);
-        this.skillButtonContainer.addChild(btnNode);
+      const btn = btnNode.getComponent(Button);
+      if (btn) {
+        btn.interactable = canUse[i];
+        btnNode['_skillBtnIndex'] = i;
+        btnNode['_skillBtnCallback'] = callback;
+        btn.node.off(Button.EventType.CLICK, this.onSkillBtnClicked, this);
+        btn.node.on(Button.EventType.CLICK, this.onSkillBtnClicked, this);
       }
+      btnNode.setPosition(startX + i * (btnWidth + gap), 0, 0);
+      btnNode.active = true;
     }
   }
 
   clearSkillButtons(): void {
     if (this.skillButtonContainer) {
-      this.skillButtonContainer.removeAllChildren();
+      while (this.skillButtonContainer.children.length > 0) {
+        const btn = this.skillButtonContainer.children[0];
+        btn.removeFromParent();
+        this._skillButtonPool.push(btn);
+      }
     }
   }
 
@@ -535,21 +557,40 @@ export class BattleUI extends Component {
 
     // 根据阶段设置背景色
     if (this.phaseBg) {
+      let phaseType: string;
       if (phase.includes('\u5E03\u9635')) {
-        // 布阵 - 绿色
-        this.phaseBg.color = new Color(0, 120, 60, 120);
+        phaseType = 'deploy';
       } else if (phase.includes('\u654C\u65B9')) {
-        // 敌方 - 红色
-        this.phaseBg.color = new Color(180, 40, 40, 120);
+        phaseType = 'enemy';
       } else if (phase.includes('\u6211\u65B9')) {
-        // 我方 - 蓝色
-        this.phaseBg.color = new Color(0, 80, 180, 120);
+        phaseType = 'player';
       } else if (phase.includes('\u80DC\u5229')) {
-        this.phaseBg.color = new Color(180, 140, 0, 120);
+        phaseType = 'victory';
       } else if (phase.includes('\u5931\u8D25')) {
-        this.phaseBg.color = new Color(80, 80, 80, 120);
+        phaseType = 'defeat';
       } else {
-        this.phaseBg.color = new Color(0, 0, 0, 0);
+        phaseType = 'none';
+      }
+      
+      switch (phaseType) {
+        case 'deploy':
+          this.phaseBg.color = new Color(0, 120, 60, 120);
+          break;
+        case 'enemy':
+          this.phaseBg.color = new Color(180, 40, 40, 120);
+          break;
+        case 'player':
+          this.phaseBg.color = new Color(0, 80, 180, 120);
+          break;
+        case 'victory':
+          this.phaseBg.color = new Color(180, 140, 0, 120);
+          break;
+        case 'defeat':
+          this.phaseBg.color = new Color(80, 80, 80, 120);
+          break;
+        default:
+          this.phaseBg.color = new Color(0, 0, 0, 0);
+          break;
       }
     }
   }

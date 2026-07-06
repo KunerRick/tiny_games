@@ -31,6 +31,7 @@ export interface SkillConfig {
   description: string;
   triggerCondition?: TriggerCondition;
   effects: SkillEffect[];
+  preMove?: boolean;
 }
 
 export interface ClassConfig {
@@ -102,8 +103,9 @@ export const SKILLS: Record<string, SkillConfig> = {
     effects: [{ type: 'execute', params: { threshold: 0.3, multiplier: 3.0 } }]
   },
   charge: {
-    id: 'charge', name: '冲锋', type: 'active', energyCost: 2, targetType: 'enemy',
+    id: 'charge', name: '冲锋', type: 'active', energyCost: 2, targetType: 'self',
     description: '本次移动+2格 + 攻击附带+2伤害',
+    preMove: true,
     effects: [{ type: 'buff_move', params: { amount: 2, duration: 1 } }, { type: 'bonus_damage', params: { amount: 2 } }]
   },
   counter: {

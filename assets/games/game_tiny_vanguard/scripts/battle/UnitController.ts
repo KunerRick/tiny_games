@@ -242,6 +242,8 @@ export class UnitController extends Component {
 
   takeDamage(rawAmount: number, ignoreDefense: boolean = false, attacker?: UnitController): number {
     if (!this._data || !this._data.isAlive) return 0;
+    
+    const wasAlive = this._data.isAlive;
 
     let actualDamage = rawAmount;
 
@@ -263,7 +265,7 @@ export class UnitController extends Component {
       this._data.isAlive = false;
     }
 
-    if (attacker && this._data.isAlive && !this._countering && this.hasPassive('counter')) {
+    if (attacker && wasAlive && !this._countering && this.hasPassive('counter')) {
       this._countering = true;
       const counterDmg = Math.max(1, Math.floor(this._data.stats.attack * 0.5));
       attacker.takeDamage(counterDmg, false, this);
@@ -273,7 +275,7 @@ export class UnitController extends Component {
     return actualDamage;
   }
 
-  private hasPassive(skillId: string): boolean {
+  hasPassive(skillId: string): boolean {
     return this._data?.skills.some(s => s.id === skillId) ?? false;
   }
 
@@ -412,30 +414,30 @@ export class UnitController extends Component {
   private removeBuff(buff: BuffEntry): void {
     if (!this._data) return;
     if (buff.type === 'buff_move') {
-      this._data.stats.move = this._data.baseStats.move;
+      this._data.stats.move -= buff.params.amount ?? 0;
+      this._data.stats.move = Math.max(this._data.baseStats.move, this._data.stats.move);
     }
     if (buff.type === 'buff_attack') {
       this._data.stats.attack -= buff.params.amount ?? 0;
-    }
-    if (buff.type === 'mark') {
+      this._data.stats.attack = Math.max(this._data.baseStats.attack, this._data.stats.attack);
     }
   }
 
   addBuff(type: string, turnsLeft: number, params: Record<string, number>): void {
     if (!this._data) return;
     const existing = this._data.buffs.find(b => b.type === type);
+    
     if (existing) {
       existing.turnsLeft = Math.max(existing.turnsLeft, turnsLeft);
-      Object.assign(existing.params, params);
     } else {
-      this._data.buffs.push({ type, turnsLeft, params });
-    }
-
-    if (type === 'buff_move') {
-      this._data.stats.move = this._data.baseStats.move + (params.amount ?? 0);
-    }
-    if (type === 'buff_attack') {
-      this._data.stats.attack += params.amount ?? 0;
+      this._data.buffs.push({ type, turnsLeft, params: { ...params } });
+      
+      if (type === 'buff_move') {
+        this._data.stats.move += params.amount ?? 0;
+      }
+      if (type === 'buff_attack') {
+        this._data.stats.attack += params.amount ?? 0;
+      }
     }
   }
 

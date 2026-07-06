@@ -504,7 +504,7 @@ export class TinyVanguardMain extends Component {
       // 不自动跳转，等待玩家点击胜利面板的"继续"按钮
       // Boss 战的胜利处理在 onVictoryContinue 中判断
     } else {
-      this._runData.honor += Math.max(1, this._battleCount * 2);
+      this._runData.honor += Math.max(1, this._battleCount * 5);
       this.battleUI.clearPhase();
       this.battleUI.showDefeat();
       this.scheduleOnce(() => {

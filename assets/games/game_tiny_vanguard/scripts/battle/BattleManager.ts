@@ -41,6 +41,8 @@ export class BattleManager extends Component {
   private _pendingSkill: import('../config/GameData').SkillConfig | null = null;
   private _skillTargets: GridPosition[] = [];
   private _totalDamageDealt: number = 0;
+  private _preMoveSkillUsed: boolean = false;
+  private _currentBattleType: 'normal' | 'elite' | 'boss' = 'normal';
 
   get phase(): BattlePhase { return this._phase; }
   get playerUnits(): UnitController[] { return this._playerUnits; }
@@ -64,6 +66,14 @@ export class BattleManager extends Component {
     this._phase = 'deploy';
     this._turnCount = 0;
     this._deployedPositions = [];
+    
+    if (isBoss) {
+      this._currentBattleType = 'boss';
+    } else if (isElite) {
+      this._currentBattleType = 'elite';
+    } else {
+      this._currentBattleType = 'normal';
+    }
 
     this.clearAllUnits();
     this.createPlayerUnits(playerClasses);
@@ -338,6 +348,7 @@ export class BattleManager extends Component {
 
   private startPlayerTurn(): void {
     this._currentUnitIndex = 0;
+    this._preMoveSkillUsed = false;
     for (const unit of this._playerUnits) {
       if (unit.data?.isAlive) {
         unit.onTurnStart(this._playerUnits);
@@ -355,7 +366,7 @@ export class BattleManager extends Component {
 
     while (this._currentUnitIndex < this._playerUnits.length) {
       const unit = this._playerUnits[this._currentUnitIndex];
-      if (unit.data?.isAlive) {
+      if (unit.data?.isAlive && !unit.data.hasActed) {
         this._selectedUnit = unit;
         unit.setSelected(true);
         this._unitPhase = 'move';
@@ -430,6 +441,7 @@ export class BattleManager extends Component {
 
   private handleMovePhase(unit: UnitController, gridPos: GridPosition): void {
     if (unit.data.gridPos.row === gridPos.row && unit.data.gridPos.col === gridPos.col) {
+      unit.data.hasMoved = true;
       this._unitPhase = 'action';
       this.highlightAttackRange(unit);
       if (this._onUnitPhaseChanged) {
@@ -559,6 +571,12 @@ export class BattleManager extends Component {
     this.finishUnitTurn();
   }
 
+  private _getMarkBonus(target: UnitController): number {
+    if (!target?.data) return 0;
+    const markBuff = target.data.buffs.find(b => b.type === 'mark');
+    return markBuff ? (markBuff.params.amount ?? 2) : 0;
+  }
+
   private executeSkillEffects(
     caster: UnitController,
     target: UnitController | null,
@@ -566,6 +584,10 @@ export class BattleManager extends Component {
     effects: SkillEffect[]
   ): void {
     if (!caster.data) return;
+    
+    const nextSkillBuff = caster.data.buffs.find(b => b.type === 'buff_next_skill');
+    const skillMultiplier = nextSkillBuff ? (nextSkillBuff.params.multiplier ?? 1.5) : 1.0;
+    
     const ignoreDefense = effects.some(e => e.type === 'ignore_defense' && e.params.value === 1);
 
     for (const effect of effects) {
@@ -576,7 +598,9 @@ export class BattleManager extends Component {
         case 'damage': {
           if (!target?.data) break;
           const rawDmg = effect.params.amount ?? 0;
-          const dmg = target.takeDamage(rawDmg, ignoreDefense);
+          const markBonus = this._getMarkBonus(target);
+          const totalDmg = Math.floor(rawDmg * skillMultiplier) + markBonus;
+          const dmg = target.takeDamage(totalDmg, ignoreDefense, caster);
           this._totalDamageDealt += dmg;
           if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
             this._onDamageDealtCallback(target.node, dmg);
@@ -587,8 +611,9 @@ export class BattleManager extends Component {
         case 'damage_multiplier': {
           if (!target?.data) break;
           const mult = effect.params.multiplier ?? 1;
-          const rawDmg = Math.floor(caster.data.stats.attack * mult);
-          const dmg = target.takeDamage(rawDmg, ignoreDefense);
+          const markBonus = this._getMarkBonus(target);
+          const rawDmg = Math.floor(caster.data.stats.attack * mult * skillMultiplier);
+          const dmg = target.takeDamage(rawDmg + markBonus, ignoreDefense, caster);
           this._totalDamageDealt += dmg;
           if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
             this._onDamageDealtCallback(target.node, dmg);
@@ -607,8 +632,9 @@ export class BattleManager extends Component {
           const count = effect.params.count ?? 2;
           const mult = effect.params.multiplier ?? 0.7;
           for (let i = 0; i < count; i++) {
-            const rawDmg = Math.floor(caster.data.stats.attack * mult);
-            const dmg = target.takeDamage(rawDmg, ignoreDefense);
+            const markBonus = this._getMarkBonus(target);
+            const rawDmg = Math.floor(caster.data.stats.attack * mult * skillMultiplier);
+            const dmg = target.takeDamage(rawDmg + markBonus, ignoreDefense, caster);
             this._totalDamageDealt += dmg;
             if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
               this._onDamageDealtCallback(target.node, dmg);
@@ -623,10 +649,11 @@ export class BattleManager extends Component {
           const threshold = effect.params.threshold ?? 0.3;
           const multiplier = effect.params.multiplier ?? 3.0;
           const isLowHp = (target.data.currentHp / target.data.maxHp) <= threshold;
+          const markBonus = this._getMarkBonus(target);
           const rawDmg = isLowHp
-            ? Math.floor(caster.data.stats.attack * multiplier)
-            : caster.data.stats.attack;
-          const dmg = target.takeDamage(rawDmg, ignoreDefense);
+            ? Math.floor(caster.data.stats.attack * multiplier * skillMultiplier)
+            : Math.floor(caster.data.stats.attack * skillMultiplier);
+          const dmg = target.takeDamage(rawDmg + markBonus, ignoreDefense, caster);
           this._totalDamageDealt += dmg;
           if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
             this._onDamageDealtCallback(target.node, dmg);
@@ -636,8 +663,10 @@ export class BattleManager extends Component {
 
         case 'bonus_damage': {
           if (!target?.data) break;
+          const markBonus = this._getMarkBonus(target);
           const bonusRaw = caster.data.stats.attack + (effect.params.amount ?? 2);
-          const dmg = target.takeDamage(bonusRaw, ignoreDefense);
+          const totalDmg = Math.floor(bonusRaw * skillMultiplier) + markBonus;
+          const dmg = target.takeDamage(totalDmg, ignoreDefense, caster);
           this._totalDamageDealt += dmg;
           if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
             this._onDamageDealtCallback(target.node, dmg);
@@ -647,13 +676,14 @@ export class BattleManager extends Component {
 
         case 'aoe_adjacent': {
           const mult2 = effect.params.multiplier ?? 1.0;
-          const baseDmg = Math.floor(caster.data.stats.attack * mult2);
+          const baseDmg = Math.floor(caster.data.stats.attack * mult2 * skillMultiplier);
           for (const enemy of this._enemyUnits) {
             if (enemy.data?.isAlive && caster.data) {
               const dist = Math.abs(enemy.data.gridPos.row - caster.data.gridPos.row) +
                 Math.abs(enemy.data.gridPos.col - caster.data.gridPos.col);
               if (dist <= 1) {
-                const dmg = enemy.takeDamage(baseDmg, ignoreDefense);
+                const markBonus = this._getMarkBonus(enemy);
+                const dmg = enemy.takeDamage(baseDmg + markBonus, ignoreDefense, caster);
                 this._totalDamageDealt += dmg;
                 if (dmg > 0 && this._onDamageDealtCallback && enemy.node?.isValid) {
                   this._onDamageDealtCallback(enemy.node, dmg);
@@ -666,14 +696,15 @@ export class BattleManager extends Component {
 
         case 'aoe_1radius': {
           const mult3 = effect.params.multiplier ?? 1.5;
-          const baseDmg = Math.floor(caster.data.stats.attack * mult3);
+          const baseDmg = Math.floor(caster.data.stats.attack * mult3 * skillMultiplier);
           const center = target?.data?.gridPos ?? targetPos ?? caster.data.gridPos;
           for (const enemy of this._enemyUnits) {
             if (enemy.data?.isAlive) {
               const dist = Math.abs(enemy.data.gridPos.row - center.row) +
                 Math.abs(enemy.data.gridPos.col - center.col);
               if (dist <= 1) {
-                const dmg = enemy.takeDamage(baseDmg, ignoreDefense);
+                const markBonus = this._getMarkBonus(enemy);
+                const dmg = enemy.takeDamage(baseDmg + markBonus, ignoreDefense, caster);
                 this._totalDamageDealt += dmg;
                 if (dmg > 0 && this._onDamageDealtCallback && enemy.node?.isValid) {
                   this._onDamageDealtCallback(enemy.node, dmg);
@@ -686,14 +717,15 @@ export class BattleManager extends Component {
 
         case 'aoe_3x3': {
           const mult4 = effect.params.multiplier ?? 0.6;
-          const baseDmg = Math.floor(caster.data.stats.attack * mult4);
+          const baseDmg = Math.floor(caster.data.stats.attack * mult4 * skillMultiplier);
           const center = target?.data?.gridPos ?? targetPos ?? caster.data.gridPos;
           for (const enemy of this._enemyUnits) {
             if (enemy.data?.isAlive) {
               const dr = Math.abs(enemy.data.gridPos.row - center.row);
               const dc = Math.abs(enemy.data.gridPos.col - center.col);
               if (dr <= 1 && dc <= 1) {
-                const dmg = enemy.takeDamage(baseDmg, ignoreDefense);
+                const markBonus = this._getMarkBonus(enemy);
+                const dmg = enemy.takeDamage(baseDmg + markBonus, ignoreDefense, caster);
                 this._totalDamageDealt += dmg;
                 if (dmg > 0 && this._onDamageDealtCallback && enemy.node?.isValid) {
                   this._onDamageDealtCallback(enemy.node, dmg);
@@ -724,8 +756,9 @@ export class BattleManager extends Component {
           if (!target?.data) break;
           const chainCount = effect.params.chainCount ?? 2;
           const chainMult = effect.params.multiplier ?? 0.8;
-          const baseChainDmg = Math.floor(caster.data.stats.attack * chainMult);
-          const mainDmg = target.takeDamage(baseChainDmg, ignoreDefense);
+          const baseChainDmg = Math.floor(caster.data.stats.attack * chainMult * skillMultiplier);
+          const markBonus = this._getMarkBonus(target);
+          const mainDmg = target.takeDamage(baseChainDmg + markBonus, ignoreDefense, caster);
           this._totalDamageDealt += mainDmg;
           if (mainDmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
             this._onDamageDealtCallback(target.node, mainDmg);
@@ -742,7 +775,8 @@ export class BattleManager extends Component {
           });
           for (let i = 0; i < Math.min(chainCount, otherEnemies.length); i++) {
             const chainTarget = otherEnemies[i];
-            const chainDmg = chainTarget.takeDamage(baseChainDmg, ignoreDefense);
+            const chainMarkBonus = this._getMarkBonus(chainTarget);
+            const chainDmg = chainTarget.takeDamage(baseChainDmg + chainMarkBonus, ignoreDefense, caster);
             this._totalDamageDealt += chainDmg;
             if (chainDmg > 0 && this._onDamageDealtCallback && chainTarget.node?.isValid) {
               this._onDamageDealtCallback(chainTarget.node, chainDmg);
@@ -828,7 +862,11 @@ export class BattleManager extends Component {
         }
       }
     }
-    // 技能攻击后触发淬毒箭被动（仅对敌人生效）
+    
+    if (nextSkillBuff && caster.data) {
+      caster.data.buffs = caster.data.buffs.filter(b => b.type !== 'buff_next_skill');
+    }
+    
     if (caster.data && caster.hasPassive('poison_arrows') && target?.data && !target.data.isPlayer) {
       target.addBuff('poison', 2, { damage: 1 });
     }
@@ -855,13 +893,29 @@ export class BattleManager extends Component {
     if (!unit?.data?.isAlive) return;
     const skill = unit.peekSkill(skillIndex);
     if (!skill) return;
+    
+    if (skill.preMove && this._preMoveSkillUsed) {
+      return;
+    }
+    
     if (skill.targetType === 'self') {
       unit.useSkill(skillIndex);
       if (unit.data) {
         this.executeSkillEffects(unit, unit, unit.data.gridPos, skill.effects);
       }
-      unit.data.hasActed = true;
-      this.finishUnitTurn();
+      
+      if (skill.preMove) {
+        this._preMoveSkillUsed = true;
+        this._unitPhase = 'move';
+        this.gridController.clearHighlights();
+        this.highlightMoveRange(unit);
+        if (this._onUnitPhaseChanged) {
+          this._onUnitPhaseChanged('player_turn', unit, 'move');
+        }
+      } else {
+        unit.data.hasActed = true;
+        this.finishUnitTurn();
+      }
     } else {
       this._pendingSkill = skill;
       this._pendingSkill['_skillIndex'] = skillIndex;
@@ -945,7 +999,11 @@ export class BattleManager extends Component {
     const moveTarget = action.moveTo ?? enemy.data.gridPos;
     enemy.moveToPositionAnimated(moveTarget, moveDuration, () => {
       if (action.attackTarget?.data?.isAlive) {
-        this.executeAttack(enemy, action.attackTarget);
+        const dist = Math.abs(action.attackTarget.data.gridPos.row - enemy.data.gridPos.row) +
+          Math.abs(action.attackTarget.data.gridPos.col - enemy.data.gridPos.col);
+        if (dist <= enemy.data.stats.range) {
+          this.executeAttack(enemy, action.attackTarget);
+        }
       }
       this.scheduleOnce(() => {
         this._processNextAIUnit();
@@ -987,8 +1045,18 @@ export class BattleManager extends Component {
       this._selectedUnit = null;
     }
     this.gridController.clearHighlights();
-
-    const goldReward = victory ? 10 + this._turnCount * 2 : 0;
+    
+    let goldReward = 0;
+    if (victory) {
+      if (this._currentBattleType === 'boss') {
+        goldReward = 30;
+      } else if (this._currentBattleType === 'elite') {
+        goldReward = 15 + Math.floor(Math.random() * 6);
+      } else {
+        goldReward = 5 + Math.floor(Math.random() * 6);
+      }
+    }
+    
     if (this._onBattleEndCallback) {
       this._onBattleEndCallback({ victory, goldReward });
     }
