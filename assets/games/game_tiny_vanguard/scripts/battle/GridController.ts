@@ -86,6 +86,19 @@ export class GridController extends Component {
     }
   }
 
+  setCellColor(pos: GridPosition, color: Color): void {
+    const cell = this.getCell(pos.row, pos.col);
+    if (cell) {
+      const sprite = cell.getComponent(Sprite);
+      if (sprite) {
+        sprite.color = color;
+      }
+      if (!this._highlightedCells.includes(cell)) {
+        this._highlightedCells.push(cell);
+      }
+    }
+  }
+
   clearHighlights(): void {
     for (const cell of this._highlightedCells) {
       if (cell?.isValid) {

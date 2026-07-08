@@ -193,28 +193,27 @@ export class BattleManager extends Component {
   }
 
   private _highlightDeployArea(): void {
-    // 顶部两行：浅绿色（可部署区域）
-    const deployableColor = new Color(150, 230, 150, 180);
-    const deployablePositions: GridPosition[] = [];
-    for (let c = 0; c < 6; c++) {
-      deployablePositions.push({ row: 0, col: c });
-      deployablePositions.push({ row: 1, col: c });
-    }
-    this.gridController.highlightCells(deployablePositions, deployableColor);
+    this.gridController.clearHighlights();
 
-    // 底部四行：淡灰色（不可部署区域）
+    // 顶部两行：浅绿色（可部署区域，玩家在己方半场部署）
+    const deployableColor = new Color(150, 230, 150, 180);
+    for (let c = 0; c < 6; c++) {
+      this.gridController.setCellColor({ row: 0, col: c }, deployableColor);
+      this.gridController.setCellColor({ row: 1, col: c }, deployableColor);
+    }
+
+    // 底部四行：淡灰色（不可部署区域，敌方区域）
     const disabledColor = new Color(200, 200, 200, 100);
-    const disabledPositions: GridPosition[] = [];
     for (let r = 2; r < 6; r++) {
       for (let c = 0; c < 6; c++) {
-        disabledPositions.push({ row: r, col: c });
+        this.gridController.setCellColor({ row: r, col: c }, disabledColor);
       }
     }
-    this.gridController.highlightCells(disabledPositions, disabledColor);
 
-    // 已部署位置：深绿色（需要单独处理，保持可见）
-    if (this._deployedPositions.length > 0) {
-      this.gridController.highlightCells(this._deployedPositions, new Color(100, 200, 100, 220));
+    // 已部署位置：深绿色（覆盖之前的颜色）
+    const placedColor = new Color(100, 200, 100, 220);
+    for (const pos of this._deployedPositions) {
+      this.gridController.setCellColor(pos, placedColor);
     }
   }
 
@@ -362,6 +361,7 @@ export class BattleManager extends Component {
       this._selectedUnit.setSelected(false);
       this._selectedUnit = null;
     }
+    this._preMoveSkillUsed = false;
     this.gridController.clearHighlights();
 
     while (this._currentUnitIndex < this._playerUnits.length) {

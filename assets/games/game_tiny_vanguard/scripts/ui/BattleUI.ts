@@ -249,20 +249,17 @@ export class BattleUI extends Component {
     const cardHeight = 65;
     const gap = 8;
     const count = unitNames.length;
-    
-    const container = this.deployUnitList || this.node;
-    const containerTransform = container.getComponent(UITransform);
-    const containerWidth = containerTransform ? containerTransform.contentSize.width : 120;
-    const containerHeight = containerTransform ? containerTransform.contentSize.height : 300;
-    
-    const startX = -containerWidth / 2 + cardWidth / 2;
-    const totalCardHeight = count * cardHeight + (count - 1) * gap;
-    const startY = -containerHeight / 2 + cardHeight / 2;
+    // 棋盘左边界 x=-200，棋盘底部 y=-200
+    // 兵牌位于棋盘左侧外，与棋盘底部平齐
+    // baseX = 棋盘左边界 - 兵牌宽度 - 间隙 = -200 - 110 - 15 = -325
+    // baseY = 棋盘底部 y = -200
+    const baseX = -325;
+    const baseY = -200;
 
     for (let i = 0; i < count; i++) {
       const card = new Node(`PlatoonCard_${i}`);
       // 从下往上排列：i=0 最底，i=2 最高
-      card.setPosition(startX, startY + i * (cardHeight + gap), 0);
+      card.setPosition(baseX, baseY + i * (cardHeight + gap), 0);
 
       // 背景
       const bg = card.addComponent(Sprite);
@@ -313,8 +310,7 @@ export class BattleUI extends Component {
         if (cb) cb(idx);
       });
 
-      const container = this.deployUnitList || this.node;
-      container.addChild(card);
+      this.node.addChild(card);
       this._deployCards.push(card);
     }
   }
