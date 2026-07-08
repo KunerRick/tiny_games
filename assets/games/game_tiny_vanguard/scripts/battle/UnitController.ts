@@ -25,6 +25,7 @@ export interface UnitData {
   shieldAmount: number;
   passiveApplied: string[];
   aiBehavior: AIType;
+  preMoveSkillUsed: boolean;
 }
 
 export interface BuffEntry {
@@ -84,6 +85,7 @@ export class UnitController extends Component {
       shieldAmount: 0,
       passiveApplied: [],
       aiBehavior: config.aiBehavior,
+      preMoveSkillUsed: false,
     };
 
     this.updatePosition();
@@ -122,6 +124,7 @@ export class UnitController extends Component {
       shieldAmount: 0,
       passiveApplied: [],
       aiBehavior: 'aggressive',
+      preMoveSkillUsed: false,
     };
 
     this.updatePosition();
@@ -300,11 +303,13 @@ export class UnitController extends Component {
     return this._data.skills[skillIndex];
   }
 
-  useSkill(skillIndex: number): SkillConfig | null {
+  useSkill(skillIndex: number, setActed: boolean = true): SkillConfig | null {
     if (!this._data || !this.canUseSkill(skillIndex)) return null;
     const skill = this._data.skills[skillIndex];
     this._data.energy -= skill.energyCost;
-    this._data.hasActed = true;
+    if (setActed) {
+      this._data.hasActed = true;
+    }
     return skill;
   }
 
@@ -333,6 +338,7 @@ export class UnitController extends Component {
     if (skillId === 'toughness') {
       this._data.maxHp += 1;
       this._data.currentHp = Math.min(this._data.currentHp + 1, this._data.maxHp);
+      this._data.baseStats.defense += 1;
       this._data.stats.defense += 1;
       if (!this._data.passiveApplied.includes('toughness')) {
         this._data.passiveApplied.push('toughness');
@@ -360,6 +366,7 @@ export class UnitController extends Component {
     this._data.energy = Math.min(this._data.maxEnergy, this._data.energy + this._data.energyRegen);
     this._data.hasMoved = false;
     this._data.hasActed = false;
+    this._data.preMoveSkillUsed = false;
 
     for (let i = this._data.buffs.length - 1; i >= 0; i--) {
       const buff = this._data.buffs[i];
@@ -372,17 +379,25 @@ export class UnitController extends Component {
 
     for (const skill of this._data.skills) {
       if (skill.type !== 'passive' || skill.triggerCondition !== 'on_turn_start') continue;
-      if (this._data.passiveApplied.includes(skill.id)) continue;
+
+      // 判断是否为每回合都触发的效果（光环类）
+      const isAuraType = skill.effects.some(e =>
+        e.type === 'passive_aura_heal'
+      );
+      // 非光环类永久被动只应用一次
+      if (!isAuraType && this._data.passiveApplied.includes(skill.id)) continue;
 
       for (const effect of skill.effects) {
         switch (effect.type) {
           case 'passive_toughness':
             this._data.maxHp += effect.params.hp ?? 1;
             this._data.currentHp = Math.min(this._data.currentHp + (effect.params.hp ?? 1), this._data.maxHp);
+            this._data.baseStats.defense += effect.params.defense ?? 1;
             this._data.stats.defense += effect.params.defense ?? 1;
             this._data.passiveApplied.push(skill.id);
             break;
           case 'passive_eagle_eye':
+            this._data.baseStats.range += effect.params.range ?? 1;
             this._data.stats.range += effect.params.range ?? 1;
             this._data.passiveApplied.push(skill.id);
             break;
@@ -450,6 +465,9 @@ export class UnitController extends Component {
     this._data.shieldAmount = 0;
     this._data.hasMoved = false;
     this._data.hasActed = false;
+    this._data.preMoveSkillUsed = false;
     this._data.stats = { ...this._data.baseStats };
+    // 不清空 passiveApplied — 永久被动（铁壁/鹰眼/魔力涌动）已写入 baseStats
+    // 每次战斗开始时 onTurnStart 会通过 passiveApplied 检查避免重复应用
   }
 }

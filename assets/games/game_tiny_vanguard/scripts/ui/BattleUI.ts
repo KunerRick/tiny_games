@@ -69,7 +69,11 @@ export class BattleUI extends Component {
       this.node.active = false;
     }
     if (this.victoryPanel) this.victoryPanel.active = false;
-    if (this.defeatPanel) this.defeatPanel.active = false;
+    if (this.defeatPanel) {
+      this.defeatPanel.active = false;
+      // 确保失败面板在渲染层级最顶层（避免被单位遮挡）
+      this.ensurePanelOnTop(this.defeatPanel);
+    }
 
     if (this.endTurnButton) {
       const etTransform = this.endTurnButton.node.getComponent(UITransform);
@@ -154,6 +158,15 @@ export class BattleUI extends Component {
     }
     if (this.waitButton) {
       this.waitButton.node.off(Button.EventType.CLICK, this.onWaitClicked, this);
+    }
+  }
+
+  /**
+   * 确保面板节点在父节点的最顶层渲染
+   */
+  private ensurePanelOnTop(panel: Node | null): void {
+    if (panel && panel.parent) {
+      panel.setSiblingIndex(panel.parent.children.length - 1);
     }
   }
 
@@ -475,10 +488,14 @@ export class BattleUI extends Component {
 
   showVictory(gold: number): void {
     if (this.victoryPanel) {
+      this.ensurePanelOnTop(this.victoryPanel);
       this.victoryPanel.active = true;
     }
     if (this.endTurnButton) {
       this.endTurnButton.node.active = false;
+    }
+    if (this.waitButton) {
+      this.waitButton.node.active = false;
     }
 
     // 确保有"继续"按钮
@@ -522,10 +539,27 @@ export class BattleUI extends Component {
 
   showDefeat(): void {
     if (this.defeatPanel) {
+      // 确保面板在最顶层（避免被单位遮挡）
+      this.ensurePanelOnTop(this.defeatPanel);
       this.defeatPanel.active = true;
+
+      // 设置失败文案居中
+      const resultLabel = this.defeatPanel.getComponentInChildren(Label);
+      if (resultLabel) {
+        resultLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+        resultLabel.verticalAlign = Label.VerticalAlign.CENTER;
+        resultLabel.string = '失 败';
+        resultLabel.color = new Color(255, 80, 80);
+      }
     }
     if (this.endTurnButton) {
       this.endTurnButton.node.active = false;
+    }
+    if (this.waitButton) {
+      this.waitButton.node.active = false;
+    }
+    if (this.skillButtonContainer) {
+      this.skillButtonContainer.active = false;
     }
   }
 
@@ -551,6 +585,16 @@ export class BattleUI extends Component {
       this.actionHintLabel.string = actionHint ?? '';
     }
 
+    // 根据阶段控制按钮可见性
+    const isEnemyTurn = phase.includes('\u654C\u65B9');
+    const isDeploy = phase.includes('\u5E03\u9635');
+    if (this.waitButton) {
+      this.waitButton.node.active = !isEnemyTurn && !isDeploy;
+    }
+    if (this.endTurnButton) {
+      this.endTurnButton.node.active = !isEnemyTurn && !isDeploy;
+    }
+
     // 根据阶段设置背景色
     if (this.phaseBg) {
       let phaseType: string;
@@ -567,7 +611,7 @@ export class BattleUI extends Component {
       } else {
         phaseType = 'none';
       }
-      
+
       switch (phaseType) {
         case 'deploy':
           this.phaseBg.color = new Color(0, 120, 60, 120);

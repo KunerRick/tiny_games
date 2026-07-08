@@ -41,7 +41,6 @@ export class BattleManager extends Component {
   private _pendingSkill: import('../config/GameData').SkillConfig | null = null;
   private _skillTargets: GridPosition[] = [];
   private _totalDamageDealt: number = 0;
-  private _preMoveSkillUsed: boolean = false;
   private _currentBattleType: 'normal' | 'elite' | 'boss' = 'normal';
 
   get phase(): BattlePhase { return this._phase; }
@@ -347,7 +346,6 @@ export class BattleManager extends Component {
 
   private startPlayerTurn(): void {
     this._currentUnitIndex = 0;
-    this._preMoveSkillUsed = false;
     for (const unit of this._playerUnits) {
       if (unit.data?.isAlive) {
         unit.onTurnStart(this._playerUnits);
@@ -361,7 +359,6 @@ export class BattleManager extends Component {
       this._selectedUnit.setSelected(false);
       this._selectedUnit = null;
     }
-    this._preMoveSkillUsed = false;
     this.gridController.clearHighlights();
 
     while (this._currentUnitIndex < this._playerUnits.length) {
@@ -460,22 +457,7 @@ export class BattleManager extends Component {
     if (this._onUnitPhaseChanged) {
       this._onUnitPhaseChanged('player_turn', unit, 'action');
     }
-    this._checkAutoSkipIfNoTargets(unit);
-  }
-
-  private _checkAutoSkipIfNoTargets(unit: UnitController): void {
-    const attacks = this.getAttackableEnemies(unit);
-    if (attacks.length === 0 && !unit.data?.hasActed) {
-      this.scheduleOnce(() => {
-        if (unit.data?.isAlive && !unit.data.hasActed) {
-          unit.data.hasActed = true;
-          if (this._onUnitPhaseChanged) {
-            this._onUnitPhaseChanged('player_turn', unit, 'done');
-          }
-          this.finishUnitTurn();
-        }
-      }, 0.3);
-    }
+    return;
   }
 
   private handleActionPhase(unit: UnitController, gridPos: GridPosition): void {
@@ -521,12 +503,6 @@ export class BattleManager extends Component {
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive) return;
 
-    // 点击自己 = 等待（结束当前单位行动）
-    if (unit.data.gridPos.row === gridPos.row && unit.data.gridPos.col === gridPos.col) {
-      this.waitCurrentUnit();
-      return;
-    }
-
     const clickedPlayer = this._playerUnits.find(u =>
       u.data?.isAlive && u.data.gridPos.row === gridPos.row && u.data.gridPos.col === gridPos.col
     );
@@ -537,8 +513,22 @@ export class BattleManager extends Component {
     }
 
     if (this._unitPhase === 'move') {
+      // 移动阶段点击自己 = 原地不动，进入行动阶段
+      if (unit.data.gridPos.row === gridPos.row && unit.data.gridPos.col === gridPos.col) {
+        unit.data.hasMoved = true;
+        this._unitPhase = 'action';
+        this.highlightAttackRange(unit);
+        if (this._onUnitPhaseChanged) {
+          this._onUnitPhaseChanged('player_turn', unit, 'action');
+        }
+        return;
+      }
       this.handleMovePhase(unit, gridPos);
     } else if (this._unitPhase === 'action') {
+      // 行动阶段点击自己 = 不处理（必须通过等待按钮或攻击来结束）
+      if (unit.data.gridPos.row === gridPos.row && unit.data.gridPos.col === gridPos.col) {
+        return;
+      }
       this.handleActionPhase(unit, gridPos);
     }
   }
@@ -894,18 +884,19 @@ export class BattleManager extends Component {
     const skill = unit.peekSkill(skillIndex);
     if (!skill) return;
     
-    if (skill.preMove && this._preMoveSkillUsed) {
+    if (skill.preMove && unit.data.preMoveSkillUsed) {
       return;
     }
     
     if (skill.targetType === 'self') {
-      unit.useSkill(skillIndex);
+      // pre-move 技能不消耗行动次数（仅消耗能量），后续仍可攻击
+      unit.useSkill(skillIndex, !skill.preMove);
       if (unit.data) {
         this.executeSkillEffects(unit, unit, unit.data.gridPos, skill.effects);
       }
       
       if (skill.preMove) {
-        this._preMoveSkillUsed = true;
+        unit.data.preMoveSkillUsed = true;
         this._unitPhase = 'move';
         this.gridController.clearHighlights();
         this.highlightMoveRange(unit);
@@ -1045,7 +1036,24 @@ export class BattleManager extends Component {
       this._selectedUnit = null;
     }
     this.gridController.clearHighlights();
-    
+
+    // 战斗结束后：胜利方保持显示，失败方隐藏（避免棋盘杂乱）
+    if (victory) {
+      // 胜利：隐藏所有敌方单位，友方单位保持显示
+      for (const enemy of this._enemyUnits) {
+        if (enemy.node?.isValid) {
+          enemy.node.active = false;
+        }
+      }
+    } else {
+      // 失败：隐藏所有友方单位，敌方保持显示
+      for (const player of this._playerUnits) {
+        if (player.node?.isValid) {
+          player.node.active = false;
+        }
+      }
+    }
+
     let goldReward = 0;
     if (victory) {
       if (this._currentBattleType === 'boss') {
@@ -1056,7 +1064,7 @@ export class BattleManager extends Component {
         goldReward = 5 + Math.floor(Math.random() * 6);
       }
     }
-    
+
     if (this._onBattleEndCallback) {
       this._onBattleEndCallback({ victory, goldReward });
     }
@@ -1064,8 +1072,12 @@ export class BattleManager extends Component {
 
   reviveAllUnits(): void {
     for (const unit of this._playerUnits) {
-      if (unit.data && !unit.data.isAlive) {
+      if (unit.data) {
         unit.resetForNewBattle();
+        // 阵亡单位重新显示
+        if (unit.node?.isValid) {
+          unit.node.active = true;
+        }
       }
     }
   }
