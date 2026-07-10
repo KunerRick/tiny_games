@@ -94,12 +94,11 @@ export class RouteMapUI extends Component {
 
   private isReachable(nodeId: number): boolean {
     if (nodeId === 0) return true;
-    const node = this._nodes.find(n => n.id === nodeId);
-    if (!node) return false;
-    return node.connections.some(connId => {
-      const conn = this._nodes.find(n => n.id === connId);
-      return conn && conn.completed;
-    });
+    // connections 存的是"从本节点能去往的节点ID"（正向边）
+    // 检查是否有某个节点的 connections 包含 nodeId 且该节点已完成
+    return this._nodes.some(n =>
+      n.connections.includes(nodeId) && n.completed
+    );
   }
 
   private onNodeTapped(nodeId: number): void {

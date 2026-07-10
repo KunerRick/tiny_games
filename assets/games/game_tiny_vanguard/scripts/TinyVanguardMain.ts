@@ -528,6 +528,10 @@ export class TinyVanguardMain extends Component {
       return;
     }
 
+    // 标记当前战斗节点已完成
+    this.routeMapUI?.completeNode(this._currentNode?.id ?? 0);
+    SaveManager.saveRun(this._runData);
+
     this.scheduleOnce(() => {
       this.battleManager.reviveAllUnits();
       this.battleUI.hide();
@@ -864,6 +868,13 @@ export class TinyVanguardMain extends Component {
 
     if (victory) {
       this.checkAchievements();
+      // checkAchievements 可能修改了 unlockedClasses，重新保存 meta
+      SaveManager.saveMeta({
+        honor: this._runData.honor,
+        talents: this._runData.talents,
+        unlockedClasses: this._runData.unlockedClasses,
+        unlockedSkills: this._runData.unlockedSkills,
+      });
     }
 
     SaveManager.clearRun();

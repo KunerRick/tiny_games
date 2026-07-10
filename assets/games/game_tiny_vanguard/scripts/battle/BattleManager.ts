@@ -43,6 +43,7 @@ export class BattleManager extends Component {
   private _skillTargets: GridPosition[] = [];
   private _totalDamageDealt: number = 0;
   private _currentBattleType: 'normal' | 'elite' | 'boss' = 'normal';
+  private _autoSkipUnitRef: UnitController | null = null;
 
   get phase(): BattlePhase { return this._phase; }
   get playerUnits(): UnitController[] { return this._playerUnits; }
@@ -360,6 +361,9 @@ export class BattleManager extends Component {
   }
 
   private selectNextPlayerUnit(): void {
+    // 取消任何未完成的自动跳过延迟，防止用户切换单位后回调冲突
+    this._cancelAutoSkip();
+
     if (this._selectedUnit) {
       this._selectedUnit.setSelected(false);
       this._selectedUnit = null;
@@ -481,11 +485,26 @@ export class BattleManager extends Component {
         this._onAutoSkipCallback(unit.data.name);
       }
       unit.data.hasActed = true;
+      this._autoSkipUnitRef = unit;
       // 延迟跳过，让玩家看到提示
-      this.scheduleOnce(() => {
-        this.finishUnitTurn();
-      }, 0.6);
+      this.scheduleOnce(this._onAutoSkipTimeout, 0.6);
     }
+  }
+
+  private _cancelAutoSkip(): void {
+    if (this._autoSkipUnitRef) {
+      this._autoSkipUnitRef = null;
+      this.unschedule(this._onAutoSkipTimeout);
+    }
+  }
+
+  private _onAutoSkipTimeout(): void {
+    if (!this._autoSkipUnitRef?.data?.isAlive) {
+      this._autoSkipUnitRef = null;
+      return;
+    }
+    this._autoSkipUnitRef = null;
+    this.finishUnitTurn();
   }
 
   private handleActionPhase(unit: UnitController, gridPos: GridPosition): void {
@@ -960,6 +979,22 @@ export class BattleManager extends Component {
       return this._enemyUnits
         .filter(e => e.data?.isAlive)
         .map(e => e.data!.gridPos);
+    }
+    if (skill.targetType === 'tile') {
+      const range = skill.effects.find(e => e.type === 'teleport')?.params?.range ?? 3;
+      const pos = unit.data.gridPos;
+      const tiles: GridPosition[] = [];
+      for (let r = -range; r <= range; r++) {
+        for (let c = -range; c <= range; c++) {
+          if (Math.abs(r) + Math.abs(c) > range) continue;
+          const row = pos.row + r;
+          const col = pos.col + c;
+          if (row < 0 || row >= 6 || col < 0 || col >= 6) continue;
+          if (this.isOccupied({ row, col })) continue;
+          tiles.push({ row, col });
+        }
+      }
+      return tiles;
     }
     return [];
   }
