@@ -381,6 +381,9 @@ export class TinyVanguardMain extends Component {
   private startBattle(isElite: boolean, isBoss: boolean): void {
     this._state = 'battle';
     this.routeMapUI.hide();
+    if (this.battleManager?.node) {
+      this.battleManager.node.active = true;
+    }
     if (this.battleManager?.gridController?.node) {
       this.battleManager.gridController.node.active = true;
     }

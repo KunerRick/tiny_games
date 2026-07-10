@@ -150,6 +150,9 @@ export class BattleUI extends Component {
     if (this.waitButton) {
       this.waitButton.node.on(Button.EventType.CLICK, this.onWaitClicked, this);
     }
+    if (this.endTurnButton) {
+      this.endTurnButton.node.on(Button.EventType.CLICK, this.onEndTurnClicked, this);
+    }
   }
 
   private unbindEvents(): void {
@@ -158,6 +161,9 @@ export class BattleUI extends Component {
     }
     if (this.waitButton) {
       this.waitButton.node.off(Button.EventType.CLICK, this.onWaitClicked, this);
+    }
+    if (this.endTurnButton) {
+      this.endTurnButton.node.off(Button.EventType.CLICK, this.onEndTurnClicked, this);
     }
   }
 
@@ -264,9 +270,8 @@ export class BattleUI extends Component {
     const count = unitNames.length;
     // 棋盘左边界 x=-200，棋盘底部 y=-200
     // 兵牌位于棋盘左侧外，与棋盘底部平齐
-    // baseX = 棋盘左边界 - 兵牌宽度 - 间隙 = -200 - 110 - 15 = -325
-    // baseY = 棋盘底部 y = -200
-    const baseX = -325;
+    // 调整 baseX 使卡片更靠近棋盘（从 -325 改为 -265，间距约 25px）
+    const baseX = -265;
     const baseY = -200;
 
     for (let i = 0; i < count; i++) {
@@ -303,17 +308,6 @@ export class BattleUI extends Component {
       nameLabel.setPosition(0, -14, 0);
       card.addChild(nameLabel);
 
-      // 选中勾（默认隐藏，placed 时显示）- 放在左上角，向内缩避免超出卡片
-      const checkMark = new Node('CheckMark');
-      const cmLabel = checkMark.addComponent(Label);
-      cmLabel.string = '\u2713';
-      cmLabel.fontSize = 22;
-      cmLabel.color = new Color(80, 240, 100);
-      // 放在左上角内缩位置，不遮挡棋盘
-      checkMark.setPosition(-cardWidth / 2 + 14, cardHeight / 2 - 10, 0);
-      checkMark.active = false;
-      card.addChild(checkMark);
-
       // 交互
       card['_deployIdx'] = i;
       card['_deployCb'] = callback;
@@ -333,30 +327,28 @@ export class BattleUI extends Component {
     if (!card?.isValid) return;
 
     const bg = card.getComponent(Sprite);
-    const checkMark = card.getChildByName('CheckMark');
 
     // 找到或创建 HighlightBorder
     let border = card.getChildByName('HighlightBorder');
 
     switch (state) {
       case 'unplaced':
-        // 深蓝灰色背景，白色边框提示可交互
+        // 深蓝灰色背景，淡色边框提示可交互
         if (bg) bg.color = new Color(45, 50, 70, 220);
         card.setScale(new Vec3(1, 1, 1));
-        if (checkMark) checkMark.active = false;
         if (border) {
           const bSprite = border.getComponent(Sprite);
           if (bSprite) bSprite.color = new Color(120, 130, 160, 200);
           const bTrans = border.getComponent(UITransform);
           if (bTrans) bTrans.setContentSize(116, 71);
+          border.active = true;
         }
         break;
 
       case 'selected':
-        // 亮绿色背景表示当前选中
+        // 亮绿色背景 + 绿色边框表示当前选中
         if (bg) bg.color = new Color(60, 180, 60, 240);
         card.setScale(new Vec3(1.12, 1.12, 1));
-        if (checkMark) checkMark.active = false;
         if (!border) {
           border = new Node('HighlightBorder');
           const bSprite = border.addComponent(Sprite);
@@ -371,27 +363,43 @@ export class BattleUI extends Component {
         break;
 
       case 'placed':
-        // 深色半透明背景，表示已完成部署
+        // 深色半透明背景 + 金色边框表示已完成部署
         if (bg) bg.color = new Color(30, 35, 50, 150);
         card.setScale(new Vec3(1, 1, 1));
-        if (checkMark) checkMark.active = true;
-        if (border) border.active = false;
+        if (!border) {
+          border = new Node('HighlightBorder');
+          const bSprite = border.addComponent(Sprite);
+          bSprite.color = new Color(255, 200, 80, 255);
+          bSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+          const bTrans = border.addComponent(UITransform);
+          bTrans.setContentSize(116, 71);
+          border.setPosition(0, 0, -1);
+          card.addChild(border);
+        }
+        const placedBorderSprite = border.getComponent(Sprite);
+        if (placedBorderSprite) placedBorderSprite.color = new Color(255, 200, 80, 255);
+        border.active = true;
         break;
     }
+
+    // 记录状态用于 selectDeployCard 判断
+    card['_deployState'] = state;
   }
 
   selectDeployCard(index: number): void {
-    // 先重置所有卡片为 unplaced
+    // 先重置所有卡片为 unplaced（已放置的保持 placed 态）
     for (let i = 0; i < this._deployCards.length; i++) {
       const card = this._deployCards[i];
       if (!card?.isValid) continue;
       // 不重置已放置的卡片
-      const checkMark = card.getChildByName('CheckMark');
-      if (checkMark?.active) continue;
+      if (card['_deployState'] === 'placed') continue;
       this.setDeployCardState(i, 'unplaced');
     }
-    // 设置目标卡片为选中态
-    this.setDeployCardState(index, 'selected');
+    // 设置目标卡片为选中态（仅当未放置时）
+    const targetCard = this._deployCards[index];
+    if (targetCard?.isValid && targetCard['_deployState'] !== 'placed') {
+      this.setDeployCardState(index, 'selected');
+    }
   }
 
   clearUnitInfo(): void {

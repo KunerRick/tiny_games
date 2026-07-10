@@ -361,9 +361,11 @@ export class BattleManager extends Component {
     }
     this.gridController.clearHighlights();
 
-    while (this._currentUnitIndex < this._playerUnits.length) {
-      const unit = this._playerUnits[this._currentUnitIndex];
+    // 从 0 开始遍历，确保不会跳过前面未行动的单位
+    for (let i = 0; i < this._playerUnits.length; i++) {
+      const unit = this._playerUnits[i];
       if (unit.data?.isAlive && !unit.data.hasActed) {
+        this._currentUnitIndex = i;
         this._selectedUnit = unit;
         unit.setSelected(true);
         this._unitPhase = 'move';
@@ -373,7 +375,6 @@ export class BattleManager extends Component {
         }
         return;
       }
-      this._currentUnitIndex++;
     }
     this.endPlayerTurn();
   }
@@ -460,6 +461,15 @@ export class BattleManager extends Component {
     return;
   }
 
+  private _checkAutoSkipIfNoTargets(unit: UnitController): void {
+    if (!unit.data) return;
+    const targets = this.getAttackableEnemies(unit);
+    if (targets.length === 0) {
+      unit.data.hasActed = true;
+      this.finishUnitTurn();
+    }
+  }
+
   private handleActionPhase(unit: UnitController, gridPos: GridPosition): void {
     if (unit.data.hasActed) return;
     const targetEnemy = this._enemyUnits.find(e =>
@@ -506,7 +516,7 @@ export class BattleManager extends Component {
     const clickedPlayer = this._playerUnits.find(u =>
       u.data?.isAlive && u.data.gridPos.row === gridPos.row && u.data.gridPos.col === gridPos.col
     );
-    if (clickedPlayer && clickedPlayer !== unit) {
+    if (clickedPlayer && clickedPlayer !== unit && !clickedPlayer.data.hasActed) {
       this._currentUnitIndex = this._playerUnits.indexOf(clickedPlayer);
       this.selectNextPlayerUnit();
       return;

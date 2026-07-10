@@ -268,10 +268,11 @@ export class UnitController extends Component {
       this._data.isAlive = false;
     }
 
-    if (attacker && wasAlive && !this._countering && this.hasPassive('counter')) {
+    if (attacker && wasAlive && !this._countering && !ignoreDefense && this.hasPassive('counter')) {
       this._countering = true;
       const counterDmg = Math.max(1, Math.floor(this._data.stats.attack * 0.5));
-      attacker.takeDamage(counterDmg, false, this);
+      // 反击伤害标记为 ignoreDefense=true，防止链式反击死循环
+      attacker.takeDamage(counterDmg, true, this);
       this._countering = false;
     }
 
