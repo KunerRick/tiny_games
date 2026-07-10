@@ -82,6 +82,14 @@ export class BattleUI extends Component {
       }
       this.endTurnButton.node.setPosition(290, -280);
     }
+    if (this.waitButton) {
+      const wtTransform = this.waitButton.node.getComponent(UITransform);
+      if (wtTransform) {
+        wtTransform.setContentSize(100, 60);
+      }
+      // 与 endTurnButton 并排在左侧
+      this.waitButton.node.setPosition(175, -280);
+    }
     if (this.confirmDeployButton) {
       this.confirmDeployButton.node.setPosition(0, -320);
     }
@@ -220,14 +228,11 @@ export class BattleUI extends Component {
     if (this.confirmDeployButton) this.confirmDeployButton.node.active = true;
     if (this.waitButton) this.waitButton.node.active = false;
     if (this.endTurnButton) this.endTurnButton.node.active = false;
-    // 设置顶部阶段标签，清空其余文本
+    // 隐藏状态栏面板（仅在部署阶段）
+    this.setStatPanelVisible(false);
+    // 设置顶部阶段标签
     if (this.phaseLabel) this.phaseLabel.string = '\u5E03\u9635\u9636\u6BB5';
-    if (this.unitNameLabel) this.unitNameLabel.string = '';
-    if (this.hpLabel) this.hpLabel.string = '';
-    if (this.energyLabel) this.energyLabel.string = '';
-    if (this.turnLabel) this.turnLabel.string = '';
-    if (this.unitTurnLabel) this.unitTurnLabel.string = '';
-    if (this.actionHintLabel) this.actionHintLabel.string = '';
+    if (this.actionHintLabel) this.actionHintLabel.string = '\u70B9\u51FB\u524D\u4E24\u884C\u653E\u7F6E\u5355\u4F4D';
     if (this.deployUnitList) this.deployUnitList.active = false;
   }
 
@@ -235,7 +240,27 @@ export class BattleUI extends Component {
     if (this.deployPrompt) this.deployPrompt.active = false;
     if (this.confirmDeployButton) this.confirmDeployButton.node.active = false;
     if (this.waitButton) this.waitButton.node.active = true;
+    if (this.endTurnButton) this.endTurnButton.node.active = true;
+    // 恢复状态栏面板
+    this.setStatPanelVisible(true);
     if (this.deployUnitList) this.deployUnitList.active = false;
+  }
+
+  /** 部署阶段隐藏 / 战斗阶段恢复 状态栏面板 */
+  private setStatPanelVisible(visible: boolean): void {
+    // UnitInfoPanel 是 unitNameLabel/hpLabel/energyLabel 的父节点
+    if (this.unitNameLabel?.node?.parent) {
+      this.unitNameLabel.node.parent.active = visible;
+    }
+    if (this.turnLabel?.node) {
+      this.turnLabel.node.active = visible;
+    }
+    if (this.skillButtonContainer) {
+      this.skillButtonContainer.active = visible;
+    }
+    if (this.unitTurnLabel?.node) {
+      this.unitTurnLabel.node.active = visible;
+    }
   }
 
   updateUnitInfo(name: string, hp: number, maxHp: number, energy: number, maxEnergy: number, turn: number, isEnemy: boolean = false): void {
@@ -649,6 +674,14 @@ export class BattleUI extends Component {
     if (this.actionHintLabel) this.actionHintLabel.string = '';
     if (this.phaseBg) {
       this.phaseBg.color = new Color(0, 0, 0, 0);
+    }
+  }
+
+  /** 显示自动跳过提示（短暂展示后恢复） */
+  showAutoSkipNotice(unitName: string): void {
+    if (this.actionHintLabel) {
+      this.actionHintLabel.string = `${unitName} \u65E0\u53EF\u653B\u51FB\u76EE\u6807\uFF0C\u81EA\u52A8\u8DF3\u8FC7`;
+      this.actionHintLabel.color = new Color(255, 200, 80);
     }
   }
 

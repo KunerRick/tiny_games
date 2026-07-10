@@ -10,7 +10,10 @@ export interface GridPosition {
 export class GridController extends Component {
   public static readonly GRID_SIZE = 6;
   public static readonly CELL_SIZE = 80;
-  public static readonly DEFAULT_CELL_COLOR = Color.WHITE;
+  // 柔和的浅灰半透明底色，避免 clearHighlights 后纯白闪烁
+  public static readonly DEFAULT_CELL_COLOR = new Color(220, 220, 230, 180);
+  // 选中单位所在格子的金色标记
+  public static readonly SELECTED_CELL_COLOR = new Color(255, 215, 0, 120);
 
   @property({ type: Node, tooltip: '网格容器节点' })
   gridContainer: Node = null;
@@ -109,6 +112,20 @@ export class GridController extends Component {
       }
     }
     this._highlightedCells = [];
+  }
+
+  /** 高亮选中单位所在格子（金色标记，与移动/攻击高亮区分） */
+  highlightSelectedCell(pos: GridPosition): void {
+    const cell = this.getCell(pos.row, pos.col);
+    if (cell?.isValid) {
+      const sprite = cell.getComponent(Sprite);
+      if (sprite) {
+        sprite.color = GridController.SELECTED_CELL_COLOR;
+      }
+      if (!this._highlightedCells.includes(cell)) {
+        this._highlightedCells.push(cell);
+      }
+    }
   }
 
   setRowsInteractable(rows: number[], interactable: boolean): void {

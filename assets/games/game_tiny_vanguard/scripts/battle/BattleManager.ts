@@ -33,6 +33,7 @@ export class BattleManager extends Component {
   private _aiController: AIController = new AIController();
   private _onBattleEndCallback: ((result: BattleResult) => void) | null = null;
   private _onDamageDealtCallback: ((targetNode: Node, amount: number) => void) | null = null;
+  private _onAutoSkipCallback: ((unitName: string) => void) | null = null;
   private _deployedPositions: GridPosition[] = [];
   private _selectedDeployUnitIndex: number = -1;
   private _onDeployUnitPlacedCallback: ((placedCount: number, totalCount: number) => void) | null = null;
@@ -220,6 +221,10 @@ export class BattleManager extends Component {
     this._onDamageDealtCallback = callback;
   }
 
+  setAutoSkipCallback(callback: (unitName: string) => void): void {
+    this._onAutoSkipCallback = callback;
+  }
+
   confirmDeploy(): boolean {
     if (this._deployedPositions.length < this._playerUnits.length) {
       return false;
@@ -370,6 +375,8 @@ export class BattleManager extends Component {
         unit.setSelected(true);
         this._unitPhase = 'move';
         this.highlightMoveRange(unit);
+        // 标记选中单位所在格子
+        this.gridController.highlightSelectedCell(unit.data.gridPos);
         if (this._onUnitPhaseChanged) {
           this._onUnitPhaseChanged('player_turn', unit, 'move');
         }
@@ -389,6 +396,8 @@ export class BattleManager extends Component {
       this._unitPhase = 'action';
       this.highlightAttackRange(unit);
     }
+    // 始终标记选中单位所在格子
+    this.gridController.highlightSelectedCell(unit.data.gridPos);
   }
 
   private highlightAttackRange(unit: UnitController): void {
@@ -396,6 +405,8 @@ export class BattleManager extends Component {
     if (!unit.data) return;
     const attacks = this.getAttackableEnemies(unit);
     this.gridController.highlightCells(attacks, new Color(200, 100, 100, 180));
+    // 始终标记选中单位所在格子
+    this.gridController.highlightSelectedCell(unit.data.gridPos);
   }
 
   private getReachablePositions(from: GridPosition, range: number): GridPosition[] {
@@ -465,8 +476,15 @@ export class BattleManager extends Component {
     if (!unit.data) return;
     const targets = this.getAttackableEnemies(unit);
     if (targets.length === 0) {
+      // 通知 UI 显示自动跳过提示
+      if (this._onAutoSkipCallback) {
+        this._onAutoSkipCallback(unit.data.name);
+      }
       unit.data.hasActed = true;
-      this.finishUnitTurn();
+      // 延迟跳过，让玩家看到提示
+      this.scheduleOnce(() => {
+        this.finishUnitTurn();
+      }, 0.6);
     }
   }
 

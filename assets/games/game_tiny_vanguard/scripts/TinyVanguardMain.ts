@@ -345,6 +345,10 @@ export class TinyVanguardMain extends Component {
       this.battleManager.setDeploySelectionChangedCallback((index) => {
         this.battleUI.selectDeployCard(index);
       });
+      // 自动跳过提示
+      this.battleManager.setAutoSkipCallback((unitName) => {
+        this.battleUI.showAutoSkipNotice(unitName);
+      });
     }
 
     this.updateGoldDisplay();
@@ -457,6 +461,8 @@ export class TinyVanguardMain extends Component {
             this.battleManager.turnCount,
             hint
           );
+          // 同步刷新单位状态栏（血量/能量/技能按钮）
+          this.updateBattleUI();
         }
         break;
 
