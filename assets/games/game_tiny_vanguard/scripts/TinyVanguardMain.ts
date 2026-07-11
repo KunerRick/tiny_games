@@ -310,6 +310,7 @@ export class TinyVanguardMain extends Component {
     if (saved) {
       this._runData = saved;
       if (this.classSelectPanel) this.classSelectPanel.active = false;
+      if (this.continueButton) this.continueButton.node.active = false;
       this.startNewRun();
     }
   }
@@ -468,6 +469,9 @@ export class TinyVanguardMain extends Component {
 
       case 'enemy_turn':
         this.battleUI.updatePhase('\u654C\u65B9\u56DE\u5408', '\u654C\u4EBA\u884C\u52A8\u4E2D...');
+        // 敌方回合清除上一个玩家单位的信息残留
+        this.battleUI.clearUnitInfo();
+        this.battleUI.clearSkillButtons();
         break;
     }
   }
@@ -501,14 +505,17 @@ export class TinyVanguardMain extends Component {
   private onBattleEnd(result: BattleResult): void {
     if (result.victory) {
       this._battleCount++;
-      this.routeMapUI.completeNode(this._currentNode?.id ?? 0);
       this._runData.gold += result.goldReward;
       this._runData.honor += 5;
       SaveManager.saveRun(this._runData);
       this.updateGoldDisplay();
 
       this.battleUI.clearPhase();
-      this.battleUI.showVictory(result.goldReward);
+      this.battleUI.showVictory(
+        result.goldReward,
+        this.battleManager.turnCount,
+        this.battleManager.totalDamageDealt
+      );
 
       // 不自动跳转，等待玩家点击胜利面板的"继续"按钮
       // Boss 战的胜利处理在 onVictoryContinue 中判断
@@ -535,6 +542,7 @@ export class TinyVanguardMain extends Component {
     this.scheduleOnce(() => {
       this.battleManager.reviveAllUnits();
       this.battleUI.hide();
+      if (this.battleManager) this.battleManager.node.active = false;
       if (this.battleManager?.gridController?.node) {
         this.battleManager.gridController.node.active = false;
       }
@@ -641,6 +649,10 @@ export class TinyVanguardMain extends Component {
 
   private returnToRouteMap(): void {
     this._state = 'route_map';
+    // 确保所有子面板已隐藏（防止跨阶段残留）
+    if (this.upgradeUI) this.upgradeUI.hide();
+    if (this.eventUI) this.eventUI.hide();
+    if (this.battleUI) this.battleUI.hide();
     if (this.routeMapUI?.node?.isValid) {
       this.routeMapUI.show();
       this.routeMapUI.renderRoute(this.routeMapUI.nodes);
@@ -843,6 +855,7 @@ export class TinyVanguardMain extends Component {
     if (this.goldLabel?.node) {
       this.goldLabel.node.active = false;
     }
+    if (this.routeMapUI) this.routeMapUI.hide();
 
     if (victory) {
       this._runData.honor += 100;
@@ -901,6 +914,10 @@ export class TinyVanguardMain extends Component {
     if (this.victoryPanel) this.victoryPanel.active = false;
     if (this.gameOverPanel) this.gameOverPanel.active = false;
     if (this.battleUI) this.battleUI.hide();
+    if (this.upgradeUI) this.upgradeUI.hide();
+    if (this.eventUI) this.eventUI.hide();
+    if (this.shopPanel) this.shopPanel.active = false;
+    if (this.restPanel) this.restPanel.active = false;
 
     this._state = 'class_select';
     this._selectedClasses = [];

@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, instantiate, Prefab, Button, Label } from 'cc';
+import { _decorator, Component, Node, instantiate, Prefab, Button, Label, UITransform, Sprite, Color } from 'cc';
 const { ccclass, property } = _decorator;
 
 export interface UpgradeOption {
@@ -74,18 +74,58 @@ export class UpgradeUI extends Component {
       this.cardContainer.removeAllChildren();
 
       const options = this._allOptions[this._currentUnitIndex];
-      for (let i = 0; i < options.length; i++) {
+      const count = options.length;
+      const cardWidth = 210;
+      const cardHeight = 130;
+      const gap = 15;
+      const totalWidth = count * cardWidth + (count - 1) * gap;
+      const startX = -totalWidth / 2 + cardWidth / 2;
+
+      for (let i = 0; i < count; i++) {
         const card = instantiate(this.cardPrefab);
         card.name = `Card_${this._currentUnitIndex}_${i}`;
+        card.setPosition(startX + i * (cardWidth + gap), 0, 0);
+
+        // 调整卡片尺寸
+        const cardTransform = card.getComponent(UITransform);
+        if (cardTransform) {
+          cardTransform.setContentSize(cardWidth, cardHeight);
+        }
+
+        // 添加半透明背景
+        let bg = card.getComponent(Sprite);
+        if (!bg) {
+          bg = card.addComponent(Sprite);
+          bg.sizeMode = Sprite.SizeMode.CUSTOM;
+        }
+        // 奇数张用稍亮的颜色做视觉区分
+        const brightness = 45 + (i % 2 === 0 ? 0 : 10);
+        bg.color = new Color(brightness, brightness + 5, 70, 230);
 
         const labels = card.getComponentsInChildren(Label);
         if (labels.length >= 2) {
+          // 名称（卡片上半部分）
+          const nameLabel = labels[0].node;
+          nameLabel.setPosition(0, 30, 0);
+          const nameTransform = nameLabel.getComponent(UITransform);
+          if (nameTransform) nameTransform.setContentSize(cardWidth - 20, 35);
+          labels[0].fontSize = 20;
           labels[0].string = options[i].name;
+
+          // 描述（卡片下半部分）
+          const descLabel = labels[1].node;
+          descLabel.setPosition(0, -25, 0);
+          const descTransform = descLabel.getComponent(UITransform);
+          if (descTransform) descTransform.setContentSize(cardWidth - 20, 35);
+          labels[1].fontSize = 15;
+          labels[1].color = new Color(180, 190, 210);
           labels[1].string = options[i].description;
         }
 
         const btn = card.getComponent(Button);
         if (btn) {
+          // 将 Button 过渡从 SPRITE（无 sprite 会显示白色方块）改为 SCALE
+          btn.transition = Button.Transition.SCALE;
           card['_upgradeOptionIndex'] = i;
           btn.node.on(Button.EventType.CLICK, this.onUpgradeCardClicked, this);
         }

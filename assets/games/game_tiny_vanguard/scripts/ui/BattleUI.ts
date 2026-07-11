@@ -75,19 +75,11 @@ export class BattleUI extends Component {
       this.ensurePanelOnTop(this.defeatPanel);
     }
 
-    if (this.endTurnButton) {
-      const etTransform = this.endTurnButton.node.getComponent(UITransform);
-      if (etTransform) {
-        etTransform.setContentSize(100, 60);
-      }
-      this.endTurnButton.node.setPosition(290, -280);
-    }
     if (this.waitButton) {
       const wtTransform = this.waitButton.node.getComponent(UITransform);
       if (wtTransform) {
         wtTransform.setContentSize(100, 60);
       }
-      // 与 endTurnButton 并排在左侧
       this.waitButton.node.setPosition(175, -280);
     }
     if (this.confirmDeployButton) {
@@ -158,9 +150,6 @@ export class BattleUI extends Component {
     if (this.waitButton) {
       this.waitButton.node.on(Button.EventType.CLICK, this.onWaitClicked, this);
     }
-    if (this.endTurnButton) {
-      this.endTurnButton.node.on(Button.EventType.CLICK, this.onEndTurnClicked, this);
-    }
   }
 
   private unbindEvents(): void {
@@ -169,9 +158,6 @@ export class BattleUI extends Component {
     }
     if (this.waitButton) {
       this.waitButton.node.off(Button.EventType.CLICK, this.onWaitClicked, this);
-    }
-    if (this.endTurnButton) {
-      this.endTurnButton.node.off(Button.EventType.CLICK, this.onEndTurnClicked, this);
     }
   }
 
@@ -184,14 +170,9 @@ export class BattleUI extends Component {
     }
   }
 
-  private _onEndTurn: (() => void) | null = null;
   private _onConfirmDeploy: (() => void) | null = null;
   private _onWait: (() => void) | null = null;
   private _onContinueVictory: (() => void) | null = null;
-
-  setEndTurnCallback(callback: () => void): void {
-    this._onEndTurn = callback;
-  }
 
   setConfirmDeployCallback(callback: () => void): void {
     this._onConfirmDeploy = callback;
@@ -203,10 +184,6 @@ export class BattleUI extends Component {
 
   setVictoryContinueCallback(callback: () => void): void {
     this._onContinueVictory = callback;
-  }
-
-  private onEndTurnClicked(): void {
-    if (this._onEndTurn) this._onEndTurn();
   }
 
   private onConfirmDeployClicked(): void {
@@ -224,10 +201,12 @@ export class BattleUI extends Component {
   }
 
   showDeployPhase(): void {
+    // 进入新战斗前隐藏上一场的结算面板
+    if (this.victoryPanel) this.victoryPanel.active = false;
+    if (this.defeatPanel) this.defeatPanel.active = false;
     if (this.deployPrompt) this.deployPrompt.active = true;
     if (this.confirmDeployButton) this.confirmDeployButton.node.active = true;
     if (this.waitButton) this.waitButton.node.active = false;
-    if (this.endTurnButton) this.endTurnButton.node.active = false;
     // 隐藏状态栏面板（仅在部署阶段）
     this.setStatPanelVisible(false);
     // 设置顶部阶段标签
@@ -240,7 +219,6 @@ export class BattleUI extends Component {
     if (this.deployPrompt) this.deployPrompt.active = false;
     if (this.confirmDeployButton) this.confirmDeployButton.node.active = false;
     if (this.waitButton) this.waitButton.node.active = true;
-    if (this.endTurnButton) this.endTurnButton.node.active = true;
     // 恢复状态栏面板
     this.setStatPanelVisible(true);
     if (this.deployUnitList) this.deployUnitList.active = false;
@@ -437,8 +415,8 @@ export class BattleUI extends Component {
     this._skillClickCallbacks = [];
     if (!this.skillButtonContainer) return;
     
-    const btnWidth = 100;
-    const gap = 10;
+    const btnWidth = 120;
+    const gap = 15;
     const count = skillNames.length;
     const totalWidth = count * btnWidth + (count - 1) * gap;
     const startX = -totalWidth / 2 + btnWidth / 2;
@@ -466,10 +444,11 @@ export class BattleUI extends Component {
       const label = btnNode.getComponentInChildren(Label);
       if (label) {
         label.string = skillNames[i];
-        label.fontSize = 24;
+        label.fontSize = 20;
       }
       const btn = btnNode.getComponent(Button);
       if (btn) {
+        btn.transition = Button.Transition.SCALE;
         btn.interactable = canUse[i];
         btnNode['_skillBtnIndex'] = i;
         btnNode['_skillBtnCallback'] = callback;
@@ -519,13 +498,10 @@ export class BattleUI extends Component {
       .start();
   }
 
-  showVictory(gold: number): void {
+  showVictory(gold: number, turnCount: number = 0, totalDamage: number = 0): void {
     if (this.victoryPanel) {
       this.ensurePanelOnTop(this.victoryPanel);
       this.victoryPanel.active = true;
-    }
-    if (this.endTurnButton) {
-      this.endTurnButton.node.active = false;
     }
     if (this.waitButton) {
       this.waitButton.node.active = false;
@@ -561,12 +537,46 @@ export class BattleUI extends Component {
       gl.color = new Color(255, 215, 0);
       gl.horizontalAlign = Label.HorizontalAlign.CENTER;
       gl.verticalAlign = Label.VerticalAlign.CENTER;
-      goldLabel.setPosition(0, -20, 0);
+      goldLabel.setPosition(0, -30, 0);
       this.victoryPanel.addChild(goldLabel);
     }
     const glComp = goldLabel?.getComponent(Label);
     if (glComp) {
       glComp.string = `\uD83D\uDCB0 +${gold}`;
+    }
+
+    // 显示回合数（顶部）
+    let turnLabel = this.victoryPanel?.getChildByName('TurnCountLabel');
+    if (!turnLabel && this.victoryPanel) {
+      turnLabel = new Node('TurnCountLabel');
+      const tl = turnLabel.addComponent(Label);
+      tl.fontSize = 22;
+      tl.color = Color.WHITE;
+      tl.horizontalAlign = Label.HorizontalAlign.CENTER;
+      tl.verticalAlign = Label.VerticalAlign.CENTER;
+      turnLabel.setPosition(0, 40, 0);
+      this.victoryPanel.addChild(turnLabel);
+    }
+    const tlComp = turnLabel?.getComponent(Label);
+    if (tlComp) {
+      tlComp.string = `\u7528\u65F6\u56DE\u5408\uFF1A${turnCount}`;
+    }
+
+    // 显示总伤害（中部）
+    let dmgLabel = this.victoryPanel?.getChildByName('DamageLabel');
+    if (!dmgLabel && this.victoryPanel) {
+      dmgLabel = new Node('DamageLabel');
+      const dl = dmgLabel.addComponent(Label);
+      dl.fontSize = 22;
+      dl.color = new Color(255, 180, 100);
+      dl.horizontalAlign = Label.HorizontalAlign.CENTER;
+      dl.verticalAlign = Label.VerticalAlign.CENTER;
+      dmgLabel.setPosition(0, 5, 0);
+      this.victoryPanel.addChild(dmgLabel);
+    }
+    const dlComp = dmgLabel?.getComponent(Label);
+    if (dlComp) {
+      dlComp.string = `\u9020\u6210\u4F24\u5BB3\uFF1A${totalDamage}`;
     }
   }
 
@@ -584,9 +594,6 @@ export class BattleUI extends Component {
         resultLabel.string = '失 败';
         resultLabel.color = new Color(255, 80, 80);
       }
-    }
-    if (this.endTurnButton) {
-      this.endTurnButton.node.active = false;
     }
     if (this.waitButton) {
       this.waitButton.node.active = false;
@@ -623,9 +630,6 @@ export class BattleUI extends Component {
     const isDeploy = phase.includes('\u5E03\u9635');
     if (this.waitButton) {
       this.waitButton.node.active = !isEnemyTurn && !isDeploy;
-    }
-    if (this.endTurnButton) {
-      this.endTurnButton.node.active = !isEnemyTurn && !isDeploy;
     }
 
     // 根据阶段设置背景色
@@ -692,6 +696,10 @@ export class BattleUI extends Component {
       return;
     }
 
+    // 动画期间隐藏 waitButton，动画结束后恢复
+    const waitBtnWasActive = this.waitButton?.node.active ?? false;
+    if (this.waitButton) this.waitButton.node.active = false;
+
     this._battleStartOverlay.active = true;
     const overlaySprite = this._battleStartOverlay.getComponent(Sprite);
     const titleNode = this._battleStartOverlay.getChildByName('BattleStartTitle');
@@ -717,6 +725,8 @@ export class BattleUI extends Component {
               .to(0.3, { color: new Color(0, 0, 0, 0) })
               .call(() => {
                 this._battleStartOverlay.active = false;
+                // 恢复 waitButton 状态
+                if (this.waitButton) this.waitButton.node.active = waitBtnWasActive;
                 if (this._onBattleStartComplete) {
                   this._onBattleStartComplete();
                   this._onBattleStartComplete = null;
@@ -743,7 +753,6 @@ export class BattleUI extends Component {
     // 只清 JS 引用
     this._skillClickCallbacks = [];
     this._deployCards = [];
-    this._onEndTurn = null;
     this._onConfirmDeploy = null;
     this._onWait = null;
     this._battleStartOverlay = null;

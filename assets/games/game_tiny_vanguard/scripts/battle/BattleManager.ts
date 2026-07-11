@@ -1081,6 +1081,17 @@ export class BattleManager extends Component {
   }
 
   private checkBattleEnd(): void {
+    // 死亡单位立即隐藏（敌方单位死亡不消失 bug 修复）
+    for (const u of this._enemyUnits) {
+      if (!u.data?.isAlive && u.node?.isValid) {
+        u.node.active = false;
+      }
+    }
+    for (const u of this._playerUnits) {
+      if (!u.data?.isAlive && u.node?.isValid) {
+        u.node.active = false;
+      }
+    }
     const allEnemiesDead = this._enemyUnits.every(u => !u.data?.isAlive);
     const allPlayersDead = this._playerUnits.every(u => !u.data?.isAlive);
 

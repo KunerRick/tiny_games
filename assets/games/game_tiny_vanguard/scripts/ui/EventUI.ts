@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, instantiate, Prefab, Button, Label } from 'cc';
+import { _decorator, Component, Node, instantiate, Prefab, Button, Label, UITransform } from 'cc';
 import { EventConfig } from '../config/GameData';
 const { ccclass, property } = _decorator;
 
@@ -38,14 +38,22 @@ export class EventUI extends Component {
       this.choiceContainer.removeAllChildren();
 
       if (event.type === 'choice' && event.choices) {
+        const btnHeight = 50;
+        const gap = 10;
+        const count = event.choices.length;
+        const totalHeight = count * btnHeight + (count - 1) * gap;
+        const startY = totalHeight / 2 - btnHeight / 2;
+
         for (let i = 0; i < event.choices.length; i++) {
           const btnNode = instantiate(this.choiceButtonPrefab);
+          btnNode.setPosition(0, startY - i * (btnHeight + gap), 0);
           const label = btnNode.getComponentInChildren(Label);
           if (label) {
             label.string = event.choices[i].description;
           }
           const btn = btnNode.getComponent(Button);
           if (btn) {
+            btn.transition = Button.Transition.SCALE;
             const index = i;
             btn.node.on(Button.EventType.CLICK, () => {
               onChoice(index);
@@ -72,10 +80,12 @@ export class EventUI extends Component {
         }
 
         const confirmBtn = instantiate(this.choiceButtonPrefab);
+        confirmBtn.setPosition(0, 0, 0);
         const label = confirmBtn.getComponentInChildren(Label);
         if (label) label.string = '\u786E\u5B9A';
         const btn = confirmBtn.getComponent(Button);
         if (btn) {
+          btn.transition = Button.Transition.SCALE;
           btn.node.on(Button.EventType.CLICK, () => {
             onChoice(selectedIndex);
             this.node.active = false;
