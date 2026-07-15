@@ -327,6 +327,18 @@ export class TinyVanguardMain extends Component {
       this.routeMapUI.show();
       const nodes = this.routeMapUI.generateRoute();
       this.routeMapUI.renderRoute(nodes);
+      // 续档恢复：标记已完成的节点
+      const currentNodeId = this._runData.currentRouteNode;
+      if (currentNodeId > 0) {
+        this._battleCount = nodes.filter(n =>
+          n.id < currentNodeId && (n.type === 'battle' || n.type === 'elite' || n.type === 'boss')
+        ).length;
+        for (const node of nodes) {
+          if (node.id < currentNodeId) {
+            this.routeMapUI.completeNode(node.id);
+          }
+        }
+      }
       this.routeMapUI.setNodeClickCallback((nodeId) => this.onNodeSelected(nodeId));
     }
 
@@ -422,6 +434,21 @@ export class TinyVanguardMain extends Component {
       isBoss,
       (result) => this.onBattleEnd(result)
     );
+
+    // 恢复存档中的技能
+    if (Object.keys(this._runData.unitSkills).length > 0) {
+      for (let i = 0; i < this.battleManager.playerUnits.length; i++) {
+        const skillIds = this._runData.unitSkills[i];
+        if (skillIds) {
+          for (const skillId of skillIds) {
+            const skill = getSkillById(skillId);
+            if (skill) {
+              this.battleManager.playerUnits[i].addSkill(skill);
+            }
+          }
+        }
+      }
+    }
   }
 
   private onConfirmDeploy(): void {
@@ -504,9 +531,13 @@ export class TinyVanguardMain extends Component {
 
   private onBattleEnd(result: BattleResult): void {
     if (result.victory) {
+      if (this._currentNode) {
+        this._runData.currentRouteNode = this._currentNode.id;
+      }
       this._battleCount++;
       this._runData.gold += result.goldReward;
       this._runData.honor += 5;
+      this._syncUnitSkillsToRunData();
       SaveManager.saveRun(this._runData);
       this.updateGoldDisplay();
 
@@ -535,8 +566,6 @@ export class TinyVanguardMain extends Component {
       return;
     }
 
-    // 标记当前战斗节点已完成
-    this.routeMapUI?.completeNode(this._currentNode?.id ?? 0);
     SaveManager.saveRun(this._runData);
 
     this.scheduleOnce(() => {
@@ -628,6 +657,7 @@ export class TinyVanguardMain extends Component {
       if (skill) {
         unit.addSkill(skill);
       }
+      this._syncUnitSkillsToRunData();
       return;
     }
 
@@ -645,6 +675,7 @@ export class TinyVanguardMain extends Component {
           break;
       }
     }
+    this._syncUnitSkillsToRunData();
   }
 
   private returnToRouteMap(): void {
@@ -688,6 +719,7 @@ export class TinyVanguardMain extends Component {
         }
       }
     }
+    this._syncUnitSkillsToRunData();
     this.updateGoldDisplay();
   }
 
@@ -801,6 +833,7 @@ export class TinyVanguardMain extends Component {
             }
           }
         }
+        this._syncUnitSkillsToRunData();
         break;
       }
 
@@ -841,8 +874,23 @@ export class TinyVanguardMain extends Component {
     }
   }
 
+  /** 将当前 playerUnits 的技能列表同步到 _runData.unitSkills */
+  private _syncUnitSkillsToRunData(): void {
+    if (!this.battleManager) return;
+    this._runData.unitSkills = {};
+    for (let i = 0; i < this.battleManager.playerUnits.length; i++) {
+      const unit = this.battleManager.playerUnits[i];
+      if (unit.data) {
+        this._runData.unitSkills[i] = unit.data.skills.map(s => s.id);
+      }
+    }
+  }
+
   private completeNonBattleNode(): void {
     this.routeMapUI.completeNode(this._currentNode?.id ?? 0);
+    if (this._currentNode) {
+      this._runData.currentRouteNode = this._currentNode.id;
+    }
     SaveManager.saveRun(this._runData);
     this.returnToRouteMap();
   }

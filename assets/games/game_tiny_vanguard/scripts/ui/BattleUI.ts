@@ -115,7 +115,7 @@ export class BattleUI extends Component {
     if (this.waitButton) {
       const wtLabel = this.waitButton.node.getComponentInChildren(Label);
       if (wtLabel) {
-        wtLabel.string = '\u7ED3\u675F\u884C\u52A8';
+        wtLabel.string = '\u7B49\u5F85';
       }
     }
 
@@ -129,6 +129,64 @@ export class BattleUI extends Component {
       bgNode.setPosition(0, 260, -1);
       this.node.addChild(bgNode);
       this.phaseBg = bgSprite;
+    }
+
+    // 预创建胜利面板子节点
+    if (this.victoryPanel) {
+      let continueBtn = this.victoryPanel.getChildByName('ContinueBtn');
+      if (!continueBtn) {
+        continueBtn = new Node('ContinueBtn');
+        const btn = continueBtn.addComponent(Button);
+        const btnTransform = continueBtn.addComponent(UITransform);
+        btnTransform.setContentSize(160, 50);
+        continueBtn.setPosition(0, -80, 0);
+        const btnLabel = continueBtn.addComponent(Label);
+        btnLabel.string = '\u7EE7\u7EED';
+        btnLabel.fontSize = 24;
+        btnLabel.color = Color.WHITE;
+        btnLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+        btnLabel.verticalAlign = Label.VerticalAlign.CENTER;
+        const btnSprite = continueBtn.addComponent(Sprite);
+        btnSprite.color = new Color(0, 120, 200);
+        btnSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+        this.victoryPanel.addChild(continueBtn);
+      }
+
+      let goldLabel = this.victoryPanel.getChildByName('GoldLabel');
+      if (!goldLabel) {
+        goldLabel = new Node('GoldLabel');
+        const gl = goldLabel.addComponent(Label);
+        gl.fontSize = 28;
+        gl.color = new Color(255, 215, 0);
+        gl.horizontalAlign = Label.HorizontalAlign.CENTER;
+        gl.verticalAlign = Label.VerticalAlign.CENTER;
+        goldLabel.setPosition(0, -30, 0);
+        this.victoryPanel.addChild(goldLabel);
+      }
+
+      let turnLabel = this.victoryPanel.getChildByName('TurnCountLabel');
+      if (!turnLabel) {
+        turnLabel = new Node('TurnCountLabel');
+        const tl = turnLabel.addComponent(Label);
+        tl.fontSize = 22;
+        tl.color = Color.WHITE;
+        tl.horizontalAlign = Label.HorizontalAlign.CENTER;
+        tl.verticalAlign = Label.VerticalAlign.CENTER;
+        turnLabel.setPosition(0, 40, 0);
+        this.victoryPanel.addChild(turnLabel);
+      }
+
+      let dmgLabel = this.victoryPanel.getChildByName('DamageLabel');
+      if (!dmgLabel) {
+        dmgLabel = new Node('DamageLabel');
+        const dl = dmgLabel.addComponent(Label);
+        dl.fontSize = 22;
+        dl.color = new Color(255, 180, 100);
+        dl.horizontalAlign = Label.HorizontalAlign.CENTER;
+        dl.verticalAlign = Label.VerticalAlign.CENTER;
+        dmgLabel.setPosition(0, 5, 0);
+        this.victoryPanel.addChild(dmgLabel);
+      }
     }
   }
 
@@ -506,77 +564,42 @@ export class BattleUI extends Component {
     if (this.waitButton) {
       this.waitButton.node.active = false;
     }
-
-    // 确保有"继续"按钮
-    let continueBtn = this.victoryPanel?.getChildByName('ContinueBtn');
-    if (!continueBtn && this.victoryPanel) {
-      continueBtn = new Node('ContinueBtn');
-      const btn = continueBtn.addComponent(Button);
-      const btnTransform = continueBtn.addComponent(UITransform);
-      btnTransform.setContentSize(160, 50);
-      continueBtn.setPosition(0, -80, 0);
-      const btnLabel = continueBtn.addComponent(Label);
-      btnLabel.string = '\u7EE7\u7EED';
-      btnLabel.fontSize = 24;
-      btnLabel.color = Color.WHITE;
-      btnLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
-      btnLabel.verticalAlign = Label.VerticalAlign.CENTER;
-      const btnSprite = continueBtn.addComponent(Sprite);
-      btnSprite.color = new Color(0, 120, 200);
-      btnSprite.sizeMode = Sprite.SizeMode.CUSTOM;
-      btn.node.on(Button.EventType.CLICK, this.onVictoryContinueClicked, this);
-      this.victoryPanel.addChild(continueBtn);
+    if (this.endTurnButton) {
+      this.endTurnButton.node.active = false;
+    }
+    if (this.skillButtonContainer) {
+      this.skillButtonContainer.active = false;
     }
 
-    // 显示金币
-    let goldLabel = this.victoryPanel?.getChildByName('GoldLabel');
-    if (!goldLabel && this.victoryPanel) {
-      goldLabel = new Node('GoldLabel');
-      const gl = goldLabel.addComponent(Label);
-      gl.fontSize = 28;
-      gl.color = new Color(255, 215, 0);
-      gl.horizontalAlign = Label.HorizontalAlign.CENTER;
-      gl.verticalAlign = Label.VerticalAlign.CENTER;
-      goldLabel.setPosition(0, -30, 0);
-      this.victoryPanel.addChild(goldLabel);
-    }
+    // 更新金币显示
+    const goldLabel = this.victoryPanel?.getChildByName('GoldLabel');
     const glComp = goldLabel?.getComponent(Label);
     if (glComp) {
       glComp.string = `\uD83D\uDCB0 +${gold}`;
     }
 
-    // 显示回合数（顶部）
-    let turnLabel = this.victoryPanel?.getChildByName('TurnCountLabel');
-    if (!turnLabel && this.victoryPanel) {
-      turnLabel = new Node('TurnCountLabel');
-      const tl = turnLabel.addComponent(Label);
-      tl.fontSize = 22;
-      tl.color = Color.WHITE;
-      tl.horizontalAlign = Label.HorizontalAlign.CENTER;
-      tl.verticalAlign = Label.VerticalAlign.CENTER;
-      turnLabel.setPosition(0, 40, 0);
-      this.victoryPanel.addChild(turnLabel);
-    }
+    // 更新回合数
+    const turnLabel = this.victoryPanel?.getChildByName('TurnCountLabel');
     const tlComp = turnLabel?.getComponent(Label);
     if (tlComp) {
-      tlComp.string = `\u7528\u65F6\u56DE\u5408\uFF1A${turnCount}`;
+      tlComp.string = `用时回合：${turnCount}`;
     }
 
-    // 显示总伤害（中部）
-    let dmgLabel = this.victoryPanel?.getChildByName('DamageLabel');
-    if (!dmgLabel && this.victoryPanel) {
-      dmgLabel = new Node('DamageLabel');
-      const dl = dmgLabel.addComponent(Label);
-      dl.fontSize = 22;
-      dl.color = new Color(255, 180, 100);
-      dl.horizontalAlign = Label.HorizontalAlign.CENTER;
-      dl.verticalAlign = Label.VerticalAlign.CENTER;
-      dmgLabel.setPosition(0, 5, 0);
-      this.victoryPanel.addChild(dmgLabel);
-    }
+    // 更新总伤害
+    const dmgLabel = this.victoryPanel?.getChildByName('DamageLabel');
     const dlComp = dmgLabel?.getComponent(Label);
     if (dlComp) {
-      dlComp.string = `\u9020\u6210\u4F24\u5BB3\uFF1A${totalDamage}`;
+      dlComp.string = `造成伤害：${totalDamage}`;
+    }
+
+    // 绑定继续按钮事件
+    const continueBtn = this.victoryPanel?.getChildByName('ContinueBtn');
+    if (continueBtn) {
+      const btn = continueBtn.getComponent(Button);
+      if (btn) {
+        btn.node.off(Button.EventType.CLICK, this.onVictoryContinueClicked, this);
+        btn.node.on(Button.EventType.CLICK, this.onVictoryContinueClicked, this);
+      }
     }
   }
 
@@ -630,6 +653,12 @@ export class BattleUI extends Component {
     const isDeploy = phase.includes('\u5E03\u9635');
     if (this.waitButton) {
       this.waitButton.node.active = !isEnemyTurn && !isDeploy;
+    }
+    if (this.endTurnButton) {
+      this.endTurnButton.node.active = !isEnemyTurn && !isDeploy;
+    }
+    if (this.skillButtonContainer) {
+      this.skillButtonContainer.active = !isEnemyTurn && !isDeploy;
     }
 
     // 根据阶段设置背景色
