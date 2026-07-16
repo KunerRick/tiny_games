@@ -7,7 +7,7 @@ import { EnemyConfig, SkillEffect, ENEMIES, ELITE_ENEMIES, BOSS_CONFIG, getClass
 const { ccclass, property } = _decorator;
 
 export type BattlePhase = 'deploy' | 'player_turn' | 'enemy_turn' | 'skill_target' | 'victory' | 'defeat';
-export type UnitActionPhase = 'move' | 'action' | 'done';
+export type UnitActionPhase = 'move' | 'action' | 'attack_target' | 'skill_target' | 'skill_target_aoe' | 'done';
 
 export interface BattleResult {
   victory: boolean;
@@ -42,6 +42,7 @@ export class BattleManager extends Component {
   private _selectedUnit: UnitController | null = null;
   private _pendingSkill: import('../config/GameData').SkillConfig | null = null;
   private _skillTargets: GridPosition[] = [];
+  private _skillPreviewPos: GridPosition | null = null;
   private _totalDamageDealt: number = 0;
   private _currentBattleType: 'normal' | 'elite' | 'boss' = 'normal';
   private _autoSkipUnitRef: UnitController | null = null;
@@ -534,6 +535,7 @@ export class BattleManager extends Component {
       this._selectedUnit = null;
     }
     this.gridController.clearHighlights();
+    this._skillPreviewPos = null;
     this._currentUnitIndex++;
     this.selectNextPlayerUnit();
   }
@@ -543,6 +545,26 @@ export class BattleManager extends Component {
     if (!unit?.data?.isAlive) return;
     unit.data.hasActed = true;
     this.finishUnitTurn();
+  }
+
+  canUseSkillWithTargets(unit: UnitController, skillIndex: number): boolean {
+    if (!unit.data || !unit.data.isAlive || unit.data.hasActed) return false;
+    if (!unit.canUseSkill(skillIndex)) return false;
+    const skill = unit.data.skills[skillIndex];
+    if (skill.targetType === 'self') return true;
+    const targets = this.getValidSkillTargets(unit, skill);
+    return targets.length > 0;
+  }
+
+  onAttackSelected(): void {
+    const unit = this._selectedUnit;
+    if (!unit?.data?.isAlive || unit.data.hasActed) return;
+    if (this._unitPhase !== 'action') return;
+    this._unitPhase = 'attack_target';
+    this.highlightAttackRange(unit);
+    if (this._onUnitPhaseChanged) {
+      this._onUnitPhaseChanged('player_turn', unit, 'attack_target');
+    }
   }
 
   onCellClicked(gridPos: GridPosition): void {
@@ -603,7 +625,29 @@ export class BattleManager extends Component {
       return;
     }
 
-    // action 阶段：允许切换选中友方单位
+    if (this._unitPhase === 'attack_target') {
+      const targetEnemy = this._enemyUnits.find(e =>
+        e.data?.isAlive && e.data.gridPos.row === gridPos.row && e.data.gridPos.col === gridPos.col
+      );
+      if (targetEnemy) {
+        const dist = Math.abs(gridPos.row - unit.data.gridPos.row) + Math.abs(gridPos.col - unit.data.gridPos.col);
+        if (dist <= unit.data.stats.range) {
+          this.executeAttack(unit, targetEnemy);
+          unit.data.hasActed = true;
+          this.finishUnitTurn();
+          return;
+        }
+      }
+      // 点击无效目标或非敌方：取消攻击模式，回到 action
+      this._unitPhase = 'action';
+      this.gridController.clearHighlights();
+      if (this._onUnitPhaseChanged) {
+        this._onUnitPhaseChanged('player_turn', unit, 'action');
+      }
+      return;
+    }
+
+    // action 阶段：允许切换选中友方单位，不再直接响应敌方格子点击
     const clickedPlayer = this._playerUnits.find(u =>
       u.data?.isAlive && u.data.gridPos.row === gridPos.row && u.data.gridPos.col === gridPos.col
     );
@@ -612,25 +656,48 @@ export class BattleManager extends Component {
       this.selectNextPlayerUnit();
       return;
     }
+  }
 
-    if (this._unitPhase === 'action') {
-      if (unit.data.gridPos.row === gridPos.row && unit.data.gridPos.col === gridPos.col) {
-        return;
+  private _getAoePreviewPositions(center: GridPosition, skill: import('../config/GameData').SkillConfig): GridPosition[] {
+    const positions: GridPosition[] = [];
+    const has3x3 = skill.effects.some(e => e.type === 'aoe_3x3');
+    for (let r = 0; r < GridController.GRID_SIZE; r++) {
+      for (let c = 0; c < GridController.GRID_SIZE; c++) {
+        const dr = Math.abs(r - center.row);
+        const dc = Math.abs(c - center.col);
+        if (has3x3) {
+          if (dr <= 1 && dc <= 1) positions.push({ row: r, col: c });
+        } else {
+          if (dr + dc <= 1) positions.push({ row: r, col: c });
+        }
       }
-      this.handleActionPhase(unit, gridPos);
+    }
+    return positions;
+  }
+
+  private _showSkillPreview(gridPos: GridPosition): void {
+    if (!this._pendingSkill) return;
+    this._skillPreviewPos = { row: gridPos.row, col: gridPos.col };
+    const isAoe = this._pendingSkill.targetType === 'aoe';
+    const baseColor = isAoe ? new Color(255, 150, 0, 200) : new Color(255, 200, 50, 200);
+
+    // 重新高亮所有可选目标，再叠加预览效果（避免切换时颜色残留）
+    this.gridController.highlightCells(this._skillTargets, baseColor);
+
+    if (isAoe) {
+      const previewPositions = this._getAoePreviewPositions(gridPos, this._pendingSkill);
+      this.gridController.highlightAoePreview(
+        gridPos,
+        previewPositions,
+        new Color(255, 80, 80, 220),
+        new Color(255, 100, 100, 120)
+      );
+    } else {
+      this.gridController.highlightSelectedTarget(gridPos, new Color(255, 235, 59, 255));
     }
   }
 
-  private handleSkillTargetClick(gridPos: GridPosition): void {
-    const isTarget = this._skillTargets.some(t => t.row === gridPos.row && t.col === gridPos.col);
-    if (!isTarget) {
-      this._pendingSkill = null;
-      this._skillTargets = [];
-      this._phase = 'player_turn';
-      this.highlightAttackRange(this._selectedUnit!);
-      return;
-    }
-
+  private _executePendingSkill(gridPos: GridPosition): void {
     const unit = this._selectedUnit;
     if (!unit?.data || !this._pendingSkill) return;
     const skillIndex = this._pendingSkill['_skillIndex'] as number;
@@ -644,9 +711,39 @@ export class BattleManager extends Component {
 
     this._pendingSkill = null;
     this._skillTargets = [];
+    this._skillPreviewPos = null;
 
     unit.data.hasActed = true;
     this.finishUnitTurn();
+  }
+
+  private handleSkillTargetClick(gridPos: GridPosition): void {
+    const isTarget = this._skillTargets.some(t => t.row === gridPos.row && t.col === gridPos.col);
+    if (!isTarget) {
+      this._pendingSkill = null;
+      this._skillTargets = [];
+      this._skillPreviewPos = null;
+      this._phase = 'player_turn';
+      const unit = this._selectedUnit;
+      if (unit?.data) {
+        this.highlightAttackRange(unit);
+        if (this._onUnitPhaseChanged) {
+          this._onUnitPhaseChanged('player_turn', unit, 'action');
+        }
+      }
+      return;
+    }
+
+    // 已有预览且点击同一位置 → 确认释放
+    if (this._skillPreviewPos &&
+        this._skillPreviewPos.row === gridPos.row &&
+        this._skillPreviewPos.col === gridPos.col) {
+      this._executePendingSkill(gridPos);
+      return;
+    }
+
+    // 点击新目标 → 切换预览
+    this._showSkillPreview(gridPos);
   }
 
   private _getMarkBonus(target: UnitController): number {
@@ -999,27 +1096,49 @@ export class BattleManager extends Component {
       this._pendingSkill = skill;
       this._pendingSkill['_skillIndex'] = skillIndex;
       this._phase = 'skill_target';
+      this._skillPreviewPos = null;
       this._skillTargets = this.getValidSkillTargets(unit, skill);
-      this.gridController.highlightCells(this._skillTargets, new Color(255, 200, 50, 200));
+      const isAoe = skill.targetType === 'aoe';
+      const highlightColor = isAoe ? new Color(255, 150, 0, 200) : new Color(255, 200, 50, 200);
+      this.gridController.highlightCells(this._skillTargets, highlightColor);
+      if (this._onUnitPhaseChanged) {
+        this._onUnitPhaseChanged('player_turn', unit, isAoe ? 'skill_target_aoe' : 'skill_target');
+      }
     }
   }
 
   private getValidSkillTargets(unit: UnitController, skill: import('../config/GameData').SkillConfig): GridPosition[] {
     if (!unit.data) return [];
+    const pos = unit.data.gridPos;
+    const maxRange = skill.range ?? unit.data.stats.range;
+
+    const inRange = (targetPos: GridPosition) => {
+      const dist = Math.abs(targetPos.row - pos.row) + Math.abs(targetPos.col - pos.col);
+      return dist <= maxRange;
+    };
+
     if (skill.targetType === 'enemy') {
       return this._enemyUnits
-        .filter(e => e.data?.isAlive)
+        .filter(e => e.data?.isAlive && inRange(e.data.gridPos))
         .map(e => e.data!.gridPos);
+    }
+    if (skill.targetType === 'aoe') {
+      // AOE技能可以选择射程内任意格子作为中心点
+      const tiles: GridPosition[] = [];
+      for (let r = 0; r < GridController.GRID_SIZE; r++) {
+        for (let c = 0; c < GridController.GRID_SIZE; c++) {
+          const dist = Math.abs(r - pos.row) + Math.abs(c - pos.col);
+          if (dist <= maxRange) {
+            tiles.push({ row: r, col: c });
+          }
+        }
+      }
+      return tiles;
     }
     if (skill.targetType === 'ally') {
       return this._playerUnits
-        .filter(p => p.data?.isAlive && p.data.id !== unit.data.id)
+        .filter(p => p.data?.isAlive && p.data.id !== unit.data.id && inRange(p.data.gridPos))
         .map(p => p.data!.gridPos);
-    }
-    if (skill.targetType === 'aoe') {
-      return this._enemyUnits
-        .filter(e => e.data?.isAlive)
-        .map(e => e.data!.gridPos);
     }
     if (skill.targetType === 'tile') {
       const range = skill.effects.find(e => e.type === 'teleport')?.params?.range ?? 3;

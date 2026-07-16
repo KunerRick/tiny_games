@@ -32,6 +32,7 @@ export interface SkillConfig {
   triggerCondition?: TriggerCondition;
   effects: SkillEffect[];
   preMove?: boolean;
+  range?: number;
 }
 
 export interface ClassConfig {
@@ -120,27 +121,27 @@ export const SKILLS: Record<string, SkillConfig> = {
   },
 
   precise_shot: {
-    id: 'precise_shot', name: '狙击', type: 'active', energyCost: 2, targetType: 'enemy',
+    id: 'precise_shot', name: '狙击', type: 'active', energyCost: 2, targetType: 'enemy', range: 2,
     description: '2倍伤害，无视防御',
     effects: [{ type: 'damage_multiplier', params: { multiplier: 2.0 } }, { type: 'ignore_defense', params: { value: 1 } }]
   },
   barrage: {
-    id: 'barrage', name: '连射', type: 'active', energyCost: 2, targetType: 'enemy',
+    id: 'barrage', name: '连射', type: 'active', energyCost: 2, targetType: 'enemy', range: 2,
     description: '对同一目标射出两箭（各80%）',
     effects: [{ type: 'multi_attack', params: { count: 2, multiplier: 0.8 } }]
   },
   rain_of_arrows: {
-    id: 'rain_of_arrows', name: '箭雨', type: 'active', energyCost: 3, targetType: 'aoe',
+    id: 'rain_of_arrows', name: '箭雨', type: 'active', energyCost: 3, targetType: 'aoe', range: 2,
     description: '3×3 AOE，60%伤害',
     effects: [{ type: 'aoe_3x3', params: { multiplier: 0.6 } }]
   },
   mark_target: {
-    id: 'mark_target', name: '标记', type: 'active', energyCost: 1, targetType: 'enemy',
+    id: 'mark_target', name: '标记', type: 'active', energyCost: 1, targetType: 'enemy', range: 2,
     description: '目标2回合内受伤+2',
     effects: [{ type: 'mark', params: { amount: 2, duration: 2 } }]
   },
   evade: {
-    id: 'evade', name: '后撤步', type: 'active', energyCost: 1, targetType: 'enemy',
+    id: 'evade', name: '后撤步', type: 'active', energyCost: 1, targetType: 'enemy', range: 1,
     description: '攻击后向后移动1格',
     effects: [{ type: 'damage', params: { amount: 0 } }, { type: 'retreat', params: { distance: 1 } }]
   },
@@ -156,17 +157,17 @@ export const SKILLS: Record<string, SkillConfig> = {
   },
 
   fireball: {
-    id: 'fireball', name: '火球', type: 'active', energyCost: 3, targetType: 'aoe',
+    id: 'fireball', name: '火球', type: 'active', energyCost: 3, targetType: 'aoe', range: 2,
     description: '1.5倍伤害 + 目标周围1格AOE',
     effects: [{ type: 'aoe_1radius', params: { multiplier: 1.5 } }]
   },
   freeze: {
-    id: 'freeze', name: '冰冻', type: 'active', energyCost: 2, targetType: 'enemy',
+    id: 'freeze', name: '冰冻', type: 'active', energyCost: 2, targetType: 'enemy', range: 2,
     description: '伤害 + 定身1回合',
     effects: [{ type: 'damage_multiplier', params: { multiplier: 1.0 } }, { type: 'immobilize', params: { duration: 1 } }]
   },
   chain_lightning: {
-    id: 'chain_lightning', name: '闪电链', type: 'active', energyCost: 3, targetType: 'enemy',
+    id: 'chain_lightning', name: '闪电链', type: 'active', energyCost: 3, targetType: 'enemy', range: 2,
     description: '主目标伤害 + 连锁2名最近敌人',
     effects: [{ type: 'chain', params: { chainCount: 2, multiplier: 0.8 } }]
   },
@@ -192,32 +193,32 @@ export const SKILLS: Record<string, SkillConfig> = {
   },
 
   heal: {
-    id: 'heal', name: '治愈', type: 'active', energyCost: 2, targetType: 'ally',
+    id: 'heal', name: '治愈', type: 'active', energyCost: 2, targetType: 'ally', range: 2,
     description: '恢复友方4点血量',
     effects: [{ type: 'heal', params: { amount: 4 } }]
   },
   group_heal: {
-    id: 'group_heal', name: '群体治愈', type: 'active', energyCost: 3, targetType: 'ally',
+    id: 'group_heal', name: '群体治愈', type: 'active', energyCost: 3, targetType: 'ally', range: 2,
     description: '周围2格所有友方恢复3血量',
     effects: [{ type: 'aoe_heal', params: { radius: 2, amount: 3 } }]
   },
   shield: {
-    id: 'shield', name: '护盾', type: 'active', energyCost: 2, targetType: 'ally',
+    id: 'shield', name: '护盾', type: 'active', energyCost: 2, targetType: 'ally', range: 2,
     description: '友方获得3点护盾（持续2回合）',
     effects: [{ type: 'shield', params: { amount: 3, duration: 2 } }]
   },
   bless: {
-    id: 'bless', name: '祝福', type: 'active', energyCost: 1, targetType: 'ally',
+    id: 'bless', name: '祝福', type: 'active', energyCost: 1, targetType: 'ally', range: 2,
     description: '友方本场永久+2攻击',
     effects: [{ type: 'buff_attack', params: { amount: 2, duration: 99 } }]
   },
   smite: {
-    id: 'smite', name: '惩戒', type: 'active', energyCost: 2, targetType: 'enemy',
+    id: 'smite', name: '惩戒', type: 'active', energyCost: 2, targetType: 'enemy', range: 1,
     description: '对敌方造成4点魔法伤害（无视防御）',
     effects: [{ type: 'damage', params: { amount: 4 } }, { type: 'ignore_defense', params: { value: 1 } }]
   },
   haste: {
-    id: 'haste', name: '加速', type: 'active', energyCost: 1, targetType: 'ally',
+    id: 'haste', name: '加速', type: 'active', energyCost: 1, targetType: 'ally', range: 2,
     description: '友方2回合内移速+1',
     effects: [{ type: 'buff_move', params: { amount: 1, duration: 2 } }]
   },

@@ -24,6 +24,9 @@ export class GridController extends Component {
   private _cells: Node[][] = [];
   private _highlightedCells: Node[] = [];
   private _previewCell: Node | null = null;
+  private _aoePreviewCells: Node[] = [];
+  private _selectedTargetCell: Node | null = null;
+  private _selectedTargetOriginalColor: Color | null = null;
   private _onCellClickCallback: ((pos: GridPosition) => void) | null = null;
 
   onLoad(): void {
@@ -104,6 +107,7 @@ export class GridController extends Component {
   }
 
   clearHighlights(): void {
+    this.clearSelectedTarget();
     for (const cell of this._highlightedCells) {
       if (cell?.isValid) {
         const sprite = cell.getComponent(Sprite);
@@ -114,6 +118,7 @@ export class GridController extends Component {
     }
     this._highlightedCells = [];
     this.clearPreview();
+    this.clearAoePreview();
   }
 
   /** 高亮单个格子为移动预览（黄色半透明） */
@@ -138,6 +143,61 @@ export class GridController extends Component {
       }
     }
     this._previewCell = null;
+  }
+
+  /** 高亮选中目标（单体技能目标确认），叠加颜色 */
+  highlightSelectedTarget(pos: GridPosition, color: Color): void {
+    this.clearSelectedTarget();
+    const cell = this.getCell(pos.row, pos.col);
+    if (cell) {
+      const sprite = cell.getComponent(Sprite);
+      if (sprite) {
+        this._selectedTargetOriginalColor = sprite.color.clone();
+        sprite.color = color;
+      }
+      this._selectedTargetCell = cell;
+    }
+  }
+
+  clearSelectedTarget(): void {
+    if (this._selectedTargetCell?.isValid && this._selectedTargetOriginalColor) {
+      const sprite = this._selectedTargetCell.getComponent(Sprite);
+      if (sprite) sprite.color = this._selectedTargetOriginalColor;
+    }
+    this._selectedTargetCell = null;
+    this._selectedTargetOriginalColor = null;
+  }
+
+  /** 高亮AOE范围预览（中心和范围用不同颜色） */
+  highlightAoePreview(center: GridPosition, positions: GridPosition[], centerColor: Color, rangeColor: Color): void {
+    this.clearAoePreview();
+
+    const centerCell = this.getCell(center.row, center.col);
+    if (centerCell) {
+      const sprite = centerCell.getComponent(Sprite);
+      if (sprite) sprite.color = centerColor;
+      this._aoePreviewCells.push(centerCell);
+    }
+
+    for (const pos of positions) {
+      if (pos.row === center.row && pos.col === center.col) continue;
+      const cell = this.getCell(pos.row, pos.col);
+      if (cell) {
+        const sprite = cell.getComponent(Sprite);
+        if (sprite) sprite.color = rangeColor;
+        this._aoePreviewCells.push(cell);
+      }
+    }
+  }
+
+  clearAoePreview(): void {
+    for (const cell of this._aoePreviewCells) {
+      if (cell?.isValid) {
+        const sprite = cell.getComponent(Sprite);
+        if (sprite) sprite.color = GridController.DEFAULT_CELL_COLOR;
+      }
+    }
+    this._aoePreviewCells = [];
   }
 
   /** 高亮选中单位所在格子（金色标记，与移动/攻击高亮区分） */

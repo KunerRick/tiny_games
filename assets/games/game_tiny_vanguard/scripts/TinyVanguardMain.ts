@@ -346,6 +346,7 @@ export class TinyVanguardMain extends Component {
       this.battleUI.setConfirmDeployCallback(() => this.onConfirmDeploy());
       this.battleUI.setWaitCallback(() => this.onWaitClicked());
       this.battleUI.setVictoryContinueCallback(() => this.onVictoryContinue());
+      this.battleUI.setAttackCallback(() => this.battleManager.onAttackSelected());
     }
     if (this.battleManager) {
       this.battleManager.setDamageDealtCallback((targetNode, amount) => {
@@ -480,7 +481,11 @@ export class TinyVanguardMain extends Component {
       case 'player_turn':
         if (unit?.data) {
           const idx = aliveUnits.findIndex(u => u === unit) + 1;
-          const hint = actionPhase === 'move' ? '\u70B9\u51FB\u53EF\u79FB\u52A8\u4F4D\u7F6E' : '\u9009\u62E9\u653B\u51FB\u76EE\u6807\u6216\u7B49\u5F85';
+          const hint = actionPhase === 'move' ? '\u70B9\u51FB\u53EF\u79FB\u52A8\u4F4D\u7F6E' :
+                       actionPhase === 'attack_target' ? '\u9009\u62E9\u653B\u51FB\u76EE\u6807' :
+                       actionPhase === 'skill_target' ? '\u9009\u62E9\u6280\u80FD\u76EE\u6807\uFF0C\u518D\u6B21\u70B9\u51FB\u786E\u8BA4' :
+                       actionPhase === 'skill_target_aoe' ? '\u9009\u62E9AOE\u4E2D\u5FC3\u70B9\uFF0C\u518D\u6B21\u70B9\u51FB\u786E\u8BA4' :
+                       '\u70B9\u51FB\u653B\u51FB\u6309\u94AE\u6216\u6280\u80FD\u6309\u94AE';
           this.battleUI.updatePhase(
             `\u6211\u65B9\u56DE\u5408 \u7B2C${this.battleManager.turnCount}\u8F6E`,
             unit.data.name,
@@ -491,6 +496,11 @@ export class TinyVanguardMain extends Component {
           );
           // 同步刷新单位状态栏（血量/能量/技能按钮）
           this.updateBattleUI();
+          if (actionPhase === 'action' || actionPhase === 'attack_target') {
+            this.battleUI.showAttackButton();
+          } else {
+            this.battleUI.hideAttackButton();
+          }
         }
         break;
 
@@ -517,7 +527,7 @@ export class TinyVanguardMain extends Component {
 
       const skillNames = selected.data.skills.map(s => `${s.name} [${s.energyCost}\u26A1]`);
       const canUse = selected.data.skills.map((_, i) =>
-        selected.canUseSkill(i) && !selected.data!.hasActed
+        this.battleManager.canUseSkillWithTargets(selected, i)
       );
       this.battleUI.showSkillButtons(skillNames, canUse, (index) => {
         this.battleManager.onSkillUsed(index);
@@ -533,6 +543,7 @@ export class TinyVanguardMain extends Component {
     if (result.victory) {
       if (this._currentNode) {
         this._runData.currentRouteNode = this._currentNode.id;
+        this.routeMapUI?.completeNode(this._currentNode.id);
       }
       this._battleCount++;
       this._runData.gold += result.goldReward;

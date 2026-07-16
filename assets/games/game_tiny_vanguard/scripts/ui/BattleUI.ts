@@ -24,6 +24,9 @@ export class BattleUI extends Component {
   @property({ type: Button, tooltip: '等待（跳过行动）按钮' })
   waitButton: Button = null;
 
+  @property({ type: Button, tooltip: '普通攻击按钮' })
+  attackButton: Button = null;
+
   @property({ type: Node, tooltip: '布阵提示文本' })
   deployPrompt: Node = null;
 
@@ -63,6 +66,7 @@ export class BattleUI extends Component {
   private _battleStartOverlay: Node | null = null;
   private _onBattleStartComplete: (() => void) | null = null;
   private _skillButtonPool: Node[] = [];
+  private _onAttackCallback: (() => void) | null = null;
 
   onLoad(): void {
     if (!this._showCalled) {
@@ -199,6 +203,9 @@ export class BattleUI extends Component {
     if (this.waitButton) {
       this.waitButton.node.on(Button.EventType.CLICK, this.onWaitClicked, this);
     }
+    if (this.attackButton) {
+      this.attackButton.node.on(Button.EventType.CLICK, this.onAttackClicked, this);
+    }
   }
 
   private unbindEvents(): void {
@@ -207,6 +214,9 @@ export class BattleUI extends Component {
     }
     if (this.waitButton) {
       this.waitButton.node.off(Button.EventType.CLICK, this.onWaitClicked, this);
+    }
+    if (this.attackButton) {
+      this.attackButton.node.off(Button.EventType.CLICK, this.onAttackClicked, this);
     }
   }
 
@@ -519,6 +529,22 @@ export class BattleUI extends Component {
     }
   }
 
+  setAttackCallback(callback: () => void): void {
+    this._onAttackCallback = callback;
+  }
+
+  showAttackButton(): void {
+    if (this.attackButton) this.attackButton.node.active = true;
+  }
+
+  hideAttackButton(): void {
+    if (this.attackButton) this.attackButton.node.active = false;
+  }
+
+  private onAttackClicked(): void {
+    if (this._onAttackCallback) this._onAttackCallback();
+  }
+
   showDamageNumber(targetNode: Node, amount: number): void {
     if (!this.damageNumberPrefab || !targetNode?.isValid) return;
 
@@ -696,6 +722,7 @@ export class BattleUI extends Component {
     if (this.phaseLabel) this.phaseLabel.string = '';
     if (this.unitTurnLabel) this.unitTurnLabel.string = '';
     if (this.actionHintLabel) this.actionHintLabel.string = '';
+    this.hideAttackButton();
     if (this.phaseBg) {
       this.phaseBg.color = new Color(0, 0, 0, 0);
     }

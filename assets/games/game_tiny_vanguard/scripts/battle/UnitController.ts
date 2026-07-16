@@ -266,6 +266,7 @@ export class UnitController extends Component {
     if (this._data.currentHp <= 0) {
       this._data.currentHp = 0;
       this._data.isAlive = false;
+      this._data.hasActed = true;
     }
 
     if (attacker && wasAlive && !this._countering && !ignoreDefense && this.hasPassive('counter')) {
