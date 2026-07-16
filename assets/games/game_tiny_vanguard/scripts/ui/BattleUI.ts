@@ -76,11 +76,10 @@ export class BattleUI extends Component {
     }
 
     if (this.waitButton) {
-      const wtTransform = this.waitButton.node.getComponent(UITransform);
-      if (wtTransform) {
-        wtTransform.setContentSize(100, 60);
+      const wtLabel = this.waitButton.node.getComponentInChildren(Label);
+      if (wtLabel) {
+        wtLabel.string = '\u7B49\u5F85';
       }
-      this.waitButton.node.setPosition(175, -280);
     }
     if (this.confirmDeployButton) {
       this.confirmDeployButton.node.setPosition(0, -320);
@@ -110,14 +109,6 @@ export class BattleUI extends Component {
     titleNode.setPosition(0, 0, 0);
     titleNode.setScale(0, 0, 1);
     this._battleStartOverlay.addChild(titleNode);
-
-    // waitButton 文字
-    if (this.waitButton) {
-      const wtLabel = this.waitButton.node.getComponentInChildren(Label);
-      if (wtLabel) {
-        wtLabel.string = '\u7B49\u5F85';
-      }
-    }
 
     // 阶段背景色（编辑器未绑定时自动创建）
     if (!this.phaseBg && this.phaseLabel) {

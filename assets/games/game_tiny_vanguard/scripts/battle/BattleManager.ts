@@ -28,6 +28,7 @@ export class BattleManager extends Component {
   private _phase: BattlePhase = 'deploy';
   private _turnCount: number = 0;
   private _unitPhase: UnitActionPhase = 'move';
+  private _movePreviewPos: GridPosition | null = null;
   private _aiQueue: { enemy: UnitController; action: AIAction }[] = [];
   private _onUnitPhaseChanged: ((phase: BattlePhase, unit: UnitController | null, actionPhase: UnitActionPhase | null) => void) | null = null;
   private _aiController: AIController = new AIController();
@@ -363,6 +364,8 @@ export class BattleManager extends Component {
   private selectNextPlayerUnit(): void {
     // 取消任何未完成的自动跳过延迟，防止用户切换单位后回调冲突
     this._cancelAutoSkip();
+    this._movePreviewPos = null;
+    this.gridController.clearPreview();
 
     if (this._selectedUnit) {
       this._selectedUnit.setSelected(false);
@@ -524,6 +527,7 @@ export class BattleManager extends Component {
   }
 
   private finishUnitTurn(): void {
+    if (this._phase !== 'player_turn') return;
     this._unitPhase = 'done';
     if (this._selectedUnit) {
       this._selectedUnit.setSelected(false);
@@ -550,6 +554,56 @@ export class BattleManager extends Component {
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive) return;
 
+    if (this._unitPhase === 'move') {
+      // 点击自己：原地不动，进入行动阶段
+      if (unit.data.gridPos.row === gridPos.row && unit.data.gridPos.col === gridPos.col) {
+        this.gridController.clearPreview();
+        this._movePreviewPos = null;
+        unit.data.hasMoved = true;
+        this._unitPhase = 'action';
+        this.highlightAttackRange(unit);
+        if (this._onUnitPhaseChanged) {
+          this._onUnitPhaseChanged('player_turn', unit, 'action');
+        }
+        this._checkAutoSkipIfNoTargets(unit);
+        return;
+      }
+
+      // 检查是否在可移动范围内
+      const moves = this.getReachablePositions(unit.data.gridPos, unit.data.stats.move);
+      const canMove = moves.some(m => m.row === gridPos.row && m.col === gridPos.col);
+
+      if (!canMove) {
+        // 点击无效区域：完全无反应
+        return;
+      }
+
+      // 已有预览且点击同一位置 → 确认移动（带动画）
+      if (this._movePreviewPos &&
+          this._movePreviewPos.row === gridPos.row &&
+          this._movePreviewPos.col === gridPos.col) {
+        this._movePreviewPos = null;
+        this.gridController.clearPreview();
+        unit.moveToPositionAnimated(gridPos, 0.25, () => {
+          if (!unit.data || this._phase !== 'player_turn') return;
+          this._unitPhase = 'action';
+          this.highlightAttackRange(unit);
+          if (this._onUnitPhaseChanged) {
+            this._onUnitPhaseChanged('player_turn', unit, 'action');
+          }
+          this._checkAutoSkipIfNoTargets(unit);
+        });
+        this.gridController.clearHighlights();
+        return;
+      }
+
+      // 第一次点击可移动格：设置预览
+      this._movePreviewPos = { row: gridPos.row, col: gridPos.col };
+      this.gridController.highlightPreviewCell(gridPos);
+      return;
+    }
+
+    // action 阶段：允许切换选中友方单位
     const clickedPlayer = this._playerUnits.find(u =>
       u.data?.isAlive && u.data.gridPos.row === gridPos.row && u.data.gridPos.col === gridPos.col
     );
@@ -559,20 +613,7 @@ export class BattleManager extends Component {
       return;
     }
 
-    if (this._unitPhase === 'move') {
-      // 移动阶段点击自己 = 原地不动，进入行动阶段
-      if (unit.data.gridPos.row === gridPos.row && unit.data.gridPos.col === gridPos.col) {
-        unit.data.hasMoved = true;
-        this._unitPhase = 'action';
-        this.highlightAttackRange(unit);
-        if (this._onUnitPhaseChanged) {
-          this._onUnitPhaseChanged('player_turn', unit, 'action');
-        }
-        return;
-      }
-      this.handleMovePhase(unit, gridPos);
-    } else if (this._unitPhase === 'action') {
-      // 行动阶段点击自己 = 不处理（必须通过等待按钮或攻击来结束）
+    if (this._unitPhase === 'action') {
       if (unit.data.gridPos.row === gridPos.row && unit.data.gridPos.col === gridPos.col) {
         return;
       }

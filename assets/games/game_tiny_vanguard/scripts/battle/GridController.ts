@@ -23,6 +23,7 @@ export class GridController extends Component {
 
   private _cells: Node[][] = [];
   private _highlightedCells: Node[] = [];
+  private _previewCell: Node | null = null;
   private _onCellClickCallback: ((pos: GridPosition) => void) | null = null;
 
   onLoad(): void {
@@ -112,6 +113,31 @@ export class GridController extends Component {
       }
     }
     this._highlightedCells = [];
+    this.clearPreview();
+  }
+
+  /** 高亮单个格子为移动预览（黄色半透明） */
+  highlightPreviewCell(pos: GridPosition): void {
+    this.clearPreview();
+    const cell = this.getCell(pos.row, pos.col);
+    if (cell) {
+      const sprite = cell.getComponent(Sprite);
+      if (sprite) {
+        sprite.color = new Color(255, 235, 59, 200);
+      }
+      this._previewCell = cell;
+    }
+  }
+
+  /** 清除预览高亮 */
+  clearPreview(): void {
+    if (this._previewCell?.isValid) {
+      const sprite = this._previewCell.getComponent(Sprite);
+      if (sprite) {
+        sprite.color = GridController.DEFAULT_CELL_COLOR;
+      }
+    }
+    this._previewCell = null;
   }
 
   /** 高亮选中单位所在格子（金色标记，与移动/攻击高亮区分） */

@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, ScrollView, instantiate, Prefab, Button, Label, Color, Sprite, UITransform } from 'cc';
+import { _decorator, Component, Node, ScrollView, instantiate, Prefab, Button, Label, Color, Sprite, UITransform, Graphics, Vec3, tween } from 'cc';
 const { ccclass, property } = _decorator;
 
 export interface RouteNode {
@@ -20,6 +20,9 @@ export class RouteMapUI extends Component {
 
   @property({ type: Node, tooltip: '节点容器' })
   nodesContainer: Node = null;
+
+  @property({ type: Node, tooltip: '连接线图层' })
+  connectionsLayer: Node = null;
 
   private _nodes: RouteNode[] = [];
   private _currentNodeId: number = 0;
@@ -61,6 +64,55 @@ export class RouteMapUI extends Component {
     return nodes;
   }
 
+  private drawConnections(): void {
+    if (!this.connectionsLayer) return;
+    const graphics = this.connectionsLayer.getComponent(Graphics);
+    if (!graphics) return;
+    graphics.clear();
+
+    for (const node of this._nodes) {
+      for (const targetId of node.connections) {
+        const target = this._nodes.find(n => n.id === targetId);
+        if (!target) continue;
+
+        const x1 = node.col * 130 + 80;
+        const y1 = -node.row * 110 - 60;
+        const x2 = target.col * 130 + 80;
+        const y2 = -target.row * 110 - 60;
+
+        const bothDone = node.completed && target.completed;
+        const reachToTarget = node.completed && this.isReachable(targetId);
+        let lineColor: Color;
+        if (bothDone) {
+          lineColor = new Color(156, 163, 175, 200);
+        } else if (reachToTarget) {
+          lineColor = new Color(34, 197, 94, 220);
+        } else {
+          lineColor = new Color(209, 213, 219, 150);
+        }
+
+        graphics.strokeColor = lineColor;
+        graphics.lineWidth = 3;
+        graphics.moveTo(x1, y1);
+        graphics.lineTo(x2, y2);
+        graphics.stroke();
+
+        // 小箭头
+        const angle = Math.atan2(y2 - y1, x2 - x1);
+        const arrowLen = 8;
+        const ax1 = x2 - arrowLen * Math.cos(angle - 0.4);
+        const ay1 = y2 - arrowLen * Math.sin(angle - 0.4);
+        const ax2 = x2 - arrowLen * Math.cos(angle + 0.4);
+        const ay2 = y2 - arrowLen * Math.sin(angle + 0.4);
+        graphics.moveTo(x2, y2);
+        graphics.lineTo(ax1, ay1);
+        graphics.moveTo(x2, y2);
+        graphics.lineTo(ax2, ay2);
+        graphics.stroke();
+      }
+    }
+  }
+
   renderRoute(nodes: RouteNode[]): void {
     this._nodes = nodes;
     if (!this.nodesContainer) return;
@@ -81,15 +133,37 @@ export class RouteMapUI extends Component {
         label.string = typeIcons[node.type] || '?';
       }
 
+      const isReachable = this.isReachable(node.id);
+      const sprite = btnNode.getComponent(Sprite);
+      if (sprite) {
+        if (node.completed) {
+          sprite.color = new Color(156, 163, 175, 255);
+          btnNode.opacity = 200;
+        } else if (isReachable) {
+          sprite.color = new Color(34, 197, 94, 255);
+          tween(btnNode)
+            .to(0.5, { scale: new Vec3(1.1, 1.1, 1) })
+            .to(0.5, { scale: new Vec3(1.0, 1.0, 1) })
+            .union()
+            .repeatForever()
+            .start();
+        } else {
+          sprite.color = new Color(209, 213, 219, 255);
+          btnNode.opacity = 128;
+        }
+      }
+
       const button = btnNode.getComponent(Button);
       if (button) {
-        button.interactable = this.isReachable(node.id);
+        button.interactable = isReachable && !node.completed;
         btnNode['_routeNodeId'] = node.id;
         button.node.on(Button.EventType.CLICK, this.onRouteNodeClicked, this);
       }
 
       this.nodesContainer.addChild(btnNode);
     }
+
+    this.drawConnections();
   }
 
   private isReachable(nodeId: number): boolean {
@@ -103,6 +177,8 @@ export class RouteMapUI extends Component {
 
   private onNodeTapped(nodeId: number): void {
     if (!this.isReachable(nodeId)) return;
+    const node = this._nodes.find(n => n.id === nodeId);
+    if (node?.completed) return;
     this._currentNodeId = nodeId;
     if (this._onNodeClickCallback) {
       this._onNodeClickCallback(nodeId);
@@ -111,7 +187,10 @@ export class RouteMapUI extends Component {
 
   completeNode(nodeId: number): void {
     const node = this._nodes.find(n => n.id === nodeId);
-    if (node) node.completed = true;
+    if (node) {
+      node.completed = true;
+      this.renderRoute(this._nodes);
+    }
   }
 
   get currentNodeId(): number {
