@@ -829,12 +829,12 @@ export class BattleUI extends Component {
   }
 
   onDestroy(): void {
-    this.unbindEvents();
+    // onDestroy 不访问 @property(Node) — 事件解绑已在 hide() 中完成
+    // 只清 JS 引用和 schedule 回调
     if (this._autoSkipNoticeCb) {
       this.unschedule(this._autoSkipNoticeCb);
       this._autoSkipNoticeCb = null;
     }
-    // 只清 JS 引用，不访问 @property(Node)
     this._skillClickCallbacks = [];
     this._deployCards = [];
     this._onDeployCardCb = null;

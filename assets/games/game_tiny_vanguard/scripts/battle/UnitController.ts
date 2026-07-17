@@ -378,15 +378,21 @@ export class UnitController extends Component {
 
   private applyPassiveEffect(skillId: string): void {
     if (!this._data || this._data.passiveApplied.includes(skillId)) return;
-    this._data.passiveApplied.push(skillId);
+    let applied = false;
     if (skillId === 'toughness') {
       this._data.maxHp += 1;
       this._data.currentHp = Math.min(this._data.currentHp + 1, this._data.maxHp);
       this._data.baseStats.defense += 1;
       this._data.stats.defense += 1;
+      applied = true;
     }
     if (skillId === 'arcane_flow') {
       this._data.energyRegen += 1;
+      applied = true;
+    }
+    // 只有真正处理了属性加成才标记，避免 onTurnStart 中同名被动被跳过
+    if (applied) {
+      this._data.passiveApplied.push(skillId);
     }
   }
 
@@ -488,21 +494,26 @@ export class UnitController extends Component {
   private removeBuff(buff: BuffEntry): void {
     if (!this._data) return;
     const amount = buff.params.amount ?? 0;
-    if (buff.type === 'buff_move') {
-      this._data.stats.move -= amount;
-      this._data.stats.move = Math.max(this._data.baseStats.move, this._data.stats.move);
+    this._applyBuffStatDelta(buff.type, -amount, true);
+  }
+
+  private _applyBuffStatDelta(type: string, delta: number, clamp: boolean = false): void {
+    if (!this._data) return;
+    if (type === 'buff_move') {
+      this._data.stats.move += delta;
+      if (clamp) this._data.stats.move = Math.max(this._data.baseStats.move, this._data.stats.move);
     }
-    if (buff.type === 'buff_attack') {
-      this._data.stats.attack -= amount;
-      this._data.stats.attack = Math.max(this._data.baseStats.attack, this._data.stats.attack);
+    if (type === 'buff_attack') {
+      this._data.stats.attack += delta;
+      if (clamp) this._data.stats.attack = Math.max(this._data.baseStats.attack, this._data.stats.attack);
     }
-    if (buff.type === 'buff_defense') {
-      this._data.stats.defense -= amount;
-      this._data.stats.defense = Math.max(this._data.baseStats.defense, this._data.stats.defense);
+    if (type === 'buff_defense') {
+      this._data.stats.defense += delta;
+      if (clamp) this._data.stats.defense = Math.max(this._data.baseStats.defense, this._data.stats.defense);
     }
-    if (buff.type === 'buff_range') {
-      this._data.stats.range -= amount;
-      this._data.stats.range = Math.max(this._data.baseStats.range, this._data.stats.range);
+    if (type === 'buff_range') {
+      this._data.stats.range += delta;
+      if (clamp) this._data.stats.range = Math.max(this._data.baseStats.range, this._data.stats.range);
     }
   }
 
@@ -518,22 +529,11 @@ export class UnitController extends Component {
       if (newAmount !== oldAmount) {
         existing.params.amount = newAmount;
         const delta = newAmount - oldAmount;
-        if (type === 'buff_move') {
-          this._data.stats.move += delta;
-        }
-        if (type === 'buff_attack') {
-          this._data.stats.attack += delta;
-        }
+        this._applyBuffStatDelta(type, delta);
       }
     } else {
       this._data.buffs.push({ type, turnsLeft, params: { ...params } });
-
-      if (type === 'buff_move') {
-        this._data.stats.move += params.amount ?? 0;
-      }
-      if (type === 'buff_attack') {
-        this._data.stats.attack += params.amount ?? 0;
-      }
+      this._applyBuffStatDelta(type, params.amount ?? 0);
     }
   }
 
