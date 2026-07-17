@@ -4,6 +4,11 @@
 
   /* Add your custom configuration here. */
   "compilerOptions": {
-    "strict": false
-  }
+    "strict": false,
+    "skipLibCheck": true,
+    "lib": ["es2020", "dom"]
+  },
+  "exclude": [
+    "extensions/**/*"
+  ]
 }

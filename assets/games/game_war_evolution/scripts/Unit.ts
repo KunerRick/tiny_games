@@ -190,10 +190,7 @@ export class Unit extends Component {
                 break;
         }
 
-        // 死亡动画期间跳过血条更新（优化）
-        if (this._state !== UnitState.DEAD) {
-            this.updateHPBar();
-        }
+        this.updateHPBar();
     }
 
     // ==================== 移动 ====================

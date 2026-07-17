@@ -3957,13 +3957,13 @@
       "__id__": 25
     },
     "endTurnButton": {
-      "__id__": 80
+      "__id__": 75
     },
     "confirmDeployButton": {
-      "__id__": 54
+      "__id__": 49
     },
     "waitButton": {
-      "__id__": 74
+      "__id__": 68
     },
     "attackButton": {
       "__id__": 82

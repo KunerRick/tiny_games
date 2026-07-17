@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, EventTouch, EventKeyboard, KeyboardEvent, KeyCode, Vec2, systemEvent, SystemEvent } from 'cc';
+import { _decorator, Component, Node, EventTouch, EventKeyboard, KeyCode, Vec2, systemEvent, SystemEvent } from 'cc';
 import { Direction } from './GameConfig';
 
 const { ccclass, property } = _decorator;
@@ -10,10 +10,11 @@ const KEY_MAP: Record<number, Direction> = {
     [KeyCode.ARROW_DOWN]: Direction.DOWN,
     [KeyCode.ARROW_LEFT]: Direction.LEFT,
     [KeyCode.ARROW_RIGHT]: Direction.RIGHT,
-    [KeyCode.W]: Direction.UP,
-    [KeyCode.S]: Direction.DOWN,
-    [KeyCode.A]: Direction.LEFT,
-    [KeyCode.D]: Direction.RIGHT,
+    // WASD 键码（Cocos KeyCode 枚举未暴露 W/S/A/D）
+    87: Direction.UP,
+    83: Direction.DOWN,
+    65: Direction.LEFT,
+    68: Direction.RIGHT,
 };
 
 @ccclass('InputHandler')
@@ -41,7 +42,7 @@ export class InputHandler extends Component {
     private onKeyDown(event: EventKeyboard): void {
         const direction = KEY_MAP[event.keyCode];
         if (direction !== undefined) {
-            event.preventDefault?.();
+            event.propagationStopped = true;
             this._onDirectionInput?.(direction);
         }
     }

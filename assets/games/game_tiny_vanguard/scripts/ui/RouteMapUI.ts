@@ -137,8 +137,7 @@ export class RouteMapUI extends Component {
       const sprite = btnNode.getComponent(Sprite);
       if (sprite) {
         if (node.completed) {
-          sprite.color = new Color(156, 163, 175, 255);
-          btnNode.opacity = 200;
+          sprite.color = new Color(156, 163, 175, 200);
         } else if (isReachable) {
           sprite.color = new Color(34, 197, 94, 255);
           tween(btnNode)
@@ -148,8 +147,7 @@ export class RouteMapUI extends Component {
             .repeatForever()
             .start();
         } else {
-          sprite.color = new Color(209, 213, 219, 255);
-          btnNode.opacity = 128;
+          sprite.color = new Color(209, 213, 219, 128);
         }
       }
 
