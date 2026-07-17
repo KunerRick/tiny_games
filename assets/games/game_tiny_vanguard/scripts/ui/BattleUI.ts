@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Button, Sprite, Color, tween, Vec3, instantiate, Prefab, UITransform } from 'cc';
+import { _decorator, Component, Node, Label, Button, Sprite, Color, tween, Vec3, instantiate, Prefab, UITransform, Event } from 'cc';
 const { ccclass, property } = _decorator;
 
 @ccclass('BattleUI')
@@ -15,17 +15,17 @@ export class BattleUI extends Component {
   @property({ type: Label, tooltip: '回合计数' })
   turnLabel: Label = null;
 
-  @property({ type: Button, tooltip: '结束回合按钮' })
-  endTurnButton: Button = null;
+  @property({ type: Node, tooltip: '结束回合按钮节点' })
+  endTurnButton: Node = null;
 
-  @property({ type: Button, tooltip: '确认布阵按钮' })
-  confirmDeployButton: Button = null;
+  @property({ type: Node, tooltip: '确认布阵按钮节点' })
+  confirmDeployButton: Node = null;
 
-  @property({ type: Button, tooltip: '等待（跳过行动）按钮' })
-  waitButton: Button = null;
+  @property({ type: Node, tooltip: '等待（跳过行动）按钮节点' })
+  waitButton: Node = null;
 
-  @property({ type: Button, tooltip: '普通攻击按钮' })
-  attackButton: Button = null;
+  @property({ type: Node, tooltip: '普通攻击按钮节点' })
+  attackButton: Node = null;
 
   @property({ type: Node, tooltip: '布阵提示文本' })
   deployPrompt: Node = null;
@@ -80,13 +80,13 @@ export class BattleUI extends Component {
     }
 
     if (this.waitButton) {
-      const wtLabel = this.waitButton.node.getComponentInChildren(Label);
+      const wtLabel = this.waitButton.getComponentInChildren(Label);
       if (wtLabel) {
         wtLabel.string = '\u7B49\u5F85';
       }
     }
     if (this.confirmDeployButton) {
-      this.confirmDeployButton.node.setPosition(0, -320);
+      this.confirmDeployButton.setPosition(0, -320);
     }
     if (this.deployPrompt) {
       this.deployPrompt.setPosition(0, 260);
@@ -198,25 +198,25 @@ export class BattleUI extends Component {
 
   private bindEvents(): void {
     if (this.confirmDeployButton) {
-      this.confirmDeployButton.node.on(Button.EventType.CLICK, this.onConfirmDeployClicked, this);
+      this.confirmDeployButton.on(Node.EventType.TOUCH_END, this.onConfirmDeployClicked, this);
     }
     if (this.waitButton) {
-      this.waitButton.node.on(Button.EventType.CLICK, this.onWaitClicked, this);
+      this.waitButton.on(Node.EventType.TOUCH_END, this.onWaitClicked, this);
     }
     if (this.attackButton) {
-      this.attackButton.node.on(Button.EventType.CLICK, this.onAttackClicked, this);
+      this.attackButton.on(Node.EventType.TOUCH_END, this.onAttackClicked, this);
     }
   }
 
   private unbindEvents(): void {
     if (this.confirmDeployButton) {
-      this.confirmDeployButton.node.off(Button.EventType.CLICK, this.onConfirmDeployClicked, this);
+      this.confirmDeployButton.off(Node.EventType.TOUCH_END, this.onConfirmDeployClicked, this);
     }
     if (this.waitButton) {
-      this.waitButton.node.off(Button.EventType.CLICK, this.onWaitClicked, this);
+      this.waitButton.off(Node.EventType.TOUCH_END, this.onWaitClicked, this);
     }
     if (this.attackButton) {
-      this.attackButton.node.off(Button.EventType.CLICK, this.onAttackClicked, this);
+      this.attackButton.off(Node.EventType.TOUCH_END, this.onAttackClicked, this);
     }
   }
 
@@ -264,8 +264,8 @@ export class BattleUI extends Component {
     if (this.victoryPanel) this.victoryPanel.active = false;
     if (this.defeatPanel) this.defeatPanel.active = false;
     if (this.deployPrompt) this.deployPrompt.active = true;
-    if (this.confirmDeployButton) this.confirmDeployButton.node.active = true;
-    if (this.waitButton) this.waitButton.node.active = false;
+    if (this.confirmDeployButton) this.confirmDeployButton.active = true;
+    if (this.waitButton) this.waitButton.active = false;
     // 隐藏状态栏面板（仅在部署阶段）
     this.setStatPanelVisible(false);
     // 设置顶部阶段标签
@@ -276,8 +276,8 @@ export class BattleUI extends Component {
 
   hideDeployPhase(): void {
     if (this.deployPrompt) this.deployPrompt.active = false;
-    if (this.confirmDeployButton) this.confirmDeployButton.node.active = false;
-    if (this.waitButton) this.waitButton.node.active = true;
+    if (this.confirmDeployButton) this.confirmDeployButton.active = false;
+    if (this.waitButton) this.waitButton.active = true;
     // 恢复状态栏面板
     this.setStatPanelVisible(true);
     if (this.deployUnitList) this.deployUnitList.active = false;
@@ -534,11 +534,11 @@ export class BattleUI extends Component {
   }
 
   showAttackButton(): void {
-    if (this.attackButton) this.attackButton.node.active = true;
+    if (this.attackButton) this.attackButton.active = true;
   }
 
   hideAttackButton(): void {
-    if (this.attackButton) this.attackButton.node.active = false;
+    if (this.attackButton) this.attackButton.active = false;
   }
 
   private onAttackClicked(): void {
@@ -579,10 +579,10 @@ export class BattleUI extends Component {
       this.victoryPanel.active = true;
     }
     if (this.waitButton) {
-      this.waitButton.node.active = false;
+      this.waitButton.active = false;
     }
     if (this.endTurnButton) {
-      this.endTurnButton.node.active = false;
+      this.endTurnButton.active = false;
     }
     if (this.skillButtonContainer) {
       this.skillButtonContainer.active = false;
@@ -636,7 +636,7 @@ export class BattleUI extends Component {
       }
     }
     if (this.waitButton) {
-      this.waitButton.node.active = false;
+      this.waitButton.active = false;
     }
     if (this.skillButtonContainer) {
       this.skillButtonContainer.active = false;
@@ -669,10 +669,10 @@ export class BattleUI extends Component {
     const isEnemyTurn = phase.includes('\u654C\u65B9');
     const isDeploy = phase.includes('\u5E03\u9635');
     if (this.waitButton) {
-      this.waitButton.node.active = !isEnemyTurn && !isDeploy;
+      this.waitButton.active = !isEnemyTurn && !isDeploy;
     }
     if (this.endTurnButton) {
-      this.endTurnButton.node.active = !isEnemyTurn && !isDeploy;
+      this.endTurnButton.active = !isEnemyTurn && !isDeploy;
     }
     if (this.skillButtonContainer) {
       this.skillButtonContainer.active = !isEnemyTurn && !isDeploy;
@@ -744,8 +744,8 @@ export class BattleUI extends Component {
     }
 
     // 动画期间隐藏 waitButton，动画结束后恢复
-    const waitBtnWasActive = this.waitButton?.node.active ?? false;
-    if (this.waitButton) this.waitButton.node.active = false;
+    const waitBtnWasActive = this.waitButton?.active ?? false;
+    if (this.waitButton) this.waitButton.active = false;
 
     this._battleStartOverlay.active = true;
     const overlaySprite = this._battleStartOverlay.getComponent(Sprite);
@@ -773,7 +773,7 @@ export class BattleUI extends Component {
               .call(() => {
                 this._battleStartOverlay.active = false;
                 // 恢复 waitButton 状态
-                if (this.waitButton) this.waitButton.node.active = waitBtnWasActive;
+                if (this.waitButton) this.waitButton.active = waitBtnWasActive;
                 if (this._onBattleStartComplete) {
                   this._onBattleStartComplete();
                   this._onBattleStartComplete = null;
