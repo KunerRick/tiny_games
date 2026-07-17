@@ -1,5 +1,5 @@
 import { UnitController } from './UnitController';
-import { GridPosition } from './GridController';
+import { GridPosition, GridController } from './GridController';
 import { AIType } from '../config/GameData';
 
 export interface AIAction {
@@ -10,12 +10,13 @@ export interface AIAction {
 export class AIController {
   decideAll(enemies: UnitController[], players: UnitController[]): AIAction[] {
     const aliveEnemies = enemies.filter(u => u.data?.isAlive);
+    const actionableEnemies = aliveEnemies.filter(u => !u.data.hasActed);
     const alivePlayers = players.filter(u => u.data?.isAlive);
     const occupied = this.getAllOccupiedPositions(enemies, players);
     const actions: AIAction[] = [];
 
-    for (const enemy of aliveEnemies) {
-      if (!enemy.data?.isAlive) continue;
+    for (const enemy of actionableEnemies) {
+      if (!enemy.data?.isAlive || enemy.data.hasActed) continue;
 
       const currentPos = enemy.data.gridPos;
       const posIdx = occupied.findIndex(
@@ -119,7 +120,13 @@ export class AIController {
       const moveTo = this.bestMoveToward(
         enemy.data.gridPos, threatenedAlly.data.gridPos, enemy.data.stats.move, occupied
       );
-      return { moveTo, attackTarget: null };
+      // 移动到保护位置后，若射程内有敌人则反击
+      const nearest = this.findNearestTarget(moveTo, players);
+      const newDist = nearest?.data ? this.manhattanDist(moveTo, nearest.data.gridPos) : Infinity;
+      return {
+        moveTo,
+        attackTarget: (nearest && newDist <= enemy.data.stats.range) ? nearest : null
+      };
     }
 
     const target = this.findTarget(enemy, players);
@@ -187,7 +194,7 @@ export class AIController {
         if (Math.abs(r) + Math.abs(c) > moveRange) continue;
         const newRow = from.row + r;
         const newCol = from.col + c;
-        if (newRow < 0 || newRow >= 6 || newCol < 0 || newCol >= 6) continue;
+        if (newRow < 0 || newRow >= GridController.GRID_SIZE || newCol < 0 || newCol >= GridController.GRID_SIZE) continue;
         const candidate = { row: newRow, col: newCol };
         if (occupied.some(o => o.row === newRow && o.col === newCol)) continue;
         const dist = this.manhattanDist(candidate, targetPos);
@@ -213,7 +220,7 @@ export class AIController {
         if (Math.abs(r) + Math.abs(c) > moveRange) continue;
         const newRow = from.row + r;
         const newCol = from.col + c;
-        if (newRow < 0 || newRow >= 6 || newCol < 0 || newCol >= 6) continue;
+        if (newRow < 0 || newRow >= GridController.GRID_SIZE || newCol < 0 || newCol >= GridController.GRID_SIZE) continue;
         const candidate = { row: newRow, col: newCol };
         if (occupied.some(o => o.row === newRow && o.col === newCol)) continue;
 
@@ -241,7 +248,7 @@ export class AIController {
         if (Math.abs(r) + Math.abs(c) > moveRange || (r === 0 && c === 0)) continue;
         const newRow = from.row + r;
         const newCol = from.col + c;
-        if (newRow < 0 || newRow >= 6 || newCol < 0 || newCol >= 6) continue;
+        if (newRow < 0 || newRow >= GridController.GRID_SIZE || newCol < 0 || newCol >= GridController.GRID_SIZE) continue;
         const candidate = { row: newRow, col: newCol };
         if (occupied.some(o => o.row === newRow && o.col === newCol)) continue;
 
@@ -295,9 +302,22 @@ export class AIController {
   ): UnitController | null {
     const alive = players.filter(u => u.data?.isAlive);
     if (alive.length === 0) return null;
-    return alive.reduce((a, b) =>
-      (a.data?.currentHp ?? 999) < (b.data?.currentHp ?? 999) ? a : b
+    return alive.reduce((a: UnitController, b: UnitController) =>
+      ((a.data?.currentHp ?? 999) < (b.data?.currentHp ?? 999)) ? a : b
     );
+  }
+
+  /** 找最近目标 */
+  private findNearestTarget(pos: GridPosition, players: UnitController[]): UnitController | null {
+    const alive = players.filter(u => u.data?.isAlive);
+    if (alive.length === 0) return null;
+    return alive.reduce((nearest, u) => {
+      if (!u.data) return nearest;
+      if (!nearest?.data) return u;
+      const distU = this.manhattanDist(pos, u.data.gridPos);
+      const distN = this.manhattanDist(pos, nearest.data.gridPos);
+      return distU < distN ? u : nearest;
+    }, null as UnitController | null);
   }
 
   /** 找最低防御目标（影刺用），优先法师→牧师→弓手→战士 */
@@ -394,7 +414,7 @@ export class AIController {
         if (Math.abs(r) + Math.abs(c) > moveRange) continue;
         const newRow = pos.row + r;
         const newCol = pos.col + c;
-        if (newRow < 0 || newRow >= 6 || newCol < 0 || newCol >= 6) continue;
+        if (newRow < 0 || newRow >= GridController.GRID_SIZE || newCol < 0 || newCol >= GridController.GRID_SIZE) continue;
         const candidate = { row: newRow, col: newCol };
         if (occupied.some(o => o.row === newRow && o.col === newCol)) continue;
 

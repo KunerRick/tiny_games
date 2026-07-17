@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Button, Sprite, Color, tween, Vec3, instantiate, Prefab, UITransform, Event } from 'cc';
+import { _decorator, Component, Node, Label, Button, Sprite, Color, tween, Vec3, instantiate, Prefab, UITransform, Event, EventTouch } from 'cc';
 const { ccclass, property } = _decorator;
 
 @ccclass('BattleUI')
@@ -63,6 +63,8 @@ export class BattleUI extends Component {
   private _skillClickCallbacks: ((index: number) => void)[] = [];
   private _showCalled: boolean = false;
   private _deployCards: Node[] = [];
+  private _onDeployCardCb: ((index: number) => void) | null = null;
+  private _autoSkipNoticeCb: (() => void) | null = null;
   private _battleStartOverlay: Node | null = null;
   private _onBattleStartComplete: (() => void) | null = null;
   private _skillButtonPool: Node[] = [];
@@ -206,6 +208,9 @@ export class BattleUI extends Component {
     if (this.attackButton) {
       this.attackButton.on(Node.EventType.TOUCH_END, this.onAttackClicked, this);
     }
+    if (this.endTurnButton) {
+      this.endTurnButton.on(Node.EventType.TOUCH_END, this.onEndTurnClicked, this);
+    }
   }
 
   private unbindEvents(): void {
@@ -217,6 +222,9 @@ export class BattleUI extends Component {
     }
     if (this.attackButton) {
       this.attackButton.off(Node.EventType.TOUCH_END, this.onAttackClicked, this);
+    }
+    if (this.endTurnButton) {
+      this.endTurnButton.off(Node.EventType.TOUCH_END, this.onEndTurnClicked, this);
     }
   }
 
@@ -231,6 +239,7 @@ export class BattleUI extends Component {
 
   private _onConfirmDeploy: (() => void) | null = null;
   private _onWait: (() => void) | null = null;
+  private _onEndTurn: (() => void) | null = null;
   private _onContinueVictory: (() => void) | null = null;
 
   setConfirmDeployCallback(callback: () => void): void {
@@ -239,6 +248,10 @@ export class BattleUI extends Component {
 
   setWaitCallback(callback: () => void): void {
     this._onWait = callback;
+  }
+
+  setEndTurnCallback(callback: () => void): void {
+    this._onEndTurn = callback;
   }
 
   setVictoryContinueCallback(callback: () => void): void {
@@ -251,6 +264,10 @@ export class BattleUI extends Component {
 
   private onWaitClicked(): void {
     if (this._onWait) this._onWait();
+  }
+
+  private onEndTurnClicked(): void {
+    if (this._onEndTurn) this._onEndTurn();
   }
 
   private onVictoryContinueClicked(): void {
@@ -321,10 +338,12 @@ export class BattleUI extends Component {
     // 清除旧的兵牌
     for (const card of this._deployCards) {
       if (card?.isValid) {
+        card.off(Node.EventType.TOUCH_END, this.onDeployCardClicked, this);
         card.removeFromParent();
       }
     }
     this._deployCards = [];
+    this._onDeployCardCb = callback;
 
     const cardWidth = 110;
     const cardHeight = 65;
@@ -372,16 +391,18 @@ export class BattleUI extends Component {
 
       // 交互
       card['_deployIdx'] = i;
-      card['_deployCb'] = callback;
-      card.on(Node.EventType.TOUCH_END, (evt) => {
-        const idx = evt.target['_deployIdx'] as number;
-        const cb = evt.target['_deployCb'] as (index: number) => void;
-        if (cb) cb(idx);
-      });
+      card.on(Node.EventType.TOUCH_END, this.onDeployCardClicked, this);
 
       this.node.addChild(card);
       this._deployCards.push(card);
     }
+  }
+
+  private onDeployCardClicked(evt: EventTouch): void {
+    const card = evt.currentTarget as Node;
+    if (!card?.isValid) return;
+    const idx = card['_deployIdx'] as number;
+    if (this._onDeployCardCb) this._onDeployCardCb(idx);
   }
 
   setDeployCardState(index: number, state: 'unplaced' | 'selected' | 'placed'): void {
@@ -734,6 +755,18 @@ export class BattleUI extends Component {
       this.actionHintLabel.string = `${unitName} \u65E0\u53EF\u653B\u51FB\u76EE\u6807\uFF0C\u81EA\u52A8\u8DF3\u8FC7`;
       this.actionHintLabel.color = new Color(255, 200, 80);
     }
+    // 2 秒后自动恢复提示
+    if (this._autoSkipNoticeCb) {
+      this.unschedule(this._autoSkipNoticeCb);
+      this._autoSkipNoticeCb = null;
+    }
+    this._autoSkipNoticeCb = () => {
+      this._autoSkipNoticeCb = null;
+      if (this.actionHintLabel) {
+        this.actionHintLabel.string = '';
+      }
+    };
+    this.scheduleOnce(this._autoSkipNoticeCb, 2);
   }
 
   playBattleStartAnimation(onComplete: () => void): void {
@@ -796,14 +829,21 @@ export class BattleUI extends Component {
   }
 
   onDestroy(): void {
-    // onDestroy 中不访问 @property(Node) — 已由 hide() 中的 unbindEvents() 清理
-    // 只清 JS 引用
+    this.unbindEvents();
+    if (this._autoSkipNoticeCb) {
+      this.unschedule(this._autoSkipNoticeCb);
+      this._autoSkipNoticeCb = null;
+    }
+    // 只清 JS 引用，不访问 @property(Node)
     this._skillClickCallbacks = [];
     this._deployCards = [];
+    this._onDeployCardCb = null;
     this._onConfirmDeploy = null;
     this._onWait = null;
+    this._onEndTurn = null;
     this._battleStartOverlay = null;
     this._onBattleStartComplete = null;
     this._onContinueVictory = null;
+    this._skillButtonPool = [];
   }
 }

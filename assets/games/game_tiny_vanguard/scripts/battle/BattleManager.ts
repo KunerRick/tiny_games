@@ -239,6 +239,7 @@ export class BattleManager extends Component {
   startBattleAfterAnimation(): void {
     this._phase = 'player_turn';
     this._turnCount = 1;
+    this.gridController.clearHighlights();
     this.gridController.setCellClickCallback((pos) => this.onCellClicked(pos));
     this.gridController.setRowsInteractable([2, 3, 4, 5], true);
     // 确保所有单位节点可见（防止 col=-1 的单位因为之前的隐藏而不可见）
@@ -359,6 +360,9 @@ export class BattleManager extends Component {
         unit.onTurnStart(this._playerUnits);
       }
     }
+    // 回合开始毒伤可能导致全部玩家死亡，立即结算
+    this.checkBattleEnd();
+    if (this._phase !== 'player_turn') return;
     this.selectNextPlayerUnit();
   }
 
@@ -374,8 +378,11 @@ export class BattleManager extends Component {
     }
     this.gridController.clearHighlights();
 
-    // 从 0 开始遍历，确保不会跳过前面未行动的单位
-    for (let i = 0; i < this._playerUnits.length; i++) {
+    // 从当前索引开始搜索，支持切换单位；若后面没有则回绕到前面
+    const start = this._currentUnitIndex;
+    const len = this._playerUnits.length;
+    for (let offset = 0; offset < len; offset++) {
+      const i = (start + offset) % len;
       const unit = this._playerUnits[i];
       if (unit.data?.isAlive && !unit.data.hasActed) {
         this._currentUnitIndex = i;
@@ -546,6 +553,7 @@ export class BattleManager extends Component {
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive) return;
     unit.data.hasActed = true;
+    this._cancelAutoSkip();
     this.finishUnitTurn();
   }
 
@@ -553,6 +561,7 @@ export class BattleManager extends Component {
     if (!unit.data || !unit.data.isAlive || unit.data.hasActed) return false;
     if (!unit.canUseSkill(skillIndex)) return false;
     const skill = unit.data.skills[skillIndex];
+    if (skill.preMove && unit.data.preMoveSkillUsed) return false;
     if (skill.targetType === 'self') return true;
     const targets = this.getValidSkillTargets(unit, skill);
     return targets.length > 0;
@@ -703,18 +712,32 @@ export class BattleManager extends Component {
     const unit = this._selectedUnit;
     if (!unit?.data || !this._pendingSkill) return;
     const skillIndex = this._pendingSkill['_skillIndex'] as number;
-    unit.useSkill(skillIndex);
+    const usedSkill = unit.useSkill(skillIndex);
+    if (!usedSkill) {
+      // 能量不足等导致使用失败：取消技能目标模式并切回玩家回合
+      this._pendingSkill = null;
+      this._skillTargets = [];
+      this._skillPreviewPos = null;
+      this._phase = 'player_turn';
+      this.highlightAttackRange(unit);
+      if (this._onUnitPhaseChanged) {
+        this._onUnitPhaseChanged('player_turn', unit, 'action');
+      }
+      return;
+    }
 
     const targetUnit = [...this._enemyUnits, ...this._playerUnits].find(u =>
       u.data?.isAlive && u.data.gridPos.row === gridPos.row && u.data.gridPos.col === gridPos.col
     );
 
-    this.executeSkillEffects(unit, targetUnit, gridPos, this._pendingSkill.effects);
+    this.executeSkillEffects(unit, targetUnit, gridPos, usedSkill.effects);
 
     this._pendingSkill = null;
     this._skillTargets = [];
     this._skillPreviewPos = null;
 
+    // 必须在 finishUnitTurn 前切回 player_turn，否则会被直接 return
+    this._phase = 'player_turn';
     unit.data.hasActed = true;
     this.finishUnitTurn();
   }
@@ -1060,7 +1083,7 @@ export class BattleManager extends Component {
     if (attacker.data && attacker.hasPassive('poison_arrows')) {
       target.addBuff('poison', 2, { damage: 1 });
     }
-    if (!target.data?.isAlive) {
+    if (!attacker.data?.isAlive || !target.data?.isAlive) {
       this.checkBattleEnd();
     }
   }
@@ -1077,11 +1100,12 @@ export class BattleManager extends Component {
     
     if (skill.targetType === 'self') {
       // pre-move 技能不消耗行动次数（仅消耗能量），后续仍可攻击
-      unit.useSkill(skillIndex, !skill.preMove);
+      const usedSkill = unit.useSkill(skillIndex, !skill.preMove);
+      if (!usedSkill) return;
       if (unit.data) {
-        this.executeSkillEffects(unit, unit, unit.data.gridPos, skill.effects);
+        this.executeSkillEffects(unit, unit, unit.data.gridPos, usedSkill.effects);
       }
-      
+
       if (skill.preMove) {
         unit.data.preMoveSkillUsed = true;
         this._unitPhase = 'move';
@@ -1165,6 +1189,7 @@ export class BattleManager extends Component {
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive) return;
     unit.data.hasActed = true;
+    this._cancelAutoSkip();
     this.finishUnitTurn();
   }
 
@@ -1237,6 +1262,9 @@ export class BattleManager extends Component {
           unit.onTurnStart(this._playerUnits);
         }
       }
+      // 回合开始毒伤可能导致全部玩家死亡，立即结算
+      this.checkBattleEnd();
+      if (this._phase !== 'player_turn') return;
       this._currentUnitIndex = 0;
       this.selectNextPlayerUnit();
     }
@@ -1319,6 +1347,7 @@ export class BattleManager extends Component {
   }
 
   onDestroy(): void {
+    this.unscheduleAllCallbacks();
     this._playerUnits = [];
     this._enemyUnits = [];
     this._selectedUnit = null;

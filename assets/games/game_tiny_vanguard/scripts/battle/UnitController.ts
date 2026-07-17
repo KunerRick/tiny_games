@@ -48,6 +48,14 @@ export class UnitController extends Component {
   private _data: UnitData | null = null;
   private _isSelected: boolean = false;
   private _countering: boolean = false;
+  private _selectTween: any = null;
+
+  onDestroy(): void {
+    if (this._selectTween) {
+      this._selectTween.stop();
+      this._selectTween = null;
+    }
+  }
 
   private static readonly CLASS_COLORS: Record<string, Color> = {
     warrior: new Color(100, 180, 255),
@@ -156,11 +164,16 @@ export class UnitController extends Component {
     if (this.selectionIndicator) {
       this.selectionIndicator.active = selected;
     }
-    if (selected && this.node?.isValid) {
-      tween(this.node)
+    if (!this.node?.isValid) return;
+    if (this._selectTween) {
+      this._selectTween.stop();
+      this._selectTween = null;
+    }
+    if (selected) {
+      this._selectTween = tween(this.node)
         .to(0.2, { scale: new Vec3(1.08, 1.08, 1) })
         .start();
-    } else if (this.node?.isValid) {
+    } else {
       this.node.setScale(new Vec3(1, 1, 1));
     }
   }
@@ -234,12 +247,16 @@ export class UnitController extends Component {
       return;
     }
     this._data.gridPos = { ...pos };
-    this._data.hasMoved = true;
     const targetX = (pos.col - 2.5) * GridController.CELL_SIZE;
     const targetY = (pos.row - 2.5) * GridController.CELL_SIZE;
     tween(this.node)
       .to(duration, { position: new Vec3(targetX, targetY, 0) })
-      .call(() => { if (onComplete) onComplete(); })
+      .call(() => {
+        if (this._data) {
+          this._data.hasMoved = true;
+        }
+        if (onComplete) onComplete();
+      })
       .start();
   }
 
@@ -267,9 +284,10 @@ export class UnitController extends Component {
       this._data.currentHp = 0;
       this._data.isAlive = false;
       this._data.hasActed = true;
+      this._onDeath();
     }
 
-    if (attacker && wasAlive && !this._countering && !ignoreDefense && this.hasPassive('counter')) {
+    if (attacker && !this._countering && !ignoreDefense && this.hasPassive('counter')) {
       this._countering = true;
       const counterDmg = Math.max(1, Math.floor(this._data.stats.attack * 0.5));
       // 反击伤害标记为 ignoreDefense=true，防止链式反击死循环
@@ -284,13 +302,31 @@ export class UnitController extends Component {
     return this._data?.skills.some(s => s.id === skillId) ?? false;
   }
 
+  private _onDeath(): void {
+    if (this._selectTween) {
+      this._selectTween.stop();
+      this._selectTween = null;
+    }
+    if (this.node?.isValid) {
+      this.node.active = false;
+    }
+    if (this.selectionIndicator) {
+      this.selectionIndicator.active = false;
+    }
+    // 清除所有 buff，避免尸体残留状态
+    if (this._data) {
+      this._data.buffs = [];
+      this._data.shieldAmount = 0;
+    }
+  }
+
   heal(amount: number): void {
     if (!this._data || !this._data.isAlive) return;
     this._data.currentHp = Math.min(this._data.maxHp, this._data.currentHp + amount);
   }
 
   healFull(): void {
-    if (!this._data) return;
+    if (!this._data || !this._data.isAlive) return;
     this._data.currentHp = this._data.maxHp;
   }
 
@@ -306,7 +342,7 @@ export class UnitController extends Component {
   }
 
   useSkill(skillIndex: number, setActed: boolean = true): SkillConfig | null {
-    if (!this._data || !this.canUseSkill(skillIndex)) return null;
+    if (!this._data || !this._data.isAlive || !this.canUseSkill(skillIndex)) return null;
     const skill = this._data.skills[skillIndex];
     this._data.energy -= skill.energyCost;
     if (setActed) {
@@ -329,6 +365,11 @@ export class UnitController extends Component {
 
   replaceSkill(index: number, newSkill: SkillConfig): void {
     if (!this._data || index < 0 || index >= this._data.skills.length) return;
+    const oldSkill = this._data.skills[index];
+    // 先回退旧被动效果，避免永久叠加
+    if (oldSkill && oldSkill.type === 'passive') {
+      this._revertPassiveEffect(oldSkill.id);
+    }
     this._data.skills[index] = newSkill;
     if (newSkill.type === 'passive') {
       this.applyPassiveEffect(newSkill.id);
@@ -336,27 +377,39 @@ export class UnitController extends Component {
   }
 
   private applyPassiveEffect(skillId: string): void {
-    if (!this._data) return;
+    if (!this._data || this._data.passiveApplied.includes(skillId)) return;
+    this._data.passiveApplied.push(skillId);
     if (skillId === 'toughness') {
       this._data.maxHp += 1;
       this._data.currentHp = Math.min(this._data.currentHp + 1, this._data.maxHp);
       this._data.baseStats.defense += 1;
       this._data.stats.defense += 1;
-      if (!this._data.passiveApplied.includes('toughness')) {
-        this._data.passiveApplied.push('toughness');
-      }
     }
     if (skillId === 'arcane_flow') {
       this._data.energyRegen += 1;
-      if (!this._data.passiveApplied.includes('arcane_flow')) {
-        this._data.passiveApplied.push('arcane_flow');
-      }
+    }
+  }
+
+  private _revertPassiveEffect(skillId: string): void {
+    if (!this._data) return;
+    const idx = this._data.passiveApplied.indexOf(skillId);
+    if (idx < 0) return;
+    this._data.passiveApplied.splice(idx, 1);
+    if (skillId === 'toughness') {
+      this._data.maxHp = Math.max(1, this._data.maxHp - 1);
+      this._data.currentHp = Math.min(this._data.currentHp, this._data.maxHp);
+      this._data.baseStats.defense = Math.max(0, this._data.baseStats.defense - 1);
+      this._data.stats.defense = Math.max(0, this._data.stats.defense - 1);
+    }
+    if (skillId === 'arcane_flow') {
+      this._data.energyRegen = Math.max(0, this._data.energyRegen - 1);
     }
   }
 
   onTurnStart(allies?: UnitController[]): void {
     if (!this._data || !this._data.isAlive) return;
 
+    // 毒伤结算
     for (let i = this._data.buffs.length - 1; i >= 0; i--) {
       const buff = this._data.buffs[i];
       if (buff.type === 'poison') {
@@ -364,12 +417,15 @@ export class UnitController extends Component {
         this.takeDamage(poisonDmg, true);
       }
     }
+    // 毒伤可能导致死亡，此时不再继续重置状态
+    if (!this._data.isAlive) return;
 
     this._data.energy = Math.min(this._data.maxEnergy, this._data.energy + this._data.energyRegen);
     this._data.hasMoved = false;
     this._data.hasActed = false;
     this._data.preMoveSkillUsed = false;
 
+    // buff 衰减
     for (let i = this._data.buffs.length - 1; i >= 0; i--) {
       const buff = this._data.buffs[i];
       buff.turnsLeft--;
@@ -379,15 +435,18 @@ export class UnitController extends Component {
       }
     }
 
+    // 回合开始触发类被动
     for (const skill of this._data.skills) {
       if (skill.type !== 'passive' || skill.triggerCondition !== 'on_turn_start') continue;
 
-      // 判断是否为每回合都触发的效果（光环类）
-      const isAuraType = skill.effects.some(e =>
-        e.type === 'passive_aura_heal'
-      );
-      // 非光环类永久被动只应用一次
+      // 光环类每回合执行，不加入 passiveApplied；永久成长类只执行一次
+      const isAuraType = skill.effects.some(e => e.type === 'passive_aura_heal');
       if (!isAuraType && this._data.passiveApplied.includes(skill.id)) continue;
+
+      // 永久成长类标记已应用
+      if (!isAuraType) {
+        this._data.passiveApplied.push(skill.id);
+      }
 
       for (const effect of skill.effects) {
         switch (effect.type) {
@@ -396,16 +455,13 @@ export class UnitController extends Component {
             this._data.currentHp = Math.min(this._data.currentHp + (effect.params.hp ?? 1), this._data.maxHp);
             this._data.baseStats.defense += effect.params.defense ?? 1;
             this._data.stats.defense += effect.params.defense ?? 1;
-            this._data.passiveApplied.push(skill.id);
             break;
           case 'passive_eagle_eye':
             this._data.baseStats.range += effect.params.range ?? 1;
             this._data.stats.range += effect.params.range ?? 1;
-            this._data.passiveApplied.push(skill.id);
             break;
           case 'passive_energy_regen':
             this._data.energyRegen += effect.params.amount ?? 1;
-            this._data.passiveApplied.push(skill.id);
             break;
           case 'passive_aura_heal': {
             if (allies) {
@@ -413,8 +469,9 @@ export class UnitController extends Component {
               const amount = effect.params.amount ?? 1;
               for (const ally of allies) {
                 if (ally !== this && ally.data?.isAlive) {
-                  const dist = Math.abs(ally.data.gridPos.row - this._data.gridPos.row) +
-                    Math.abs(ally.data.gridPos.col - this._data.gridPos.col);
+                  const data = ally.data;
+                  const dist = Math.abs(data.gridPos.row - this._data.gridPos.row) +
+                    Math.abs(data.gridPos.col - this._data.gridPos.col);
                   if (dist <= radius) {
                     ally.heal(amount);
                   }
@@ -430,25 +487,47 @@ export class UnitController extends Component {
 
   private removeBuff(buff: BuffEntry): void {
     if (!this._data) return;
+    const amount = buff.params.amount ?? 0;
     if (buff.type === 'buff_move') {
-      this._data.stats.move -= buff.params.amount ?? 0;
+      this._data.stats.move -= amount;
       this._data.stats.move = Math.max(this._data.baseStats.move, this._data.stats.move);
     }
     if (buff.type === 'buff_attack') {
-      this._data.stats.attack -= buff.params.amount ?? 0;
+      this._data.stats.attack -= amount;
       this._data.stats.attack = Math.max(this._data.baseStats.attack, this._data.stats.attack);
+    }
+    if (buff.type === 'buff_defense') {
+      this._data.stats.defense -= amount;
+      this._data.stats.defense = Math.max(this._data.baseStats.defense, this._data.stats.defense);
+    }
+    if (buff.type === 'buff_range') {
+      this._data.stats.range -= amount;
+      this._data.stats.range = Math.max(this._data.baseStats.range, this._data.stats.range);
     }
   }
 
   addBuff(type: string, turnsLeft: number, params: Record<string, number>): void {
-    if (!this._data) return;
+    if (!this._data || !this._data.isAlive) return;
     const existing = this._data.buffs.find(b => b.type === type);
-    
+
     if (existing) {
       existing.turnsLeft = Math.max(existing.turnsLeft, turnsLeft);
+      // 刷新为更大的数值效果（先回退旧值再叠加新值）
+      const oldAmount = existing.params.amount ?? 0;
+      const newAmount = params.amount ?? 0;
+      if (newAmount !== oldAmount) {
+        existing.params.amount = newAmount;
+        const delta = newAmount - oldAmount;
+        if (type === 'buff_move') {
+          this._data.stats.move += delta;
+        }
+        if (type === 'buff_attack') {
+          this._data.stats.attack += delta;
+        }
+      }
     } else {
       this._data.buffs.push({ type, turnsLeft, params: { ...params } });
-      
+
       if (type === 'buff_move') {
         this._data.stats.move += params.amount ?? 0;
       }

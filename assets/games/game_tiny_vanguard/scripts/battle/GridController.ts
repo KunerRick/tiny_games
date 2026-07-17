@@ -195,10 +195,11 @@ export class GridController extends Component {
 
   clearAoePreview(): void {
     for (const cell of this._aoePreviewCells) {
-      if (cell?.isValid) {
+      if (cell?.isValid && !this._highlightedCells.includes(cell)) {
         const sprite = cell.getComponent(Sprite);
         if (sprite) sprite.color = GridController.DEFAULT_CELL_COLOR;
       }
+      // 若 cell 仍在 _highlightedCells 中，则保留其高亮色，避免擦掉移动/攻击范围
     }
     this._aoePreviewCells = [];
   }

@@ -345,6 +345,7 @@ export class TinyVanguardMain extends Component {
     if (this.battleUI) {
       this.battleUI.setConfirmDeployCallback(() => this.onConfirmDeploy());
       this.battleUI.setWaitCallback(() => this.onWaitClicked());
+      this.battleUI.setEndTurnCallback(() => this.battleManager.endCurrentUnitTurn());
       this.battleUI.setVictoryContinueCallback(() => this.onVictoryContinue());
       this.battleUI.setAttackCallback(() => this.battleManager.onAttackSelected());
     }
