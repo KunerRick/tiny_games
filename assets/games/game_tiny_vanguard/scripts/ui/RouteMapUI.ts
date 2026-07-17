@@ -117,6 +117,11 @@ export class RouteMapUI extends Component {
     this._nodes = nodes;
     if (!this.nodesContainer) return;
 
+    // 先把连接线层级移到最底部，确保其在节点图标和背景下方
+    if (this.connectionsLayer?.isValid) {
+      this.connectionsLayer.setSiblingIndex(0);
+    }
+
     this.nodesContainer.removeAllChildren();
     const typeIcons: Record<string, string> = {
       battle: '\u2694\uFE0F', elite: '\uD83D\uDD25', shop: '\uD83C\uDFEA',
@@ -156,11 +161,6 @@ export class RouteMapUI extends Component {
       btnNode.on(Node.EventType.TOUCH_END, this.onRouteNodeTouchEnd, this);
 
       this.nodesContainer.addChild(btnNode);
-    }
-
-    // 确保连接线在节点图标下方
-    if (this.connectionsLayer && this.connectionsLayer.parent === this.nodesContainer.parent) {
-      this.connectionsLayer.setSiblingIndex(0);
     }
 
     this.drawConnections();
