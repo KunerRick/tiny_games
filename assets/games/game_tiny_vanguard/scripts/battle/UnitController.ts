@@ -287,6 +287,7 @@ export class UnitController extends Component {
       this._onDeath();
     }
 
+    // 设计意图：即使本次伤害导致死亡，也允许触发一次反击（同归于尽/濒死反扑）
     if (attacker && !this._countering && !ignoreDefense && this.hasPassive('counter')) {
       this._countering = true;
       const counterDmg = Math.max(1, Math.floor(this._data.stats.attack * 0.5));

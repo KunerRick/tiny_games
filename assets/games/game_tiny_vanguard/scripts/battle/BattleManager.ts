@@ -200,15 +200,15 @@ export class BattleManager extends Component {
 
     // 顶部两行：浅绿色（可部署区域，玩家在己方半场部署）
     const deployableColor = new Color(150, 230, 150, 180);
-    for (let c = 0; c < 6; c++) {
+    for (let c = 0; c < GridController.GRID_SIZE; c++) {
       this.gridController.setCellColor({ row: 0, col: c }, deployableColor);
       this.gridController.setCellColor({ row: 1, col: c }, deployableColor);
     }
 
     // 底部四行：淡灰色（不可部署区域，敌方区域）
     const disabledColor = new Color(200, 200, 200, 100);
-    for (let r = 2; r < 6; r++) {
-      for (let c = 0; c < 6; c++) {
+    for (let r = 2; r < GridController.GRID_SIZE; r++) {
+      for (let c = 0; c < GridController.GRID_SIZE; c++) {
         this.gridController.setCellColor({ row: r, col: c }, disabledColor);
       }
     }
@@ -431,7 +431,7 @@ export class BattleManager extends Component {
         if (Math.abs(r) + Math.abs(c) > range) continue;
         const row = from.row + r;
         const col = from.col + c;
-        if (row < 0 || row >= 6 || col < 0 || col >= 6) continue;
+        if (row < 0 || row >= GridController.GRID_SIZE || col < 0 || col >= GridController.GRID_SIZE) continue;
         if (this.isOccupied({ row, col })) continue;
         positions.push({ row, col });
       }
@@ -995,7 +995,7 @@ export class BattleManager extends Component {
           };
           const newRow = target.data.gridPos.row + (dir.row !== 0 ? Math.sign(dir.row) * distance : 0);
           const newCol = target.data.gridPos.col + (dir.col !== 0 ? Math.sign(dir.col) * distance : 0);
-          if (newRow >= 0 && newRow < 6 && newCol >= 0 && newCol < 6 && !this.isOccupied({ row: newRow, col: newCol })) {
+          if (newRow >= 0 && newRow < GridController.GRID_SIZE && newCol >= 0 && newCol < GridController.GRID_SIZE && !this.isOccupied({ row: newRow, col: newCol })) {
             target.setGridPosition({ row: newRow, col: newCol });
           }
           break;
@@ -1010,7 +1010,7 @@ export class BattleManager extends Component {
           };
           const newRow = caster.data.gridPos.row + (retreatDir.row !== 0 ? Math.sign(retreatDir.row) * retreatDist : 0);
           const newCol = caster.data.gridPos.col + (retreatDir.col !== 0 ? Math.sign(retreatDir.col) * retreatDist : 0);
-          if (newRow >= 0 && newRow < 6 && newCol >= 0 && newCol < 6 && !this.isOccupied({ row: newRow, col: newCol })) {
+          if (newRow >= 0 && newRow < GridController.GRID_SIZE && newCol >= 0 && newCol < GridController.GRID_SIZE && !this.isOccupied({ row: newRow, col: newCol })) {
             caster.setGridPosition({ row: newRow, col: newCol });
           }
           break;
@@ -1175,7 +1175,7 @@ export class BattleManager extends Component {
           if (Math.abs(r) + Math.abs(c) > range) continue;
           const row = pos.row + r;
           const col = pos.col + c;
-          if (row < 0 || row >= 6 || col < 0 || col >= 6) continue;
+          if (row < 0 || row >= GridController.GRID_SIZE || col < 0 || col >= GridController.GRID_SIZE) continue;
           if (this.isOccupied({ row, col })) continue;
           tiles.push({ row, col });
         }

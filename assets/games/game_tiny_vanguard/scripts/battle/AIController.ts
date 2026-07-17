@@ -10,13 +10,19 @@ export interface AIAction {
 export class AIController {
   decideAll(enemies: UnitController[], players: UnitController[]): AIAction[] {
     const aliveEnemies = enemies.filter(u => u.data?.isAlive);
-    const actionableEnemies = aliveEnemies.filter(u => !u.data.hasActed);
     const alivePlayers = players.filter(u => u.data?.isAlive);
     const occupied = this.getAllOccupiedPositions(enemies, players);
     const actions: AIAction[] = [];
 
-    for (const enemy of actionableEnemies) {
-      if (!enemy.data?.isAlive || enemy.data.hasActed) continue;
+    for (const enemy of enemies) {
+      if (!enemy.data?.isAlive || enemy.data.hasActed) {
+        // 保持与输入数组顺序一一对应，不可行动单位置空
+        actions.push({
+          moveTo: { ...enemy.data?.gridPos ?? { row: 0, col: 0 } },
+          attackTarget: null
+        });
+        continue;
+      }
 
       const currentPos = enemy.data.gridPos;
       const posIdx = occupied.findIndex(
@@ -44,8 +50,8 @@ export class AIController {
           action = this.decideAggressive(enemy, alivePlayers, occupied);
       }
 
-      actions.push(action);
       occupied.push(action.moveTo);
+      actions.push(action);
     }
 
     return actions;

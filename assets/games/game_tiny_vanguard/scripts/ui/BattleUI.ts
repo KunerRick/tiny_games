@@ -62,6 +62,7 @@ export class BattleUI extends Component {
 
   private _skillClickCallbacks: ((index: number) => void)[] = [];
   private _showCalled: boolean = false;
+  private _eventsBound: boolean = false;
   private _deployCards: Node[] = [];
   private _onDeployCardCb: ((index: number) => void) | null = null;
   private _autoSkipNoticeCb: (() => void) | null = null;
@@ -190,12 +191,18 @@ export class BattleUI extends Component {
   show(): void {
     this._showCalled = true;
     this.node.active = true;
-    this.bindEvents();
+    if (!this._eventsBound) {
+      this._eventsBound = true;
+      this.bindEvents();
+    }
   }
 
   hide(): void {
     this.node.active = false;
-    this.unbindEvents();
+    if (this._eventsBound) {
+      this._eventsBound = false;
+      this.unbindEvents();
+    }
   }
 
   private bindEvents(): void {
