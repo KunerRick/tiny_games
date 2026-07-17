@@ -528,14 +528,16 @@ export class BattleManager extends Component {
   }
 
   private finishUnitTurn(): void {
-    if (this._phase !== 'player_turn') return;
-    this._unitPhase = 'done';
+    // 先清除选中状态和高亮：即使战斗结束（victory/defeat）也要清理残留高亮
     if (this._selectedUnit) {
       this._selectedUnit.setSelected(false);
       this._selectedUnit = null;
     }
     this.gridController.clearHighlights();
     this._skillPreviewPos = null;
+
+    if (this._phase !== 'player_turn') return;
+    this._unitPhase = 'done';
     this._currentUnitIndex++;
     this.selectNextPlayerUnit();
   }

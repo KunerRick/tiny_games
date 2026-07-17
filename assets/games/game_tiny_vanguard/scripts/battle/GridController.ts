@@ -24,6 +24,7 @@ export class GridController extends Component {
   private _cells: Node[][] = [];
   private _highlightedCells: Node[] = [];
   private _previewCell: Node | null = null;
+  private _previewOriginalColor: Color | null = null;
   private _aoePreviewCells: Node[] = [];
   private _selectedTargetCell: Node | null = null;
   private _selectedTargetOriginalColor: Color | null = null;
@@ -121,28 +122,30 @@ export class GridController extends Component {
     this.clearAoePreview();
   }
 
-  /** 高亮单个格子为移动预览（黄色半透明） */
+  /** 高亮单个格子为移动预览（黄色半透明），保留原色以便切换时恢复 */
   highlightPreviewCell(pos: GridPosition): void {
     this.clearPreview();
     const cell = this.getCell(pos.row, pos.col);
     if (cell) {
       const sprite = cell.getComponent(Sprite);
       if (sprite) {
+        this._previewOriginalColor = sprite.color.clone();
         sprite.color = new Color(255, 235, 59, 200);
       }
       this._previewCell = cell;
     }
   }
 
-  /** 清除预览高亮 */
+  /** 清除预览高亮，恢复为原色（避免可移动区域变回地板色） */
   clearPreview(): void {
     if (this._previewCell?.isValid) {
       const sprite = this._previewCell.getComponent(Sprite);
       if (sprite) {
-        sprite.color = GridController.DEFAULT_CELL_COLOR;
+        sprite.color = this._previewOriginalColor ?? GridController.DEFAULT_CELL_COLOR;
       }
     }
     this._previewCell = null;
+    this._previewOriginalColor = null;
   }
 
   /** 高亮选中目标（单体技能目标确认），叠加颜色 */
