@@ -60,7 +60,6 @@ export class BattleUI extends Component {
   @property({ type: Sprite, tooltip: '阶段背景色' })
   phaseBg: Sprite = null;
 
-  private _skillClickCallbacks: ((index: number) => void)[] = [];
   private _showCalled: boolean = false;
   private _eventsBound: boolean = false;
   private _deployCards: Node[] = [];
@@ -499,7 +498,6 @@ export class BattleUI extends Component {
   }
 
   showSkillButtons(skillNames: string[], canUse: boolean[], callback: (index: number) => void): void {
-    this._skillClickCallbacks = [];
     if (!this.skillButtonContainer) return;
     
     const btnWidth = 120;
@@ -842,7 +840,6 @@ export class BattleUI extends Component {
       this.unschedule(this._autoSkipNoticeCb);
       this._autoSkipNoticeCb = null;
     }
-    this._skillClickCallbacks = [];
     this._deployCards = [];
     this._onDeployCardCb = null;
     this._onConfirmDeploy = null;

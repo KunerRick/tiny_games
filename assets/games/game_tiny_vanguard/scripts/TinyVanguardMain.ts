@@ -674,16 +674,20 @@ export class TinyVanguardMain extends Component {
     }
 
     if (option.type === 'buff') {
+      const amount = option.buffAmount ?? 1;
       switch (option.buffType) {
         case 'hp':
-          unit.data.maxHp += option.buffAmount ?? 1;
-          unit.data.currentHp = Math.min(unit.data.currentHp + (option.buffAmount ?? 1), unit.data.maxHp);
+          unit.data.maxHp += amount;
+          unit.data.currentHp = Math.min(unit.data.currentHp + amount, unit.data.maxHp);
           break;
         case 'attack':
-          unit.data.stats.attack += option.buffAmount ?? 1;
+          unit.data.baseStats.attack += amount;
+          unit.data.stats.attack += amount;
           break;
         case 'energy':
-          unit.data.maxEnergy += option.buffAmount ?? 1;
+          unit.data.baseStats.maxEnergy += amount;
+          unit.data.maxEnergy += amount;
+          unit.data.energy = Math.min(unit.data.energy + amount, unit.data.maxEnergy);
           break;
       }
     }

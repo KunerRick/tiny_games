@@ -109,6 +109,9 @@ export class GridController extends Component {
 
   clearHighlights(): void {
     this.clearSelectedTarget();
+    // 先恢复预览格原色（预览格可能属于 _highlightedCells），再清空高亮列表
+    this.clearPreview();
+    this.clearAoePreview();
     for (const cell of this._highlightedCells) {
       if (cell?.isValid) {
         const sprite = cell.getComponent(Sprite);
@@ -118,8 +121,6 @@ export class GridController extends Component {
       }
     }
     this._highlightedCells = [];
-    this.clearPreview();
-    this.clearAoePreview();
   }
 
   /** 高亮单个格子为移动预览（黄色半透明），保留原色以便切换时恢复 */

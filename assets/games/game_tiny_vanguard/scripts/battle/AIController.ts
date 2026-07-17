@@ -270,25 +270,6 @@ export class AIController {
 
   // ========== 保留的辅助方法 ==========
 
-  private attackIfInRangeOrMoveToward(
-    enemy: UnitController, target: UnitController, occupied: GridPosition[]
-  ): void {
-    if (!enemy.data || !target.data) return;
-    const dist = this.manhattanDist(enemy.data.gridPos, target.data.gridPos);
-    if (dist <= enemy.data.stats.range) {
-      target.takeDamage(enemy.data.stats.attack);
-    } else {
-      const moveTo = this.bestMoveToward(
-        enemy.data.gridPos, target.data.gridPos, enemy.data.stats.move, occupied
-      );
-      enemy.setGridPosition(moveTo);
-      const newDist = this.manhattanDist(enemy.data.gridPos, target.data.gridPos);
-      if (newDist <= enemy.data.stats.range) {
-        target.takeDamage(enemy.data.stats.attack);
-      }
-    }
-  }
-
   private getAllOccupiedPositions(
     enemies: UnitController[], players: UnitController[]
   ): GridPosition[] {

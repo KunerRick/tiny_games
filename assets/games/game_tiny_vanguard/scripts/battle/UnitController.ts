@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Sprite, Color, tween, Vec3, Label } from 'cc';
+import { _decorator, Component, Node, Sprite, Color, tween, Vec3, Label, Tween } from 'cc';
 import { GridPosition, GridController } from './GridController';
 import { SkillConfig, getClassById, EnemyConfig, AIType } from '../config/GameData';
 
@@ -15,7 +15,7 @@ export interface UnitData {
   energy: number;
   maxEnergy: number;
   energyRegen: number;
-  baseStats: { hp: number; attack: number; defense: number; move: number; range: number };
+  baseStats: { hp: number; attack: number; defense: number; move: number; range: number; maxEnergy: number };
   skills: SkillConfig[];
   gridPos: GridPosition;
   isAlive: boolean;
@@ -48,7 +48,7 @@ export class UnitController extends Component {
   private _data: UnitData | null = null;
   private _isSelected: boolean = false;
   private _countering: boolean = false;
-  private _selectTween: any = null;
+  private _selectTween: Tween<Node> | null = null;
 
   onDestroy(): void {
     if (this._selectTween) {
@@ -83,7 +83,7 @@ export class UnitController extends Component {
       energy: 0,
       maxEnergy: 0,
       energyRegen: 0,
-      baseStats: { ...config.stats },
+      baseStats: { ...config.stats, maxEnergy: 0 },
       skills: [],
       gridPos: { ...gridPos },
       isAlive: true,
@@ -122,7 +122,7 @@ export class UnitController extends Component {
       energy: classConfig.energy.max,
       maxEnergy: classConfig.energy.max,
       energyRegen: classConfig.energy.regen,
-      baseStats: { ...classConfig.stats },
+      baseStats: { ...classConfig.stats, maxEnergy: classConfig.energy.max },
       skills: [],
       gridPos: { ...gridPos },
       isAlive: true,
@@ -280,20 +280,25 @@ export class UnitController extends Component {
     if (actualDamage <= 0) return 0;
 
     this._data.currentHp -= actualDamage;
-    if (this._data.currentHp <= 0) {
+    const isDead = this._data.currentHp <= 0;
+    if (isDead) {
       this._data.currentHp = 0;
       this._data.isAlive = false;
       this._data.hasActed = true;
-      this._onDeath();
     }
 
     // 设计意图：即使本次伤害导致死亡，也允许触发一次反击（同归于尽/濒死反扑）
+    // 反击在 _onDeath 之前执行，确保 buff 仍生效
     if (attacker && !this._countering && !ignoreDefense && this.hasPassive('counter')) {
       this._countering = true;
       const counterDmg = Math.max(1, Math.floor(this._data.stats.attack * 0.5));
       // 反击伤害标记为 ignoreDefense=true，防止链式反击死循环
       attacker.takeDamage(counterDmg, true, this);
       this._countering = false;
+    }
+
+    if (isDead) {
+      this._onDeath();
     }
 
     return actualDamage;
@@ -360,7 +365,7 @@ export class UnitController extends Component {
     this._data.skills.push(skill);
 
     if (skill.type === 'passive') {
-      this.applyPassiveEffect(skill.id);
+      this.applyPassiveEffect(skill);
     }
   }
 
@@ -369,47 +374,72 @@ export class UnitController extends Component {
     const oldSkill = this._data.skills[index];
     // 先回退旧被动效果，避免永久叠加
     if (oldSkill && oldSkill.type === 'passive') {
-      this._revertPassiveEffect(oldSkill.id);
+      this._revertPassiveEffect(oldSkill);
     }
     this._data.skills[index] = newSkill;
     if (newSkill.type === 'passive') {
-      this.applyPassiveEffect(newSkill.id);
+      this.applyPassiveEffect(newSkill);
     }
   }
 
-  private applyPassiveEffect(skillId: string): void {
-    if (!this._data || this._data.passiveApplied.includes(skillId)) return;
+  private applyPassiveEffect(skill: SkillConfig): void {
+    if (!this._data || this._data.passiveApplied.includes(skill.id)) return;
     let applied = false;
-    if (skillId === 'toughness') {
-      this._data.maxHp += 1;
-      this._data.currentHp = Math.min(this._data.currentHp + 1, this._data.maxHp);
-      this._data.baseStats.defense += 1;
-      this._data.stats.defense += 1;
-      applied = true;
-    }
-    if (skillId === 'arcane_flow') {
-      this._data.energyRegen += 1;
-      applied = true;
+    for (const effect of skill.effects) {
+      switch (effect.type) {
+        case 'passive_toughness':
+          const hp = effect.params.hp ?? 1;
+          const def = effect.params.defense ?? 1;
+          this._data.maxHp += hp;
+          this._data.currentHp = Math.min(this._data.currentHp + hp, this._data.maxHp);
+          this._data.baseStats.defense += def;
+          this._data.stats.defense += def;
+          applied = true;
+          break;
+        case 'passive_eagle_eye':
+          const range = effect.params.range ?? 1;
+          this._data.baseStats.range += range;
+          this._data.stats.range += range;
+          applied = true;
+          break;
+        case 'passive_energy_regen':
+          const amount = effect.params.amount ?? 1;
+          this._data.energyRegen += amount;
+          applied = true;
+          break;
+      }
     }
     // 只有真正处理了属性加成才标记，避免 onTurnStart 中同名被动被跳过
     if (applied) {
-      this._data.passiveApplied.push(skillId);
+      this._data.passiveApplied.push(skill.id);
     }
   }
 
-  private _revertPassiveEffect(skillId: string): void {
+  private _revertPassiveEffect(skill: SkillConfig): void {
     if (!this._data) return;
-    const idx = this._data.passiveApplied.indexOf(skillId);
+    const idx = this._data.passiveApplied.indexOf(skill.id);
     if (idx < 0) return;
     this._data.passiveApplied.splice(idx, 1);
-    if (skillId === 'toughness') {
-      this._data.maxHp = Math.max(1, this._data.maxHp - 1);
-      this._data.currentHp = Math.min(this._data.currentHp, this._data.maxHp);
-      this._data.baseStats.defense = Math.max(0, this._data.baseStats.defense - 1);
-      this._data.stats.defense = Math.max(0, this._data.stats.defense - 1);
-    }
-    if (skillId === 'arcane_flow') {
-      this._data.energyRegen = Math.max(0, this._data.energyRegen - 1);
+    for (const effect of skill.effects) {
+      switch (effect.type) {
+        case 'passive_toughness':
+          const hp = effect.params.hp ?? 1;
+          const def = effect.params.defense ?? 1;
+          this._data.maxHp = Math.max(1, this._data.maxHp - hp);
+          this._data.currentHp = Math.min(this._data.currentHp, this._data.maxHp);
+          this._data.baseStats.defense = Math.max(0, this._data.baseStats.defense - def);
+          this._data.stats.defense = Math.max(0, this._data.stats.defense - def);
+          break;
+        case 'passive_eagle_eye':
+          const range = effect.params.range ?? 1;
+          this._data.baseStats.range = Math.max(0, this._data.baseStats.range - range);
+          this._data.stats.range = Math.max(0, this._data.stats.range - range);
+          break;
+        case 'passive_energy_regen':
+          const amount = effect.params.amount ?? 1;
+          this._data.energyRegen = Math.max(0, this._data.energyRegen - amount);
+          break;
+      }
     }
   }
 
@@ -446,46 +476,27 @@ export class UnitController extends Component {
     for (const skill of this._data.skills) {
       if (skill.type !== 'passive' || skill.triggerCondition !== 'on_turn_start') continue;
 
-      // 光环类每回合执行，不加入 passiveApplied；永久成长类只执行一次
       const isAuraType = skill.effects.some(e => e.type === 'passive_aura_heal');
-      if (!isAuraType && this._data.passiveApplied.includes(skill.id)) continue;
-
-      // 永久成长类标记已应用
+      // 永久成长类只执行一次，通过 applyPassiveEffect 统一处理并标记
       if (!isAuraType) {
-        this._data.passiveApplied.push(skill.id);
+        this.applyPassiveEffect(skill);
+        continue;
       }
 
+      // 光环类每回合执行
       for (const effect of skill.effects) {
-        switch (effect.type) {
-          case 'passive_toughness':
-            this._data.maxHp += effect.params.hp ?? 1;
-            this._data.currentHp = Math.min(this._data.currentHp + (effect.params.hp ?? 1), this._data.maxHp);
-            this._data.baseStats.defense += effect.params.defense ?? 1;
-            this._data.stats.defense += effect.params.defense ?? 1;
-            break;
-          case 'passive_eagle_eye':
-            this._data.baseStats.range += effect.params.range ?? 1;
-            this._data.stats.range += effect.params.range ?? 1;
-            break;
-          case 'passive_energy_regen':
-            this._data.energyRegen += effect.params.amount ?? 1;
-            break;
-          case 'passive_aura_heal': {
-            if (allies) {
-              const radius = effect.params.radius ?? 1;
-              const amount = effect.params.amount ?? 1;
-              for (const ally of allies) {
-                if (ally !== this && ally.data?.isAlive) {
-                  const data = ally.data;
-                  const dist = Math.abs(data.gridPos.row - this._data.gridPos.row) +
-                    Math.abs(data.gridPos.col - this._data.gridPos.col);
-                  if (dist <= radius) {
-                    ally.heal(amount);
-                  }
-                }
+        if (effect.type === 'passive_aura_heal' && allies) {
+          const radius = effect.params.radius ?? 1;
+          const amount = effect.params.amount ?? 1;
+          for (const ally of allies) {
+            if (ally !== this && ally.data?.isAlive) {
+              const data = ally.data;
+              const dist = Math.abs(data.gridPos.row - this._data.gridPos.row) +
+                Math.abs(data.gridPos.col - this._data.gridPos.col);
+              if (dist <= radius) {
+                ally.heal(amount);
               }
             }
-            break;
           }
         }
       }

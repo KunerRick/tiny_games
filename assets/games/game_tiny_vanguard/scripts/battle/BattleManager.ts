@@ -736,8 +736,10 @@ export class BattleManager extends Component {
     this._skillTargets = [];
     this._skillPreviewPos = null;
 
-    // 必须在 finishUnitTurn 前切回 player_turn，否则会被直接 return
-    this._phase = 'player_turn';
+    // 如果技能已导致战斗结束（victory/defeat），不要覆盖 phase
+    if (this._phase === 'skill_target') {
+      this._phase = 'player_turn';
+    }
     unit.data.hasActed = true;
     this.finishUnitTurn();
   }
@@ -1212,9 +1214,9 @@ export class BattleManager extends Component {
       enemy.onTurnStart();
     }
     const actions = this._aiController.decideAll(this._enemyUnits, this._playerUnits);
-    this._aiQueue = aliveEnemies.map((enemy, i) => ({
+    this._aiQueue = aliveEnemies.map((enemy) => ({
       enemy,
-      action: actions[i] ?? { moveTo: { ...enemy.data?.gridPos ?? { row: 0, col: 0 } }, attackTarget: null },
+      action: actions[this._enemyUnits.indexOf(enemy)] ?? { moveTo: { ...enemy.data?.gridPos ?? { row: 0, col: 0 } }, attackTarget: null },
     }));
 
     this._processNextAIUnit();
@@ -1295,6 +1297,8 @@ export class BattleManager extends Component {
   }
 
   private onBattleEnd(victory: boolean): void {
+    this.unscheduleAllCallbacks();
+    this._aiQueue = [];
     if (this._selectedUnit) {
       this._selectedUnit.setSelected(false);
       this._selectedUnit = null;
