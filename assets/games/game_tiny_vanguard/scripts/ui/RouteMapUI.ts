@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, ScrollView, instantiate, Prefab, Button, Label, Color, Sprite, UITransform, Graphics, Vec3, tween } from 'cc';
+import { _decorator, Component, Node, ScrollView, instantiate, Prefab, Button, Label, Color, Sprite, UITransform, Graphics, Vec3, tween, Event } from 'cc';
 const { ccclass, property } = _decorator;
 
 export interface RouteNode {
@@ -153,14 +153,16 @@ export class RouteMapUI extends Component {
         }
       }
 
-      const button = btnNode.getComponent(Button);
-      if (button) {
-        button.interactable = isReachable && !node.completed;
-        btnNode['_routeNodeId'] = node.id;
-        button.node.on(Button.EventType.CLICK, this.onRouteNodeClicked, this);
-      }
+      // 存储节点 ID，使用事件委托避免 Button 组件依赖
+      btnNode['_routeNodeId'] = node.id;
+      btnNode.on(Node.EventType.TOUCH_END, this.onRouteNodeTouchEnd, this);
 
       this.nodesContainer.addChild(btnNode);
+    }
+
+    // 确保连接线在节点图标下方
+    if (this.connectionsLayer && this.connectionsLayer.parent === this.nodesContainer.parent) {
+      this.connectionsLayer.setSiblingIndex(0);
     }
 
     this.drawConnections();
@@ -205,9 +207,10 @@ export class RouteMapUI extends Component {
     return this._nodes;
   }
 
-  private onRouteNodeClicked(button: Button): void {
-    if (!button?.node?.isValid) return;
-    const nodeId = button.node['_routeNodeId'] as number;
+  private onRouteNodeTouchEnd(event: Event): void {
+    const node = (event?.target as Node) ?? (event?.currentTarget as Node);
+    if (!node?.isValid) return;
+    const nodeId = node['_routeNodeId'] as number;
     if (nodeId === undefined || nodeId === null) return;
     this.onNodeTapped(nodeId);
   }
