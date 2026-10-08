@@ -11,7 +11,7 @@
 | # | 规则 | 典型后果 |
 |---|------|---------|
 | 1 | **禁止用 PowerShell `Set-Content`/`Out-File` 修改含中文的 TypeScript 文件** | UTF-8 字节被重编码为 GBK/ANSI，导致中文字符串全部乱码，`npx tsc` 报大量 `Unterminated string literal` |
-| 2 | **所有 Cocos 场景/预制体修改必须通过 MCP 工具** | 直接改 `.scene`/`.prefab` JSON 会破坏编辑器元数据 |
+| 2 | **所有 Cocos 场景/预制体的查询与修改必须通过 MCP 工具** | 直接读写 `.scene`/`.prefab` JSON 会破坏编辑器元数据 |
 | 3 | **按钮/可点击元素优先用 `@property({ type: Node })` + `Node.EventType.TOUCH_END`** | `@property({ type: Button })` 绑定的是 **Button 组件引用**，MCP 绑节点 UUID 会导致运行时 `Cannot read properties of undefined (reading 'on')` |
 | 4 | **`onDestroy()` 不访问任何 `@property(Node)`** | 场景销毁时 getter 可能返回 null，触发空引用崩溃 |
 | 5 | **事件 handler 必须是命名方法，禁止匿名 lambda** | 匿名函数无法 `off()` 解绑，造成内存泄漏或重复触发 |
