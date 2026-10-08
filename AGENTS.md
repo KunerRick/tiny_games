@@ -60,27 +60,30 @@
 ```
 tiny_games/
 ├── assets/
-│   ├── main/              # 游戏大厅（Lobby.scene）
+│   ├── main/              # 游戏大厅（scenes/Lobby.scene）
 │   │   ├── scripts/       # Lobby.ts, GameGrid.ts, GameIcon.ts
 │   │   └── resources/prefabs/GameIcon.prefab
-│   ├── games/             # 每游戏独立目录
-│   │   ├── game_2048/
-│   │   ├── game_snake/
-│   │   ├── game_war_evolution/
-│   │   ├── game_tiny_vanguard/
-│   │   └── ...future games
+│   ├── games/             # 每游戏独立目录（每个含 scenes/ + scripts/）
+│   │   ├── game_2048/          # 场景: Game2048
+│   │   ├── game_snake/         # 场景: Snake
+│   │   ├── game_war_evolution/ # 场景: WarEvo
+│   │   └── game_tiny_vanguard/ # 场景: TinyVanguard
 │   ├── common/            # 公共模块
 │   │   ├── managers/      # SceneManager, StorageManager, GameConfig
 │   │   └── components/    # BackButton, SafeAreaAdapter
-│   ├── game_placeholder/  # 新游戏模板场景
-│   └── resources/         # 动态加载资源
+│   ├── game_placeholder/  # 新游戏模板（scenes/GamePlaceholder.scene）
+│   └── Cocos UI/          # 编辑器 UI 素材
 ├── docs/                  # 所有文档统一存放（见 docs/README.md）
 │   ├── specs/             # 游戏设计规格
 │   ├── design/            # UI/场景配置指南
 │   ├── plans/             # 实现计划
-│   ├── tech/              # 技术决策与踩坑记录
+│   ├── superpowers/       # 历史迭代计划/规格
+│   ├── assets/            # 文档配图
+│   ├── tech/              # 技术决策与踩坑记录（预留，过旧教训迁移至此）
 │   └── cocos-best-practices.md
+├── tools/                 # 本地校验脚本（如 verify-battle-fixes.js）
 ├── settings/              # Cocos 编辑器设置
+├── extensions/            # 编辑器插件（tsconfig 排除；node_modules 已 gitignore）
 └── build/                 # 构建输出（gitignored）
 ```
 
@@ -89,9 +92,10 @@ tiny_games/
 所有游戏在 `assets/common/managers/GameConfig.ts` 的 `GAME_LIST` 中注册：
 
 ```typescript
-{ id: '2048',      name: '2048',       icon: 'default', sceneName: 'Game2048' }
-{ id: 'war_evo',   name: '战争进化',   icon: 'default', sceneName: 'WarEvo' }
-{ id: 'snake',     name: '贪吃蛇',     icon: 'default', sceneName: 'Snake' }
+{ id: '2048',         name: '2048',     icon: 'default', sceneName: 'Game2048',     description: '经典数字合并游戏' }
+{ id: 'war_evo',      name: '战争进化', icon: 'default', sceneName: 'WarEvo',       description: '时代进化对推' }
+{ id: 'snake',        name: '贪吃蛇',   icon: 'default', sceneName: 'Snake',        description: '大作战风格贪吃蛇' }
+{ id: 'tiny_vanguard', name: '小小先锋', icon: 'default', sceneName: 'TinyVanguard', description: 'Roguelike 回合制战棋' }
 ```
 
 **添加新游戏三步骤**：① `GameConfig.ts` 注册 ② 创建 `assets/games/game_xxx/scenes/Xxx.scene` ③ 场景名与 `sceneName` 一致。
@@ -157,14 +161,22 @@ private onConfirmClicked(): void { /* ... */ }
 
 ## 开发者命令
 
-此项目由 Cocos Creator 编辑器管理，无 npm 脚本。构建/预览均通过编辑器 UI 操作。
+此项目由 Cocos Creator 编辑器管理，`package.json` 无 `scripts`，构建/预览均通过编辑器 UI 操作。唯一依赖是 `typescript@^5.4.5`（devDependency，需先 `npm install`）。
 
 ```bash
 # 启动编辑器
 /path/to/CocosCreator --path .
 
-# 代码类型检查（修改后必跑）
+# 代码类型检查（修改 .ts 后必跑）
+# 注意：tsconfig.json extends ./temp/tsconfig.cocos.json，需编辑器生成过 temp/ 才能通过
 npx tsc --noEmit
+```
+
+静态校验脚本（可选，Tiny Vanguard 战斗修复回归自检）：
+
+```bash
+node tools/verify-battle-fixes.js
+# 注意：脚本内 ROOT 硬编码为作者的 Windows 路径，跨机运行前需先改成本机绝对路径
 ```
 
 ## 防崩溃守则（违反即崩）
