@@ -1,0 +1,120 @@
+# Reasonix configuration.
+# Resolution order: flag > ./reasonix.toml > ~/.reasonix/config.toml > built-in defaults.
+# Fields marked user/global only are not overridden by ./reasonix.toml.
+# Secrets are named via api_key_env and stored in Reasonix's global .env; never put keys here.
+
+config_version = 12   # schema marker for diagnostics; old versions may ignore it
+default_model = "deepseek-flash"
+# language      = "zh"   # ui/model language; empty = auto-detect from $LANG / $REASONIX_LANG
+
+[agent]
+# system_prompt = """..."""   # omit to use the built-in prompt for this version
+# system_prompt_file = "prompts/system.md"   # project paths stay in <workspace>; user paths may fall back to <reasonix home>
+temperature       = 0.0
+# recovery_model = "deepseek-pro"   # optional; falls back to guardian then main model
+# reasoning_language = "zh"   # visible reasoning language: auto|zh|en
+compact_ratio       = 0.85   # fold at this share of the model window (default 0.85)
+# keep                = ["errors"]   # compaction keep policy: errors, user_marked
+# user_turn_keep_tokens = 8192   # your own turns kept verbatim through a fold; unset = 5% of the window
+# first_turn_pin_tokens = 1500   # first turn pinned verbatim into the cached prefix; it is paid for every request
+# checkpoint_ceiling_ratio = 0.50   # how small a fold's result must be to be accepted
+context_soft_limit_tokens = 0   # optional earlier absolute fold size; 0 or negative = use model capacity
+# recent_keep         = 2   # minimum recent messages kept verbatim
+# plan_mode_read_only_commands = ["gh issue view"]   # legacy compatibility only; Plan bash uses Permissions
+# embedded_diff_detection = true   # mark a shell result that is a whole unified diff so a frontend renders it as a diff (default false)
+# planner_model = "deepseek-pro"   # optional: enable two-model collaboration
+# subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
+# subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }   # per-skill overrides
+# vision_model = "kimi/kimi-k2-vision"   # optional: reads images a text-only main model cannot
+# guardian_model = "deepseek-pro"   # optional: independent reviewer for risky calls
+# guardian_temperature = 0.0   # the reviewer's own sampling temperature
+# decision_model = "typesafe/system-one"   # optional: the system_one backend
+# triage_model = "deepseek-flash"   # small classifications; point it somewhere cheap
+# advisor_model = "deepseek-pro"   # optional: offers the advise tool, backed by this model
+# best_of_n = true   # parallel attempts in git worktrees; a judge applies the best
+# worktree_isolation = true   # task can run a writer in a git worktree; changes wait for apply_isolated
+# code_mode = true   # run_script: tool calls from a short script, one round trip
+# screen_external_content = true   # triage flags external results that address the agent
+# task_cost_budget = 0.50   # a task lands on one summary once it spends this much
+# task_time_budget_minutes = 10   # the same landing, measured in wall clock
+# task_token_budget = 2000000   # the same landing, measured in cumulative model tokens
+# goal_token_budget = 200000   # what a /goal loop may spend before it stops
+# subagent_effort = "high"   # optional default effort for subagents
+# subagent_efforts = { review = "max", task = "high" }   # per-tool/skill effort overrides
+# max_subagent_depth = 2   # nested subagent delegation depth; set 1 to disable nested delegation
+# max_subagent_concurrency = 6   # session-wide sub-agent concurrency (task/fleet/skills)
+# max_parallel_writers = 3   # concurrent writers with non-overlapping write_paths
+# output_style = "explanatory"   # explanatory | learning | concise | custom; empty = default
+
+[tools]
+enabled = []   # empty = all built-in tools
+bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
+mcp_startup_timeout_seconds = 30   # background initialize + tools/list safety cap; per-plugin overrides may raise it
+mcp_call_timeout_seconds = 300   # default MCP call safety cap; per-plugin/tool overrides may raise it
+protect_changed_files = true   # refuse a whole-file write over a change made since the agent last saw the file
+browser_tools = true   # built-in browser tools; the browser starts on first use
+
+[tools.background_jobs]
+stalled_warning_seconds = 900   # warn once per background job after this many quiet seconds; 0 disables
+
+[tools.shell]
+# The interpreter the bash tool runs commands in; your login shell does not change it.
+# prefer = "auto"   # auto|bash|powershell|pwsh; empty/default = auto-detect
+# path   = "/opt/homebrew/bin/bash"   # absolute path to the shell executable; empty = PATH lookup
+
+[lsp]
+enabled = true   # language server tools; servers launch lazily when used
+# [lsp.servers.go]
+# command = "gopls"
+# args = []
+# extensions = [".go"]
+
+[browser]
+# executable = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+headless = false   # true = no window
+
+[skills]
+# paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
+# excluded_paths = ["~/.agents/skills"]   # hide convention roots without deleting folders
+# disable_implicit_invocation = false   # keep skills available for automatic model invocation
+# suppress_warnings = false   # show non-fatal skill loading warnings
+# max_depth = 3   # nested scan depth; set 1 for legacy root-only discovery
+# disabled_skills = ["review"]   # hide noisy or unwanted skills
+
+[memory]
+# pinned_budget_chars = 1500   # cap pinned guidance; unset = no ceiling, /memory reports the cost
+# recall_limit = 4   # facts automatic recall may inject per turn
+# recall_max_chars = 2400   # total size of that injection
+
+[permissions]
+# Per-call gating. mode = writer fallback when no rule matches: ask|allow|deny.
+# Readers always default to allow. Precedence: deny > ask > allow > fallback.
+# Rules are "Tool" or "Tool(specifier)"; e.g. Bash(go test:*), Edit(src/**).
+mode  = "ask"
+# allow_dynamic_bash = false   # advanced opt-in; deny/ask and exact rules still take precedence
+# deny = ["Bash(rm -rf*)", "Bash(git push*)"]   # hard-blocked in every mode
+# allow = ["Bash(go test:*)", "Bash(git status:*)"]   # never prompted
+# ask = ["Edit(src/**)"]   # force a prompt even if otherwise allowed
+
+[sandbox]
+# Confine tool blast radius. File-writers (write_file/edit_file/multi_edit/move_file)
+# may only write under workspace_root (empty = current dir) and allow_write extras.
+# bash = "enforce" jails each command in an OS sandbox when available;
+# without one, bash execution is refused. Empty defaults to enforce on macOS/Linux.
+# Windows has no OS-level Bash sandbox and fixes bash = "off".
+# network allows sandboxed bash egress.
+# workspace_root = ""            # default: current working directory
+# allow_write = ["/tmp"]          # extra dirs writers may also modify
+# forbid_read = []                  # dirs the agent cannot read or list
+bash    = "enforce"
+network = true
+host_authorities = ["ssh_agent"]   # host services bash may call; user-global
+# allowed_domains = ["github.com", "*.npmjs.org"]   # limit bash egress to these hosts (macOS, Linux)
+
+# External MCP servers. type: "stdio" (default, a subprocess) | "http" | "sse".
+# ${VAR} / ${VAR:-default} are expanded from the environment in command/args/env/url/headers.
+
+[[plugins]]
+name    = "cocos-creator"
+type    = "http"
+url     = "http://localhost:3000/mcp"
