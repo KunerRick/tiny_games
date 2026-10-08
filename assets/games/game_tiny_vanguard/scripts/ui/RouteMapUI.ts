@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, ScrollView, instantiate, Prefab, Button, Label, Color, Sprite, UITransform, Graphics, Vec3, tween, Event } from 'cc';
+import { _decorator, Component, Node, ScrollView, instantiate, Prefab, Button, Label, Color, Sprite, UITransform, Graphics, Vec3, tween, Tween, Event } from 'cc';
 const { ccclass, property } = _decorator;
 
 export interface RouteNode {
@@ -25,6 +25,7 @@ export class RouteMapUI extends Component {
   connectionsLayer: Node = null;
 
   private _nodes: RouteNode[] = [];
+  private _nodeViews: Map<number, Node> = new Map();
   private _currentNodeId: number = 0;
   private _onNodeClickCallback: ((nodeId: number) => void) | null = null;
   private _showCalled: boolean = false;
@@ -138,32 +139,42 @@ export class RouteMapUI extends Component {
         label.string = typeIcons[node.type] || '?';
       }
 
-      const isReachable = this.isReachable(node.id);
-      const sprite = btnNode.getComponent(Sprite);
-      if (sprite) {
-        if (node.completed) {
-          sprite.color = new Color(156, 163, 175, 200);
-        } else if (isReachable) {
-          sprite.color = new Color(34, 197, 94, 255);
-          tween(btnNode)
-            .to(0.5, { scale: new Vec3(1.1, 1.1, 1) })
-            .to(0.5, { scale: new Vec3(1.0, 1.0, 1) })
-            .union()
-            .repeatForever()
-            .start();
-        } else {
-          sprite.color = new Color(209, 213, 219, 128);
-        }
-      }
-
       // 存储节点 ID，使用事件委托避免 Button 组件依赖
       btnNode['_routeNodeId'] = node.id;
       btnNode.on(Node.EventType.TOUCH_END, this.onRouteNodeTouchEnd, this);
 
       this.nodesContainer.addChild(btnNode);
+      this._nodeViews.set(node.id, btnNode);
+      this.applyNodeVisual(node, btnNode);
     }
 
     this.drawConnections();
+  }
+
+  /** 按节点状态刷新单个节点图标的颜色与高亮动画（供增量更新复用） */
+  private applyNodeVisual(node: RouteNode, btnNode: Node): void {
+    if (!btnNode?.isValid) return;
+    const sprite = btnNode.getComponent(Sprite);
+    if (!sprite) return;
+
+    // 先停止并复位上一次的循环高亮动画，避免重复叠加
+    Tween.stopAllByTarget(btnNode);
+    btnNode.setScale(1, 1, 1);
+
+    const isReachable = this.isReachable(node.id);
+    if (node.completed) {
+      sprite.color = new Color(156, 163, 175, 200);
+    } else if (isReachable) {
+      sprite.color = new Color(34, 197, 94, 255);
+      tween(btnNode)
+        .to(0.5, { scale: new Vec3(1.1, 1.1, 1) })
+        .to(0.5, { scale: new Vec3(1.0, 1.0, 1) })
+        .union()
+        .repeatForever()
+        .start();
+    } else {
+      sprite.color = new Color(209, 213, 219, 128);
+    }
   }
 
   private isReachable(nodeId: number): boolean {
@@ -187,10 +198,16 @@ export class RouteMapUI extends Component {
 
   completeNode(nodeId: number): void {
     const node = this._nodes.find(n => n.id === nodeId);
-    if (node) {
-      node.completed = true;
-      this.renderRoute(this._nodes);
+    if (!node) return;
+    node.completed = true;
+    // 增量刷新：只更新现有节点图标的视觉，不整棵树重建
+    for (const n of this._nodes) {
+      const view = this._nodeViews.get(n.id);
+      if (view?.isValid) {
+        this.applyNodeVisual(n, view);
+      }
     }
+    this.drawConnections();
   }
 
   get currentNodeId(): number {
@@ -214,10 +231,9 @@ export class RouteMapUI extends Component {
   }
 
   onDestroy(): void {
+    // 子节点随本节点销毁自动释放；按规范不访问 @property(Node)
     this._onNodeClickCallback = null;
     this._nodes = [];
-    if (this.nodesContainer) {
-      this.nodesContainer.removeAllChildren();
-    }
+    this._nodeViews.clear();
   }
 }

@@ -147,16 +147,6 @@ export class UpgradeUI extends Component {
   }
 
   onDestroy(): void {
-    if (this.cardContainer) {
-      const children = this.cardContainer.children.slice();
-      for (const child of children) {
-        if (child?.isValid) {
-          const btn = child.getComponent(Button);
-          if (btn?.node?.isValid) {
-            btn.node.off(Button.EventType.CLICK, this.onUpgradeCardClicked, this);
-          }
-        }
-      }
-    }
+    // 卡片子节点随本节点销毁自动解绑事件；按规范不访问 @property(Node)
   }
 }

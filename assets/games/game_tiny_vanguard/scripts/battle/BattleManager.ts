@@ -568,6 +568,7 @@ export class BattleManager extends Component {
   }
 
   onAttackSelected(): void {
+    if (this._phase !== 'player_turn') return;
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive || unit.data.hasActed) return;
     if (this._unitPhase !== 'action') return;
@@ -1091,6 +1092,7 @@ export class BattleManager extends Component {
   }
 
   onSkillUsed(skillIndex: number): void {
+    if (this._phase !== 'player_turn') return;
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive) return;
     const skill = unit.peekSkill(skillIndex);

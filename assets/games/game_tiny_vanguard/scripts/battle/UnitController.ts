@@ -308,6 +308,10 @@ export class UnitController extends Component {
     return this._data?.skills.some(s => s.id === skillId) ?? false;
   }
 
+  hasSkill(skillId: string): boolean {
+    return this._data?.skills.some(s => s.id === skillId) ?? false;
+  }
+
   private _onDeath(): void {
     if (this._selectTween) {
       this._selectTween.stop();

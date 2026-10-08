@@ -437,15 +437,16 @@ export class TinyVanguardMain extends Component {
       (result) => this.onBattleEnd(result)
     );
 
-    // 恢复存档中的技能
+    // 恢复存档中的技能（按 id 去重：创建单位时已自动添加起始技能，避免重复）
     if (Object.keys(this._runData.unitSkills).length > 0) {
       for (let i = 0; i < this.battleManager.playerUnits.length; i++) {
+        const unit = this.battleManager.playerUnits[i];
         const skillIds = this._runData.unitSkills[i];
-        if (skillIds) {
+        if (skillIds && unit) {
           for (const skillId of skillIds) {
             const skill = getSkillById(skillId);
-            if (skill) {
-              this.battleManager.playerUnits[i].addSkill(skill);
+            if (skill && !unit.hasSkill(skill.id)) {
+              unit.addSkill(skill);
             }
           }
         }
@@ -1006,39 +1007,8 @@ export class TinyVanguardMain extends Component {
   }
 
   onDestroy(): void {
-    if (this.continueButton?.node?.isValid) {
-      this.continueButton.node.off(Button.EventType.CLICK, this.onContinueRun, this);
-    }
-    if (this.classSelectPanel?.isValid) {
-      const startBtnNode = this.classSelectPanel.getChildByName('StartBtn');
-      if (startBtnNode) {
-        const startBtn = startBtnNode.getComponent(Button);
-        if (startBtn?.node?.isValid) {
-          startBtn.node.off(Button.EventType.CLICK, this.startClassSelect, this);
-        }
-      }
-      for (let i = 0; i < CLASS_ORDER.length; i++) {
-        const btnName = `Class${i + 1}Btn`;
-        const btnNode = this.classSelectPanel.getChildByName(btnName);
-        if (btnNode?.isValid) {
-          const btn = btnNode.getComponent(Button);
-          if (btn) {
-            btn.node.off(Button.EventType.CLICK, this.onClassToggleClicked, this);
-          }
-        }
-      }
-    }
-    if (this.gameOverPanel?.isValid) {
-      const restartBtnNode = this.gameOverPanel.getChildByName('RestartButton');
-      if (restartBtnNode) {
-        const restartBtn = restartBtnNode.getComponent(Button);
-        if (restartBtn?.node?.isValid) {
-          restartBtn.node.off(Button.EventType.CLICK, this.restartFromRouteMap, this);
-        }
-      }
-    }
-    this.unbindShopPanelEvents();
-    this.unbindRestPanelEvents();
+    // 场景销毁时各子节点会一并销毁并自动解绑事件；
+    // 按规范 onDestroy 不访问任何 @property(Node)，仅清理 JS 引用。
     this.battleManager = null;
     this.routeMapUI = null;
     this.battleUI = null;

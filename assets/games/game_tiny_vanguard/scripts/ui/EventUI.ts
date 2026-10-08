@@ -17,6 +17,7 @@ export class EventUI extends Component {
   choiceContainer: Node = null;
 
   private _showCalled: boolean = false;
+  private _onChoice: ((index: number) => void) | null = null;
 
   onLoad(): void {
     if (!this._showCalled) {
@@ -26,6 +27,7 @@ export class EventUI extends Component {
 
   showEvent(event: EventConfig, onChoice: (index: number) => void): void {
     this.node.active = true;
+    this._onChoice = onChoice;
 
     if (this.eventTitleLabel) {
       this.eventTitleLabel.string = event.name;
@@ -54,11 +56,8 @@ export class EventUI extends Component {
           const btn = btnNode.getComponent(Button);
           if (btn) {
             btn.transition = Button.Transition.SCALE;
-            const index = i;
-            btn.node.on(Button.EventType.CLICK, () => {
-              onChoice(index);
-              this.node.active = false;
-            }, this);
+            btnNode['_choiceIndex'] = i;
+            btn.node.on(Button.EventType.CLICK, this.onChoiceClicked, this);
           }
           this.choiceContainer.addChild(btnNode);
         }
@@ -86,23 +85,31 @@ export class EventUI extends Component {
         const btn = confirmBtn.getComponent(Button);
         if (btn) {
           btn.transition = Button.Transition.SCALE;
-          btn.node.on(Button.EventType.CLICK, () => {
-            onChoice(selectedIndex);
-            this.node.active = false;
-          }, this);
+          confirmBtn['_choiceIndex'] = selectedIndex;
+          btn.node.on(Button.EventType.CLICK, this.onChoiceClicked, this);
         }
         this.choiceContainer.addChild(confirmBtn);
       }
     }
   }
 
+  // 命名事件方法（禁止匿名 lambda，便于解绑）
+  private onChoiceClicked(btn: Button): void {
+    if (!this._onChoice) return;
+    const idx = btn?.node ? (btn.node['_choiceIndex'] as number) : undefined;
+    if (idx === undefined || idx === null) return;
+    const callback = this._onChoice;
+    this.node.active = false;
+    callback(idx);
+  }
+
   hide(): void {
     this.node.active = false;
+    this._onChoice = null;
   }
 
   onDestroy(): void {
-    if (this.choiceContainer) {
-      this.choiceContainer.removeAllChildren();
-    }
+    // 子节点随本节点销毁自动解绑事件；按规范不访问 @property(Node)
+    this._onChoice = null;
   }
 }

@@ -700,6 +700,9 @@ export class BattleUI extends Component {
     if (this.endTurnButton) {
       this.endTurnButton.active = !isEnemyTurn && !isDeploy;
     }
+    if (this.attackButton) {
+      this.attackButton.active = !isEnemyTurn && !isDeploy;
+    }
     if (this.skillButtonContainer) {
       this.skillButtonContainer.active = !isEnemyTurn && !isDeploy;
     }
