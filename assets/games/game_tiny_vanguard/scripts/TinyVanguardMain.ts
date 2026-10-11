@@ -1,4 +1,5 @@
-import { _decorator, Component, Node, Label, Button, Sprite, Color, tween, Vec3 } from 'cc';
+import { _decorator, Component, Node, Label, Button, Sprite } from 'cc';
+import { COLOR, hex } from './config/Theme';
 import { RouteMapUI, RouteNode } from './ui/RouteMapUI';
 import { BattleManager, BattleResult, UnitActionPhase } from './battle/BattleManager';
 import { UpgradeUI, UpgradeOption } from './ui/UpgradeUI';
@@ -15,6 +16,25 @@ import { SceneManager } from '../../../common/managers/SceneManager';
 const { ccclass, property } = _decorator;
 
 const CLASS_ORDER = ['warrior', 'archer', 'mage', 'cleric'];
+
+/** 技能卡图标：按目标类型/主动被动推导（SkillConfig 无 icon 字段） */
+function skillIconOf(skill: SkillConfig): string {
+  if (skill.type === 'passive') return '\uD83D\uDEE1\uFE0F';        // 🛡️
+  switch (skill.targetType) {
+    case 'aoe': return '\uD83D\uDCA5';                              // 💥
+    case 'ally': return '\u2764\uFE0F';                             // ❤️
+    case 'tile': return '\uD83C\uDF00';                             // 🌀
+    case 'self': return '\u2728';                                   // ✨
+    default: return '\u2694\uFE0F';                                 // ⚔️
+  }
+}
+
+/** 属性增益卡图标 */
+const BUFF_ICON: Record<string, string> = {
+  hp: '\u2764\uFE0F',      // ❤️
+  attack: '\u2694\uFE0F',  // ⚔️
+  energy: '\u26A1',        // ⚡
+};
 
 export type GameState =
   | 'route_map' | 'deploy' | 'battle' | 'upgrade'
@@ -63,8 +83,6 @@ export class TinyVanguardMain extends Component {
 
   private _state: GameState = 'class_select';
   private _selectedClasses: string[] = [];
-  private readonly SELECTED_COLOR = new Color(60, 180, 60, 255);
-  private readonly UNSELECTED_COLOR = new Color(80, 80, 80, 255);
   private _runData: RunData = {
     currentRouteNode: 0,
     playerClasses: [],
@@ -239,6 +257,10 @@ export class TinyVanguardMain extends Component {
       if (!btn) continue;
       const classId = CLASS_ORDER[i];
       btnNode['_classId'] = classId;
+      // Button 默认 COLOR 过渡会按 hover/pressed 改写节点 Sprite 颜色，
+      // 会冲掉我们在 setClassButtonVisual 里设的选中配色（选中行显示成 hover 灰）。
+      // 改用 SCALE 过渡，颜色完全由代码控制。
+      btn.transition = Button.Transition.SCALE;
       btn.node.on(Button.EventType.CLICK, this.onClassToggleClicked, this);
     }
   }
@@ -273,26 +295,31 @@ export class TinyVanguardMain extends Component {
     this.updateStartBtnInteractable();
   }
 
+  /**
+   * 职业按钮选中态。
+   * P3 起不再放大节点（1.1 倍会让 592×64 的行与邻行相贴），
+   * 改用「左侧竖条 + 底板配色」表达选中（场景内节点名为 SelectBar）。
+   */
   private setClassButtonVisual(btnNode: Node, selected: boolean): void {
-    // 主图标 Sprite
+    // 底板：选中用主色，未选中用 SURFACE
     const sprite = btnNode.getComponent(Sprite);
     if (sprite) {
-      sprite.color = selected ? this.SELECTED_COLOR : this.UNSELECTED_COLOR;
+      sprite.color = selected ? hex(COLOR.PRIMARY, 255) : hex(COLOR.SURFACE, 255);
     }
-    // 高亮边框节点
-    const border = btnNode.getChildByName('HighlightBorder');
-    if (border) border.active = selected;
+    // 左侧竖条（原 HighlightBorder 改名而来）
+    const selectBar = btnNode.getChildByName('SelectBar');
+    if (selectBar) {
+      const barSprite = selectBar.getComponent(Sprite);
+      if (barSprite) {
+        barSprite.color = selected ? hex(COLOR.TEXT_PRIMARY, 255) : hex(COLOR.PANEL_BORDER, 255);
+      }
+      selectBar.active = true;   // 竖条常态可见（未选中用暗色），避免行宽跳动
+    }
     // 选中勾标记
     const checkMark = btnNode.getChildByName('CheckMark');
     if (checkMark) checkMark.active = selected;
-    // 缩放动画
-    if (selected) {
-      tween(btnNode)
-        .to(0.15, { scale: new Vec3(1.1, 1.1, 1) })
-        .start();
-    } else {
-      btnNode.setScale(new Vec3(1, 1, 1));
-    }
+    // 兜底复位：早期版本可能残留缩放
+    btnNode.setScale(1, 1, 1);
   }
 
   private updateStartBtnInteractable(): void {
@@ -617,9 +644,7 @@ export class TinyVanguardMain extends Component {
 
   private showUpgradeScreen(): void {
     const allOptions = this.generateUpgradeOptions();
-    const unitNames = this.battleManager.playerUnits
-      .filter(u => u.data?.isAlive)
-      .map(u => u.data!.name);
+    const unitNames = this.alivePlayerUnits.map(u => u.data!.name);
 
     if (allOptions.length === 0 || unitNames.length === 0) {
       this.returnToRouteMap();
@@ -635,44 +660,64 @@ export class TinyVanguardMain extends Component {
       },
       () => {
         this.returnToRouteMap();
+      },
+      (unitIndex) => {
+        // 跳过该单位的本次升级：不应用任何增益，仅继续下一位
+        const unit = this.alivePlayerUnits[unitIndex];
+        const name = unit?.data?.name ?? `#${unitIndex}`;
+        console.info(`[UpgradeUI] \u8DF3\u8FC7 ${name} \u7684\u672C\u6B21\u5347\u7EA7`);
       }
     );
+  }
+
+  /** 存活单位（升级选项与结算统一按此列表寻址，避免用 playerUnits 全量下标而错位） */
+  private get alivePlayerUnits(): UnitController[] {
+    return this.battleManager.playerUnits.filter(u => u.data?.isAlive);
   }
 
   private generateUpgradeOptions(): UpgradeOption[][] {
     const result: UpgradeOption[][] = [];
 
-    for (const unit of this.battleManager.playerUnits) {
-      if (!unit.data?.isAlive) continue;
+    for (const unit of this.alivePlayerUnits) {
+      if (!unit.data) continue;
 
       const unitOptions: UpgradeOption[] = [];
-      const classConfig = CLASSES.find(c => c.id === unit.data.classId);
+      const classConfig = CLASSES.find(c => c.id === unit.data!.classId);
 
       if (classConfig) {
-        const skills = getRandomSkillsFromPool(classConfig.skillPool, 3);
+        // 已学技能不再进卡池（与 UI 的「已学置灰」互为兜底，杜绝重复技能）
+        const learnedIds = unit.data.skills.map(s => s.id);
+        const availablePool = classConfig.skillPool.filter(id => !learnedIds.includes(id));
+        const skills = getRandomSkillsFromPool(availablePool, 3);
         for (const skill of skills) {
           unitOptions.push({
             name: skill.name,
             description: skill.description,
             type: 'skill',
             skillId: skill.id,
+            skillKind: skill.type,
+            icon: skillIconOf(skill),
           });
         }
       }
 
+      // 可学技能不足 3 项时用属性增益补位，保证始终是「三选一」
       const buffVariants = [
-        { name: `+1 血量`, buffType: 'hp', buffAmount: 1 },
-        { name: `+1 攻击`, buffType: 'attack', buffAmount: 1 },
-        { name: `+1 能量上限`, buffType: 'energy', buffAmount: 1 },
+        { name: '\u2764\uFE0F +1 \u6700\u5927\u8840\u91CF', buffType: 'hp', buffAmount: 1 },
+        { name: '\u2694\uFE0F +1 \u653B\u51FB\u529B', buffType: 'attack', buffAmount: 1 },
+        { name: '\u26A1 +1 \u80FD\u91CF\u4E0A\u9650', buffType: 'energy', buffAmount: 1 },
       ];
-      const chosenBuff = buffVariants[Math.floor(Math.random() * buffVariants.length)];
-      unitOptions.push({
-        name: chosenBuff.name,
-        description: `${unit.data.classId} ${chosenBuff.name}`,
-        type: 'buff',
-        buffType: chosenBuff.buffType,
-        buffAmount: chosenBuff.buffAmount,
-      });
+      while (unitOptions.length < 3 && buffVariants.length > 0) {
+        const picked = buffVariants.splice(Math.floor(Math.random() * buffVariants.length), 1)[0];
+        unitOptions.push({
+          name: picked.name,
+          description: `${unit.data.name} \u83B7\u5F97\u6C38\u4E45\u589E\u76CA`,
+          type: 'buff',
+          buffType: picked.buffType,
+          buffAmount: picked.buffAmount,
+          icon: BUFF_ICON[picked.buffType] ?? '\u2728',
+        });
+      }
 
       const shuffled = unitOptions.sort(() => Math.random() - 0.5);
       result.push(shuffled.slice(0, Math.min(3, shuffled.length)));
@@ -685,7 +730,9 @@ export class TinyVanguardMain extends Component {
     const option = allOptions[unitIndex]?.[optionIndex];
     if (!option) return;
 
-    const unit = this.battleManager.playerUnits[unitIndex];
+    // 与 generateUpgradeOptions 保持同一寻址基准（存活单位），
+    // 否则阵亡单位会让下标整体偏移、增益加到错误的单位上
+    const unit = this.alivePlayerUnits[unitIndex];
     if (!unit?.data) return;
 
     if (option.type === 'skill' && option.skillId) {
