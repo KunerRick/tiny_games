@@ -494,7 +494,7 @@ export class TinyVanguardMain extends Component {
 
     switch (phase) {
       case 'deploy':
-        this.battleUI.updatePhase('\u5E03\u9635\u9636\u6BB5', '\u70B9\u51FB\u524D\u4E24\u884C\u653E\u7F6E\u5355\u4F4D');
+        this.battleUI.updatePhase('\u5E03\u9635\u9636\u6BB5', '\u70B9\u51FB\u524D\u4E24\u884C\u90E8\u7F72\u5355\u4F4D');
         break;
 
       case 'player_turn':
@@ -507,11 +507,10 @@ export class TinyVanguardMain extends Component {
                        '\u70B9\u51FB\u653B\u51FB\u6309\u94AE\u6216\u6280\u80FD\u6309\u94AE';
           this.battleUI.updatePhase(
             `\u6211\u65B9\u56DE\u5408 \u7B2C${this.battleManager.turnCount}\u8F6E`,
+            hint,
             unit.data.name,
             idx,
-            totalAlive,
-            this.battleManager.turnCount,
-            hint
+            totalAlive
           );
           // 同步刷新单位状态栏（血量/能量/技能按钮）
           this.updateBattleUI();

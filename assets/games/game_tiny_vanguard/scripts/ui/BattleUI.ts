@@ -1,5 +1,14 @@
 import { _decorator, Component, Node, Label, Button, Sprite, Color, tween, Vec3, instantiate, Prefab, UITransform, Event, EventTouch } from 'cc';
+import {
+  ALPHA, COLOR, CONTROL, SPACE, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_TINY,
+  applyFont, applyFontAndColor, hex,
+} from '../config/Theme';
 const { ccclass, property } = _decorator;
+
+/** 兵牌宽度（高度取 CONTROL.ROW_HEIGHT） */
+const CARD_WIDTH = 110;
+/** 选中态左侧竖条宽度（§4 问题 1：用竖条替代整块覆盖高亮） */
+const SELECT_BAR_WIDTH = 4;
 
 @ccclass('BattleUI')
 export class BattleUI extends Component {
@@ -27,9 +36,6 @@ export class BattleUI extends Component {
   @property({ type: Node, tooltip: '普通攻击按钮节点' })
   attackButton: Node = null;
 
-  @property({ type: Node, tooltip: '布阵提示文本' })
-  deployPrompt: Node = null;
-
   @property({ type: Node, tooltip: '布阵单位列表容器' })
   deployUnitList: Node = null;
 
@@ -54,12 +60,6 @@ export class BattleUI extends Component {
   @property({ type: Label, tooltip: '当前单位 (1/3)' })
   unitTurnLabel: Label = null;
 
-  @property({ type: Label, tooltip: '操作提示' })
-  actionHintLabel: Label = null;
-
-  @property({ type: Sprite, tooltip: '阶段背景色' })
-  phaseBg: Sprite = null;
-
   private _showCalled: boolean = false;
   private _eventsBound: boolean = false;
   private _deployCards: Node[] = [];
@@ -69,6 +69,9 @@ export class BattleUI extends Component {
   private _onBattleStartComplete: (() => void) | null = null;
   private _skillButtonPool: Node[] = [];
   private _onAttackCallback: (() => void) | null = null;
+  /** 阶段条被自动跳过提示临时覆盖前的文本/颜色，用于 2 秒后恢复 */
+  private _lastPhaseText: string = '';
+  private _lastPhaseColor: string = COLOR.TEXT_PRIMARY;
 
   onLoad(): void {
     if (!this._showCalled) {
@@ -90,9 +93,14 @@ export class BattleUI extends Component {
     if (this.confirmDeployButton) {
       this.confirmDeployButton.setPosition(0, -320);
     }
-    if (this.deployPrompt) {
-      this.deployPrompt.setPosition(0, 260);
-    }
+
+    // 阶段条与状态栏统一走设计令牌（P1：提示合并为单一阶段条，删除重复文案）
+    applyFontAndColor(this.phaseLabel, FONT_BODY, COLOR.TEXT_PRIMARY);
+    applyFontAndColor(this.unitTurnLabel, FONT_CAPTION, COLOR.TEXT_SECONDARY);
+    applyFontAndColor(this.turnLabel, FONT_BODY, COLOR.TEXT_PRIMARY);
+    applyFont(this.hpLabel, FONT_CAPTION);
+    applyFont(this.energyLabel, FONT_CAPTION);
+    applyFont(this.unitNameLabel, FONT_BODY);
 
     // 创建战前遮罩
     this._battleStartOverlay = new Node('BattleStartOverlay');
@@ -108,25 +116,12 @@ export class BattleUI extends Component {
     const titleNode = new Node('BattleStartTitle');
     const titleLabel = titleNode.addComponent(Label);
     titleLabel.string = '\u2694 \u6218\u6597\u5F00\u59CB\uff01';
-    titleLabel.fontSize = 48;
-    titleLabel.color = new Color(255, 215, 0);
+    applyFontAndColor(titleLabel, FONT_DISPLAY, COLOR.WARNING);
     titleLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
     titleLabel.verticalAlign = Label.VerticalAlign.CENTER;
     titleNode.setPosition(0, 0, 0);
     titleNode.setScale(0, 0, 1);
     this._battleStartOverlay.addChild(titleNode);
-
-    // 阶段背景色（编辑器未绑定时自动创建）
-    if (!this.phaseBg && this.phaseLabel) {
-      const bgNode = new Node('PhaseBg');
-      const bgSprite = bgNode.addComponent(Sprite);
-      bgSprite.color = new Color(0, 100, 200, 100);
-      const bgTrans = bgNode.addComponent(UITransform);
-      bgTrans.setContentSize(400, 40);
-      bgNode.setPosition(0, 260, -1);
-      this.node.addChild(bgNode);
-      this.phaseBg = bgSprite;
-    }
 
     // 预创建胜利面板子节点
     if (this.victoryPanel) {
@@ -148,8 +143,7 @@ export class BattleUI extends Component {
         textTransform.setContentSize(160, 50);
         const btnLabel = textNode.addComponent(Label);
         btnLabel.string = '\u7EE7\u7EED';
-        btnLabel.fontSize = 24;
-        btnLabel.color = Color.WHITE;
+        applyFontAndColor(btnLabel, FONT_BODY, COLOR.TEXT_PRIMARY);
         btnLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
         btnLabel.verticalAlign = Label.VerticalAlign.CENTER;
         continueBtn.addChild(textNode);
@@ -293,19 +287,16 @@ export class BattleUI extends Component {
     // 进入新战斗前隐藏上一场的结算面板
     if (this.victoryPanel) this.victoryPanel.active = false;
     if (this.defeatPanel) this.defeatPanel.active = false;
-    if (this.deployPrompt) this.deployPrompt.active = true;
     if (this.confirmDeployButton) this.confirmDeployButton.active = true;
     if (this.waitButton) this.waitButton.active = false;
     // 隐藏状态栏面板（仅在部署阶段）
     this.setStatPanelVisible(false);
-    // 设置顶部阶段标签
-    if (this.phaseLabel) this.phaseLabel.string = '\u5E03\u9635\u9636\u6BB5';
-    if (this.actionHintLabel) this.actionHintLabel.string = '\u70B9\u51FB\u524D\u4E24\u884C\u653E\u7F6E\u5355\u4F4D';
+    // 单一阶段条：阶段 + 操作提示合成一句，不再有多处重复文案
+    this.setPhaseBar('\u5E03\u9635\u9636\u6BB5', '\u70B9\u51FB\u524D\u4E24\u884C\u90E8\u7F72\u5355\u4F4D');
     if (this.deployUnitList) this.deployUnitList.active = false;
   }
 
   hideDeployPhase(): void {
-    if (this.deployPrompt) this.deployPrompt.active = false;
     if (this.confirmDeployButton) this.confirmDeployButton.active = false;
     if (this.waitButton) this.waitButton.active = true;
     // 恢复状态栏面板
@@ -333,14 +324,18 @@ export class BattleUI extends Component {
   updateUnitInfo(name: string, hp: number, maxHp: number, energy: number, maxEnergy: number, turn: number, isEnemy: boolean = false): void {
     if (this.unitNameLabel) {
       this.unitNameLabel.string = name;
-      this.unitNameLabel.color = isEnemy ? new Color(255, 100, 100) : Color.WHITE;
+      // 敌人统一 DANGER 系，玩家用正文色（§4 问题 6）
+      this.unitNameLabel.color = isEnemy ? hex(COLOR.DANGER) : hex(COLOR.TEXT_PRIMARY);
     }
     if (this.hpLabel) {
       this.hpLabel.string = `HP: ${hp}/${maxHp}`;
-      this.hpLabel.color = isEnemy ? new Color(255, 80, 80) : new Color(80, 200, 255);
+      this.hpLabel.color = isEnemy ? hex(COLOR.DANGER) : hex(COLOR.SUCCESS);
     }
-    if (this.energyLabel) this.energyLabel.string = `\u26A1 ${energy}/${maxEnergy}`;
-    if (this.turnLabel) this.turnLabel.string = `\u8F6E\u6B21 ${turn}`;
+    if (this.energyLabel) {
+      this.energyLabel.string = `\u26A1 ${energy}/${maxEnergy}`;
+      this.energyLabel.color = hex(COLOR.INFO);
+    }
+    if (this.turnLabel) this.turnLabel.string = `\u56DE\u5408 ${turn}`;
   }
 
   setupPlatoonCards(
@@ -358,13 +353,11 @@ export class BattleUI extends Component {
     this._deployCards = [];
     this._onDeployCardCb = callback;
 
-    const cardWidth = 110;
-    const cardHeight = 65;
-    const gap = 8;
+    // 兵牌：纵向堆叠在棋盘左侧，行高与间距统一走设计令牌
+    const cardWidth = CARD_WIDTH;
+    const cardHeight = CONTROL.ROW_HEIGHT;
+    const gap = CONTROL.ROW_GAP;
     const count = unitNames.length;
-    // 棋盘左边界 x=-200，棋盘底部 y=-200
-    // 兵牌位于棋盘左侧外，与棋盘底部平齐
-    // 调整 baseX 使卡片更靠近棋盘（从 -325 改为 -265，间距约 25px）
     const baseX = -265;
     const baseY = -200;
 
@@ -373,34 +366,38 @@ export class BattleUI extends Component {
       // 从下往上排列：i=0 最底，i=2 最高
       card.setPosition(baseX, baseY + i * (cardHeight + gap), 0);
 
-      // 背景
+      // 背景：Sprite 的 @requireComponent 已自带 UITransform，不可重复 addComponent
+      // （重复添加会让 setContentSize 设到未被使用的那一个上，节点仍是默认 100×100
+      //   → 卡片按 100 高与 8 间距排布时必然重叠）
       const bg = card.addComponent(Sprite);
-      bg.color = new Color(50, 55, 75, 230);
+      bg.color = hex(COLOR.SURFACE, ALPHA.PANEL_BG);
       bg.sizeMode = Sprite.SizeMode.CUSTOM;
-      const bgTransform = card.addComponent(UITransform);
-      bgTransform.setContentSize(cardWidth, cardHeight);
+      const cardTransform = card.getComponent(UITransform);
+      if (cardTransform) cardTransform.setContentSize(cardWidth, cardHeight);
 
-      // 图标 (文字 emoji，放在上半部分)
+      // 图标（上半部分）
       const iconNode = new Node('IconLabel');
+      const iconUi = iconNode.addComponent(UITransform);
+      iconUi.setContentSize(cardWidth, 32);
       const iconLabel = iconNode.addComponent(Label);
       iconLabel.string = unitIcons[i] || '';
-      iconLabel.fontSize = 22;
-      iconLabel.color = Color.WHITE;
+      applyFontAndColor(iconLabel, FONT_BODY, COLOR.TEXT_PRIMARY);
       iconLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
       iconLabel.verticalAlign = Label.VerticalAlign.CENTER;
-      iconNode.setPosition(0, 10, 0);
+      iconNode.setPosition(0, 14, 0);
       card.addChild(iconNode);
 
-      // 名字（放在下半部分）
-      const nameLabel = new Node('NameLabel');
-      const nl = nameLabel.addComponent(Label);
+      // 名字（下半部分）
+      const nameNode = new Node('NameLabel');
+      const nameUi = nameNode.addComponent(UITransform);
+      nameUi.setContentSize(cardWidth, 20);
+      const nl = nameNode.addComponent(Label);
       nl.string = unitNames[i];
-      nl.fontSize = 13;
-      nl.color = Color.WHITE;
+      applyFontAndColor(nl, FONT_TINY, COLOR.TEXT_SECONDARY);
       nl.horizontalAlign = Label.HorizontalAlign.CENTER;
       nl.verticalAlign = Label.VerticalAlign.CENTER;
-      nameLabel.setPosition(0, -14, 0);
-      card.addChild(nameLabel);
+      nameNode.setPosition(0, -18, 0);
+      card.addChild(nameNode);
 
       // 交互
       card['_deployIdx'] = i;
@@ -423,58 +420,45 @@ export class BattleUI extends Component {
     if (!card?.isValid) return;
 
     const bg = card.getComponent(Sprite);
+    const cardHeight = CONTROL.ROW_HEIGHT;
 
-    // 找到或创建 HighlightBorder
-    let border = card.getChildByName('HighlightBorder');
+    // 左侧竖条即选中指示条，不再用整块 HighlightBorder 覆盖卡片
+    // （覆盖式高亮会与卡片内的图标/名字 100% 重叠；见改版方案 §4 问题 1）
+    let bar = card.getChildByName('SelectBar');
+    if (!bar) {
+      bar = new Node('SelectBar');
+      const barSprite = bar.addComponent(Sprite);
+      barSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+      const barUi = bar.getComponent(UITransform);
+      if (barUi) barUi.setContentSize(SELECT_BAR_WIDTH, cardHeight - SPACE.SM);
+      // 贴卡片左缘内侧，竖直居中
+      bar.setPosition(-CARD_WIDTH / 2 + SELECT_BAR_WIDTH / 2 + 1, 0, 0);
+      card.addChild(bar);
+    }
+
+    const barSpriteComp = bar.getComponent(Sprite);
 
     switch (state) {
       case 'unplaced':
-        // 深蓝灰色背景，淡色边框提示可交互
-        if (bg) bg.color = new Color(45, 50, 70, 220);
+        if (bg) bg.color = hex(COLOR.SURFACE, ALPHA.PANEL_BG);
         card.setScale(new Vec3(1, 1, 1));
-        if (border) {
-          const bSprite = border.getComponent(Sprite);
-          if (bSprite) bSprite.color = new Color(120, 130, 160, 200);
-          const bTrans = border.getComponent(UITransform);
-          if (bTrans) bTrans.setContentSize(116, 71);
-          border.active = true;
-        }
+        bar.active = false;
         break;
 
       case 'selected':
-        // 亮绿色背景 + 绿色边框表示当前选中
-        if (bg) bg.color = new Color(60, 180, 60, 240);
-        card.setScale(new Vec3(1.12, 1.12, 1));
-        if (!border) {
-          border = new Node('HighlightBorder');
-          const bSprite = border.addComponent(Sprite);
-          bSprite.color = new Color(120, 255, 120, 255);
-          bSprite.sizeMode = Sprite.SizeMode.CUSTOM;
-          const bTrans = border.addComponent(UITransform);
-          bTrans.setContentSize(116, 71);
-          border.setPosition(0, 0, -1);
-          card.addChild(border);
-        }
-        border.active = true;
+        // 选中：主色背景 + 左侧主色竖条（取代原来的 1.12 放大与整块绿框）
+        if (bg) bg.color = hex(COLOR.PRIMARY, ALPHA.PANEL_BG);
+        card.setScale(new Vec3(1, 1, 1));
+        if (barSpriteComp) barSpriteComp.color = hex(COLOR.TEXT_PRIMARY);
+        bar.active = true;
         break;
 
       case 'placed':
-        // 深色半透明背景 + 金色边框表示已完成部署
-        if (bg) bg.color = new Color(30, 35, 50, 150);
+        // 已部署：压暗底色 + 金色竖条
+        if (bg) bg.color = hex(COLOR.PRIMARY_DISABLED, ALPHA.PANEL_BG);
         card.setScale(new Vec3(1, 1, 1));
-        if (!border) {
-          border = new Node('HighlightBorder');
-          const bSprite = border.addComponent(Sprite);
-          bSprite.color = new Color(255, 200, 80, 255);
-          bSprite.sizeMode = Sprite.SizeMode.CUSTOM;
-          const bTrans = border.addComponent(UITransform);
-          bTrans.setContentSize(116, 71);
-          border.setPosition(0, 0, -1);
-          card.addChild(border);
-        }
-        const placedBorderSprite = border.getComponent(Sprite);
-        if (placedBorderSprite) placedBorderSprite.color = new Color(255, 200, 80, 255);
-        border.active = true;
+        if (barSpriteComp) barSpriteComp.color = hex(COLOR.WARNING);
+        bar.active = true;
         break;
     }
 
@@ -676,26 +660,27 @@ export class BattleUI extends Component {
     }
   }
 
+  /**
+   * 更新阶段条与当前单位。
+   * 参数顺序以「阶段条」为中心：phase 与 actionHint 是阶段条的唯一内容，
+   * 单位信息（unitName/unitIndex/totalUnits）写在左侧状态面板里。
+   * 原签名把 actionHint 放在最后，导致部署/敌方回合的提示被当作 unitName 丢失。
+   */
   updatePhase(
     phase: string,
+    actionHint?: string,
     unitName?: string,
     unitIndex?: number,
-    totalUnits?: number,
-    turn?: number,
-    actionHint?: string
+    totalUnits?: number
   ): void {
-    if (this.phaseLabel) {
-      this.phaseLabel.string = phase;
-    }
+    // 单一阶段条：阶段名 + 操作提示合成一句（P1 合并原 PhaseLabel/ActionHintLabel/DeployPrompt）
+    this.setPhaseBar(phase, actionHint);
     if (this.unitTurnLabel) {
       if (unitName && unitIndex !== undefined && totalUnits !== undefined) {
         this.unitTurnLabel.string = `${unitName} (${unitIndex}/${totalUnits})`;
       } else {
         this.unitTurnLabel.string = unitName ?? '';
       }
-    }
-    if (this.actionHintLabel) {
-      this.actionHintLabel.string = actionHint ?? '';
     }
 
     // 根据阶段控制按钮可见性
@@ -713,62 +698,39 @@ export class BattleUI extends Component {
     if (this.skillButtonContainer) {
       this.skillButtonContainer.active = !isEnemyTurn && !isDeploy;
     }
+  }
 
-    // 根据阶段设置背景色
-    if (this.phaseBg) {
-      let phaseType: string;
-      if (phase.includes('\u5E03\u9635')) {
-        phaseType = 'deploy';
-      } else if (phase.includes('\u654C\u65B9')) {
-        phaseType = 'enemy';
-      } else if (phase.includes('\u6211\u65B9')) {
-        phaseType = 'player';
-      } else if (phase.includes('\u80DC\u5229')) {
-        phaseType = 'victory';
-      } else if (phase.includes('\u5931\u8D25')) {
-        phaseType = 'defeat';
-      } else {
-        phaseType = 'none';
-      }
-
-      switch (phaseType) {
-        case 'deploy':
-          this.phaseBg.color = new Color(0, 120, 60, 120);
-          break;
-        case 'enemy':
-          this.phaseBg.color = new Color(180, 40, 40, 120);
-          break;
-        case 'player':
-          this.phaseBg.color = new Color(0, 80, 180, 120);
-          break;
-        case 'victory':
-          this.phaseBg.color = new Color(180, 140, 0, 120);
-          break;
-        case 'defeat':
-          this.phaseBg.color = new Color(80, 80, 80, 120);
-          break;
-        default:
-          this.phaseBg.color = new Color(0, 0, 0, 0);
-          break;
-      }
+  /**
+   * 单一阶段条：把「阶段」与「操作提示」写进同一个 Label。
+   * 原实现把两者分散在 PhaseLabel / DeployPrompt / ActionHintLabel 三个节点上，
+   * 造成文案重复与相互重叠（见改版方案 §4 问题 5）。
+   */
+  private setPhaseBar(phase: string, actionHint?: string): void {
+    if (!this.phaseLabel) return;
+    if (actionHint && actionHint.length > 0) {
+      this.phaseLabel.string = `${phase} \u00B7 ${actionHint}`;
+    } else {
+      this.phaseLabel.string = phase;
     }
+    this._lastPhaseText = this.phaseLabel.string;
+    this._lastPhaseColor = COLOR.TEXT_PRIMARY;
+    this.phaseLabel.color = hex(COLOR.TEXT_PRIMARY);
   }
 
   clearPhase(): void {
-    if (this.phaseLabel) this.phaseLabel.string = '';
-    if (this.unitTurnLabel) this.unitTurnLabel.string = '';
-    if (this.actionHintLabel) this.actionHintLabel.string = '';
-    this.hideAttackButton();
-    if (this.phaseBg) {
-      this.phaseBg.color = new Color(0, 0, 0, 0);
+    if (this.phaseLabel) {
+      this.phaseLabel.string = '';
+      this.phaseLabel.color = hex(COLOR.TEXT_PRIMARY);
     }
+    if (this.unitTurnLabel) this.unitTurnLabel.string = '';
+    this.hideAttackButton();
   }
 
   /** 显示自动跳过提示（短暂展示后恢复） */
   showAutoSkipNotice(unitName: string): void {
-    if (this.actionHintLabel) {
-      this.actionHintLabel.string = `${unitName} \u65E0\u53EF\u653B\u51FB\u76EE\u6807\uFF0C\u81EA\u52A8\u8DF3\u8FC7`;
-      this.actionHintLabel.color = new Color(255, 200, 80);
+    if (this.phaseLabel) {
+      this.phaseLabel.string = `${unitName} \u65E0\u53EF\u653B\u51FB\u76EE\u6807\uFF0C\u81EA\u52A8\u8DF3\u8FC7`;
+      this.phaseLabel.color = hex(COLOR.WARNING);
     }
     // 2 秒后自动恢复提示
     if (this._autoSkipNoticeCb) {
@@ -777,8 +739,9 @@ export class BattleUI extends Component {
     }
     this._autoSkipNoticeCb = () => {
       this._autoSkipNoticeCb = null;
-      if (this.actionHintLabel) {
-        this.actionHintLabel.string = '';
+      if (this.phaseLabel) {
+        this.phaseLabel.string = this._lastPhaseText;
+        this.phaseLabel.color = hex(this._lastPhaseColor);
       }
     };
     this.scheduleOnce(this._autoSkipNoticeCb, 2);
