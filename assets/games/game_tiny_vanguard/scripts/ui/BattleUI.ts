@@ -258,14 +258,16 @@ export class BattleUI extends Component {
     if (this.deployUnitList) this.deployUnitList.active = false;
   }
 
-  /** 部署阶段隐藏 / 战斗阶段恢复 状态栏面板 */
+  /**
+   * 部署阶段隐藏 / 战斗阶段恢复 状态栏面板。
+   * 注意：不含 `turnLabel` —— HudTop 是 Canvas 根级常驻节点，其显隐由
+   * TinyVanguardMain 的状态机统一管理（否则两个管理者各关一半，非战斗
+   * 界面会残留「回合 1」）。本类只负责写它的文本。
+   */
   private setStatPanelVisible(visible: boolean): void {
     // UnitInfoPanel 是 unitNameLabel/hpLabel/energyLabel 的父节点
     if (this.unitNameLabel?.node?.parent) {
       this.unitNameLabel.node.parent.active = visible;
-    }
-    if (this.turnLabel?.node) {
-      this.turnLabel.node.active = visible;
     }
     if (this.skillButtonContainer) {
       this.skillButtonContainer.active = visible;

@@ -75,6 +75,9 @@ export class TinyVanguardMain extends Component {
   @property({ type: Label, tooltip: '金币显示' })
   goldLabel: Label = null;
 
+  @property({ type: Label, tooltip: '回合显示（仅战斗中可见）' })
+  turnLabel: Label = null;
+
   @property({ type: Button, tooltip: '继续按钮（存档）' })
   continueButton: Button = null;
 
@@ -112,9 +115,10 @@ export class TinyVanguardMain extends Component {
     if (this.battleManager?.gridController?.node) {
       this.battleManager.gridController.node.active = false;
     }
-    if (this.goldLabel?.node) {
-      this.goldLabel.node.active = false;
-    }
+    // HudTop 挂在 Canvas 根级，必须在开局就按状态机收起来。
+    // 原先只关 goldLabel，turnLabel 无人关（BattleUI 节点是 inactive，
+    // 其 onLoad 不执行）→ 职业选择/路线图/通关界面残留「回合 1」。
+    this.setHudVisible(false, false);
 
     const meta = SaveManager.loadMeta();
     if (meta) {
@@ -406,9 +410,8 @@ export class TinyVanguardMain extends Component {
     this._state = 'route_map';
     this._battleCount = 0;
 
-    if (this.goldLabel?.node) {
-      this.goldLabel.node.active = true;
-    }
+    // 路线图：金币可见（局内资源）、回合隐藏（仅战斗有意义）
+    this.setHudVisible(true, false);
 
     if (this.routeMapUI) {
       this.routeMapUI.show();
@@ -486,6 +489,8 @@ export class TinyVanguardMain extends Component {
 
   private startBattle(isElite: boolean, isBoss: boolean): void {
     this._state = 'battle';
+    // 战斗中 HUD 双端可见：左回合、右金币
+    this.setHudVisible(true, true);
     this.routeMapUI.hide();
     if (this.battleManager?.node) {
       this.battleManager.node.active = true;
@@ -824,6 +829,8 @@ export class TinyVanguardMain extends Component {
 
   private openShop(): void {
     this._state = 'shop';
+    // 非战斗节点：金币可见、回合隐藏
+    this.setHudVisible(true, false);
     this.routeMapUI.hide();
 
     if (this.shopPanel) {
@@ -885,6 +892,7 @@ export class TinyVanguardMain extends Component {
 
   private openRest(): void {
     this._state = 'rest';
+    this.setHudVisible(true, false);
     this.routeMapUI.hide();
 
     if (this.restPanel) {
@@ -913,6 +921,7 @@ export class TinyVanguardMain extends Component {
 
   private triggerEvent(): void {
     this._state = 'event';
+    this.setHudVisible(true, false);
     this.routeMapUI.hide();
 
     const eventIdx = Math.floor(Math.random() * EVENTS.length);
@@ -1030,17 +1039,23 @@ export class TinyVanguardMain extends Component {
 
   private onRunComplete(victory: boolean): void {
     if (this.battleUI) this.battleUI.hide();
+    // 战斗单位是 BattleManager 的直接子节点。原先只关 gridController（网格），
+    // 最后一关残留的敌人会叠在通关/失败面板上（实测 5 个单位显示在面板前）。
+    if (this.battleManager?.node?.isValid) {
+      this.battleManager.node.active = false;
+    }
     if (this.battleManager?.gridController?.node) {
       this.battleManager.gridController.node.active = false;
     }
-    if (this.goldLabel?.node) {
-      this.goldLabel.node.active = false;
-    }
+    // 结算页不需要任何 HUD（回合与金币一并收起）
+    this.setHudVisible(false, false);
     if (this.routeMapUI) this.routeMapUI.hide();
 
     if (victory) {
       this._runData.honor += 100;
 
+      // 两个结算面板互斥：Boss 关通关与失败可能连续触发，不收起另一个会叠版
+      if (this.gameOverPanel) this.gameOverPanel.active = false;
       if (this.victoryPanel) {
         this.victoryPanel.active = true;
       }
@@ -1048,6 +1063,7 @@ export class TinyVanguardMain extends Component {
       this.fillPanelSummary(this.victoryPanel, 1, `\u62B5\u8FBE\u7B2C ${this._battleCount} \u5173`);
       this.fillPanelSummary(this.victoryPanel, 2, `\u8363\u8A89 +100 \u00B7 \u91D1\u5E01 ${this._runData.gold}`);
     } else {
+      if (this.victoryPanel) this.victoryPanel.active = false;
       if (this.gameOverPanel) {
         this.gameOverPanel.active = true;
       }
@@ -1092,6 +1108,18 @@ export class TinyVanguardMain extends Component {
     }
   }
 
+  /**
+   * 顶部 HUD（HudTop 下的回合/金币）显隐的唯一出口。
+   * HudTop 是 Canvas 根级常驻节点，不属于 BattleUI —— 若让 BattleUI 与本类
+   * 各管一半，非战斗界面就会残留 HUD（实测职业选择页只显示「回合 1」，
+   * 金币被本类关掉、回合无人管，左右不对称）。
+   * 约定：金币在局内（路线图起）可见；回合仅战斗可见。
+   */
+  private setHudVisible(gold: boolean, turn: boolean): void {
+    if (this.goldLabel?.node?.isValid) this.goldLabel.node.active = gold;
+    if (this.turnLabel?.node?.isValid) this.turnLabel.node.active = turn;
+  }
+
   private updateGoldDisplay(): void {
     if (this.goldLabel) {
       this.goldLabel.string = `\uD83D\uDCB0 ${this._runData.gold}`;
@@ -1112,15 +1140,14 @@ export class TinyVanguardMain extends Component {
     SaveManager.clearRun();
     this.resetClassSelectionVisual();
 
-    if (this.battleManager) {
+    if (this.battleManager?.node?.isValid) {
       this.battleManager.node.active = false;
       if (this.battleManager.gridController?.node) {
         this.battleManager.gridController.node.active = false;
       }
     }
-    if (this.goldLabel?.node) {
-      this.goldLabel.node.active = false;
-    }
+    // 回到职业选择：HUD 整体收起（原只关 goldLabel，turnLabel 残留）
+    this.setHudVisible(false, false);
     if (this.classSelectPanel) {
       this.classSelectPanel.active = true;
     }

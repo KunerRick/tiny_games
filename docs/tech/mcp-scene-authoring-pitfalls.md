@@ -167,6 +167,71 @@ const rect = [
 
 **正确做法**：调真实入口（`showDeployPhase()` / `showVictory(...)` / `showDefeat(...)`）再测量；测完还原可见性。
 
+### ④ `@property` 是组件类型时：`propertyType` 用 `component`、值传**节点** UUID
+
+绑定 `@property({ type: Label })` 这类组件引用时，`propertyType` 写 `"cc.Label"` 会被直接拒绝：
+
+```
+Failed to set property: Unsupported property type: cc.Label
+```
+
+`propertyType` 的合法取值里**没有** `cc.Xxx`：
+
+```
+string | number | boolean | integer | float | color | vec2 | vec3 | size
+node | component | spriteFrame | prefab | asset
+nodeArray | colorArray | numberArray | stringArray
+```
+
+正确做法是 `propertyType: 'component'` + `value` = **目标节点 UUID**（MCP 会按属性元数据在该节点上自动找所需组件）：
+
+```js
+await call('component_set_component_property', {
+  nodeUuid: gmNodeUuid,                      // 属性所在的节点
+  componentType: 'd9ba2ybHbJLroUxmNge1oOA',  // 脚本 classId（不是类名）
+  property: 'turnLabel',
+  propertyType: 'component',                 // ← 不是 'cc.Label'
+  value: 'TurnLabel 的节点 uuid',            // ← 节点 uuid，不是组件 uuid
+});
+```
+
+两个配套注意点：
+
+- `componentType` 用脚本的 **classId**（`@ccclass` 生成的短 id），不是 `TinyVanguardMain` 这类显示名。拿不到时先 `component_get_components`，读返回里那个非 `cc.` 前缀的 `type`。
+- `component_get_components` 返回中，**内置组件的 `uuid` 常常是 `null`**（如 `cc.Label`、`cc.UITransform`），不要拿它当引用值 —— 这正是必须"传节点 uuid"的原因。
+
+> 前提：新增 `@property` 之后必须先 `project_refresh_assets`，否则编辑器里还没有这个字段，绑定会报 `Property 'xxx' not found`。
+
+### ⑤ 跨面板常驻的 HUD：显隐只能有**一个**管理者
+
+`HudTop`（回合 + 金币）挂在 `Canvas` 根级，不属于任何面板。若让 `BattleUI` 管 `turnLabel`、`TinyVanguardMain` 管 `goldLabel`，必然出现"没人管的那个残留"：`BattleUI` 节点本身 `active = false` 时其 `onLoad()` **不执行**，于是没人关 `turnLabel` → 职业选择/路线图/通关界面都顶着「回合 1」，左右也不再对称。
+
+规则：
+
+- 常驻节点的 `active` 收敛到**一个**出口方法（如 `setHudVisible(gold, turn)`），在每个状态切换点（开局 / 路线图 / 战斗 / 商店 / 休息 / 事件 / 结算）显式调用；
+- 面板类只负责写它的**文本**，不负责它的 `active`。
+
+同理，结算时要顺手清掉"上一阶段的残留"：`onRunComplete()` 原先只关了 `gridController`（网格）—— 但战斗单位是 **`BattleManager` 的直接子节点**，最后一关的敌人会叠在结算面板上。改为一并 `battleManager.node.active = false`。
+
+### ⑥ `ScrollView.horizontal = false` 不会校正 content 的 x
+
+`content` 存的是 `x = -325`，而纵向 ScrollView 只对齐/夹取 `y`，**x 原样保留** → 整块内容左移 325px：左列节点 world `x ∈ [-95, -15]`，而画布可见区从 `x = 0` 起，**整列被裁到屏幕外**。
+
+口诀：`content` 的位置要**读回实际值**，别只信"它应该居中"。
+
+```js
+// 水平居中：x 归 0（y 交给 ScrollView 自己 clamp）
+await call('node_set_node_transform', { uuid: CONTENT, position: { x: 0, y: y0, z: 0 } });
+```
+
+### ⑦ 固定表头 + 全屏滚动区：第一行内容会被表头压住
+
+`view` 占满 `720×1280` 时，`ScrollView` 会把 `content` 顶部钉在 view 顶部（`y = 1280`），而浮在顶部的进度/图例标签在 `y ≈ 1198~1270` —— 第一行节点（`y 1160~1240`）就被图例压住 `80×28`。
+
+修法：把滚动区收到表头**之下**（本例 `view` 高 `1280 → 1160`、中心下移 60），让 `content` 的可视顶部落在图例下方。
+
+**教训**：任何"固定表头 + 滚动内容"的组合，都要按**表头底边**给滚动区定高，而不是让滚动区占满全屏。
+
 ---
 
 ## 4. 同一节点只能有一个渲染组件
