@@ -17,6 +17,8 @@
 | 5 | **事件 handler 必须是命名方法，禁止匿名 lambda** | 匿名函数无法 `off()` 解绑，造成内存泄漏或重复触发 |
 | 6 | **修改 `.ts` 后必须跑 `npx tsc --noEmit` 验证编译** | 早发现编码破坏和类型错误，避免提交后才发现 |
 | 7 | **提交前用 `git diff --stat` 和 `git diff <file>` 检查变更范围** | 防止把临时文件/编码破坏/无关改动一起提交 |
+| 8 | **改完 `.ts` 后先调 MCP `project_refresh_assets` 刷新资产库，再重载预览页** | 编辑器不会自动重编译文件系统改动，预览仍跑旧代码，会误判“修复无效” |
+| 9 | **用浏览器工具点击预览时，坐标按设备像素传（= CSS 坐标 × `devicePixelRatio`）** | 传 CSS 坐标会静默点偏，造出“点了没反应”的假象 |
 
 ### 当前教训（最近踩过的坑）
 
@@ -43,6 +45,14 @@
 - **场景**：复制 `WaitButton` 节点得到 `AttackButton`，但新节点缺少 `Button` 组件
 - **结果**：`getComponent(Button)` 返回 null，按钮无响应
 - **正确做法**：要么走“教训 B”的 Node 方案，要么在 MCP 创建节点后显式 `component_add_component` 添加 `cc.Button`
+
+#### 教训 D：浏览器验证预览时的三个隐形陷阱
+
+- **刷新**：改了 `.ts` 直接重载预览页，改动**不生效**（新方法 `typeof` 为 `undefined`）。必须先 `project_refresh_assets` 再重载。
+- **坐标**：点击入参是**设备像素**（截图空间），需 `CSS × devicePixelRatio`（本机 canvas 786×1308 / CSS 393×654 / dpr 2）；传错会静默点偏。
+- **面板**：`onLoad(){ if(!this._showCalled) this.node.active=false }` 的懒初始化面板，`show()` 必须先置 `_showCalled` 再 `node.active = true`（赋值 `active` 会同步触发 `onLoad`）。`EventUI` 曾漏置导致事件面板永远打不开、流程卡死。
+
+详细手册见 [`docs/tech/browser-verify-cocos-preview.md`](./docs/tech/browser-verify-cocos-preview.md)。
 
 ---
 
@@ -169,7 +179,9 @@ private onConfirmClicked(): void { /* ... */ }
 
 # 代码类型检查（修改 .ts 后必跑）
 # 注意：tsconfig.json extends ./temp/tsconfig.cocos.json，需编辑器生成过 temp/ 才能通过
-npx tsc --noEmit
+# 若 npx tsc 解析到全局 6.x，会报 tsconfig 自身的 TS5107 弃用错误（与你的改动无关），改用编辑器自带版本：
+TSC="/Applications/Cocos/Creator/3.8.8/CocosCreator.app/Contents/Resources/app.asar.unpacked/node_modules/typescript/bin/tsc"
+node "$TSC" --noEmit && echo TS_OK   # 实测 Version 5.8.2 通过
 ```
 
 静态校验脚本（可选，Tiny Vanguard 战斗修复回归自检）：
@@ -209,6 +221,19 @@ node tools/verify-battle-fixes.js
 - 场景排查顺序：`get_scene_hierarchy` → `get_node_info` → `validate_scene` → 日志 → `execute_script`
 - 新增按钮节点后：**要么用 Node 事件方案（推荐），要么显式添加 `cc.Button` 组件**
 - MCP 绑定 `@property` 时：按属性声明的类型绑定。`type: Node` 绑节点 UUID；`type: Button` 绑 Button 组件 UUID
+
+### 浏览器操作验证（可视化交互验证）
+
+验证真实交互（点击、技能释放、面板流转、报错/崩溃）时，用编辑器预览服务器 + 浏览器工具操作，**不要只读代码就下结论**。
+
+- **预览地址**：`http://127.0.0.1:7456/`（先 `lsof -nP -iTCP:7456 -sTCP:LISTEN` 确认在跑）。MCP **不能**启动预览（`project_run_project` 只开构建面板、`project_start_preview_server` 返回不支持）。
+- **改了 `.ts`**：`project_refresh_assets` → 重载页面 → 用 `typeof comp.新方法 === 'function'` 确认新代码已加载。
+- **页内探针**：用 `eval` 读 `window.cc` 的节点/组件/私有状态（如 `_phase`、`_selectedUnit`、`activeInHierarchy`）做断言；组件用字符串名 `getComponent('cc.UITransform')`。
+- **点击坐标**：按设备像素传（= CSS 坐标 × `devicePixelRatio`）。
+- **日志**：浏览器 logs + `debug_get_console_logs`（`filter:"error"`）+ `debug_search_project_logs`。
+- 读数互相矛盾时**先怀疑探针**（字段名/坐标换算），再判定是否游戏缺陷。
+
+完整手册（坐标换算代码、加速注入与声明纪律、易错字段表、可复用验证顺序）：[`docs/tech/browser-verify-cocos-preview.md`](./docs/tech/browser-verify-cocos-preview.md)。
 
 ## Git 规范
 

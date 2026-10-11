@@ -11,6 +11,7 @@
 | 刚拿到项目，需要整体规范 | [`../AGENTS.md`](../AGENTS.md) |
 | 写 Cocos 代码，担心崩溃 | [`cocos-best-practices.md`](./cocos-best-practices.md) |
 | 修改场景/节点/MCP 操作 | [`../AGENTS.md`](../AGENTS.md) 的 **MCP 使用守则** |
+| 要验证真实交互（点击/流程/报错） | [`tech/browser-verify-cocos-preview.md`](./tech/browser-verify-cocos-preview.md) |
 | 新增游戏或场景 | [`../AGENTS.md`](../AGENTS.md) 的 **项目结构 + 游戏注册** |
 | 查某游戏的设计/计划/场景配置 | 下文的 **按游戏分类** |
 
@@ -20,6 +21,7 @@
 
 - [`../AGENTS.md`](../AGENTS.md) — 项目总规范、红线清单、当前教训、Git 规范、MCP 守则
 - [`cocos-best-practices.md`](./cocos-best-practices.md) — Cocos Creator 3.x 防崩溃详解与代码模式
+- [`tech/browser-verify-cocos-preview.md`](./tech/browser-verify-cocos-preview.md) — 浏览器操作验证预览：刷新资产库、设备像素坐标、页内探针与日志取证
 
 ---
 
@@ -88,7 +90,7 @@
 - `specs/` — 游戏设计规格、需求文档
 - `plans/` — 实现计划、修复计划、迭代任务
 - `design/` — 场景搭建、UI 配置、组件绑定指南
-- `tech/` — 技术决策记录
+- `tech/` — 技术决策与验证手册（如 `browser-verify-cocos-preview.md`）
 - `assets/` — 文档配图
 
 ---
