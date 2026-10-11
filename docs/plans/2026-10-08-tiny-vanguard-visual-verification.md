@@ -133,6 +133,43 @@
 
 ---
 
+## 八、修复与回归（第二轮，2026-10-08）
+
+> 本轮依据本报告修复问题并做端到端回归；修复均在预览中实测确认。
+
+### 已修复
+
+| 问题 | 修复方式 | 验证证据 |
+|------|---------|---------|
+| 问题 1 通关面板无出口 | `TinyVanguardMain.bindRunVictoryPanel()` 为 `RunVictoryPanel/ContinueLabel` 绑定 `Node.EventType.TOUCH_END` → `SceneManager.gotoLobby()`（Node 事件委托，符合守则 #3） | 点击「返回大厅」后 `cc.director.getScene().name === 'Lobby'` |
+| 问题 2 `Label` + `Sprite` 同节点 | 文字改放到子节点 `ContinueText`；并清理 `ContinueBtn` 上重复的 `UITransform`（`Button` 的 `@requireComponent` 已自带） | 组件实测为 `[UITransform, Button, Sprite]`；运行时警告消失 |
+| 问题 3 占位文案 `label` | 同问题 1，`bindRunVictoryPanel()` 中设为「返回大厅」 | 运行时 `Label.string === '返回大厅'` |
+
+### 本轮新发现并修复
+
+| 新问题 | 严重度 | 修复 |
+|--------|--------|------|
+| `EventUI.showEvent()` **漏置 `_showCalled`**，首次显示时 `node.active = true` 同步触发 `onLoad`，而 `_showCalled` 仍为 false，导致 `onLoad` 立刻把面板关掉——事件节点永远无法交互，流程卡死在 `gmState === 'event'` | **高（流程中断）** | 在 `showEvent()` 开头（早于 `node.active = true`）置 `this._showCalled = true`；并排查同类的 `UpgradeUI`/`RouteMapUI`/`BattleUI`（均正确，属单点缺陷） |
+| `resetClassSelectionVisual()` 只置开始按钮 `interactable = false`，**未同步文案**，重开后残留上一局的「开始游戏 (n/3)」 | 低 | 改为调用 `updateStartBtnInteractable()`，使文案与可用性一同重置 |
+
+### 更正（撤回上一轮误报）
+
+- **问题 4（`StartBtn` 与 `ContinueRunButton` 重叠）经实测不成立，撤回。** 实测两按钮世界坐标 `y = 510` / `y = 440`，垂直间距 70 设计像素 > 两者半高和 40，不重叠。该误报源于上一轮把设计像素当作设备像素判读（同类错误在本报告第五节已记录）。
+- **问题 5（`move` 阶段提示为空）经实测已修复**：`ActionHintLabel` 显示「点击可移动位置」，随 `29f4582` 落地。
+
+### 回归结果
+
+- **端到端链路已走通**：职业选择 → 路线图 → 布阵 → 战斗 → 单场胜利 → 升级三选一 → 精英战 → 休息 → 事件 → 商店 → Boss → 通关 → **返回大厅**。
+- **运行时零 error**：浏览器 console 与编辑器 console 的 error 计数均为 0；`Can't add renderable component` 警告在修复后不再出现。
+- **类型检查通过**：`tsc --noEmit`（Cocos 自带 TypeScript 5.8.2）无错误。
+- 各面板交互均正常：商店（购买 10 金 / 治疗 5 金 / 离开）、休息（确认 / 跳过）、事件（多选项与结果回传）、失败与重开。
+
+### 工作流提示（重要）
+
+修改 `.ts` 后**编辑器不会自动重编译**。需先调用 Cocos MCP 的 `project_refresh_assets` 刷新资产库，预览页面重载后才会加载新代码——否则预览仍运行旧版本，容易误判“修复无效”。
+
+---
+
 ## 附：本次使用的工具
 
 - Cocos MCP：`scene_get_current_scene`、`debug_get_console_logs`、`debug_clear_console`、`debug_search_project_logs`、`project_run_project`、`project_start_preview_server`
