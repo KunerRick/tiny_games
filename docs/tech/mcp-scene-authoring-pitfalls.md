@@ -96,6 +96,77 @@ if (ui) ui.setContentSize(w, h);
 
 > 顺带：用纯色块做背景时 `sizeMode` 要设 `CUSTOM`，否则尺寸由 `spriteFrame` 决定。
 
+### ⚠️ 赋值顺序：`contentSize` 必须最后设
+
+即使 `sizeMode` 最终是 `CUSTOM`，**写入顺序错了尺寸依然会被覆盖**：设完 `contentSize` 再设 `spriteFrame`，引擎会按贴图原始尺寸重算一次（本项目默认贴图是 `2×2` 的九宫格），结果节点变成 `2×2`。
+
+本项目两轮都踩到这个坑（P1 的 `PhaseBar`、P2 的 `ContinueBtn`），正确顺序固定为：
+
+```
+spriteFrame → sizeMode(CUSTOM) → type(SIMPLE) → color → contentSize（最后）
+```
+
+自查（**别只看代码，读实际值**）：
+
+```js
+const sp = node.getComponent('cc.Sprite');
+const ui = node.getComponent('cc.UITransform');
+console.log(sp.sizeMode, ui.contentSize);   // contentSize 与预期不符即为症状
+```
+
+> 实例：`PhaseBar` 期望 `640×40`，实测 `2×2` —— 面板底板与文字都对，只有背景块缩成一个点，肉眼容易漏看。
+
+---
+
+## 3.5 ⚠️ MCP 写入的两个静默失败（值看着设了、实际没生效）
+
+这两个坑的共同点：**MCP 都返回 `success: true`**，只有读回实际值才能发现。
+
+### ① `cc.UITransform.anchorPoint`：`value.x = 0` 会被吞掉
+
+写 `{x: 0, y: 0.5}` 读回 `{x: 0.5, y: 0.5}`；写 `{x: 1, ...}` 则正常。也就是说**左对齐/上对齐的锚点在 MCP 里设不上**。
+
+受影响的表现：`UnitInfoPanel` 的子节点按"左对齐"排布时整体右移 40px、溢出容器。
+
+绕开方式 —— 用 `sceneAdvanced_execute_component_method` 直接调引擎方法：
+
+```js
+// 先取 UITransform 组件的 uuid
+const ui = (await call('component_get_components', { nodeUuid }))
+  .data.components.find(c => c.type === 'cc.UITransform');
+
+await call('sceneAdvanced_execute_component_method', {
+  uuid: ui.properties.uuid.value,     // 注意：组件 uuid，不是节点 uuid
+  name: 'setAnchorPoint',
+  args: [0, 0.5],
+});
+// 读回核对：anchorPoint 应为 {x:0, y:0.5}
+```
+
+> 任何 `anchorPoint` 写入后都要**读回核对**，尤其 `x=0`。
+
+### ② 容器节点用 `getBoundingBoxToWorld()` 量尺寸会偏大
+
+`getBoundingBoxToWorld()` **合并所有后代的包围盒**，所以对"有子节点的容器"返回的是子树并集，不是自身矩形。本项目实测：`UnitInfoPanel` 自身 `200×100`（`contentSize` 与 `getBoundingBox()` 都正确），但 `getBoundingBoxToWorld()` 返回 `380×141` → 早期探针据此报出一堆假重叠。
+
+自算自身世界矩形：
+
+```js
+const ui = node.getComponent('cc.UITransform');
+const w = ui.convertToWorldSpaceAR(new cc.Vec3(0, 0, 0));
+const rect = [
+  w.x - ui.width * ui.anchorX,
+  w.y - ui.height * (1 - ui.anchorY),
+  ui.width, ui.height,
+];
+```
+
+### ③ 审计结论要用「真实代码路径」产出
+
+手工把面板 `active = true` 去测，得到的重叠/溢出**可能与玩家看到的不一致**：那样绕过了 `showVictory()` 这类方法里"隐藏其他面板"的逻辑，于是测出 100% 重叠等假象。
+
+**正确做法**：调真实入口（`showDeployPhase()` / `showVictory(...)` / `showDefeat(...)`）再测量；测完还原可见性。
+
 ---
 
 ## 4. 同一节点只能有一个渲染组件
