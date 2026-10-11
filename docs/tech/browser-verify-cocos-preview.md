@@ -68,13 +68,39 @@ const byName = (name) => { const f = (n) => { if (n.name === name) return n;
 
 ---
 
-## 4. ⚠️ 点击坐标：设备像素 = CSS × devicePixelRatio
+## 4. ⚠️ 点击坐标：入参比例**每轮先校准**，不要套用固定倍数
 
-浏览器自动化点击工具传的 `x/y` 是**设备像素**（截图空间），而 CSS 坐标需再乘 `devicePixelRatio`。
+浏览器自动化点击工具的 `x/y` 落在**截图空间**，与 CSS 坐标之间有一个比例 `k`：
 
-本机预览实测：canvas **786 × 1308**（物理）、CSS **393 × 654**、`dpr = 2`。
+```
+clientX = 传入 x / k        // k 即「投影缩放」，不一定等于 dpr
+```
 
-求某节点的可靠设备坐标：
+**`k` 会随视口/设备模拟变化，同一会话内都会变**，因此每轮点击前必须现场标定，不能记住上次的倍数。
+
+本机实测的两个不同 k（同一台机器、同一个 canvas `rect`）：
+
+| 时机 | canvas 物理尺寸 | `devicePixelRatio` | 实测 k |
+|------|----------------|--------------------|--------|
+| 首次打开 | 786 × 1354 | 2 | **1**（传 274 → `clientX` 274） |
+| 重载后（编辑器切到 iPhone 14 Pro 模拟） | 786 × 1354 | 2 | **2**（传 400 → `clientX` 200） |
+
+> 注意两个 k 下的 `rect`、`dpr`、`innerWidth` 读数完全一致 —— **只读这些属性推不出 k**，必须实测。
+
+### 4.1 标定 k（每次要点击之前先做）
+
+```js
+// 1) 注入监听
+window.__raw = [];
+document.querySelector('canvas').addEventListener(
+  'pointerdown', (e) => window.__raw.push([e.clientX, e.clientY]), true);
+
+// 2) 随便点一次已知点，例如 (200, 200)
+// 3) 读回实际派发值，算出 k
+window.__raw;      // 若得到 [100,100] → k = 2；若得到 [200,200] → k = 1
+```
+
+标定后，把节点世界坐标换算成**点击入参**：
 
 ```js
 const canvasEl = document.querySelector('canvas');
@@ -85,19 +111,47 @@ const w   = ui.convertToWorldSpaceAR(new cc.Vec3(0, 0, 0));
 const sp  = cam.worldToScreen(w.clone(), new cc.Vec3());   // 物理像素
 const cssX = rect.left + sp.x / canvasEl.width  * rect.width;
 const cssY = rect.top + (1 - sp.y / canvasEl.height) * rect.height;
-// 点击入参 = css × dpr ；本机 dpr=2，即 cssX*2 / cssY*2
+const CLICK = (css) => css * k;      // k 来自上面的现场标定
 ```
+
+**做过一次就封装成探针**，后续所有点击直接取现成入参：
+
+```js
+window.__dev = function (path) {
+  const cc = window.cc, scene = cc.director.getScene();
+  let n = scene.getChildByName('Canvas');
+  for (const p of String(path).split('/').filter(Boolean)) { if (!n) return null; n = n.getChildByName(p); }
+  if (!n) return null;
+  const cam = scene.getChildByName('Canvas').getChildByName('Camera').getComponent('cc.Camera');
+  const ui = n.getComponent('cc.UITransform');
+  const w = ui.convertToWorldSpaceAR(new cc.Vec3(0, 0, 0));
+  const sp = cam.worldToScreen(w.clone(), new cc.Vec3());
+  const c = document.querySelector('canvas'), r = c.getBoundingClientRect();
+  const cssY = r.top + (1 - sp.y / c.height) * r.height;
+  const cssX = r.left + sp.x / c.width * r.width;
+  return { path, css: [cssX, cssY], click: [Math.round(cssX * K), Math.round(cssY * K)], active: n.activeInHierarchy };
+};
+```
+
+> ⚠️ **页面重载会清掉页内探针**（`window.__dev`/`__uiAudit` 都定义在页面上下文）。重载后必须重新注入。
+> 省事做法：把探针源码存进 `localStorage`，重载后一行 `eval` 恢复：
+> ```js
+> // 注入时
+> localStorage.setItem('__uiAuditSrc', 'window.__uiAudit = (' + factory.toString() + ')()');
+> // 重载后
+> eval(localStorage.getItem('__uiAuditSrc'));
+> ```
+
+### 4.2 别把"点偏"当成游戏缺陷
+
+`k` 变了而你没重新标定 → 点击落在别的节点上 → 现象是"点了没反应/按钮失效"，很容易误判成**回归或流程卡死**。
+
+本轮踩过：一次视口切换后 k 由 1 变 2，误判为"布阵点击格子不生效（回归）"；重新标定后同一坐标立刻正常，`deployed` 0 → 1。
+
+**判据**：点击后状态没变时，先 `window.__raw` 看实际派发坐标，再决定是否算缺陷。
 
 > 尺度提醒：`convertToWorldSpaceAR` 的世界坐标是**设计像素**（本项目 720×1280）。
 > 判断"两个 UI 是否重叠"要用**世界坐标 + 自身尺寸**比较（`|Δy| < (h1+h2)/2`），不要拿设计像素当设备像素估——本轮曾因此误报"按钮重叠"。
-
-**校验落点**（传值错会静默点偏）：
-
-```js
-// 注入监听，看浏览器实际派发的坐标
-for (const t of ['pointerdown','mousedown','pointerup','mouseup','click'])
-  canvasEl.addEventListener(t, (e) => log.push({ t, cx: e.clientX, cy: e.clientY }), true);
-```
 
 ---
 
@@ -137,8 +191,29 @@ gm.onRunComplete(true);                                            // 走真实�
 | 单位血量 | `unit.data.currentHp` / `maxHp` | `unit.data.hp`（那只是 `stats.hp` 模板值） |
 | 当前单位 | `battleManager.selectedUnit` | `battleManager.currentUnit`（不存在该 getter） |
 | 同名节点 | 按**路径**定位，如 `Canvas/GoldLabel` 与 `BattleUI/VictoryPanel/GoldLabel` | 按名字全局搜 → 命中错误层级 |
+| 面板/列表状态 | `node.activeInHierarchy`（含父链） | `node.active`（父节点关掉时仍为 true） |
 
 **纪律**：读数互相矛盾时（如"血量 1 但 `alive: true`"），**先怀疑自己的探针**（字段名、坐标换算），确认无误再判定游戏缺陷。本轮多次误报都源于此。
+
+### 7.1 量化审计探针自身的坑（写重叠检测时必看）
+
+本轮的「重叠 + 字号」审计探针踩过两个坑，都会产出**看似合理却完全错误**的结论：
+
+**① 坐标算式里写错变量 → 假零重叠。** 算 y 方向交叠时误写成 `b.y + b.y`（少了一个 `height`），交集恒为 0，探针会兴高采烈地报 `overlapCount: 0`。肉眼看到的却是明显压在一起。
+
+> 防御：写完先拿一个**已知会重叠**的样本自测（例如故意把两个节点摆到同一点），确认探针报出非零重叠，再用于审计。一个新探针第一次跑就报"全 0"，要当可疑信号而不是好消息。
+
+**② 重叠只在同层比较，别跨父节点判。** 父子关系（如 `HighlightBorder` 覆盖整张卡片）本身就是"设计上叠放"，不是缺陷。本轮改为**按 `parent` 分组，同层内两两比较**：
+
+```js
+// 只在同一父节点下比较，避免把父子叠放误报成重叠
+const groups = {};
+for (const e of visible) (groups[e.parent || 'ROOT'] ||= []).push(e);
+```
+
+**③ 判据要能区分「设计性叠加」与「缺陷」。** 本项目里 `UnitPrefab/selectionIndicator`（选中光圈）天然覆盖 `unitSprite` 与 `HpBar` —— 它**渲染在两者之间**（sibling 顺序 `unitSprite → selectionIndicator → HpBar`），是刻意的视觉设计。审计报出来后要逐个判定归属（哪一层、什么语义），不要直接当 bug 修。
+
+**④ 探针要给「字号违规」而不是只给字号。** 把判定固化成 `lineHeight < fontSize × 1.2`，输出违规清单而不是让读者自己比大小 —— 本项目 `fontSize 48 / lineHeight 40`、`28 / 25` 这类问题就是这样被稳定检出的。
 
 ---
 
@@ -163,7 +238,7 @@ show(): void { this._showCalled = true; this.node.active = true; }   // 先置�
 1. 确认预览服务器在跑（`curl` 返回 200）。
 2. 改了 `.ts` → `project_refresh_assets` → 重载页面（并用 `typeof` 核对新方法）。
 3. 探针读初始状态（可见性、节点树、关键组件）。
-4. **真实点击**（设备像素坐标）→ 探针断言状态变化。
+4. **标定点击比例 k**（§4.1）→ 真实点击 → 探针断言状态变化。
 5. 读日志（error 计数、新增 warning）。
 6. 类型检查（见 §10）。
 7. 结论里区分：自然流程 / 加速注入；设计像素 / 设备像素。
@@ -191,5 +266,10 @@ node "$TSC" --noEmit && echo TS_OK
 ## 附：本轮用到的 MCP 工具
 
 `project_refresh_assets`、`debug_get_console_logs`、`debug_clear_console`、`debug_search_project_logs`、`scene_get_current_scene`、`scene_get_scene_hierarchy`、`node_get_all_nodes`、`component_get_component_info`、`debug_validate_scene`。
+
+场景结构变更（P1 战斗界面重构）另用：`sceneAdvanced_begin_undo_recording` / `sceneAdvanced_end_undo_recording`、`node_create_node`、`node_delete_node`、`node_move_node`、`node_set_node_transform`、`component_set_component_property`、`scene_save_scene`。
+
+> `debug_validate_scene` **必须无参调用**；带 `checkMissingAssets` / `checkPerformance` 会报
+> `Message does not exist: scene - check-missing-assets`。期望结果 `issueCount: 0`。
 
 （MCP 接入：项目级 `reasonix.toml` 的 `[[plugins]] cocos-creator`，`type=http`、`url=http://localhost:3000/mcp`。）

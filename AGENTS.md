@@ -26,8 +26,8 @@
 |---|---------------|------|
 | A | PowerShell `Set-Content`/`Out-File` 会把含中文的 `.ts` 重编码成 GBK/ANSI：中文全乱码、`tsc` 报大量 `Unterminated string literal` | [`tech/dev-toolchain-notes.md`](./docs/tech/dev-toolchain-notes.md) §1 |
 | B | `@property({ type: Button })` 绑的是 **Button 组件**、不是节点；MCP 绑节点 UUID → 运行时 `Cannot read properties of undefined (reading 'on')`。改用 `@property({ type: Node })` + `Node.EventType.TOUCH_END` | [`tech/mcp-scene-authoring-pitfalls.md`](./docs/tech/mcp-scene-authoring-pitfalls.md) §2 |
-| C | 新建/复制的按钮节点可能**没有 `Button` 组件** → `getComponent(Button)` 返回 null、按钮无响应；补挂 `cc.Button` 时**别再 `addComponent(UITransform)`** | [`tech/mcp-scene-authoring-pitfalls.md`](./docs/tech/mcp-scene-authoring-pitfalls.md) §3–4 |
-| D | 浏览器验证三坑：改完 `.ts` 先 `project_refresh_assets`；点击坐标传**设备像素**（CSS × dpr）；懒初始化面板 `show()` 先置 `_showCalled` 再置 `active` | [`tech/browser-verify-cocos-preview.md`](./docs/tech/browser-verify-cocos-preview.md) |
+| C | 新建/复制的按钮节点可能**没有 `Button` 组件** → `getComponent(Button)` 返回 null、按钮无响应；补挂 `cc.Button` 时**别再 `addComponent(UITransform)`**（渲染组件都自带它；重复挂会让 `setContentSize` 设到没被使用的那个上，节点仍是默认 100×100 → 按真实高度排布时必然重叠） | [`tech/mcp-scene-authoring-pitfalls.md`](./docs/tech/mcp-scene-authoring-pitfalls.md) §3–4 |
+| D | 浏览器验证四坑：改完 `.ts` 先 `project_refresh_assets`；**点击入参比例每轮现场标定**（`clientX = 传入 / k`，k 随视口变化，曾误判成回归）；页面重载会清掉页内探针；懒初始化面板 `show()` 先置 `_showCalled` 再置 `active` | [`tech/browser-verify-cocos-preview.md`](./docs/tech/browser-verify-cocos-preview.md) §4、§7.1、§8 |
 
 > 维护约定：本表保持 **3–5 条**高价值教训；新教训超出时按主题迁到 `docs/tech/`，这里只留一行索引。
 

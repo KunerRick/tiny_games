@@ -72,6 +72,30 @@ private onConfirmClicked(): void { /* ... */ }
 
 > `cc.Button` 的 `@requireComponent` 会自带 `UITransform`。**不要再 `addComponent(UITransform)`**，否则同节点挂两个 `UITransform`（本轮实测踩到）。需要时用 `getComponent(UITransform)` 取用。
 
+### 重复 `UITransform` 的隐性后果：节点尺寸"看起来改了却没生效"
+
+两个 `UITransform` 里只有引擎**实际使用的那一个**参与布局。后续 `setContentSize(...)` 若落到另一个上，节点的真实尺寸**仍是插入第一个渲染组件时的默认值 `100×100`**。
+
+实例（P1 战斗界面兵牌）：代码里 `card.addComponent(Sprite)`（已自带 `UITransform`）后又 `card.addComponent(UITransform)`，再把 `setContentSize(110, 65)` 设到后者 —— 结果卡片真实尺寸仍是 `100×100`，而排布按"高 65 + 间距 8"计算 → **每张卡与下一张重叠 27~33px**。
+
+运行时可这样自查（别只看代码，看实际值）：
+
+```js
+card.components.map(c => c.constructor.name)   // 出现两个 "UITransform" 就有问题
+card.getComponent('cc.UITransform').contentSize  // 与预期不符即为症状
+```
+
+**正确写法**：`Sprite`/`Label`/`Button` 加完后，用 `getComponent(UITransform)` **取用**自带的那个：
+
+```ts
+const bg = card.addComponent(Sprite);            // @requireComponent 已带上 UITransform
+bg.sizeMode = Sprite.SizeMode.CUSTOM;            // 让 color/contentSize 生效
+const ui = card.getComponent(UITransform);       // 取用，不新增
+if (ui) ui.setContentSize(w, h);
+```
+
+> 顺带：用纯色块做背景时 `sizeMode` 要设 `CUSTOM`，否则尺寸由 `spriteFrame` 决定。
+
 ---
 
 ## 4. 同一节点只能有一个渲染组件
