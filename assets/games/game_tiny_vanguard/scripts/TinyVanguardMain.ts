@@ -10,6 +10,7 @@ import {
   SkillConfig, SKILLS
 } from './config/GameData';
 import { UnitController } from './battle/UnitController';
+import { SceneManager } from '../../../common/managers/SceneManager';
 
 const { ccclass, property } = _decorator;
 
@@ -134,6 +135,27 @@ export class TinyVanguardMain extends Component {
 
     this.bindShopPanelEvents();
     this.bindRestPanelEvents();
+    this.bindRunVictoryPanel();
+  }
+
+  /**
+   * 通关面板出口。
+   * 场景内 RunVictoryPanel 没有任何 Button，通关后玩家无法离开，
+   * 这里用其 ContinueLabel 节点的 TOUCH_END 作为“返回大厅”入口（遵循 Node 事件委托方案）。
+   */
+  private bindRunVictoryPanel(): void {
+    if (!this.victoryPanel) return;
+    const labelNode = this.victoryPanel.getChildByName('ContinueLabel');
+    if (!labelNode) return;
+    const label = labelNode.getComponent(Label);
+    if (label) {
+      label.string = '\u8FD4\u56DE\u5927\u5385';
+    }
+    labelNode.on(Node.EventType.TOUCH_END, this.onReturnToLobby, this);
+  }
+
+  private onReturnToLobby(): void {
+    SceneManager.gotoLobby();
   }
 
   private bindShopPanelEvents(): void {
@@ -222,13 +244,8 @@ export class TinyVanguardMain extends Component {
       if (!btnNode) continue;
       this.setClassButtonVisual(btnNode, false);
     }
-    const startBtnNode = this.classSelectPanel.getChildByName('StartBtn');
-    if (startBtnNode) {
-      const startBtn = startBtnNode.getComponent(Button);
-      if (startBtn) {
-        startBtn.interactable = false;
-      }
-    }
+    // 同步开始按钮的可用性与文案（否则重开后文案会残留上一局的 “开始游戏 (n/3)”）
+    this.updateStartBtnInteractable();
   }
 
   private setupClassSelectionUI(): void {

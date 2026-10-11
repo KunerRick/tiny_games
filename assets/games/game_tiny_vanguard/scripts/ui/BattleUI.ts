@@ -134,18 +134,25 @@ export class BattleUI extends Component {
       if (!continueBtn) {
         continueBtn = new Node('ContinueBtn');
         const btn = continueBtn.addComponent(Button);
-        const btnTransform = continueBtn.addComponent(UITransform);
-        btnTransform.setContentSize(160, 50);
+        // Button 的 @requireComponent 已自动带上 UITransform，这里取用而非重复添加
+        const btnTransform = continueBtn.getComponent(UITransform);
+        if (btnTransform) btnTransform.setContentSize(160, 50);
         continueBtn.setPosition(0, -80, 0);
-        const btnLabel = continueBtn.addComponent(Label);
+        const btnSprite = continueBtn.addComponent(Sprite);
+        btnSprite.color = new Color(0, 120, 200);
+        btnSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+        // 同一节点不能同时挂两个渲染组件（Label + Sprite 会触发
+        // "Can't add renderable component to this node"），文字放到子节点
+        const textNode = new Node('ContinueText');
+        const textTransform = textNode.addComponent(UITransform);
+        textTransform.setContentSize(160, 50);
+        const btnLabel = textNode.addComponent(Label);
         btnLabel.string = '\u7EE7\u7EED';
         btnLabel.fontSize = 24;
         btnLabel.color = Color.WHITE;
         btnLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
         btnLabel.verticalAlign = Label.VerticalAlign.CENTER;
-        const btnSprite = continueBtn.addComponent(Sprite);
-        btnSprite.color = new Color(0, 120, 200);
-        btnSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+        continueBtn.addChild(textNode);
         this.victoryPanel.addChild(continueBtn);
       }
 

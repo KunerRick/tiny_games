@@ -26,6 +26,9 @@ export class EventUI extends Component {
   }
 
   showEvent(event: EventConfig, onChoice: (index: number) => void): void {
+    // 置位必须先于 node.active = true：节点首次激活会同步触发 onLoad，
+    // 若此时 _showCalled 仍为 false，onLoad 会立即把面板关掉，事件永远无法交互
+    this._showCalled = true;
     this.node.active = true;
     this._onChoice = onChoice;
 
