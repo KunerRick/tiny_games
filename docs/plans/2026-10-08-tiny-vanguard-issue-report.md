@@ -6,6 +6,16 @@
 
 ---
 
+## 运行时复核（2026-10-08 更新）
+
+本清单第三节的代码类问题已在**可视化交互验证**中逐条复核（详见 [`2026-10-08-tiny-vanguard-visual-verification.md`](./2026-10-08-tiny-vanguard-visual-verification.md)），结论：
+
+- **第三节 #1–#6 全部已修复，不再成立**（复核证据见新报告第四节）。
+- **新增 5 条运行时问题**：①通关 `RunVictoryPanel` 无任何可点击出口；②`ContinueBtn` 同节点 `Label`+`Sprite` 冲突触发运行时警告；③`RunVictoryPanel/ContinueLabel` 为占位文案 `label`；④首屏 `StartBtn` 与 `ContinueRunButton` 垂直重叠；⑤`move` 阶段 `ActionHintLabel` 为空。
+- **修正第二节判断**：两个 `VictoryPanel` 并非同名冗余，且节点已重命名为 `RunVictoryPanel` / `ContinueRunButton`。
+
+---
+
 ## 一、结论摘要
 
 - **场景结构本身没有损坏**：`debug_validate_scene` 返回 `valid=true, issueCount=0`。
