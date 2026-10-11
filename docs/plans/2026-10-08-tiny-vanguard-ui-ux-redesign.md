@@ -232,9 +232,21 @@
 | P4 | 路线图节点不透明化 + `content` 尺寸修正（问题 2） | P0 |
 | P5 | 全局配色替换（问题 6） | P0 |
 
-**涉及文件**：`ui/BattleUI.ts`、`ui/UpgradeUI.ts`、`ui/RouteMapUI.ts`、`TinyVanguardMain.ts`（面板布局）、新建 `config/Theme.ts`。
-**场景侧**：新增节点/改尺寸需走 MCP（`begin_undo_recording` → 操作 → `end_undo_recording` → `validate_scene`）。
+**涉及文件**：`ui/BattleUI.ts`、`ui/UpgradeUI.ts`、`ui/RouteMapUI.ts`、`ui/EventUI.ts`、`TinyVanguardMain.ts`（面板布局）、新建 `config/Theme.ts`。
+**场景侧**：新增节点 / 调整尺寸 / 改层级一律走 MCP，见 §8 清单；每次结构变更按 `begin_undo_recording` → 操作 → `end_undo_recording` → `validate_scene` 执行。
 **验证**：每阶段用浏览器工具复跑本报告的量化审计（重叠检测 + 字号校验），确保重叠归零、`lineHeight ≥ fontSize`。
+
+### 分阶段明细（含场景侧）
+
+| 阶段 | 代码侧 | 场景侧（MCP） |
+|------|--------|--------------|
+| P0 | 新建 `config/Theme.ts` 定义令牌 | 无（纯代码） |
+| P1 | 战斗界面：合并阶段提示、行动栏统一 | 新增 `PhaseBar` 容器；合并 `PhaseLabel`+`DeployPrompt`+`ActionHintLabel`；删 `DeployPrompt`；调整 `ActionBar` 子按钮尺寸 |
+| P2 | 胜利/通关面板布局 | `VictoryPanel` 尺寸 750×1334 → 560×620；删 `VictoryPanel/ContinueLabel`；`RunVictoryPanel` 260×180 → 560×640 并补按钮/图标 |
+| P3 | 职业选择去重叠、升级界面重做 | 4 个职业按钮重排（列表化）；`UpgradeUI` 加进度条与跳过按钮 |
+| P4 | 路线图节点不透明化、`content` 尺寸修正 | `content`/`NodesContainer` 尺寸改为按跨度；补图例与进度条节点 |
+| P5 | 全局颜色替换为令牌 | 无（颜色多为运行时设置） |
+| P6 | 逻辑 4 项修复（§6） | 无（纯代码） |
 
 ---
 
@@ -260,20 +272,60 @@
 
 ---
 
-## 七、我的建议
+## 七、已确认的决策（2026-10-08）
 
-### 7.1 推荐做法（若由我决定，按此执行）
+| 决策项 | 结论 |
+|--------|------|
+| **视觉风格** | **深色科技风** —— 深底（`#1E2430` 系）+ 单一蓝色主强调（`#3B82F6`），语义色：绿=可用/成功、红=危险、金=奖励、青=能量。与现有深色遮罩、`ActionBar` 深灰底（`30,30,40`）一脉相承；深底上高饱和语义色对比度最好，720×1280 竖屏可读性最佳 |
+| **改动范围** | **代码 + MCP 重构场景节点（并行）**。既改脚本内布局与样式，也用 MCP 整理场景结构（合并重复节点、统一命名、修正面板尺寸与层级）。场景侧清单见 §8 |
+| **执行方式** | **本轮只定稿方案，暂不实施**。本文档即为实施依据，后续开工时按 §5 分阶段推进 |
+| **设计分辨率** | 保留 **720×1280**；所有面板收敛到 ≤ `640×960`，留安全边距 |
 
-1. **视觉风格：深色科技风**。深底（`#1E2430` 系）+ 单一蓝色主强调（`#3B82F6`），辅以语义色（绿=可用/成功、红=危险、金=奖励、青=能量）。
-   理由：与现有深色遮罩、`ActionBar` 深灰底（`30,30,40`）一脉相承，改动量最小；深底上高饱和语义色的对比度最好；720×1280 竖屏下可读性最佳。
-2. **改动范围：只改代码内布局，暂不动场景结构**。面板尺寸、子节点位置、字号与颜色都能在脚本里设置（现有代码本就在运行时创建大量子节点，如 `PlatoonCard_*`、`ContinueBtn`）。这样**无需 MCP 改场景**，回归只需浏览器验证，风险最低。
-3. **保留 720×1280 设计分辨率**，所有面板收敛到 ≤ `640×960`，留出安全边距。
-4. **先做一屏试点**：建议从**战斗界面**开始（问题最集中、收益最大），确认风格与手感后再铺开到其余界面。
+其余细节（具体图标、文案措辞、圆角大小等）按本文档推荐值直接定，不再逐条确认。
 
-### 7.2 需要你拍板的三点
+---
 
-1. **风格方向** —— 采用我推荐的**深色科技风**，还是另有偏好（明亮清爽 / 卡通圆角 / 像素复古）？
-2. **改动范围** —— 同意「**只改代码、不动场景**」吗？还是希望同时用 MCP 重构场景节点（结构更规整，但改动面大、需逐界面回归）？
-3. **执行方式** —— 立即开始实施（建议从战斗界面试点），还是先把方案定稿、稍后统一做？
+## 八、场景节点重构清单（MCP）
 
-> 这三点会改变上面所有具体数值（色值、尺寸、间距），所以先行确认；其余细节（具体图标、文案措辞、圆角大小等）我按推荐方案直接定，不再逐条打扰。
+> 目标：让场景结构与 §4 的界面方案一致，并消除"运行时创建 + 场景里残留"两套来源。
+
+### 8.1 结构性变更（需用 MCP 执行）
+
+| 界面 | 变更 | 备注 |
+|------|------|------|
+| 战斗 | 新增 `BattleUI/PhaseBar` 容器，合并 `PhaseLabel`+`DeployPrompt`+`ActionHintLabel` 三个节点为一个；删除 `DeployPrompt` | 消除提示重复与四元素重叠 |
+| 战斗 | `ActionBar` 下 `AttackButton`/`WaitButton`/`EndTurnButton` 统一尺寸为 `100×48`（当前 100×100 / 100×60 混用） | 消除同行不齐 |
+| 战斗 | 新增 `HudTop` 容器承载回合与金币（左右两端对齐） | 当前 `GoldLabel` 在 Canvas 根级、无配对的回合节点 |
+| 胜利 | `VictoryPanel` 尺寸 `750×1334` → `560×620`；删除 `ContinueLabel`（"进入升级..."） | 修复超画布与重复文案 |
+| 通关 | `RunVictoryPanel` `260×180` → `560×640`；补图标节点与按钮（含 `Sprite` 背景） | 修复文字无框 |
+| 通关/失败 | `RunVictoryPanel` 与 `GameOverPanel` 统一尺寸与子节点结构 | 两面板当前宽度相同但结构不一致 |
+| 职业选择 | 4 个 `ClassNBtn` 由"绝对坐标紧排"改为列表容器（行高 64、间距 12）；`HighlightBorder` 由整块覆盖改为左侧竖条/描边 | 消除 10px 重叠链与 100% 覆盖 |
+| 升级 | `UpgradeUI` 增加进度条节点与 `SkipBtn` | 当前仅标题 + 卡片容器 |
+| 路线图 | `content` / `NodesContainer` 尺寸由 `100×100` 改为按节点实际跨度；新增图例与进度条节点 | 修复 ScrollView 滚动范围 |
+
+### 8.2 命名统一
+
+- 面板类统一以 `Panel` 结尾（`ClassSelectPanel` / `ShopPanel` / `RestPanel` / `GameOverPanel` / `RunVictoryPanel` 已合规；`UpgradeUI` / `EventUI` / `RouteMapUI` / `BattleUI` 建议改为 `...Panel` 或保留现有约定但**全文一致**）。
+- 按钮统一以 `Btn` 结尾（现状 `ContinueBtn` 合规，但 `WaitButton`/`EndTurnButton`/`AttackButton` 用 `Button` 后缀 → 统一）。
+- HUD 类统一前缀（`HudTop` / `HudGold` / `HudTurn`）。
+
+### 8.3 执行与校验规范
+
+每次结构变更都按项目 MCP 守则：
+
+```
+begin_undo_recording
+  → node_create / node_delete / component_set / 改尺寸与层级
+end_undo_recording
+  → debug_validate_scene           // 期望 issueCount = 0
+  → lsp_diagnostics                // 若同轮改了脚本
+```
+
+改完场景后，按 [`../tech/browser-verify-cocos-preview.md`](../tech/browser-verify-cocos-preview.md)：`project_refresh_assets` → 重载预览 → 复跑量化审计（§5 验证）。
+
+### 8.4 风险与注意
+
+- **不要直接编辑 `.scene` JSON**（AGENTS.md 红线 2）。
+- 面板类在 `onLoad` 里 `if (!_showCalled) node.active = false` 的懒初始化约定要保留；新增面板节点时确认 `show()` 先置 `_showCalled` 再置 `active`。
+- 可点击元素优先 `@property({ type: Node })` + `Node.EventType.TOUCH_END`（红线 3）；新增按钮节点后必须补 `cc.Button` 或走 Node 方案。
+- 场景重构与代码改动**同阶段成套做**，否则会出现"代码引用已删除节点"的运行时错误。
