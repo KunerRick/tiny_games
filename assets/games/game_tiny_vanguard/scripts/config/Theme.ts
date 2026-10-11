@@ -9,7 +9,7 @@
  * - 字号/行高必须成对使用 FONT_* 令牌；硬性约束 lineHeight >= fontSize * 1.2。
  * - 需要 Color 实例时用 hex(...) 工厂取新对象，不要共享实例（tween(Color) 会就地改值）。
  */
-import { Color, Label } from 'cc';
+import { Button, Color, Label } from 'cc';
 
 // ---------------------------------------------------------------------------
 // 色板（§3.1）
@@ -37,6 +37,8 @@ export const COLOR = {
   SUCCESS: '#22C55E',
   /** 敌人 / 伤害 / 失败 */
   DANGER: '#EF4444',
+  /** 危险态按下（DANGER 的暗版，用于按钮 pressed） */
+  DANGER_DARK: '#DC2626',
   /** 高亮 / 金币 / 奖励 */
   WARNING: '#F59E0B',
   /** 能量 / 技能 */
@@ -78,6 +80,96 @@ export function hpBarColor(current: number, max: number): Color {
 }
 
 // ---------------------------------------------------------------------------
+// 战斗棋盘与高亮（§4 问题 6）
+// ---------------------------------------------------------------------------
+// 这些颜色原先散落在 GridController / BattleManager / UnitController 里，
+// 各写各的 RGB，同语义（如"可移动范围"）在多处出现近似但不相同的值。
+
+export const GRID = {
+  /** 棋盘格默认底色（渲染时始终实心不透明，避免 clearHighlights 后闪烁） */
+  CELL_DEFAULT: hex(COLOR.PANEL_BG, 235),
+  /** 选中单位所在格 */
+  CELL_SELECTED: hex(COLOR.WARNING, 150),
+  /** 移动预览格（鼠标悬停） */
+  CELL_PREVIEW: hex(COLOR.WARNING, 220),
+  /** 部署区可部署格 */
+  DEPLOYABLE: hex(COLOR.SUCCESS, 180),
+  /** 不可部署（敌方半场）格 */
+  DEPLOY_DISABLED: hex(COLOR.TEXT_DISABLED, 110),
+  /** 已部署格 */
+  DEPLOYED: hex(COLOR.SUCCESS, 220),
+  /** 可移动范围 */
+  MOVE_RANGE: hex(COLOR.SUCCESS, 180),
+  /** 可攻击范围 */
+  ATTACK_RANGE: hex(COLOR.DANGER, 180),
+  /** 技能可选目标（单体，偏亮黄） */
+  SKILL_TARGET: hex('#FBBF24', 200),
+  /** 技能可选目标（AOE，偏橙） */
+  SKILL_TARGET_AOE: hex(COLOR.WARNING, 200),
+  /** AOE 预览中心 */
+  AOE_CENTER: hex(COLOR.DANGER, 220),
+  /** AOE 预览范围 */
+  AOE_RANGE: hex(COLOR.DANGER, 120),
+  /** 技能确认目标（单体二次点击） */
+  SELECTED_TARGET: hex('#FDE047', 255),
+} as const;
+
+/** 阵营配色：玩家统一 PRIMARY 系、敌人统一 DANGER 系（§4 问题 6） */
+export const FACTION = {
+  PLAYER_TINT: hex(COLOR.PRIMARY, ALPHA.SOLID),
+  ENEMY_TINT: hex(COLOR.DANGER, ALPHA.SOLID),
+  PLAYER_GLOW: hex(COLOR.PRIMARY, 100),
+  ENEMY_GLOW: hex(COLOR.DANGER, 100),
+} as const;
+
+// ---------------------------------------------------------------------------
+// 按钮过渡色（§3.1）
+// ---------------------------------------------------------------------------
+// Button 的 COLOR 过渡会按状态改写节点 Sprite 颜色，若用引擎默认值
+// （hover d3d3d3 / disabled 7c7c7c）会把设计令牌配色冲掉 —— 典型症状是
+// 禁用按钮显示成灰色而不是 PRIMARY_DISABLED。故所有按钮统一走这里。
+
+export type ButtonVariant = 'primary' | 'secondary' | 'success' | 'danger';
+
+export const BUTTON_THEME: Record<ButtonVariant, {
+  normal: string; pressed: string; hover: string; disabled: string;
+}> = {
+  primary:   { normal: COLOR.PRIMARY,   pressed: COLOR.PRIMARY_DARK,  hover: '#60A5FA', disabled: COLOR.PRIMARY_DISABLED },
+  secondary: { normal: COLOR.SURFACE,   pressed: COLOR.PANEL_BORDER,  hover: '#31405A', disabled: COLOR.PRIMARY_DISABLED },
+  success:   { normal: COLOR.SUCCESS,   pressed: '#16A34A',            hover: '#4ADE80', disabled: COLOR.PRIMARY_DISABLED },
+  danger:    { normal: COLOR.DANGER,    pressed: COLOR.DANGER_DARK,    hover: '#F87171', disabled: COLOR.PRIMARY_DISABLED },
+};
+
+/**
+ * 给按钮套用统一的 COLOR 过渡令牌。
+ * 用 COLOR 而非 SCALE 是为了让「禁用态」也有明确视觉（PRIMARY_DISABLED），
+ * 但四个状态色必须全部显式写令牌 —— 否则引擎默认值会把配色冲掉。
+ */
+export function applyButtonTheme(btn: Button | null, variant: ButtonVariant): void {
+  if (!btn || !btn.isValid) return;
+  const t = BUTTON_THEME[variant];
+  btn.transition = Button.Transition.COLOR;
+  btn.normalColor = hex(t.normal);
+  btn.pressedColor = hex(t.pressed);
+  btn.hoverColor = hex(t.hover);
+  btn.disabledColor = hex(t.disabled);
+}
+
+/**
+ * 职业区分色（保留语义区分：四个职业需要一眼可辨）。
+ * 这些**不是**「同语义多色」，而是四种并列语义，故各自独立成令牌，
+ * 但统一在同一色板体系内（蓝/绿/紫/金）。
+ */
+export const CLASS_COLOR = {
+  warrior: '#64B4FF',
+  archer: '#64DC64',
+  mage: '#B464DC',
+  cleric: '#F0D250',
+  /** 未知职业兜底 */
+  fallback: '#64B4FF',
+} as const;
+
+// ---------------------------------------------------------------------------
 // 字号阶梯（§3.2，行高 = 字号 × 1.4）
 // ---------------------------------------------------------------------------
 
@@ -96,6 +188,8 @@ export const FONT_BODY: FontToken = { fontSize: 20, lineHeight: 28 };
 export const FONT_CAPTION: FontToken = { fontSize: 16, lineHeight: 22 };
 /** 单位名牌 */
 export const FONT_TINY: FontToken = { fontSize: 13, lineHeight: 18 };
+/** 图标字号（emoji 图形标记，非正文；单行无换行，行高取字号 1.25 倍） */
+export const FONT_ICON: FontToken = { fontSize: 32, lineHeight: 40 };
 
 /** 硬性约束：行高至少为字号的 1.2 倍 */
 export const MIN_LINE_HEIGHT_RATIO = 1.2;

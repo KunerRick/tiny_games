@@ -3,6 +3,7 @@ import { GridController, GridPosition } from './GridController';
 import { UnitController } from './UnitController';
 import { AIController, AIAction } from './AIController';
 import { EnemyConfig, SkillEffect, ENEMIES, ELITE_ENEMIES, BOSS_CONFIG, getClassById, getRandomSkillsFromPool } from '../config/GameData';
+import { GRID } from '../config/Theme';
 
 const { ccclass, property } = _decorator;
 
@@ -198,23 +199,23 @@ export class BattleManager extends Component {
   private _highlightDeployArea(): void {
     this.gridController.clearHighlights();
 
-    // 顶部两行：浅绿色（可部署区域，玩家在己方半场部署）
-    const deployableColor = new Color(150, 230, 150, 180);
+    // 顶部两行：可部署区域（玩家在己方半场部署）
+    const deployableColor = GRID.DEPLOYABLE;
     for (let c = 0; c < GridController.GRID_SIZE; c++) {
       this.gridController.setCellColor({ row: 0, col: c }, deployableColor);
       this.gridController.setCellColor({ row: 1, col: c }, deployableColor);
     }
 
-    // 底部四行：淡灰色（不可部署区域，敌方区域）
-    const disabledColor = new Color(200, 200, 200, 100);
+    // 底部四行：不可部署区域（敌方区域）
+    const disabledColor = GRID.DEPLOY_DISABLED;
     for (let r = 2; r < GridController.GRID_SIZE; r++) {
       for (let c = 0; c < GridController.GRID_SIZE; c++) {
         this.gridController.setCellColor({ row: r, col: c }, disabledColor);
       }
     }
 
-    // 已部署位置：深绿色（覆盖之前的颜色）
-    const placedColor = new Color(100, 200, 100, 220);
+    // 已部署位置：覆盖之前的颜色
+    const placedColor = GRID.DEPLOYED;
     for (const pos of this._deployedPositions) {
       this.gridController.setCellColor(pos, placedColor);
     }
@@ -406,7 +407,7 @@ export class BattleManager extends Component {
     if (!unit.data) return;
     if (!unit.data.hasMoved) {
       const moves = this.getReachablePositions(unit.data.gridPos, unit.data.stats.move);
-      this.gridController.highlightCells(moves, new Color(100, 200, 100, 180));
+      this.gridController.highlightCells(moves, GRID.MOVE_RANGE);
     } else {
       this._unitPhase = 'action';
       this.highlightAttackRange(unit);
@@ -419,7 +420,7 @@ export class BattleManager extends Component {
     this.gridController.clearHighlights();
     if (!unit.data) return;
     const attacks = this.getAttackableEnemies(unit);
-    this.gridController.highlightCells(attacks, new Color(200, 100, 100, 180));
+    this.gridController.highlightCells(attacks, GRID.ATTACK_RANGE);
     // 始终标记选中单位所在格子
     this.gridController.highlightSelectedCell(unit.data.gridPos);
   }
@@ -693,7 +694,7 @@ export class BattleManager extends Component {
     if (!this._pendingSkill) return;
     this._skillPreviewPos = { row: gridPos.row, col: gridPos.col };
     const isAoe = this._pendingSkill.targetType === 'aoe';
-    const baseColor = isAoe ? new Color(255, 150, 0, 200) : new Color(255, 200, 50, 200);
+    const baseColor = isAoe ? GRID.SKILL_TARGET_AOE : GRID.SKILL_TARGET;
 
     // 重新高亮所有可选目标，再叠加预览效果（避免切换时颜色残留）
     this.gridController.highlightCells(this._skillTargets, baseColor);
@@ -703,11 +704,11 @@ export class BattleManager extends Component {
       this.gridController.highlightAoePreview(
         gridPos,
         previewPositions,
-        new Color(255, 80, 80, 220),
-        new Color(255, 100, 100, 120)
+        GRID.AOE_CENTER,
+        GRID.AOE_RANGE
       );
     } else {
-      this.gridController.highlightSelectedTarget(gridPos, new Color(255, 235, 59, 255));
+      this.gridController.highlightSelectedTarget(gridPos, GRID.SELECTED_TARGET);
     }
   }
 
@@ -1131,7 +1132,7 @@ export class BattleManager extends Component {
       this._skillPreviewPos = null;
       this._skillTargets = this.getValidSkillTargets(unit, skill);
       const isAoe = skill.targetType === 'aoe';
-      const highlightColor = isAoe ? new Color(255, 150, 0, 200) : new Color(255, 200, 50, 200);
+      const highlightColor = isAoe ? GRID.SKILL_TARGET_AOE : GRID.SKILL_TARGET;
       this.gridController.highlightCells(this._skillTargets, highlightColor);
       if (this._onUnitPhaseChanged) {
         this._onUnitPhaseChanged('player_turn', unit, isAoe ? 'skill_target_aoe' : 'skill_target');

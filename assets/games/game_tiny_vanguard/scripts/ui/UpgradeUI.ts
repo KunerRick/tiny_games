@@ -1,7 +1,7 @@
 import { _decorator, Component, Node, instantiate, Prefab, Button, Label, UITransform, Sprite, SpriteFrame } from 'cc';
 import {
   COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, SPACE,
-  applyFontAndColor, hex,
+  applyButtonTheme, applyFontAndColor, hex,
 } from '../config/Theme';
 const { ccclass, property } = _decorator;
 
@@ -72,6 +72,8 @@ export class UpgradeUI extends Component {
     this._showCalled = true;
     this.node.active = true;
     this.ensureEventsBound();
+    // 按钮过渡色统一走令牌（P5），否则 hover/disabled 会是引擎默认灰
+    applyButtonTheme(this.skipBtn?.getComponent(Button) ?? null, 'secondary');
   }
 
   hide(): void {

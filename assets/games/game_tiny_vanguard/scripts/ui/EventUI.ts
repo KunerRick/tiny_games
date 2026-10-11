@@ -1,4 +1,5 @@
 import { _decorator, Component, Node, instantiate, Prefab, Button, Label, UITransform } from 'cc';
+import { COLOR, FONT_BODY, applyFont, applyFontAndColor } from '../config/Theme';
 import { EventConfig } from '../config/GameData';
 const { ccclass, property } = _decorator;
 
@@ -55,6 +56,7 @@ export class EventUI extends Component {
           const label = btnNode.getComponentInChildren(Label);
           if (label) {
             label.string = event.choices[i].description;
+            applyFontAndColor(label, FONT_BODY, COLOR.TEXT_PRIMARY);
           }
           const btn = btnNode.getComponent(Button);
           if (btn) {
@@ -84,7 +86,10 @@ export class EventUI extends Component {
         const confirmBtn = instantiate(this.choiceButtonPrefab);
         confirmBtn.setPosition(0, 0, 0);
         const label = confirmBtn.getComponentInChildren(Label);
-        if (label) label.string = '\u786E\u5B9A';
+        if (label) {
+          label.string = '\u786E\u5B9A';
+          applyFontAndColor(label, FONT_BODY, COLOR.TEXT_PRIMARY);
+        }
         const btn = confirmBtn.getComponent(Button);
         if (btn) {
           btn.transition = Button.Transition.SCALE;

@@ -1,4 +1,5 @@
 import { _decorator, Component, Node, Sprite, Color, instantiate, Prefab, Button } from 'cc';
+import { GRID } from '../config/Theme';
 const { ccclass, property } = _decorator;
 
 export interface GridPosition {
@@ -10,10 +11,9 @@ export interface GridPosition {
 export class GridController extends Component {
   public static readonly GRID_SIZE = 6;
   public static readonly CELL_SIZE = 80;
-  // 柔和的浅灰半透明底色，避免 clearHighlights 后纯白闪烁
-  public static readonly DEFAULT_CELL_COLOR = new Color(220, 220, 230, 180);
-  // 选中单位所在格子的金色标记
-  public static readonly SELECTED_CELL_COLOR = new Color(255, 215, 0, 120);
+  // 棋盘格底色与选中格色统一走设计令牌（原为散落的魔法 RGB）
+  public static readonly DEFAULT_CELL_COLOR = GRID.CELL_DEFAULT;
+  public static readonly SELECTED_CELL_COLOR = GRID.CELL_SELECTED;
 
   @property({ type: Node, tooltip: '网格容器节点' })
   gridContainer: Node = null;
@@ -48,6 +48,14 @@ export class GridController extends Component {
         );
         this.gridContainer.addChild(cell);
         this._cells[row][col] = cell;
+
+        // 显式把格子设为令牌底色：CellPrefab 里写死的是旧色 e8e8e8，
+        // 而 clearHighlights 恢复的也是 DEFAULT_CELL_COLOR —— 两处不一致会让
+        // 首帧与后续帧颜色跳变。
+        const cellSprite = cell.getComponent(Sprite);
+        if (cellSprite) {
+          cellSprite.color = GridController.DEFAULT_CELL_COLOR;
+        }
 
         const button = cell.getComponent(Button);
         if (button) {
@@ -123,7 +131,7 @@ export class GridController extends Component {
     this._highlightedCells = [];
   }
 
-  /** 高亮单个格子为移动预览（黄色半透明），保留原色以便切换时恢复 */
+  /** 高亮单个格子为移动预览，保留原色以便切换时恢复 */
   highlightPreviewCell(pos: GridPosition): void {
     this.clearPreview();
     const cell = this.getCell(pos.row, pos.col);
@@ -131,7 +139,7 @@ export class GridController extends Component {
       const sprite = cell.getComponent(Sprite);
       if (sprite) {
         this._previewOriginalColor = sprite.color.clone();
-        sprite.color = new Color(255, 235, 59, 200);
+        sprite.color = GRID.CELL_PREVIEW;
       }
       this._previewCell = cell;
     }

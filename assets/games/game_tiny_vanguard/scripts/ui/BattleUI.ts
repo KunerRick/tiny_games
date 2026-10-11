@@ -1,7 +1,7 @@
-import { _decorator, Component, Node, Label, Button, Sprite, Color, tween, Vec3, instantiate, Prefab, UITransform, Event, EventTouch } from 'cc';
+import { _decorator, Component, Node, Label, Button, Sprite, tween, Vec3, instantiate, Prefab, UITransform, Event, EventTouch } from 'cc';
 import {
-  ALPHA, COLOR, CONTROL, SPACE, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_TINY,
-  applyFont, applyFontAndColor, hex,
+  ALPHA, COLOR, CONTROL, SPACE, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_TITLE, FONT_TINY,
+  applyButtonTheme, applyFont, applyFontAndColor, hex,
 } from '../config/Theme';
 const { ccclass, property } = _decorator;
 
@@ -108,7 +108,7 @@ export class BattleUI extends Component {
     overlayTransform.setContentSize(750, 1330); // 全屏
     this._battleStartOverlay.setPosition(0, 0, 0);
     const overlaySprite = this._battleStartOverlay.addComponent(Sprite);
-    overlaySprite.color = new Color(0, 0, 0, 0);
+    overlaySprite.color = hex(COLOR.BG_OVERLAY, 0);   // 起始全透明，动画中渐暗
     this._battleStartOverlay.active = false;
     this.node.addChild(this._battleStartOverlay);
 
@@ -131,10 +131,24 @@ export class BattleUI extends Component {
   show(): void {
     this._showCalled = true;
     this.node.active = true;
+    // 按钮主题放在 show() 而非 onLoad()：面板懒初始化时 onLoad 早已执行过，
+    // 且 onLoad 期间节点尚未激活，部分组件尚未就绪。
+    this.applyButtonThemes();
     if (!this._eventsBound) {
       this._eventsBound = true;
       this.bindEvents();
     }
+  }
+
+  /** 行动栏/布阵按钮的过渡色统一走令牌（P5） */
+  private applyButtonThemes(): void {
+    applyButtonTheme(this.attackButton?.getComponent(Button) ?? null, 'secondary');
+    applyButtonTheme(this.waitButton?.getComponent(Button) ?? null, 'secondary');
+    applyButtonTheme(this.endTurnButton?.getComponent(Button) ?? null, 'primary');
+    applyButtonTheme(this.confirmDeployButton?.getComponent(Button) ?? null, 'primary');
+    // 单场胜利面板的“继续”按钮（场景节点，P2 建的）
+    const continueBtn = this.victoryPanel?.getChildByName('ContinueBtn');
+    applyButtonTheme(continueBtn?.getComponent(Button) ?? null, 'primary');
   }
 
   hide(): void {
@@ -512,12 +526,13 @@ export class BattleUI extends Component {
     const label = node.getComponentInChildren(Label);
     if (label) {
       label.string = amount > 0 ? `-${amount}` : `${amount}`;
-      label.fontSize = 28;
+      applyFont(label, FONT_TITLE);
     }
 
     const sprite = node.getComponent(Sprite);
     if (sprite) {
-      sprite.color = amount > 0 ? Color.RED : Color.GREEN;
+      // 掉血=危险色，回血=成功色（§3.1 语义色）
+      sprite.color = amount > 0 ? hex(COLOR.DANGER) : hex(COLOR.SUCCESS);
     }
 
     tween(node)
@@ -728,7 +743,7 @@ export class BattleUI extends Component {
 
     // 步骤1: 遮罩渐暗 (0.3s)
     tween(overlaySprite)
-      .to(0.3, { color: new Color(0, 0, 0, 180) })
+      .to(0.3, { color: hex(COLOR.BG_OVERLAY, ALPHA.BG_OVERLAY) })
       .call(() => {
         // 步骤2: 大字出现 (1.2s)
         tween(titleNode)
@@ -738,7 +753,7 @@ export class BattleUI extends Component {
           .call(() => {
             // 步骤3: 遮罩淡出 (0.3s)
             tween(overlaySprite)
-              .to(0.3, { color: new Color(0, 0, 0, 0) })
+              .to(0.3, { color: hex(COLOR.BG_OVERLAY, 0) })
               .call(() => {
                 this._battleStartOverlay.active = false;
                 // 恢复 waitButton 状态

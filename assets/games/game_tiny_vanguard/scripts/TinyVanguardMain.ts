@@ -1,5 +1,5 @@
 import { _decorator, Component, Node, Label, Button, Sprite } from 'cc';
-import { COLOR, hex } from './config/Theme';
+import { COLOR, hex, applyButtonTheme, ButtonVariant } from './config/Theme';
 import { RouteMapUI, RouteNode } from './ui/RouteMapUI';
 import { BattleManager, BattleResult, UnitActionPhase } from './battle/BattleManager';
 import { UpgradeUI, UpgradeOption } from './ui/UpgradeUI';
@@ -154,6 +154,43 @@ export class TinyVanguardMain extends Component {
     this.bindShopPanelEvents();
     this.bindRestPanelEvents();
     this.bindRunVictoryPanel();
+    this.applyPanelButtonThemes();
+  }
+
+  /**
+   * 统一各面板按钮的过渡色（P5 配色收敛）。
+   * Button 的 COLOR 过渡若沿用引擎默认值，hover/disabled 会显示成灰
+   * （实测 StartBtn 禁用时显示 7c7c7c，而不是我们设的 PRIMARY_DISABLED），
+   * 因此四个状态色都必须显式写令牌。
+   */
+  private applyPanelButtonThemes(): void {
+    const setBtn = (node: Node | null, variant: ButtonVariant): void => {
+      if (!node?.isValid) return;
+      applyButtonTheme(node.getComponent(Button), variant);
+    };
+    // 职业选择：开始游戏=主操作；四个职业按钮用 SCALE（选中态由代码控色）
+    if (this.classSelectPanel) {
+      setBtn(this.classSelectPanel.getChildByName('StartBtn'), 'primary');
+    }
+    setBtn(this.continueButton?.node ?? null, 'secondary');
+    // 商店
+    if (this.shopPanel) {
+      setBtn(this.shopPanel.getChildByName('BuySkillBtn'), 'primary');
+      setBtn(this.shopPanel.getChildByName('HealBtn'), 'success');
+      setBtn(this.shopPanel.getChildByName('CloseBtn'), 'danger');
+    }
+    // 休息
+    if (this.restPanel) {
+      setBtn(this.restPanel.getChildByName('ConfirmRestBtn'), 'success');
+      setBtn(this.restPanel.getChildByName('SkipBtn'), 'secondary');
+    }
+    // 结算面板
+    if (this.gameOverPanel) {
+      setBtn(this.gameOverPanel.getChildByName('RestartButton'), 'primary');
+    }
+    if (this.victoryPanel) {
+      setBtn(this.victoryPanel.getChildByName('ReturnBtn'), 'primary');
+    }
   }
 
   /**

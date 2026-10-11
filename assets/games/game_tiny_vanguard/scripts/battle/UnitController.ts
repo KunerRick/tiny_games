@@ -1,6 +1,7 @@
 import { _decorator, Component, Node, Sprite, Color, tween, Vec3, Label, Tween } from 'cc';
 import { GridPosition, GridController } from './GridController';
 import { SkillConfig, getClassById, EnemyConfig, AIType } from '../config/GameData';
+import { CLASS_COLOR, COLOR, FACTION, FONT_ICON, applyFontAndColor, hex } from '../config/Theme';
 
 const { ccclass, property } = _decorator;
 
@@ -58,10 +59,10 @@ export class UnitController extends Component {
   }
 
   private static readonly CLASS_COLORS: Record<string, Color> = {
-    warrior: new Color(100, 180, 255),
-    archer:  new Color(100, 220, 100),
-    mage:    new Color(180, 100, 220),
-    cleric:  new Color(240, 210, 80),
+    warrior: hex(CLASS_COLOR.warrior),
+    archer:  hex(CLASS_COLOR.archer),
+    mage:    hex(CLASS_COLOR.mage),
+    cleric:  hex(CLASS_COLOR.cleric),
   };
 
   private static readonly CLASS_ICONS: Record<string, string> = {
@@ -102,7 +103,7 @@ export class UnitController extends Component {
       this.selectionIndicator.active = false;
     }
 
-    this.setTintColor(new Color(255, 100, 100));
+    this.setTintColor(hex(CLASS_COLOR.fallback));
     this.setupFactionVisual();
     this.setupClassIcon();
   }
@@ -143,9 +144,9 @@ export class UnitController extends Component {
 
     if (isPlayer) {
       const classColor = UnitController.CLASS_COLORS[classId];
-      this.setTintColor(classColor ?? new Color(100, 180, 255));
+      this.setTintColor(classColor ?? hex(CLASS_COLOR.fallback));
     } else {
-      this.setTintColor(new Color(255, 100, 100));
+      this.setTintColor(FACTION.ENEMY_TINT);
     }
     this.setupFactionVisual();
     this.setupClassIcon();
@@ -192,9 +193,9 @@ export class UnitController extends Component {
     const glowSprite = this.factionGlow.getComponent(Sprite);
     if (!glowSprite) return;
     if (this._data?.isPlayer) {
-      glowSprite.color = new Color(60, 140, 255, 100);
+      glowSprite.color = FACTION.PLAYER_GLOW;
     } else {
-      glowSprite.color = new Color(255, 60, 60, 100);
+      glowSprite.color = FACTION.ENEMY_GLOW;
     }
     this.factionGlow.active = true;
   }
@@ -211,8 +212,7 @@ export class UnitController extends Component {
     if (!iconNode) {
       iconNode = new Node('ClassIcon');
       const iconLabel = iconNode.addComponent(Label);
-      iconLabel.fontSize = 32;
-      iconLabel.color = Color.WHITE;
+      applyFontAndColor(iconLabel, FONT_ICON, COLOR.TEXT_PRIMARY);
       iconLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
       iconLabel.verticalAlign = Label.VerticalAlign.CENTER;
       // 居中于 unitSprite
