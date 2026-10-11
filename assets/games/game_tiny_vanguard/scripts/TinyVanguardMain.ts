@@ -721,8 +721,9 @@ export class TinyVanguardMain extends Component {
       const unitOptions: UpgradeOption[] = [];
       const classConfig = CLASSES.find(c => c.id === unit.data!.classId);
 
-      if (classConfig) {
-        // 已学技能不再进卡池（与 UI 的「已学置灰」互为兜底，杜绝重复技能）
+      if (classConfig && unit.hasFreeSkillSlot) {
+        // 已学技能不再进卡池（与 UI 的「已学置灰」互为兜底，杜绝重复技能）；
+        // 技能位已满时也不出技能卡，否则玩家选了会因 addSkill 拒绝而"没生效"
         const learnedIds = unit.data.skills.map(s => s.id);
         const availablePool = classConfig.skillPool.filter(id => !learnedIds.includes(id));
         const skills = getRandomSkillsFromPool(availablePool, 3);
@@ -774,8 +775,9 @@ export class TinyVanguardMain extends Component {
 
     if (option.type === 'skill' && option.skillId) {
       const skill = getSkillById(option.skillId);
-      if (skill) {
-        unit.addSkill(skill);
+      if (skill && !unit.addSkill(skill)) {
+        // addSkill 已拒绝（重复或技能位已满）：不静默，留痕便于排查
+        console.info(`[Upgrade] ${unit.data.name} \u672A\u5B66\u4F1A ${skill.name}\uFF08\u5DF2\u62E5\u6709\u6216\u6280\u80FD\u4F4D\u5DF2\u6EE1\uFF09`);
       }
       this._syncUnitSkillsToRunData();
       return;
@@ -829,20 +831,35 @@ export class TinyVanguardMain extends Component {
     }
   }
 
+  /**
+   * 为一个单位随机学一个新技能。
+   * 会排除已学技能；技能位已满或卡池已空时返回 null（不产生任何副作用），
+   * 让调用方决定是否扣费/提示。
+   */
+  private learnRandomSkillFor(unit: UnitController | null): SkillConfig | null {
+    if (!unit?.data || !unit.hasFreeSkillSlot) return null;
+    const classConfig = CLASSES.find(c => c.id === unit.data!.classId);
+    if (!classConfig) return null;
+    const learnedIds = unit.data.skills.map(s => s.id);
+    const pool = classConfig.skillPool.filter(id => !learnedIds.includes(id));
+    const skills = getRandomSkillsFromPool(pool, 1);
+    if (skills.length === 0) return null;
+    return unit.addSkill(skills[0]) ? skills[0] : null;
+  }
+
   private onShopBuySkill(): void {
     if (this._runData.gold < 10) return;
-    this._runData.gold -= 10;
 
-    const firstUnit = this.battleManager?.playerUnits?.[0];
-    if (firstUnit?.data) {
-      const classConfig = CLASSES.find(c => c.id === firstUnit.data.classId);
-      if (classConfig) {
-        const skills = getRandomSkillsFromPool(classConfig.skillPool, 1);
-        if (skills.length > 0) {
-          firstUnit.addSkill(skills[0]);
-        }
-      }
+    // 先尝试学习，成功才扣费：原先无条件扣 10 金币，而技能位已满或随机到
+    // 已学技能时 addSkill 会被拒绝 → 玩家花了钱却没得到任何东西
+    const firstUnit = this.battleManager?.playerUnits?.[0] ?? null;
+    const learned = this.learnRandomSkillFor(firstUnit);
+    if (!learned) {
+      console.info('[Shop] \u65E0\u6CD5\u5B66\u4E60\u65B0\u6280\u80FD\uFF08\u6280\u80FD\u4F4D\u5DF2\u6EE1\u6216\u5DF2\u5168\u90E8\u5B66\u4F1A\uFF09\uFF0C\u672C\u6B21\u4E0D\u6263\u91D1\u5E01');
+      return;
     }
+
+    this._runData.gold -= 10;
     this._syncUnitSkillsToRunData();
     this.updateGoldDisplay();
   }
@@ -905,7 +922,7 @@ export class TinyVanguardMain extends Component {
       this.applyEventEffects(event, choiceIndex);
       this.eventUI.hide();
       this.completeNonBattleNode();
-    });
+    }, this._runData.gold);
   }
 
   private applyEventEffects(event: import('./config/GameData').EventConfig, choiceIndex: number): void {
@@ -947,16 +964,8 @@ export class TinyVanguardMain extends Component {
 
       case 'learn_skill':
       case 'learn_rare_skill': {
-        const firstUnit = this.battleManager.playerUnits[0];
-        if (firstUnit?.data) {
-          const classConfig = CLASSES.find(c => c.id === firstUnit.data.classId);
-          if (classConfig) {
-            const skills = getRandomSkillsFromPool(classConfig.skillPool, 1);
-            if (skills.length > 0) {
-              firstUnit.addSkill(skills[0]);
-            }
-          }
-        }
+        // 与商店一致：排除已学技能、技能位满时不产生副作用
+        this.learnRandomSkillFor(this.battleManager.playerUnits[0] ?? null);
         this._syncUnitSkillsToRunData();
         break;
       }

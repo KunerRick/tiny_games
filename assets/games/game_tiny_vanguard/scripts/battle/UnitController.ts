@@ -5,6 +5,9 @@ import { CLASS_COLOR, COLOR, FACTION, FONT_ICON, applyFontAndColor, hex } from '
 
 const { ccclass, property } = _decorator;
 
+/** 单位技能位上限（升级/商店/事件都按此判定，避免各自写 3） */
+export const MAX_SKILLS = 3;
+
 export interface UnitData {
   id: string;
   name: string;
@@ -361,16 +364,33 @@ export class UnitController extends Component {
     return skill;
   }
 
-  addSkill(skill: SkillConfig): void {
-    if (!this._data) return;
-    if (this._data.skills.length >= 3) {
-      this._data.skills.pop();
-    }
+  /**
+   * 学习技能。
+   * - 已拥有同一技能 → 返回 false（原先会重复 push，技能栏出现重复项）
+   * - 技能位已满 3 个 → 返回 false（原先静默 pop 掉最后一个，玩家在不知情时丢技能）
+   * @returns 是否真的学会
+   */
+  addSkill(skill: SkillConfig): boolean {
+    if (!this._data || !skill) return false;
+    if (this.hasSkill(skill.id)) return false;
+    if (this._data.skills.length >= MAX_SKILLS) return false;
+
     this._data.skills.push(skill);
 
     if (skill.type === 'passive') {
       this.applyPassiveEffect(skill);
     }
+    return true;
+  }
+
+  /** 技能位是否还有空位（升级/商店/事件在选择落点前先问这里） */
+  get hasFreeSkillSlot(): boolean {
+    return (this._data?.skills.length ?? MAX_SKILLS) < MAX_SKILLS;
+  }
+
+  /** 已学技能数 */
+  get skillCount(): number {
+    return this._data?.skills.length ?? 0;
   }
 
   replaceSkill(index: number, newSkill: SkillConfig): void {

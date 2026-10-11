@@ -1,6 +1,6 @@
 import { _decorator, Component, Node, instantiate, Prefab, Button, Label, UITransform } from 'cc';
 import { COLOR, FONT_BODY, applyFont, applyFontAndColor } from '../config/Theme';
-import { EventConfig } from '../config/GameData';
+import { EventConfig, ChoiceOption } from '../config/GameData';
 const { ccclass, property } = _decorator;
 
 @ccclass('EventUI')
@@ -20,13 +20,19 @@ export class EventUI extends Component {
   private _showCalled: boolean = false;
   private _onChoice: ((index: number) => void) | null = null;
 
+  /** 该选项需要的金币（effects 里的 spend_gold）；无则 0 */
+  private static goldCostOf(option: ChoiceOption): number {
+    const spend = option.effects?.find(e => e.type === 'spend_gold');
+    return spend ? (spend.params?.amount ?? 0) : 0;
+  }
+
   onLoad(): void {
     if (!this._showCalled) {
       this.node.active = false;
     }
   }
 
-  showEvent(event: EventConfig, onChoice: (index: number) => void): void {
+  showEvent(event: EventConfig, onChoice: (index: number) => void, gold: number = 0): void {
     // 置位必须先于 node.active = true：节点首次激活会同步触发 onLoad，
     // 若此时 _showCalled 仍为 false，onLoad 会立即把面板关掉，事件永远无法交互
     this._showCalled = true;
@@ -51,17 +57,27 @@ export class EventUI extends Component {
         const startY = totalHeight / 2 - btnHeight / 2;
 
         for (let i = 0; i < event.choices.length; i++) {
+          const choice = event.choices[i];
           const btnNode = instantiate(this.choiceButtonPrefab);
           btnNode.setPosition(0, startY - i * (btnHeight + gap), 0);
+
+          // 金币校验：选项效果含 spend_gold 且钱不够 → 置灰不可点
+          const cost = EventUI.goldCostOf(choice);
+          const affordable = cost <= gold;
+
           const label = btnNode.getComponentInChildren(Label);
           if (label) {
-            label.string = event.choices[i].description;
-            applyFontAndColor(label, FONT_BODY, COLOR.TEXT_PRIMARY);
+            label.string = affordable
+              ? choice.description
+              : `${choice.description}\uFF08\u91D1\u5E01\u4E0D\u8DB3\uFF09`;
+            applyFontAndColor(label, FONT_BODY, affordable ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED);
           }
           const btn = btnNode.getComponent(Button);
           if (btn) {
             btn.transition = Button.Transition.SCALE;
+            btn.interactable = affordable;
             btnNode['_choiceIndex'] = i;
+            btn.node.off(Button.EventType.CLICK, this.onChoiceClicked, this);
             btn.node.on(Button.EventType.CLICK, this.onChoiceClicked, this);
           }
           this.choiceContainer.addChild(btnNode);

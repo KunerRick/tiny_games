@@ -124,10 +124,9 @@ export class BattleManager extends Component {
     let enemyConfigs: EnemyConfig[];
 
     if (isBoss) {
-      const bossUnit = this.spawnEnemy(BOSS_CONFIG as EnemyConfig, { row: 5, col: 3 });
-      if (bossUnit) {
-        this._enemyUnits.push(bossUnit);
-      }
+      // spawnEnemy() 内部已经 push 进 _enemyUnits，此处不能再 push 一次
+      // （否则 Boss 战出现两个「战争领主」，敌方回合让 Boss 行动两次）
+      this.spawnEnemy(BOSS_CONFIG as EnemyConfig, { row: 5, col: 3 });
       enemyConfigs = [
         { ...ENEMIES[0], stats: { ...ENEMIES[0].stats, hp: Math.floor(ENEMIES[0].stats.hp * (1 + difficulty * 0.1)) } },
         { ...ENEMIES[1], stats: { ...ENEMIES[1].stats, hp: Math.floor(ENEMIES[1].stats.hp * (1 + difficulty * 0.1)) } },
