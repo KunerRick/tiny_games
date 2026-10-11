@@ -672,7 +672,9 @@ export class BattleManager extends Component {
 
   private _getAoePreviewPositions(center: GridPosition, skill: import('../config/GameData').SkillConfig): GridPosition[] {
     const positions: GridPosition[] = [];
-    const has3x3 = skill.effects.some(e => e.type === 'aoe_3x3');
+    // 实际命中范围在 executeSkillEffects 中：aoe_3x3 与 aoe_1radius 都是 3×3（dr<=1 && dc<=1）。
+    // 预览必须与之一致，否则会把 3×3 的技能显示成十字，误导玩家。
+    const has3x3 = skill.effects.some(e => e.type === 'aoe_3x3' || e.type === 'aoe_1radius');
     for (let r = 0; r < GridController.GRID_SIZE; r++) {
       for (let c = 0; c < GridController.GRID_SIZE; c++) {
         const dr = Math.abs(r - center.row);
