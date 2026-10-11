@@ -20,39 +20,16 @@
 | 8 | **改完 `.ts` 后先调 MCP `project_refresh_assets` 刷新资产库，再重载预览页** | 编辑器不会自动重编译文件系统改动，预览仍跑旧代码，会误判“修复无效” |
 | 9 | **用浏览器工具点击预览时，坐标按设备像素传（= CSS 坐标 × `devicePixelRatio`）** | 传 CSS 坐标会静默点偏，造出“点了没反应”的假象 |
 
-### 当前教训（最近踩过的坑）
+### 当前教训（速查；详情见 `docs/tech/`）
 
-#### 教训 A：PowerShell 会破坏 UTF-8 中文文件
+| # | 教训（一句话） | 详情 |
+|---|---------------|------|
+| A | PowerShell `Set-Content`/`Out-File` 会把含中文的 `.ts` 重编码成 GBK/ANSI：中文全乱码、`tsc` 报大量 `Unterminated string literal` | [`tech/dev-toolchain-notes.md`](./docs/tech/dev-toolchain-notes.md) §1 |
+| B | `@property({ type: Button })` 绑的是 **Button 组件**、不是节点；MCP 绑节点 UUID → 运行时 `Cannot read properties of undefined (reading 'on')`。改用 `@property({ type: Node })` + `Node.EventType.TOUCH_END` | [`tech/mcp-scene-authoring-pitfalls.md`](./docs/tech/mcp-scene-authoring-pitfalls.md) §2 |
+| C | 新建/复制的按钮节点可能**没有 `Button` 组件** → `getComponent(Button)` 返回 null、按钮无响应；补挂 `cc.Button` 时**别再 `addComponent(UITransform)`** | [`tech/mcp-scene-authoring-pitfalls.md`](./docs/tech/mcp-scene-authoring-pitfalls.md) §3–4 |
+| D | 浏览器验证三坑：改完 `.ts` 先 `project_refresh_assets`；点击坐标传**设备像素**（CSS × dpr）；懒初始化面板 `show()` 先置 `_showCalled` 再置 `active` | [`tech/browser-verify-cocos-preview.md`](./docs/tech/browser-verify-cocos-preview.md) |
 
-- **场景**：用 `Set-Content` 批量替换 `BattleUI.ts` 中的 `.node.active`
-- **结果**：文件编码被破坏，所有中文字符串变成乱码，全项目编译失败
-- **正确做法**：含中文的文件统一用 Python 读写（`encoding='utf-8'`），或直接用 `SearchReplace`/`Write` 工具
-- **验证命令**：`npx tsc --noEmit`
-
-#### 教训 B：MCP 绑定 `@property({ type: Button })` 导致运行时崩溃
-
-- **场景**：新增 `AttackButton` 节点后，通过 MCP 把 `BattleUI.attackButton` 属性绑定到节点 UUID
-- **结果**：运行时 `attackButton.node` 为 `undefined`，`bindEvents()` 触发 `Cannot read properties of undefined (reading 'on')`
-- **根因**：Cocos `@property({ type: Button })` 期望引用 **Button 组件** 的 `__id__`，不是节点的 `__id__`
-- **正确做法**：
-  - 按钮属性声明为 `@property({ type: Node })`
-  - 事件绑定用 `Node.EventType.TOUCH_END`
-  - 显隐控制用 `this.attackButton.active = true/false`
-  - 这样 MCP 只需绑定节点 UUID，无需关心 Button 组件
-
-#### 教训 C：MCP 创建按钮节点后必须添加 Button 组件（如果仍用 Button 引用）
-
-- **场景**：复制 `WaitButton` 节点得到 `AttackButton`，但新节点缺少 `Button` 组件
-- **结果**：`getComponent(Button)` 返回 null，按钮无响应
-- **正确做法**：要么走“教训 B”的 Node 方案，要么在 MCP 创建节点后显式 `component_add_component` 添加 `cc.Button`
-
-#### 教训 D：浏览器验证预览时的三个隐形陷阱
-
-- **刷新**：改了 `.ts` 直接重载预览页，改动**不生效**（新方法 `typeof` 为 `undefined`）。必须先 `project_refresh_assets` 再重载。
-- **坐标**：点击入参是**设备像素**（截图空间），需 `CSS × devicePixelRatio`（本机 canvas 786×1308 / CSS 393×654 / dpr 2）；传错会静默点偏。
-- **面板**：`onLoad(){ if(!this._showCalled) this.node.active=false }` 的懒初始化面板，`show()` 必须先置 `_showCalled` 再 `node.active = true`（赋值 `active` 会同步触发 `onLoad`）。`EventUI` 曾漏置导致事件面板永远打不开、流程卡死。
-
-详细手册见 [`docs/tech/browser-verify-cocos-preview.md`](./docs/tech/browser-verify-cocos-preview.md)。
+> 维护约定：本表保持 **3–5 条**高价值教训；新教训超出时按主题迁到 `docs/tech/`，这里只留一行索引。
 
 ---
 
@@ -89,7 +66,7 @@ tiny_games/
 │   ├── plans/             # 实现计划
 │   ├── superpowers/       # 历史迭代计划/规格
 │   ├── assets/            # 文档配图
-│   ├── tech/              # 技术决策与踩坑记录（预留，过旧教训迁移至此）
+│   ├── tech/              # 技术决策与踩坑详情（AGENTS.md 教训的展开）
 │   └── cocos-best-practices.md
 ├── tools/                 # 本地校验脚本（如 verify-battle-fixes.js）
 ├── settings/              # Cocos 编辑器设置

@@ -22,6 +22,8 @@
 - [`../AGENTS.md`](../AGENTS.md) — 项目总规范、红线清单、当前教训、Git 规范、MCP 守则
 - [`cocos-best-practices.md`](./cocos-best-practices.md) — Cocos Creator 3.x 防崩溃详解与代码模式
 - [`tech/browser-verify-cocos-preview.md`](./tech/browser-verify-cocos-preview.md) — 浏览器操作验证预览：刷新资产库、设备像素坐标、页内探针与日志取证
+- [`tech/mcp-scene-authoring-pitfalls.md`](./tech/mcp-scene-authoring-pitfalls.md) — MCP 操作场景/预制体：按钮绑定类型、Button 组件、渲染组件冲突
+- [`tech/dev-toolchain-notes.md`](./tech/dev-toolchain-notes.md) — 文本编码（PowerShell 陷阱）、`tsc` 版本注意事项、提交前检查
 
 ---
 
