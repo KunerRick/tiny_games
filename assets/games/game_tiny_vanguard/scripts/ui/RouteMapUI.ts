@@ -1,5 +1,21 @@
 import { _decorator, Component, Node, ScrollView, instantiate, Prefab, Button, Label, Color, Sprite, UITransform, Graphics, Vec3, tween, Tween, Event } from 'cc';
+import { ALPHA, COLOR, FONT_CAPTION, FONT_TITLE, applyFontAndColor, hex } from '../config/Theme';
 const { ccclass, property } = _decorator;
+
+// ---------------------------------------------------------------------------
+// 路线图布局常量（必须与场景里 content / NodesContainer 的尺寸保持一致）
+// ---------------------------------------------------------------------------
+/** 列距：两列时 x = -COL_GAP/2 与 +COL_GAP/2（原 130 太窄，节点挤在左侧） */
+const COL_GAP = 180;
+/** 行距 */
+const ROW_GAP = 140;
+/** 图节点边长（< COL_GAP 且 < ROW_GAP，保证不重叠） */
+const NODE_SIZE = 80;
+/** 内容区顶部留白（第一行中心的 y） */
+const CONTENT_TOP = 400;
+/** 内容区最小宽度（画布 720 留安全边距） */
+const CONTENT_MIN_W = 688;
+
 
 export interface RouteNode {
   id: number;
@@ -23,6 +39,12 @@ export class RouteMapUI extends Component {
 
   @property({ type: Node, tooltip: '连接线图层' })
   connectionsLayer: Node = null;
+
+  @property({ type: Label, tooltip: '关卡进度（已通关 N/M）' })
+  progressLabel: Label = null;
+
+  @property({ type: Label, tooltip: '节点类型图例' })
+  legendLabel: Label = null;
 
   private _nodes: RouteNode[] = [];
   private _nodeViews: Map<number, Node> = new Map();
@@ -65,6 +87,14 @@ export class RouteMapUI extends Component {
     return nodes;
   }
 
+  /** 图节点中心坐标（渲染与连线必须共用同一公式，否则线头对不上节点） */
+  private nodePosition(col: number, row: number): { x: number; y: number } {
+    return {
+      x: (col - 0.5) * COL_GAP,
+      y: CONTENT_TOP - row * ROW_GAP,
+    };
+  }
+
   private drawConnections(): void {
     if (!this.connectionsLayer) return;
     const graphics = this.connectionsLayer.getComponent(Graphics);
@@ -76,38 +106,44 @@ export class RouteMapUI extends Component {
         const target = this._nodes.find(n => n.id === targetId);
         if (!target) continue;
 
-        const x1 = node.col * 130 + 80;
-        const y1 = -node.row * 110 - 60;
-        const x2 = target.col * 130 + 80;
-        const y2 = -target.row * 110 - 60;
+        const from = this.nodePosition(node.col, node.row);
+        const to = this.nodePosition(target.col, target.row);
 
+        // 颜色取自设计令牌：已完成=次要文字、可达=成功、未解锁=面板描边
         const bothDone = node.completed && target.completed;
         const reachToTarget = node.completed && this.isReachable(targetId);
         let lineColor: Color;
         if (bothDone) {
-          lineColor = new Color(156, 163, 175, 200);
+          lineColor = hex(COLOR.TEXT_SECONDARY, ALPHA.LINE);
         } else if (reachToTarget) {
-          lineColor = new Color(34, 197, 94, 220);
+          lineColor = hex(COLOR.SUCCESS, ALPHA.LINE);
         } else {
-          lineColor = new Color(209, 213, 219, 150);
+          lineColor = hex(COLOR.PANEL_BORDER, ALPHA.SOLID);
         }
 
         graphics.strokeColor = lineColor;
-        graphics.lineWidth = 3;
-        graphics.moveTo(x1, y1);
-        graphics.lineTo(x2, y2);
+        graphics.lineWidth = 4;
+        graphics.moveTo(from.x, from.y);
+        graphics.lineTo(to.x, to.y);
         graphics.stroke();
 
-        // 小箭头
-        const angle = Math.atan2(y2 - y1, x2 - x1);
+        // 折线中点的路标圆点：让路线走向更可读
+        const midX = (from.x + to.x) / 2;
+        const midY = (from.y + to.y) / 2;
+        graphics.fillColor = lineColor;
+        graphics.circle(midX, midY, 3);
+        graphics.fill();
+
+        // 箭头（指向目标）
+        const angle = Math.atan2(to.y - from.y, to.x - from.x);
         const arrowLen = 8;
-        const ax1 = x2 - arrowLen * Math.cos(angle - 0.4);
-        const ay1 = y2 - arrowLen * Math.sin(angle - 0.4);
-        const ax2 = x2 - arrowLen * Math.cos(angle + 0.4);
-        const ay2 = y2 - arrowLen * Math.sin(angle + 0.4);
-        graphics.moveTo(x2, y2);
+        const ax1 = to.x - arrowLen * Math.cos(angle - 0.4);
+        const ay1 = to.y - arrowLen * Math.sin(angle - 0.4);
+        const ax2 = to.x - arrowLen * Math.cos(angle + 0.4);
+        const ay2 = to.y - arrowLen * Math.sin(angle + 0.4);
+        graphics.moveTo(to.x, to.y);
         graphics.lineTo(ax1, ay1);
-        graphics.moveTo(x2, y2);
+        graphics.moveTo(to.x, to.y);
         graphics.lineTo(ax2, ay2);
         graphics.stroke();
       }
@@ -131,13 +167,26 @@ export class RouteMapUI extends Component {
 
     for (const node of nodes) {
       const btnNode = instantiate(this.nodePrefab);
+      if (!btnNode?.isValid) continue;
       btnNode.name = `Node_${node.id}`;
-      btnNode.setPosition(node.col * 130 + 80, -node.row * 110 - 60);
+      const pos = this.nodePosition(node.col, node.row);
+      btnNode.setPosition(pos.x, pos.y, 0);
+
+      // 节点按 NODE_SIZE 统一尺寸（NodePrefab 原为 70，与列/行距配合不佳）
+      const ui = btnNode.getComponent(UITransform);
+      if (ui) ui.setContentSize(NODE_SIZE, NODE_SIZE);
 
       const label = btnNode.getComponentInChildren(Label);
       if (label) {
         label.string = typeIcons[node.type] || '?';
+        applyFontAndColor(label, FONT_TITLE, COLOR.TEXT_PRIMARY);
+        const labelUi = label.node.getComponent(UITransform);
+        if (labelUi) labelUi.setContentSize(NODE_SIZE, FONT_TITLE.lineHeight);
       }
+
+      // 已完成打勾标记（运行时补齐，避免再动 prefab）
+      const check = this.ensureCheckMark(btnNode);
+      if (check) check.active = node.completed;
 
       // 存储节点 ID，使用事件委托避免 Button 组件依赖
       btnNode['_routeNodeId'] = node.id;
@@ -148,10 +197,40 @@ export class RouteMapUI extends Component {
       this.applyNodeVisual(node, btnNode);
     }
 
+    this.updateProgressLabel();
     this.drawConnections();
   }
 
-  /** 按节点状态刷新单个节点图标的颜色与高亮动画（供增量更新复用） */
+  /** 右上角的完成勾选标记（幂等创建） */
+  private ensureCheckMark(btnNode: Node): Node | null {
+    const existing = btnNode.getChildByName('CheckMark');
+    if (existing?.isValid) return existing;
+    const mark = new Node('CheckMark');
+    const markUi = mark.addComponent(UITransform);
+    markUi.setContentSize(24, 20);
+    const markLabel = mark.addComponent(Label);
+    markLabel.string = '\u2713';
+    applyFontAndColor(markLabel, FONT_CAPTION, COLOR.SUCCESS);
+    markLabel.horizontalAlign = Label.HorizontalAlign.RIGHT;
+    markLabel.verticalAlign = Label.VerticalAlign.TOP;
+    mark.setPosition(NODE_SIZE / 2 - 12, NODE_SIZE / 2 - 10, 0);
+    btnNode.addChild(mark);
+    return mark;
+  }
+
+  /** 顶部进度：已通关节点数 / 总节点数 */
+  private updateProgressLabel(): void {
+    if (!this.progressLabel) return;
+    const total = this._nodes.length;
+    const done = this._nodes.filter(n => n.completed).length;
+    this.progressLabel.string = `\u5DF2\u901A\u5173 ${done}/${total}`;
+  }
+
+  /**
+   * 按节点状态刷新单个节点图标的颜色与高亮动画（供增量更新复用）。
+   * 节点一律用**不透明实心**底色：原来未解锁节点用 alpha=128 半透明，
+   * 连接线会从底下透出，看起来像"线画在节点上方"（改版方案 §4 问题 2）。
+   */
   private applyNodeVisual(node: RouteNode, btnNode: Node): void {
     if (!btnNode?.isValid) return;
     const sprite = btnNode.getComponent(Sprite);
@@ -163,17 +242,18 @@ export class RouteMapUI extends Component {
 
     const isReachable = this.isReachable(node.id);
     if (node.completed) {
-      sprite.color = new Color(156, 163, 175, 200);
+      sprite.color = hex(COLOR.TEXT_SECONDARY, ALPHA.SOLID);          // 已完成：灰实心
     } else if (isReachable) {
-      sprite.color = new Color(34, 197, 94, 255);
+      sprite.color = hex(COLOR.SUCCESS, ALPHA.SOLID);                 // 可达：绿实心 + 呼吸
       tween(btnNode)
-        .to(0.5, { scale: new Vec3(1.1, 1.1, 1) })
+        .to(0.5, { scale: new Vec3(1.08, 1.08, 1) })
         .to(0.5, { scale: new Vec3(1.0, 1.0, 1) })
         .union()
         .repeatForever()
         .start();
     } else {
-      sprite.color = new Color(209, 213, 219, 128);
+      // 未解锁：深色实心（不是半透明），彻底遮住线头
+      sprite.color = hex(COLOR.SURFACE, ALPHA.SOLID);
     }
   }
 
@@ -205,8 +285,11 @@ export class RouteMapUI extends Component {
       const view = this._nodeViews.get(n.id);
       if (view?.isValid) {
         this.applyNodeVisual(n, view);
+        const check = view.getChildByName('CheckMark');
+        if (check) check.active = n.completed;
       }
     }
+    this.updateProgressLabel();
     this.drawConnections();
   }
 
