@@ -140,18 +140,24 @@ export class TinyVanguardMain extends Component {
 
   /**
    * 通关面板出口。
-   * 场景内 RunVictoryPanel 没有任何 Button，通关后玩家无法离开，
-   * 这里用其 ContinueLabel 节点的 TOUCH_END 作为“返回大厅”入口（遵循 Node 事件委托方案）。
+   * P2 重构后 RunVictoryPanel 有了真正的按钮节点 ReturnBtn（200×48 PRIMARY），
+   * 不再依赖原先那个既是占位文案又当点击热区的 ContinueLabel。
    */
   private bindRunVictoryPanel(): void {
     if (!this.victoryPanel) return;
-    const labelNode = this.victoryPanel.getChildByName('ContinueLabel');
-    if (!labelNode) return;
-    const label = labelNode.getComponent(Label);
-    if (label) {
-      label.string = '\u8FD4\u56DE\u5927\u5385';
+    const returnBtnNode = this.victoryPanel.getChildByName('ReturnBtn');
+    if (!returnBtnNode) return;
+    const btn = returnBtnNode.getComponent(Button);
+    if (btn) {
+      btn.node.on(Button.EventType.CLICK, this.onReturnToLobby, this);
     }
-    labelNode.on(Node.EventType.TOUCH_END, this.onReturnToLobby, this);
+  }
+
+  /** 填充结算面板的摘要行（P2 统一版式：RunVictoryPanel 与 GameOverPanel 同为 SummaryLine1/2） */
+  private fillPanelSummary(panel: Node | null, line: number, text: string): void {
+    if (!panel) return;
+    const label = panel.getChildByName(`SummaryLine${line}`)?.getComponent(Label);
+    if (label) label.string = text;
   }
 
   private onReturnToLobby(): void {
@@ -582,7 +588,8 @@ export class TinyVanguardMain extends Component {
     } else {
       this._runData.honor += Math.max(1, this._battleCount * 5);
       this.battleUI.clearPhase();
-      this.battleUI.showDefeat();
+      // 失败面板补一行战绩摘要（P2 统一版式后不再留空）
+      this.battleUI.showDefeat(`\u62B5\u8FBE\u7B2C ${this._battleCount} \u5173 \u00B7 \u9020\u6210\u4F24\u5BB3 ${this.battleManager.totalDamageDealt}`);
       this.scheduleOnce(() => {
         this.onRunComplete(false);
       }, 2.0);
@@ -944,13 +951,20 @@ export class TinyVanguardMain extends Component {
       if (this.victoryPanel) {
         this.victoryPanel.active = true;
       }
+      // P2 统一版式：标题固定，数据写进两行摘要（不再往标题 Label 里拼多行字符串）
+      this.fillPanelSummary(this.victoryPanel, 1, `\u62B5\u8FBE\u7B2C ${this._battleCount} \u5173`);
+      this.fillPanelSummary(this.victoryPanel, 2, `\u8363\u8A89 +100 \u00B7 \u91D1\u5E01 ${this._runData.gold}`);
     } else {
       if (this.gameOverPanel) {
         this.gameOverPanel.active = true;
       }
+      // 标题兜底：场景若被改动仍保证文案正确（GameOverLabel 即 GameOverPanel 的标题节点）
       if (this.gameOverLabel) {
-        this.gameOverLabel.string = `\u6E38\u620F\u7ED3\u675F\n\u62B5\u8FBE\u7B2C ${this._battleCount} \u5173\n\u83B7\u5F97 +${this._runData.honor > 100 ? this._runData.honor - 100 : 0} \u8363\u8A89`;
+        this.gameOverLabel.string = '\u6E38\u620F\u7ED3\u675F';
       }
+      const honorGain = this._runData.honor > 100 ? this._runData.honor - 100 : 0;
+      this.fillPanelSummary(this.gameOverPanel, 1, `\u62B5\u8FBE\u7B2C ${this._battleCount} \u5173`);
+      this.fillPanelSummary(this.gameOverPanel, 2, `\u83B7\u5F97 +${honorGain} \u8363\u8A89`);
     }
 
     SaveManager.saveMeta({

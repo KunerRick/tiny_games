@@ -123,69 +123,9 @@ export class BattleUI extends Component {
     titleNode.setScale(0, 0, 1);
     this._battleStartOverlay.addChild(titleNode);
 
-    // 预创建胜利面板子节点
-    if (this.victoryPanel) {
-      let continueBtn = this.victoryPanel.getChildByName('ContinueBtn');
-      if (!continueBtn) {
-        continueBtn = new Node('ContinueBtn');
-        const btn = continueBtn.addComponent(Button);
-        // Button 的 @requireComponent 已自动带上 UITransform，这里取用而非重复添加
-        const btnTransform = continueBtn.getComponent(UITransform);
-        if (btnTransform) btnTransform.setContentSize(160, 50);
-        continueBtn.setPosition(0, -80, 0);
-        const btnSprite = continueBtn.addComponent(Sprite);
-        btnSprite.color = new Color(0, 120, 200);
-        btnSprite.sizeMode = Sprite.SizeMode.CUSTOM;
-        // 同一节点不能同时挂两个渲染组件（Label + Sprite 会触发
-        // "Can't add renderable component to this node"），文字放到子节点
-        const textNode = new Node('ContinueText');
-        const textTransform = textNode.addComponent(UITransform);
-        textTransform.setContentSize(160, 50);
-        const btnLabel = textNode.addComponent(Label);
-        btnLabel.string = '\u7EE7\u7EED';
-        applyFontAndColor(btnLabel, FONT_BODY, COLOR.TEXT_PRIMARY);
-        btnLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
-        btnLabel.verticalAlign = Label.VerticalAlign.CENTER;
-        continueBtn.addChild(textNode);
-        this.victoryPanel.addChild(continueBtn);
-      }
-
-      let goldLabel = this.victoryPanel.getChildByName('GoldLabel');
-      if (!goldLabel) {
-        goldLabel = new Node('GoldLabel');
-        const gl = goldLabel.addComponent(Label);
-        gl.fontSize = 28;
-        gl.color = new Color(255, 215, 0);
-        gl.horizontalAlign = Label.HorizontalAlign.CENTER;
-        gl.verticalAlign = Label.VerticalAlign.CENTER;
-        goldLabel.setPosition(0, -30, 0);
-        this.victoryPanel.addChild(goldLabel);
-      }
-
-      let turnLabel = this.victoryPanel.getChildByName('TurnCountLabel');
-      if (!turnLabel) {
-        turnLabel = new Node('TurnCountLabel');
-        const tl = turnLabel.addComponent(Label);
-        tl.fontSize = 22;
-        tl.color = Color.WHITE;
-        tl.horizontalAlign = Label.HorizontalAlign.CENTER;
-        tl.verticalAlign = Label.VerticalAlign.CENTER;
-        turnLabel.setPosition(0, 40, 0);
-        this.victoryPanel.addChild(turnLabel);
-      }
-
-      let dmgLabel = this.victoryPanel.getChildByName('DamageLabel');
-      if (!dmgLabel) {
-        dmgLabel = new Node('DamageLabel');
-        const dl = dmgLabel.addComponent(Label);
-        dl.fontSize = 22;
-        dl.color = new Color(255, 180, 100);
-        dl.horizontalAlign = Label.HorizontalAlign.CENTER;
-        dl.verticalAlign = Label.VerticalAlign.CENTER;
-        dmgLabel.setPosition(0, 5, 0);
-        this.victoryPanel.addChild(dmgLabel);
-      }
-    }
+    // 结算面板结构由场景提供（P2 重构：三行左右对齐统计 + ContinueBtn / 图标 / 摘要行）。
+    // 不再运行时创建 GoldLabel / TurnCountLabel / DamageLabel / ContinueLabel，
+    // 避免「场景里已有」与「运行时再建一套」两个来源并存（改版方案 §8 目标）。
   }
 
   show(): void {
@@ -591,6 +531,9 @@ export class BattleUI extends Component {
   }
 
   showVictory(gold: number, turnCount: number = 0, totalDamage: number = 0): void {
+    // 两个结算面板互斥：显示胜利面板时收起失败面板与布阵按钮
+    if (this.defeatPanel) this.defeatPanel.active = false;
+    if (this.confirmDeployButton) this.confirmDeployButton.active = false;
     if (this.victoryPanel) {
       this.ensurePanelOnTop(this.victoryPanel);
       this.victoryPanel.active = true;
@@ -604,26 +547,24 @@ export class BattleUI extends Component {
     if (this.skillButtonContainer) {
       this.skillButtonContainer.active = false;
     }
+    // 结算面板与战斗 HUD 同屏会互相压叠（状态面板世界区域落在面板上方），
+    // 结算期间隐藏状态面板；下一场由 showDeployPhase/hideDeployPhase 恢复。
+    this.setStatPanelVisible(false);
 
-    // 更新金币显示
-    const goldLabel = this.victoryPanel?.getChildByName('GoldLabel');
-    const glComp = goldLabel?.getComponent(Label);
-    if (glComp) {
-      glComp.string = `\uD83D\uDCB0 +${gold}`;
+    // 统计值写进场景里的右对齐 Value 节点（左键在场景，右值运行时填）
+    const goldValue = this.victoryPanel?.getChildByName('StatsGoldValue')?.getComponent(Label);
+    if (goldValue) {
+      goldValue.string = `+${gold}`;
     }
 
-    // 更新回合数
-    const turnLabel = this.victoryPanel?.getChildByName('TurnCountLabel');
-    const tlComp = turnLabel?.getComponent(Label);
-    if (tlComp) {
-      tlComp.string = `用时回合：${turnCount}`;
+    const turnValue = this.victoryPanel?.getChildByName('StatsTurnValue')?.getComponent(Label);
+    if (turnValue) {
+      turnValue.string = `${turnCount}`;
     }
 
-    // 更新总伤害
-    const dmgLabel = this.victoryPanel?.getChildByName('DamageLabel');
-    const dlComp = dmgLabel?.getComponent(Label);
-    if (dlComp) {
-      dlComp.string = `造成伤害：${totalDamage}`;
+    const dmgValue = this.victoryPanel?.getChildByName('StatsDamageValue')?.getComponent(Label);
+    if (dmgValue) {
+      dmgValue.string = `${totalDamage}`;
     }
 
     // 绑定继续按钮事件
@@ -637,19 +578,34 @@ export class BattleUI extends Component {
     }
   }
 
-  showDefeat(): void {
+  /**
+   * 失败面板。
+   * P2 统一版式后结构与胜利/通关一致：标题 + 一行副信息 + 主按钮样式；
+   * ScoreLabel 用于一行战绩摘要（原实现留空）。
+   */
+  showDefeat(summary: string = ''): void {
+    // 与 showVictory 对称：两个结算面板互斥，并收起布阵按钮
+    if (this.victoryPanel) this.victoryPanel.active = false;
+    if (this.confirmDeployButton) this.confirmDeployButton.active = false;
     if (this.defeatPanel) {
       // 确保面板在最顶层（避免被单位遮挡）
       this.ensurePanelOnTop(this.defeatPanel);
       this.defeatPanel.active = true;
 
-      // 设置失败文案居中
-      const resultLabel = this.defeatPanel.getComponentInChildren(Label);
+      const resultLabel = this.defeatPanel.getChildByName('DefeatLabel')?.getComponent(Label);
       if (resultLabel) {
         resultLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
         resultLabel.verticalAlign = Label.VerticalAlign.CENTER;
-        resultLabel.string = '失 败';
-        resultLabel.color = new Color(255, 80, 80);
+        resultLabel.string = '\u5931 \u8D25';
+        applyFontAndColor(resultLabel, FONT_DISPLAY, COLOR.DANGER);
+      }
+
+      const scoreLabel = this.defeatPanel.getChildByName('ScoreLabel')?.getComponent(Label);
+      if (scoreLabel) {
+        scoreLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+        scoreLabel.verticalAlign = Label.VerticalAlign.CENTER;
+        scoreLabel.string = summary;
+        applyFontAndColor(scoreLabel, FONT_BODY, COLOR.TEXT_SECONDARY);
       }
     }
     if (this.waitButton) {
@@ -658,6 +614,8 @@ export class BattleUI extends Component {
     if (this.skillButtonContainer) {
       this.skillButtonContainer.active = false;
     }
+    // 同 showVictory：结算期间隐藏状态面板，避免与面板区域压叠
+    this.setStatPanelVisible(false);
   }
 
   /**
