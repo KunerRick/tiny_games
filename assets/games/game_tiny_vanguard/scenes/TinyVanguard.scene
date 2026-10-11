@@ -565,8 +565,8 @@
     "_prefab": null,
     "_lpos": {
       "__type__": "cc.Vec3",
-      "x": 10,
-      "y": 38,
+      "x": -90,
+      "y": 28,
       "z": 0
     },
     "_lrot": {
@@ -604,7 +604,7 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 180,
+      "width": 120,
       "height": 26
     },
     "_anchorPoint": {
@@ -697,8 +697,8 @@
     "_prefab": null,
     "_lpos": {
       "__type__": "cc.Vec3",
-      "x": 10,
-      "y": 10,
+      "x": -90,
+      "y": 0,
       "z": 0
     },
     "_lrot": {
@@ -741,8 +741,8 @@
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
-      "x": 0,
-      "y": 1
+      "x": 0.5,
+      "y": 0.5
     },
     "_id": "cb/FwSmo9DdLjPLKWgqb4w"
   },
@@ -829,8 +829,8 @@
     "_prefab": null,
     "_lpos": {
       "__type__": "cc.Vec3",
-      "x": 10,
-      "y": -18,
+      "x": -90,
+      "y": -28,
       "z": 0
     },
     "_lrot": {
@@ -873,8 +873,8 @@
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
-      "x": 0,
-      "y": 1
+      "x": 0.5,
+      "y": 0.5
     },
     "_id": "06C6+lYTVIUqORqfq3labc"
   },
@@ -961,8 +961,8 @@
     "_prefab": null,
     "_lpos": {
       "__type__": "cc.Vec3",
-      "x": 10,
-      "y": -46,
+      "x": 90,
+      "y": 28,
       "z": 0
     },
     "_lrot": {
@@ -1000,12 +1000,12 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 180,
+      "width": 90,
       "height": 22
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
-      "x": 0.5,
+      "x": 1,
       "y": 0.5
     },
     "_id": "5d97g2UUxKdbCqt5oV7/Z+"
@@ -1031,7 +1031,7 @@
       "a": 255
     },
     "_string": "",
-    "_horizontalAlign": 1,
+    "_horizontalAlign": 2,
     "_verticalAlign": 1,
     "_actualFontSize": 0,
     "_fontSize": 16,
@@ -1085,7 +1085,7 @@
     "_contentSize": {
       "__type__": "cc.Size",
       "width": 200,
-      "height": 120
+      "height": 100
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
