@@ -64,7 +64,8 @@ export class BattleManager extends Component {
     difficulty: number,
     isElite: boolean,
     isBoss: boolean,
-    onEnd: (result: BattleResult) => void
+    onEnd: (result: BattleResult) => void,
+    deployLayout?: ({ row: number; col: number } | null)[] | null
   ): void {
     this._onBattleEndCallback = onEnd;
     this._phase = 'deploy';
@@ -82,6 +83,8 @@ export class BattleManager extends Component {
     this.clearAllUnits();
     this.createPlayerUnits(playerClasses);
     this.createEnemyUnits(difficulty, isElite, isBoss);
+    // 落位必须在敌人生成之后：兜底校验要能检出"与敌人初始位置冲突"
+    this.applyDeployLayout(deployLayout);
     this.startDeployPhase();
   }
 
@@ -176,10 +179,16 @@ export class BattleManager extends Component {
     this._phase = 'deploy';
     this._highlightDeployArea();
     this.gridController.setCellClickCallback((pos) => this.onDeployCellClicked(pos));
-    // 自动选中第一张卡
-    this._selectedDeployUnitIndex = 0;
+    // 自动选中第一张「尚未落位」的卡；沿用存档阵型时前面的卡可能已落位
+    const firstUnplaced = this._playerUnits.findIndex(u => (u.data?.gridPos.col ?? -1) < 0);
+    // 先按实际落位情况刷新兵牌三态（存档阵型可能已把部分/全部单位放好），
+    // 再切换选中态 —— 顺序反了会让已上阵的卡被重置成 unplaced。
+    if (this._onDeployUnitPlacedCallback) {
+      this._onDeployUnitPlacedCallback(this._deployedPositions.length, this._playerUnits.length);
+    }
+    this._selectedDeployUnitIndex = firstUnplaced;
     if (this._onDeploySelectionChanged) {
-      this._onDeploySelectionChanged(0);
+      this._onDeploySelectionChanged(firstUnplaced);
     }
     // 禁用后 4 行格子交互
     this.gridController.setRowsInteractable([2, 3, 4, 5], false);
@@ -194,6 +203,53 @@ export class BattleManager extends Component {
     if (this._onUnitPhaseChanged) {
       this._onUnitPhaseChanged('deploy', null, null);
     }
+  }
+
+  /**
+   * 按存档阵型落位（§3.2）。四条校验（长度一致 / row<=1 / 单位间不冲突 /
+   * 不与敌人初始位置冲突）任一不满足即**整体回退默认阵型**，
+   * 避免"半失效"状态（部分单位落位、部分散在棋盘外）。
+   */
+  private applyDeployLayout(layout?: ({ row: number; col: number } | null)[] | null): void {
+    if (!layout || layout.length !== this._playerUnits.length) return;
+
+    const enemyPos = new Set<string>();
+    for (const e of this._enemyUnits) {
+      if (e.data) enemyPos.add(`${e.data.gridPos.row},${e.data.gridPos.col}`);
+    }
+
+    const used = new Set<string>();
+    const accepted: ({ row: number; col: number } | null)[] = [];
+    for (const entry of layout) {
+      if (!entry) {
+        accepted.push(null);
+        continue;
+      }
+      const { row, col } = entry;
+      const key = `${row},${col}`;
+      const inDeployArea = row >= 0 && row <= 1 && col >= 0 && col < GridController.GRID_SIZE;
+      if (!inDeployArea || used.has(key) || enemyPos.has(key)) return;
+      used.add(key);
+      accepted.push({ row, col });
+    }
+
+    for (let i = 0; i < this._playerUnits.length; i++) {
+      const pos = accepted[i];
+      const unit = this._playerUnits[i];
+      if (!pos || !unit?.data || !unit.node?.isValid) continue;
+      unit.setGridPosition(pos);
+      unit.node.active = true;
+      this._deployedPositions.push(pos);
+    }
+  }
+
+  /** 导出当前布阵（按 playerClasses 下标对齐；未上阵为 null），供存档持久化（§3.2） */
+  exportDeployLayout(): ({ row: number; col: number } | null)[] {
+    return this._playerUnits.map(u => {
+      const pos = u.data?.gridPos;
+      if (!pos || pos.col < 0) return null;
+      return { row: pos.row, col: pos.col };
+    });
   }
 
   public highlightDeployArea(): void {

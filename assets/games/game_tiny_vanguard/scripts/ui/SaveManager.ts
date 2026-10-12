@@ -8,6 +8,11 @@ export interface RunData {
   difficulty: string;
   unlockedClasses: string[];
   unlockedSkills: string[];
+  /**
+   * 上次战斗的布阵结果（按 playerClasses 下标对齐）；null = 该单位未上阵。
+   * 可选字段：旧存档没有此项，读取时按"无记录"处理、回退默认阵型。
+   */
+  deployLayout?: ({ row: number; col: number } | null)[];
 }
 
 export class SaveManager {

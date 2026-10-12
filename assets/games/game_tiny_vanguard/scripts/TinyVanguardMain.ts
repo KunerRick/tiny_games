@@ -392,6 +392,8 @@ export class TinyVanguardMain extends Component {
     this._runData.playerClasses = [...this._selectedClasses];
     this._runData.gold = 0;
     this._runData.currentRouteNode = 0;
+    // 新开局：丢弃上一局的布阵（职业组合已变，旧阵型无意义）
+    this._runData.deployLayout = undefined;
 
     this.startNewRun();
   }
@@ -526,7 +528,8 @@ export class TinyVanguardMain extends Component {
       this._currentDifficulty,
       isElite,
       isBoss,
-      (result) => this.onBattleEnd(result)
+      (result) => this.onBattleEnd(result),
+      this._runData.deployLayout ?? null
     );
 
     // 恢复存档中的技能（按 id 去重：创建单位时已自动添加起始技能，避免重复）
@@ -548,6 +551,9 @@ export class TinyVanguardMain extends Component {
 
   private onConfirmDeploy(): void {
     if (!this.battleManager.confirmDeploy()) return;
+    // 布阵确认成功 → 把本场阵型写入存档，下次战斗沿用（§3.2）
+    this._runData.deployLayout = this.battleManager.exportDeployLayout();
+    SaveManager.saveRun(this._runData);
     this.battleUI.hideDeployPhase();
 
     // 播放战前动画，动画完成后开始战斗
