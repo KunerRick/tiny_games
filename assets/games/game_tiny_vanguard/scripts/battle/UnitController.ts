@@ -266,15 +266,17 @@ export class UnitController extends Component {
 
     const bgUi = hpBar.getComponent(UITransform);
     const fillUi = hpFill.getComponent(UITransform);
-    // 锚点居中 + x 归零，血条才能与单位同心。
-    // prefab 里 anchorPoint 是 (0, 0.5)（左对齐），配上 x=0 会让整条血条
-    // 右移半个身位（实测偏右 27px）；改为居中后按比例缩宽度即可。
+    // 容器 HpBar 居中于单位（锚点 0.5/0.5、x=0），填充 HpFill 左端贴合容器左缘：
+    // 锚点 (0, 0.5) + x = -HP_BAR_WIDTH/2，缩宽度时右端后退、左缘恒定。
+    // prefab 里 anchorPoint 是 (0, 0.5)（左对齐），配上之前的 x=0 会让整条血条
+    // 右移半个身位（实测偏右 27px）；上一轮改成"容器与填充都居中"，导致掉血时
+    // 从两端同时内收、读感像"血从中间被吃掉"。这里只把填充改为左端锚定。
     if (bgUi) {
       bgUi.setAnchorPoint(0.5, 0.5);
       bgUi.setContentSize(UnitController.HP_BAR_WIDTH, UnitController.HP_BAR_HEIGHT);
     }
     if (fillUi) {
-      fillUi.setAnchorPoint(0.5, 0.5);
+      fillUi.setAnchorPoint(0, 0.5);
       fillUi.setContentSize(UnitController.HP_BAR_WIDTH, UnitController.HP_BAR_HEIGHT);
     }
 
@@ -284,14 +286,15 @@ export class UnitController extends Component {
     this.updateHealthBar();
   }
 
-  /** 按 currentHp/maxHp 刷新血条宽度与颜色（居中收缩，两端同时内收） */
+  /** 按 currentHp/maxHp 刷新血条宽度与颜色（左端锚定：左缘恒定、右端后退） */
   private updateHealthBar(): void {
     if (!this._data || !this._hpFill || !this._hpFillUi) return;
     const ratio = this._data.maxHp > 0
       ? Math.max(0, Math.min(1, this._data.currentHp / this._data.maxHp))
       : 0;
     this._hpFillUi.setContentSize(this._hpFillFullWidth * ratio, this._hpFillUi.height);
-    this._hpFill.node.setPosition(0, 0, 0);
+    // 锚点是 (0, 0.5) → 位置 x = 容器左缘（-宽/2），宽度收缩时左缘不动
+    this._hpFill.node.setPosition(-this._hpFillFullWidth / 2, 0, 0);
     this._hpFill.color = hpBarColor(this._data.currentHp, this._data.maxHp);
   }
 
