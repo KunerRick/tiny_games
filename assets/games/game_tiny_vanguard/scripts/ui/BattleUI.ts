@@ -1,14 +1,35 @@
-import { _decorator, Component, Node, Label, Button, Sprite, tween, Vec3, instantiate, Prefab, UITransform, Event, EventTouch } from 'cc';
+import { _decorator, Component, Node, Label, Button, Sprite, SpriteFrame, tween, Vec3, instantiate, Prefab, UITransform, EventTouch } from 'cc';
 import {
-  ALPHA, COLOR, CONTROL, SPACE, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_TITLE, FONT_TINY,
+  ALPHA, CLASS_COLOR, COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_TITLE, FONT_TINY,
   applyButtonTheme, applyFont, applyFontAndColor, hex,
 } from '../config/Theme';
 const { ccclass, property } = _decorator;
 
-/** 兵牌宽度（高度取 CONTROL.ROW_HEIGHT） */
-const CARD_WIDTH = 110;
-/** 选中态左侧竖条宽度（§4 问题 1：用竖条替代整块覆盖高亮） */
-const SELECT_BAR_WIDTH = 4;
+/**
+ * 站台槽位宽度。
+ * §3.5：从 110 收到 100，配合中心左移到 SLOT_CENTER_X，与棋盘 col0 留出 10px 间隙
+ * （左侧可用区仅 120px 宽，属紧贴排布）。
+ */
+const SLOT_WIDTH = 100;
+/** 槽位高度 = 列表行高 */
+const SLOT_HEIGHT = CONTROL.ROW_HEIGHT;
+/** 槽位区中心相对 BattleUI 的 local x（世界 x = 60 → [10, 110]） */
+const SLOT_CENTER_X = -300;
+/** 最下方槽位中心相对 BattleUI 的 local y（world 440，与旧兵牌第 0 张一致） */
+const SLOT_BASE_Y = -200;
+/** 槽位边框线宽（4 条细 Sprite 拼实线，替代虚线——项目无虚线贴图，方案 §3.4 默认 (a)） */
+const SLOT_BORDER_WIDTH = 2;
+/**
+ * 槽位内文字块尺寸与位置。
+ * 标签**必须显式给宽高并 CLAMP**：Label 默认按内容自适应，emoji fallback 字体
+ * 会把高度撑到 35px+ 顶穿边框；宽度留出左右边框的余量，避免与边框接触。
+ * 各值与边框之间保留 ≥1px 间隙（审计判据为 >0.5px 即算重叠）。
+ */
+const SLOT_LABEL_WIDTH = SLOT_WIDTH - 2 * SLOT_BORDER_WIDTH - 2;
+const SLOT_ICON_HEIGHT = 28;
+const SLOT_ICON_Y = 15;
+const SLOT_NAME_HEIGHT = 24;
+const SLOT_NAME_Y = -17;
 
 @ccclass('BattleUI')
 export class BattleUI extends Component {
@@ -36,7 +57,7 @@ export class BattleUI extends Component {
   @property({ type: Node, tooltip: '普通攻击按钮节点' })
   attackButton: Node = null;
 
-  @property({ type: Node, tooltip: '布阵单位列表容器' })
+  @property({ type: Node, tooltip: '布阵单位列表容器（站台槽位的父节点）' })
   deployUnitList: Node = null;
 
   @property({ type: Node, tooltip: '技能按钮容器' })
@@ -64,6 +85,8 @@ export class BattleUI extends Component {
   private _eventsBound: boolean = false;
   private _deployCards: Node[] = [];
   private _onDeployCardCb: ((index: number) => void) | null = null;
+  /** 纯色块贴图缓存（undefined = 尚未查询；null = 查询失败，不再重试） */
+  private _solidFrame: SpriteFrame | null | undefined = undefined;
   private _autoSkipNoticeCb: (() => void) | null = null;
   private _battleStartOverlay: Node | null = null;
   private _onBattleStartComplete: (() => void) | null = null;
@@ -250,8 +273,8 @@ export class BattleUI extends Component {
     this.setStatPanelVisible(false);
     // 单一阶段条：阶段 + 操作提示合成一句，不再有多处重复文案
     this.setPhaseBar('\u5E03\u9635\u9636\u6BB5', '\u70B9\u51FB\u524D\u4E24\u884C\u90E8\u7F72\u5355\u4F4D');
-    // 兵牌由 setupPlatoonCards 直接挂在 BattleUI 下（不在此空容器内），故保持收起
-    if (this.deployUnitList) this.deployUnitList.active = false;
+    // 站台槽位容器由 setupDeploySlots 直接置为可见（槽位挂在其中）
+    if (this.deployUnitList) this.deployUnitList.active = true;
   }
 
   hideDeployPhase(): void {
@@ -259,6 +282,7 @@ export class BattleUI extends Component {
     if (this.waitButton) this.waitButton.active = true;
     // 恢复状态栏面板
     this.setStatPanelVisible(true);
+    // 离开布阵：收起站台槽位（容器内的槽位随之不可见）
     if (this.deployUnitList) this.deployUnitList.active = false;
   }
 
@@ -305,147 +329,231 @@ export class BattleUI extends Component {
     if (this.turnLabel) this.turnLabel.string = `\u56DE\u5408 ${turn}`;
   }
 
-  setupPlatoonCards(
+  /**
+   * 构建左下角的固定站台槽位（§3.4）。
+   *
+   * 与旧实现的区别：① 槽位复用场景里一直空置的 `deployUnitList` 作为容器
+   * （旧代码把卡片直接挂在 BattleUI 下，该容器从未被使用）；② 宽度 110 → 100
+   * 并整体左移，消除与棋盘第 0 列的重叠（§3.5）；③ 背景**必须设 spriteFrame**
+   * —— 旧卡片只设了 color，`spriteFrame = null` 时 Cocos 什么都不画（背景不可见）。
+   */
+  setupDeploySlots(
     unitNames: string[],
     unitIcons: string[],
+    unitClassIds: string[],
     callback: (index: number) => void
   ): void {
-    // 清除旧的兵牌
-    for (const card of this._deployCards) {
-      if (card?.isValid) {
-        card.off(Node.EventType.TOUCH_END, this.onDeployCardClicked, this);
-        card.removeFromParent();
+    const container = this.deployUnitList;
+    if (!container?.isValid) {
+      console.warn('[BattleUI] deployUnitList 未绑定，站台槽位无法创建');
+      return;
+    }
+
+    // 清除旧槽位
+    for (const slot of this._deployCards) {
+      if (slot?.isValid) {
+        slot.off(Node.EventType.TOUCH_END, this.onDeploySlotClicked, this);
       }
+    }
+    for (const child of container.children.slice()) {
+      if (child?.isValid) child.removeFromParent();
     }
     this._deployCards = [];
     this._onDeployCardCb = callback;
 
-    // 兵牌：纵向堆叠在棋盘左侧，行高与间距统一走设计令牌
-    const cardWidth = CARD_WIDTH;
-    const cardHeight = CONTROL.ROW_HEIGHT;
-    const gap = CONTROL.ROW_GAP;
     const count = unitNames.length;
-    const baseX = -265;
-    const baseY = -200;
+    const totalHeight = count * SLOT_HEIGHT + Math.max(0, count - 1) * CONTROL.ROW_GAP;
+
+    // 容器归位（场景里可能尚未设置，运行时按设计值补齐；幂等）。
+    // 容器中心 = 最下方槽位中心 + 半个槽位区高度，这样 i=0 的槽位恒定落在 SLOT_BASE_Y
+    // （与旧兵牌位置一致，避免整列无谓位移）。
+    const listCenterY = SLOT_BASE_Y + Math.max(0, count - 1) * (SLOT_HEIGHT + CONTROL.ROW_GAP) / 2;
+    container.setPosition(SLOT_CENTER_X, listCenterY, 0);
+    const containerUi = container.getComponent(UITransform);
+    if (containerUi) {
+      containerUi.setAnchorPoint(0.5, 0.5);
+      containerUi.setContentSize(SLOT_WIDTH, Math.max(totalHeight, SLOT_HEIGHT));
+    }
+    container.active = true;
 
     for (let i = 0; i < count; i++) {
-      const card = new Node(`PlatoonCard_${i}`);
-      // 从下往上排列：i=0 最底，i=2 最高
-      card.setPosition(baseX, baseY + i * (cardHeight + gap), 0);
+      const slot = new Node(`DeploySlot_${i}`);
+      // 从下往上排列：i=0 最底
+      const y = -totalHeight / 2 + SLOT_HEIGHT / 2 + i * (SLOT_HEIGHT + CONTROL.ROW_GAP);
+      slot.setPosition(0, y, 0);
+      slot['_deployIdx'] = i;
+      slot['_deployClassId'] = unitClassIds[i] ?? '';
 
       // 背景：Sprite 的 @requireComponent 已自带 UITransform，不可重复 addComponent
-      // （重复添加会让 setContentSize 设到未被使用的那一个上，节点仍是默认 100×100
-      //   → 卡片按 100 高与 8 间距排布时必然重叠）
-      const bg = card.addComponent(Sprite);
-      bg.color = hex(COLOR.SURFACE, ALPHA.PANEL_BG);
+      // 顺序要紧：spriteFrame → sizeMode=CUSTOM → color → contentSize（最后），
+      // 否则尺寸会被贴图原始尺寸覆盖（AGENTS.md 教训 C）。
+      const bg = slot.addComponent(Sprite);
+      const frame = this.getSolidSpriteFrame();
+      if (frame) bg.spriteFrame = frame;
       bg.sizeMode = Sprite.SizeMode.CUSTOM;
-      const cardTransform = card.getComponent(UITransform);
-      if (cardTransform) cardTransform.setContentSize(cardWidth, cardHeight);
+      bg.type = Sprite.Type.SIMPLE;
+      bg.color = hex(COLOR.SURFACE, ALPHA.PANEL_BG);
+      const slotUi = slot.getComponent(UITransform);
+      if (slotUi) slotUi.setContentSize(SLOT_WIDTH, SLOT_HEIGHT);
+
+      // 4 条细 Sprite 拼实线边框（项目无虚线贴图 → 方案 §3.4 的默认方案 (a)）
+      for (const b of BattleUI.SLOT_BORDERS) {
+        const line = new Node(b.name);
+        const lineSprite = line.addComponent(Sprite);
+        if (frame) lineSprite.spriteFrame = frame;
+        lineSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+        lineSprite.type = Sprite.Type.SIMPLE;
+        lineSprite.color = hex(COLOR.PANEL_BORDER);
+        const lineUi = line.getComponent(UITransform);
+        if (lineUi) lineUi.setContentSize(b.w, b.h);
+        line.setPosition(b.x, b.y, 0);
+        slot.addChild(line);
+      }
 
       // 图标（上半部分）
+      // 宽度避开左右边框、高度钳制后与上下边框各留 1px 间隙：
+      // Label 默认按内容自适应（emoji fallback 字体把高度撑到 35px+），会与边框接触。
       const iconNode = new Node('IconLabel');
       const iconUi = iconNode.addComponent(UITransform);
-      iconUi.setContentSize(cardWidth, 32);
+      iconUi.setContentSize(SLOT_LABEL_WIDTH, SLOT_ICON_HEIGHT);
       const iconLabel = iconNode.addComponent(Label);
       iconLabel.string = unitIcons[i] || '';
       applyFontAndColor(iconLabel, FONT_BODY, COLOR.TEXT_PRIMARY);
       iconLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
       iconLabel.verticalAlign = Label.VerticalAlign.CENTER;
-      iconNode.setPosition(0, 14, 0);
-      card.addChild(iconNode);
+      iconLabel.overflow = Label.Overflow.CLAMP;
+      iconNode.setPosition(0, SLOT_ICON_Y, 0);
+      slot.addChild(iconNode);
 
       // 名字（下半部分）
       const nameNode = new Node('NameLabel');
       const nameUi = nameNode.addComponent(UITransform);
-      nameUi.setContentSize(cardWidth, 20);
+      nameUi.setContentSize(SLOT_LABEL_WIDTH, SLOT_NAME_HEIGHT);
       const nl = nameNode.addComponent(Label);
       nl.string = unitNames[i];
       applyFontAndColor(nl, FONT_TINY, COLOR.TEXT_SECONDARY);
       nl.horizontalAlign = Label.HorizontalAlign.CENTER;
       nl.verticalAlign = Label.VerticalAlign.CENTER;
-      nameNode.setPosition(0, -18, 0);
-      card.addChild(nameNode);
+      nl.overflow = Label.Overflow.CLAMP;
+      nameNode.setPosition(0, SLOT_NAME_Y, 0);
+      slot.addChild(nameNode);
 
-      // 交互
-      card['_deployIdx'] = i;
-      card.on(Node.EventType.TOUCH_END, this.onDeployCardClicked, this);
+      // 交互（点击兜底路径，P3 另叠加拖拽）
+      slot.on(Node.EventType.TOUCH_END, this.onDeploySlotClicked, this);
 
-      this.node.addChild(card);
-      this._deployCards.push(card);
+      container.addChild(slot);
+      this._deployCards.push(slot);
     }
   }
 
-  private onDeployCardClicked(evt: EventTouch): void {
-    const card = evt.currentTarget as Node;
-    if (!card?.isValid) return;
-    const idx = card['_deployIdx'] as number;
+  /**
+   * 4 条边框相对槽位中心的偏移与尺寸（线宽 SLOT_BORDER_WIDTH）。
+   * 上下边框两端各让出 SLOT_BORDER_WIDTH，与左右边框**拼接**而非交叠 ——
+   * 否则四角会形成 2×2 的自重叠（审计会判为重叠）。
+   */
+  private static readonly SLOT_BORDERS = [
+    { name: 'BorderTop',    x: 0, y:  SLOT_HEIGHT / 2 - SLOT_BORDER_WIDTH / 2, w: SLOT_WIDTH - 2 * SLOT_BORDER_WIDTH, h: SLOT_BORDER_WIDTH },
+    { name: 'BorderBottom', x: 0, y: -SLOT_HEIGHT / 2 + SLOT_BORDER_WIDTH / 2, w: SLOT_WIDTH - 2 * SLOT_BORDER_WIDTH, h: SLOT_BORDER_WIDTH },
+    { name: 'BorderLeft',   x: -SLOT_WIDTH / 2 + SLOT_BORDER_WIDTH / 2, y: 0, w: SLOT_BORDER_WIDTH, h: SLOT_HEIGHT },
+    { name: 'BorderRight',  x:  SLOT_WIDTH / 2 - SLOT_BORDER_WIDTH / 2, y: 0, w: SLOT_BORDER_WIDTH, h: SLOT_HEIGHT },
+  ] as const;
+
+  /**
+   * 纯色块用的贴图。旧实现只写 color 不写 spriteFrame，
+   * 而 `spriteFrame = null` 时 Sprite 不做任何绘制 —— 这就是"兵牌背景不可见"的根因。
+   *
+   * 必须**借用场景里已在用的贴图**（默认九宫格 `default_sprite_splash`），
+   * 不能用 `builtinResMgr.get('default-spriteframe')`：后者的 texture 是 2×2 的
+   * `default-texture`，DynamicAtlas 打包它时会持续抛
+   * `texSubImage2D: Overload resolution failed`。
+   */
+  private getSolidSpriteFrame(): SpriteFrame | null {
+    if (this._solidFrame !== undefined) return this._solidFrame;
+    let frame: SpriteFrame | null = null;
+    const donors = [this.confirmDeployButton, this.waitButton, this.attackButton, this.endTurnButton];
+    for (const d of donors) {
+      const sp = d?.isValid ? d.getComponent(Sprite) : null;
+      if (sp?.spriteFrame) { frame = sp.spriteFrame; break; }
+    }
+    if (!frame) {
+      console.warn('[BattleUI] 场景中没有可借用贴图的按钮节点，槽位背景/边框将不可见');
+    }
+    this._solidFrame = frame;
+    return frame;
+  }
+
+  private onDeploySlotClicked(evt: EventTouch): void {
+    const slot = evt.currentTarget as Node;
+    if (!slot?.isValid) return;
+    const idx = slot['_deployIdx'] as number;
     if (this._onDeployCardCb) this._onDeployCardCb(idx);
   }
 
-  setDeployCardState(index: number, state: 'unplaced' | 'selected' | 'placed'): void {
-    const card = this._deployCards[index];
-    if (!card?.isValid) return;
+  /**
+   * 三态外观（§3.4）。
+   * `placed` 的语义是"兵还在、已上场"：底色压暗 + 图标/名字淡化，
+   * 边框改用该单位的**职业色**，一眼看出是哪一兵种占着这个站台。
+   */
+  setDeploySlotState(index: number, state: 'unplaced' | 'selected' | 'placed'): void {
+    const slot = this._deployCards[index];
+    if (!slot?.isValid) return;
 
-    const bg = card.getComponent(Sprite);
-    const cardHeight = CONTROL.ROW_HEIGHT;
-
-    // 左侧竖条即选中指示条，不再用整块 HighlightBorder 覆盖卡片
-    // （覆盖式高亮会与卡片内的图标/名字 100% 重叠；见改版方案 §4 问题 1）
-    let bar = card.getChildByName('SelectBar');
-    if (!bar) {
-      bar = new Node('SelectBar');
-      const barSprite = bar.addComponent(Sprite);
-      barSprite.sizeMode = Sprite.SizeMode.CUSTOM;
-      const barUi = bar.getComponent(UITransform);
-      if (barUi) barUi.setContentSize(SELECT_BAR_WIDTH, cardHeight - SPACE.SM);
-      // 贴卡片左缘内侧，竖直居中
-      bar.setPosition(-CARD_WIDTH / 2 + SELECT_BAR_WIDTH / 2 + 1, 0, 0);
-      card.addChild(bar);
-    }
-
-    const barSpriteComp = bar.getComponent(Sprite);
+    const bg = slot.getComponent(Sprite);
+    const classId = (slot['_deployClassId'] as string) ?? '';
+    const classColor = CLASS_COLOR[classId] ?? CLASS_COLOR.fallback;
+    const applyBorder = (c: string) => {
+      for (const b of BattleUI.SLOT_BORDERS) {
+        const line = slot.getChildByName(b.name);
+        const sp = line?.getComponent(Sprite);
+        if (sp) sp.color = hex(c);
+      }
+    };
+    const setTextAlpha = (c: string) => {
+      const icon = slot.getChildByName('IconLabel')?.getComponent(Label);
+      const name = slot.getChildByName('NameLabel')?.getComponent(Label);
+      if (icon) icon.color = hex(c);
+      if (name) name.color = hex(c);
+    };
 
     switch (state) {
       case 'unplaced':
         if (bg) bg.color = hex(COLOR.SURFACE, ALPHA.PANEL_BG);
-        card.setScale(new Vec3(1, 1, 1));
-        bar.active = false;
+        applyBorder(COLOR.PANEL_BORDER);
+        setTextAlpha(COLOR.TEXT_PRIMARY);
         break;
 
       case 'selected':
-        // 选中：主色背景 + 左侧主色竖条（取代原来的 1.12 放大与整块绿框）
+        // 选中：主色背景 + 主色边框（取代旧的 1.12 放大与整块绿框）
         if (bg) bg.color = hex(COLOR.PRIMARY, ALPHA.PANEL_BG);
-        card.setScale(new Vec3(1, 1, 1));
-        if (barSpriteComp) barSpriteComp.color = hex(COLOR.TEXT_PRIMARY);
-        bar.active = true;
+        applyBorder(COLOR.PRIMARY);
+        setTextAlpha(COLOR.TEXT_PRIMARY);
         break;
 
       case 'placed':
-        // 已部署：压暗底色 + 金色竖条
+        // 空站台：底色压暗 + 图标/名字淡化，边框用该单位职业色表示"兵还在、已上场"
         if (bg) bg.color = hex(COLOR.PRIMARY_DISABLED, ALPHA.PANEL_BG);
-        card.setScale(new Vec3(1, 1, 1));
-        if (barSpriteComp) barSpriteComp.color = hex(COLOR.WARNING);
-        bar.active = true;
+        applyBorder(classColor);
+        setTextAlpha(COLOR.TEXT_DISABLED);
         break;
     }
 
-    // 记录状态用于 selectDeployCard 判断
-    card['_deployState'] = state;
+    slot.setScale(new Vec3(1, 1, 1));
+    // 记录状态用于 selectDeploySlot 判断
+    slot['_deployState'] = state;
   }
 
-  selectDeployCard(index: number): void {
-    // 先重置所有卡片为 unplaced（已放置的保持 placed 态）
+  selectDeploySlot(index: number): void {
+    // 先重置所有槽位为 unplaced（已上阵的保持 placed 态）
     for (let i = 0; i < this._deployCards.length; i++) {
-      const card = this._deployCards[i];
-      if (!card?.isValid) continue;
-      // 不重置已放置的卡片
-      if (card['_deployState'] === 'placed') continue;
-      this.setDeployCardState(i, 'unplaced');
+      const slot = this._deployCards[i];
+      if (!slot?.isValid) continue;
+      if (slot['_deployState'] === 'placed') continue;
+      this.setDeploySlotState(i, 'unplaced');
     }
-    // 设置目标卡片为选中态（仅当未放置时）
-    const targetCard = this._deployCards[index];
-    if (targetCard?.isValid && targetCard['_deployState'] !== 'placed') {
-      this.setDeployCardState(index, 'selected');
+    // 设置目标槽位为选中态（仅当未上阵时）
+    const targetSlot = this._deployCards[index];
+    if (targetSlot?.isValid && targetSlot['_deployState'] !== 'placed') {
+      this.setDeploySlotState(index, 'selected');
     }
   }
 

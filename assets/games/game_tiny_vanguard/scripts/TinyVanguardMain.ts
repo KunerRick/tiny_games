@@ -450,7 +450,7 @@ export class TinyVanguardMain extends Component {
       });
       // 布阵卡片选中回调 → 更新 UI 卡片高亮
       this.battleManager.setDeploySelectionChangedCallback((index) => {
-        this.battleUI.selectDeployCard(index);
+        this.battleUI.selectDeploySlot(index);
       });
       // 自动跳过提示
       this.battleManager.setAutoSkipCallback((unitName) => {
@@ -511,15 +511,15 @@ export class TinyVanguardMain extends Component {
       const config = getClassById(c);
       return config ? config.icon : '';
     });
-    this.battleUI.setupPlatoonCards(unitNames, unitIcons, (index) => {
+    this.battleUI.setupDeploySlots(unitNames, unitIcons, [...this._runData.playerClasses], (index) => {
       this.battleManager.selectDeployUnit(index);
     });
     this.battleManager.setDeployUnitPlacedCallback((placed, total) => {
-      // 三态更新：遍历所有单位，根据放置状态更新卡片
+      // 三态更新：遍历所有单位，根据放置状态更新站台槽位
       for (let i = 0; i < this.battleManager.playerUnits.length; i++) {
         const unit = this.battleManager.playerUnits[i];
         const isPlaced = unit.data?.gridPos.col >= 0;
-        this.battleUI.setDeployCardState(i, isPlaced ? 'placed' : 'unplaced');
+        this.battleUI.setDeploySlotState(i, isPlaced ? 'placed' : 'unplaced');
       }
     });
 
