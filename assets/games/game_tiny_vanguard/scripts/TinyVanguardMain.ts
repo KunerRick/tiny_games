@@ -523,6 +523,22 @@ export class TinyVanguardMain extends Component {
       }
     });
 
+    // 拖拽（§3.3）：视觉与手势在 BattleUI，规则全在 BattleManager，这里只做接线
+    this.battleUI.setDeployDragApi({
+      worldToGrid: (x, y) => this.battleManager.gridPosFromUI(x, y),
+      unitAtGrid: (pos) => this.battleManager.playerUnitAt(pos),
+      canPlaceAt: (unitIndex, pos) => this.battleManager.canPlaceAt(unitIndex, pos),
+      placeUnit: (unitIndex, pos) => this.battleManager.placeUnit(unitIndex, pos),
+      unplaceUnit: (unitIndex) => this.battleManager.unplaceUnit(unitIndex),
+      swapUnits: (indexA, indexB) => this.battleManager.swapUnits(indexA, indexB),
+      previewDrop: (pos, valid) => this.battleManager.previewDeployDrop(pos, valid),
+      beginDrag: (unitIndex) => this.battleManager.setDeployDragging(unitIndex, true),
+      endDrag: (unitIndex) => this.battleManager.setDeployDragging(unitIndex, false),
+      setUnitDimmed: (unitIndex, dimmed) => this.battleManager.setUnitDimmed(unitIndex, dimmed),
+    });
+    // 拖拽已消费本次触摸时，忽略棋盘格 Button 随后派发的点击
+    this.battleManager.setDeployDragGuard(() => this.battleUI.isDragConsumingTouch());
+
     this.battleManager.startBattle(
       this._runData.playerClasses,
       this._currentDifficulty,

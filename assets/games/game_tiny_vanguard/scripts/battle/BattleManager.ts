@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Color, instantiate, Prefab } from 'cc';
+import { _decorator, Component, Node, Color, Vec3, UITransform, UIOpacity, instantiate, Prefab } from 'cc';
 import { GridController, GridPosition } from './GridController';
 import { UnitController } from './UnitController';
 import { AIController, AIAction } from './AIController';
@@ -40,6 +40,8 @@ export class BattleManager extends Component {
   private _selectedDeployUnitIndex: number = -1;
   private _onDeployUnitPlacedCallback: ((placedCount: number, totalCount: number) => void) | null = null;
   private _onDeploySelectionChanged: ((index: number) => void) | null = null;
+  /** 拖拽已消费本次触摸时返回 true —— 用于忽略紧随其后的格点击（§3.3 拖拽与点击共存） */
+  private _deployDragGuard: (() => boolean) | null = null;
   private _selectedUnit: UnitController | null = null;
   private _pendingSkill: import('../config/GameData').SkillConfig | null = null;
   private _skillTargets: GridPosition[] = [];
@@ -325,40 +327,13 @@ export class BattleManager extends Component {
     const unit = this._playerUnits[index];
     if (!unit.data) return;
 
-    // 如果该单位已放置（col >= 0），则取消放置
+    // 已经上阵：点击 = 撤回（与拖拽回调同一实现）
     if (unit.data.gridPos.col >= 0) {
-      const oldPos = unit.data.gridPos;
-      // 从已部署列表中移除
-      this._deployedPositions = this._deployedPositions.filter(
-        p => !(p.row === oldPos.row && p.col === oldPos.col)
-      );
-      // 重置单位位置到棋盘外
-      unit.data.gridPos = { row: index, col: -1 };
-      unit.data.hasMoved = false;
-      // 重新定位节点到棋盘外（与 init 时 updatePosition 的计算一致）
-      unit.node.setPosition(
-        (-1 - 2.5) * GridController.CELL_SIZE,
-        (index - 2.5) * GridController.CELL_SIZE
-      );
-      // 隐藏单位节点（撤回后不显示在棋盘外）
-      if (unit.node?.isValid) {
-        unit.node.active = false;
-      }
-      // 通知 UI 取消状态
-      if (this._onDeployUnitPlacedCallback) {
-        this._onDeployUnitPlacedCallback(this._deployedPositions.length, this._playerUnits.length);
-      }
-      // 重新高亮部署区域
-      this._highlightDeployArea();
-      // 自动选中刚才撤回的卡
-      this._selectedDeployUnitIndex = index;
-      if (this._onDeploySelectionChanged) {
-        this._onDeploySelectionChanged(index);
-      }
+      this.unplaceUnit(index);
       return;
     }
 
-    // 未放置，正常进入选中
+    // 未上阵，正常进入选中
     this._selectedDeployUnitIndex = index;
     this._highlightDeployArea();
     // 分发选中通知
@@ -367,13 +342,185 @@ export class BattleManager extends Component {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // 布阵规则层（无视觉），供 BattleUI 的拖拽手势调用（§3.3）
+  // -------------------------------------------------------------------------
+
+  /** 拖拽已消费本次触摸时返回 true，用于忽略紧随其后的格点击 */
+  setDeployDragGuard(guard: (() => boolean) | null): void {
+    this._deployDragGuard = guard;
+  }
+
+  /** 该格上的己方单位下标；无则 -1 */
+  playerUnitAt(pos: GridPosition): number {
+    return this._playerUnits.findIndex(
+      u => u.data?.gridPos.row === pos.row && u.data?.gridPos.col === pos.col
+    );
+  }
+
+  /** UI 坐标（设计像素）→ 棋盘坐标；不在棋盘范围返回 null（供拖拽落点判定） */
+  gridPosFromUI(x: number, y: number): GridPosition | null {
+    const gridNode = this.gridController?.node;
+    const ui = gridNode?.isValid ? gridNode.getComponent(UITransform) : null;
+    if (!ui) return null;
+    const local = ui.convertToNodeSpaceAR(new Vec3(x, y, 0));
+    return this.gridController.positionToGrid({ x: local.x, y: local.y });
+  }
+
+  /**
+   * 拖拽落点预览：可放 = 实心绿，不可放 = 红（null = 恢复部署区底色）。
+   * 注意不能复用 `GRID.DEPLOYABLE` / `GRID.DEPLOY_DISABLED` —— 那两个正是部署区
+   * 两行与后四行的底色，设上去等于没有任何高亮反馈（实测色值完全相同）。
+   */
+  previewDeployDrop(pos: GridPosition | null, valid: boolean): void {
+    if (!pos) {
+      this._highlightDeployArea();
+      return;
+    }
+    this.gridController.setCellColor(pos, valid ? GRID.DRAG_DROP_VALID : GRID.DRAG_DROP_INVALID);
+  }
+
+  /**
+   * 拖拽开始时收起该单位的选中缩放（1.08 tween 会拽动节点读感，§6 风险）。
+   * 结束时不必恢复 —— 布阵阶段的缩放本就恒为 1。
+   */
+  setDeployDragging(unitIndex: number, dragging: boolean): void {
+    const unit = this._playerUnits[unitIndex];
+    if (!unit?.node?.isValid) return;
+    if (dragging) {
+      unit.setSelected(false);
+    }
+  }
+
+  /** 拖拽期间把原单位置为半透明（视觉层调用，规则层只负责改组件） */
+  setUnitDimmed(unitIndex: number, dimmed: boolean): void {
+    const unit = this._playerUnits[unitIndex];
+    if (!unit?.node?.isValid) return;
+    let op = unit.node.getComponent(UIOpacity);
+    if (!op) op = unit.node.addComponent(UIOpacity);
+    if (op) op.opacity = dimmed ? 140 : 255;
+  }
+
+  /** 是否可落子：在部署区（row<=1）且未被别的单位占用 */
+  canPlaceAt(unitIndex: number, pos: GridPosition): boolean {
+    if (pos.row < 0 || pos.row > 1 || pos.col < 0 || pos.col >= GridController.GRID_SIZE) {
+      return false;
+    }
+    const other = this.playerUnitAt(pos);
+    return other < 0 || other === unitIndex;
+  }
+
+  /** 落子（棋盘内移动也走这里：先摘掉旧位置再放到新位置） */
+  placeUnit(unitIndex: number, pos: GridPosition): void {
+    const unit = this._playerUnits[unitIndex];
+    if (!unit?.data || !unit.node?.isValid) return;
+
+    // 已在场则先移除旧记录，避免同一单位在 _deployedPositions 里出现两次
+    const old = unit.data.gridPos;
+    if (old.col >= 0) {
+      this._deployedPositions = this._deployedPositions.filter(
+        p => !(p.row === old.row && p.col === old.col)
+      );
+    }
+
+    unit.setGridPosition(pos);
+    this._deployedPositions.push({ row: pos.row, col: pos.col });
+    unit.node.active = true;
+
+    this._afterDeployChanged(unitIndex);
+  }
+
+  /** 撤回上阵（持牌回到棋盘外） */
+  unplaceUnit(unitIndex: number): void {
+    const unit = this._playerUnits[unitIndex];
+    if (!unit?.data || !unit.node?.isValid) return;
+
+    const old = unit.data.gridPos;
+    if (old.col >= 0) {
+      this._deployedPositions = this._deployedPositions.filter(
+        p => !(p.row === old.row && p.col === old.col)
+      );
+    }
+    // 重置单位位置到棋盘外（与 init 时 updatePosition 的计算一致）
+    unit.data.gridPos = { row: unitIndex, col: -1 };
+    unit.data.hasMoved = false;
+    unit.node.setPosition(
+      (-1 - 2.5) * GridController.CELL_SIZE,
+      (unitIndex - 2.5) * GridController.CELL_SIZE
+    );
+    unit.node.active = false;
+
+    this._afterDeployChanged(unitIndex, true);
+  }
+
+  /** 场上两兵互换位置 */
+  swapUnits(indexA: number, indexB: number): void {
+    const a = this._playerUnits[indexA];
+    const b = this._playerUnits[indexB];
+    if (!a?.data || !b?.data || !a.node?.isValid || !b.node?.isValid) return;
+    const posA = { ...a.data.gridPos };
+    const posB = { ...b.data.gridPos };
+    if (posA.col < 0 || posB.col < 0) return;
+
+    a.setGridPosition(posB);
+    b.setGridPosition(posA);
+
+    // _deployedPositions 是位置集合，换位后集合不变，只需重排为当前实际位置
+    this._deployedPositions = this._playerUnits
+      .filter(u => (u.data?.gridPos.col ?? -1) >= 0)
+      .map(u => ({ row: u.data!.gridPos.row, col: u.data!.gridPos.col }));
+
+    this._highlightDeployArea();
+    this._notifyDeployPlaced();
+  }
+
+  /** 落子/撤回后的统一收尾：重绘部署区高亮 + 刷新兵牌三态 + 选中推进 */
+  private _afterDeployChanged(changedIndex: number, selectSelf: boolean = false): void {
+    this._highlightDeployArea();
+    this._notifyDeployPlaced();
+    this._advanceDeploySelection(changedIndex, selectSelf);
+  }
+
+  private _notifyDeployPlaced(): void {
+    if (this._onDeployUnitPlacedCallback) {
+      this._onDeployUnitPlacedCallback(this._deployedPositions.length, this._playerUnits.length);
+    }
+  }
+
+  /**
+   * 落子/撤回后的选中推进。
+   * `selectSelf` = 撤回后应重新选中该兵；否则自动选中下一张未上阵的牌。
+   */
+  private _advanceDeploySelection(changedIndex: number, selectSelf: boolean): void {
+    let next = -1;
+    if (selectSelf) {
+      next = changedIndex;
+    } else if (this._selectedDeployUnitIndex === changedIndex) {
+      next = this._playerUnits.findIndex(
+        (u, i) => i !== changedIndex && (u.data?.gridPos.col ?? -1) < 0
+      );
+    } else if (this._selectedDeployUnitIndex >= 0) {
+      const cur = this._playerUnits[this._selectedDeployUnitIndex];
+      next = (cur?.data?.gridPos.col ?? -1) >= 0 ? -1 : this._selectedDeployUnitIndex;
+      if (next < 0) {
+        next = this._playerUnits.findIndex(u => (u.data?.gridPos.col ?? -1) < 0);
+      }
+    }
+
+    this._selectedDeployUnitIndex = next;
+    if (this._onDeploySelectionChanged) {
+      this._onDeploySelectionChanged(next);
+    }
+  }
+
   private onDeployCellClicked(pos: GridPosition): void {
+    // 拖拽已处理过这次触摸 → 忽略随之而来的格点击（否则会二次落子）
+    if (this._deployDragGuard?.()) return;
+
     if (pos.row > 1) return;
 
     // 如果该格子有己方单位 → 撤回（通过 selectDeployUnit 触发）
-    const existingIndex = this._playerUnits.findIndex(
-      u => u.data?.gridPos.row === pos.row && u.data?.gridPos.col === pos.col
-    );
+    const existingIndex = this.playerUnitAt(pos);
     if (existingIndex >= 0) {
       this.selectDeployUnit(existingIndex);
       return;
@@ -386,32 +533,7 @@ export class BattleManager extends Component {
     if (!unit?.data) return;
     if (unit.data.gridPos.col >= 0) return;
 
-    unit.setGridPosition(pos);
-    this._deployedPositions.push(pos);
-
-    // 显示单位节点（放置到棋盘上后可见）
-    if (unit.node?.isValid) {
-      unit.node.active = true;
-    }
-
-    // 重新高亮整个部署区域（顶部两行绿色 + 底部四行灰色 + 已部署位置深绿）
-    this._highlightDeployArea();
-    // 先通知 UI 卡片放置状态变化，再切换选中（避免选中态被覆盖）
-    if (this._onDeployUnitPlacedCallback) {
-      this._onDeployUnitPlacedCallback(this._deployedPositions.length, this._playerUnits.length);
-    }
-    // 自动选中下一张未放置的卡
-    const nextIndex = this._playerUnits.findIndex(
-      (u, i) => i !== this._selectedDeployUnitIndex && u.data?.gridPos.col < 0
-    );
-    if (nextIndex >= 0) {
-      this._selectedDeployUnitIndex = nextIndex;
-      if (this._onDeploySelectionChanged) {
-        this._onDeploySelectionChanged(nextIndex);
-      }
-    } else {
-      this._selectedDeployUnitIndex = -1;
-    }
+    this.placeUnit(this._selectedDeployUnitIndex, pos);
   }
 
   private startPlayerTurn(): void {

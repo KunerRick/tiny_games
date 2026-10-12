@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Button, Sprite, SpriteFrame, tween, Vec3, instantiate, Prefab, UITransform, EventTouch } from 'cc';
+import { _decorator, Component, Node, Label, Button, Sprite, SpriteFrame, UIOpacity, Vec2, Vec3, tween, instantiate, Prefab, UITransform, EventTouch } from 'cc';
 import {
   ALPHA, CLASS_COLOR, COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_TITLE, FONT_TINY,
   applyButtonTheme, applyFont, applyFontAndColor, hex,
@@ -30,6 +30,54 @@ const SLOT_ICON_HEIGHT = 28;
 const SLOT_ICON_Y = 15;
 const SLOT_NAME_HEIGHT = 24;
 const SLOT_NAME_Y = -17;
+
+/** 棋盘坐标（与 GridController.GridPosition 结构一致；此处只做结构约束，避免 ui→battle 的类型依赖） */
+export interface DeployDropPos {
+  row: number;
+  col: number;
+}
+
+/**
+ * 布阵拖拽的规则层接口。视觉与手势全在 BattleUI，落子规则全在 BattleManager
+ * （方案 §3.3 的职责划分）；由 TinyVanguardMain 在开局时接线。
+ */
+export interface DeployDragApi {
+  /** UI 坐标（设计像素）→ 棋盘坐标；不在棋盘范围返回 null */
+  worldToGrid: (x: number, y: number) => DeployDropPos | null;
+  /** 该格上的己方单位下标；无则 -1 */
+  unitAtGrid: (pos: DeployDropPos) => number;
+  /** 是否可落子（row<=1 且未被别的单位占用） */
+  canPlaceAt: (unitIndex: number, pos: DeployDropPos) => boolean;
+  /** 落子（含棋盘内移动） */
+  placeUnit: (unitIndex: number, pos: DeployDropPos) => void;
+  /** 撤回到兵牌区 */
+  unplaceUnit: (unitIndex: number) => void;
+  /** 场上两兵换位 */
+  swapUnits: (indexA: number, indexB: number) => void;
+  /** 高亮落点（pos = null 表示清除高亮；valid 决定绿/灰） */
+  previewDrop: (pos: DeployDropPos | null, valid: boolean) => void;
+  /** 拖拽开始/结束（规则层借此停掉单位的选中缩放 tween，见 §6 风险） */
+  beginDrag: (unitIndex: number) => void;
+  endDrag: (unitIndex: number) => void;
+  /** 拖拽期间把原单位/槽位置为半透明 */
+  setUnitDimmed: (unitIndex: number, dimmed: boolean) => void;
+}
+
+/** 位移超过该距离（设计像素）才判定为拖拽，避免误伤点击（§3.3） */
+const DRAG_THRESHOLD = 8;
+
+/**
+ * 是否存在真实触摸输入（桌面浏览器 = 0，真机 / 设备模拟 > 0）。
+ *
+ * 用于分辨 `TOUCH_CANCEL` 的两种含义，见 `onDragTouchCancel`：
+ * 桌面鼠标拖拽在抬起时被引擎派发为 CANCEL（把 CANCEL 当"中断"会让桌面拖拽永不生效）；
+ * 真机上的 CANCEL 才是真正的手势中断。
+ */
+function hasRealTouchInput(): boolean {
+  return typeof navigator !== 'undefined'
+    && typeof navigator.maxTouchPoints === 'number'
+    && navigator.maxTouchPoints > 0;
+}
 
 @ccclass('BattleUI')
 export class BattleUI extends Component {
@@ -87,6 +135,24 @@ export class BattleUI extends Component {
   private _onDeployCardCb: ((index: number) => void) | null = null;
   /** 纯色块贴图缓存（undefined = 尚未查询；null = 查询失败，不再重试） */
   private _solidFrame: SpriteFrame | null | undefined = undefined;
+  // --- 布阵拖拽（§3.3）：视觉与手势在本类，规则在 DeployDragApi ---
+  private _dragApi: DeployDragApi | null = null;
+  /** 仅布阵阶段响应全局触摸 */
+  private _dragEnabled: boolean = false;
+  /** 本次触摸锁定的兵下标；-1 = 未锁定 */
+  private _dragUnitIndex: number = -1;
+  /** 位移已超过阈值、确认为拖拽（用于区分轻触） */
+  private _dragActive: boolean = false;
+  /** 本次触摸已被拖拽消费 → 抑制随后派发的点击（格 Button / 槽位 TOUCH_END） */
+  private _dragConsumed: boolean = false;
+  /** 拖拽起点在棋盘上（而非兵牌槽位）→ 落到兵牌区才允许撤回 */
+  private _dragFromBoard: boolean = false;
+  private _dragStartPos: Vec2 | null = null;
+  private _dragGhost: Node | null = null;
+  /** 拖拽手势监听的宿主节点（= Canvas，Grid 与 BattleUI 的共同父节点） */
+  private _dragHost: Node | null = null;
+  /** 本次交互是否已开始过手势（幂等标记，见 setDeployDragEnabled 注释） */
+  private _dragSession: boolean = false;
   private _autoSkipNoticeCb: (() => void) | null = null;
   private _battleStartOverlay: Node | null = null;
   private _onBattleStartComplete: (() => void) | null = null;
@@ -275,6 +341,8 @@ export class BattleUI extends Component {
     this.setPhaseBar('\u5E03\u9635\u9636\u6BB5', '\u70B9\u51FB\u524D\u4E24\u884C\u90E8\u7F72\u5355\u4F4D');
     // 站台槽位容器由 setupDeploySlots 直接置为可见（槽位挂在其中）
     if (this.deployUnitList) this.deployUnitList.active = true;
+    // 布阵阶段开启拖拽手势（P3）；离开时在 hideDeployPhase 关闭
+    this.setDeployDragEnabled(true);
   }
 
   hideDeployPhase(): void {
@@ -284,6 +352,8 @@ export class BattleUI extends Component {
     this.setStatPanelVisible(true);
     // 离开布阵：收起站台槽位（容器内的槽位随之不可见）
     if (this.deployUnitList) this.deployUnitList.active = false;
+    // 关闭拖拽手势监听（含清幽灵/高亮/淡化）
+    this.setDeployDragEnabled(false);
   }
 
   /** 行动栏三按钮的统一出口（布阵/敌方回合收起，我方回合按需显示） */
@@ -337,6 +407,322 @@ export class BattleUI extends Component {
    * 并整体左移，消除与棋盘第 0 列的重叠（§3.5）；③ 背景**必须设 spriteFrame**
    * —— 旧卡片只设了 color，`spriteFrame = null` 时 Cocos 什么都不画（背景不可见）。
    */
+  // -------------------------------------------------------------------------
+  // 布阵拖拽（§3.3）：兵牌 ↔ 棋盘双向 + 棋盘内换位
+  // -------------------------------------------------------------------------
+
+  /** 注入规则层接口（由 TinyVanguardMain 在开局接线） */
+  setDeployDragApi(api: DeployDragApi | null): void {
+    this._dragApi = api;
+  }
+
+  /**
+   * 布阵阶段开启 / 离开时关闭拖拽手势监听。
+   *
+   * 宿主与阶段两个选择都是实测结论：
+   * - 宿主必须是 **`Canvas`**（`Grid` 与 `BattleUI` 的共同父节点）：`Grid` 不在
+   *   `BattleUI` 子树内，挂 `BattleUI` 收不到"起点在棋盘格上"的触摸；全局 `input`
+   *   在桌面浏览器只有 `MOUSE_*`、且 `MOUSE_UP` 不派发，没有可用的结束事件。
+   * - 必须用**捕获阶段**（`useCapture = true`）：棋盘格的 `Button` 在
+   *   `TOUCH_START` 时会 `stopPropagation`，冒泡阶段读不到起点在棋盘上的手势
+   *   （表现为"棋盘内换位"整条路径失效）。捕获阶段只读事件、不阻断传播，
+   *   故不影响 `Button` 自身的点击判定（点击兜底路径另由 `isDragConsumingTouch`
+   *   在 `onDeployCellClicked` 里抑制）。
+   *
+   * 结束语义：桌面（无真实触摸）下拖拽抬起被引擎派发为 `TOUCH_CANCEL`、
+   * 没有 `TOUCH_END`，而真机两者都有 —— 差异在 `onDragTouchCancel` 里分流。
+   */
+  setDeployDragEnabled(enabled: boolean): void {
+    if (this._dragEnabled === enabled) return;
+    this._dragEnabled = enabled;
+
+    if (enabled) {
+      const host = this.node?.parent ?? null;
+      if (!host?.isValid) return;
+      this._dragHost = host;
+      host.on(Node.EventType.TOUCH_START, this.onDragTouchStart, this, true);
+      host.on(Node.EventType.TOUCH_MOVE, this.onDragTouchMove, this, true);
+      host.on(Node.EventType.TOUCH_END, this.onDragTouchEnd, this, true);
+      host.on(Node.EventType.TOUCH_CANCEL, this.onDragTouchCancel, this, true);
+    } else {
+      const host = this._dragHost;
+      if (host?.isValid) {
+        host.off(Node.EventType.TOUCH_START, this.onDragTouchStart, this, true);
+        host.off(Node.EventType.TOUCH_MOVE, this.onDragTouchMove, this, true);
+        host.off(Node.EventType.TOUCH_END, this.onDragTouchEnd, this, true);
+        host.off(Node.EventType.TOUCH_CANCEL, this.onDragTouchCancel, this, true);
+      }
+      this._dragHost = null;
+      this.endDragGesture();
+    }
+  }
+
+  /**
+   * 拖拽守卫：本次触摸已被拖拽消费时返回 true。
+   * 棋盘格的 Button 与槽位的 TOUCH_END 都会在拖拽结束后正常派发，
+   * 若不拦截会与拖拽结果重复生效（落一次子后又按点击再落一次）。
+   */
+  isDragConsumingTouch(): boolean {
+    return this._dragConsumed;
+  }
+
+  private onDragTouchStart(evt: EventTouch): void {
+    if (!this._dragEnabled) return;
+    this.beginDragGesture(evt.getUILocation());
+  }
+
+  private onDragTouchMove(evt: EventTouch): void {
+    if (!this._dragEnabled) return;
+    this.moveDragGesture(evt.getUILocation());
+  }
+
+  private onDragTouchEnd(evt: EventTouch): void {
+    if (!this._dragEnabled) return;
+    this.finishDragGesture(evt.getUILocation());
+  }
+
+  private onDragTouchCancel(evt: EventTouch): void {
+    if (!this._dragEnabled) return;
+    // ⚠️ 实测：桌面环境（无真实触摸）下鼠标拖拽抬起被引擎派发为 TOUCH_CANCEL 而非
+    // TOUCH_END。若照搬方案"取消一律回位"，桌面拖拽永不生效 —— 故按输入设备分流：
+    // 无真实触摸 ⇒ 这次 CANCEL 就是"手势正常结束"；真机 ⇒ 按方案回位、不改状态。
+    if (!hasRealTouchInput()) {
+      this.finishDragGesture(evt.getUILocation());
+      return;
+    }
+    if (!this._dragActive) {
+      this.resetDragGestureState();
+      return;
+    }
+    this.endDragGesture();
+  }
+
+  /** 手势起点：锁定棋盘上的己方单位或兵牌槽位内的单位 */
+  private beginDragGesture(p: { x: number; y: number }): void {
+    if (!this._dragEnabled || !this._dragApi) return;
+    // 幂等：两套源都会派发 START/DOWN，第一个到达的认领本次手势，其余忽略
+    if (this._dragSession) return;
+    this._dragSession = true;
+    this._dragStartPos = new Vec2(p.x, p.y);
+    this._dragActive = false;
+    this._dragConsumed = false;
+    this._dragFromBoard = false;
+    this._dragUnitIndex = -1;
+
+    const onBoard = this._dragApi.worldToGrid(p.x, p.y);
+    if (onBoard) {
+      const idx = this._dragApi.unitAtGrid(onBoard);
+      if (idx >= 0) {
+        this._dragUnitIndex = idx;
+        this._dragFromBoard = true;
+      }
+      return;
+    }
+    const slotIdx = this.indexOfDeploySlotAt(p.x, p.y);
+    if (slotIdx >= 0) this._dragUnitIndex = slotIdx;
+  }
+
+  /** 手势移动：超阈值才认定为拖拽；之后跟随幽灵并高亮落点 */
+  private moveDragGesture(p: { x: number; y: number }): void {
+    if (!this._dragEnabled || !this._dragApi) return;
+    if (this._dragUnitIndex < 0) return;
+
+    if (!this._dragActive) {
+      // 位移未超阈值 → 仍可能是点击，不启动拖拽（避免误伤点选）
+      if (!this._dragStartPos) return;
+      const dx = p.x - this._dragStartPos.x;
+      const dy = p.y - this._dragStartPos.y;
+      if (dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD) return;
+      this._dragActive = true;
+      this._dragConsumed = true;
+      this._dragApi.beginDrag(this._dragUnitIndex);
+      this.showDragGhost(this._dragUnitIndex);
+      this.setDragDimmed(this._dragUnitIndex, true);
+    }
+    this.moveDragGhost(p.x, p.y);
+    this.updateDropHighlight(this._dragUnitIndex, this._dragFromBoard, p.x, p.y);
+  }
+
+  /** 手势结束：未达阈值时交给既有点击路径；否则结算落点 */
+  private finishDragGesture(p: { x: number; y: number }): void {
+    if (!this._dragEnabled || !this._dragApi) return;
+    if (!this._dragActive) {
+      // 未达阈值 = 轻触：交给既有点击路径（槽位/棋盘格），此处不动
+      this.resetDragGestureState();
+      return;
+    }
+    this.applyDrop(this._dragUnitIndex, this._dragFromBoard, p.x, p.y);
+    this.endDragGesture();
+  }
+
+  /** 拖拽落点结算（真实规则全部走 DeployDragApi） */
+  private applyDrop(unitIndex: number, fromBoard: boolean, x: number, y: number): void {
+    const api = this._dragApi;
+    if (!api) return;
+
+    // 落在兵牌区 → 撤回（仅棋盘上提起的兵允许拖回，避免原地抬起又放下被当成撤回）
+    if (this.hitTestDeploySlot(x, y)) {
+      if (fromBoard) api.unplaceUnit(unitIndex);
+      return;
+    }
+
+    const pos = api.worldToGrid(x, y);
+    if (!pos) return;
+
+    const occupant = api.unitAtGrid(pos);
+    if (occupant === unitIndex) return;                    // 落回原格 → 无操作
+
+    if (occupant >= 0) {
+      // 目标格被己方占用：仅"棋盘内拖动"可换位；从兵牌拖来视为非法落点（回位）
+      if (fromBoard) api.swapUnits(unitIndex, occupant);
+      return;
+    }
+
+    if (api.canPlaceAt(unitIndex, pos)) api.placeUnit(unitIndex, pos);
+  }
+
+  /** 统一收尾：清幽灵/高亮/淡化，恢复选中缩放 */
+  private endDragGesture(): void {
+    const idx = this._dragUnitIndex;
+    const wasActive = this._dragActive;
+    const api = this._dragApi;
+    this.resetDragGestureState();
+
+    if (wasActive && api && idx >= 0) {
+      api.previewDrop(null, true);
+      api.endDrag(idx);
+      this.setDragDimmed(idx, false);
+      this.destroyDragGhost();
+    }
+    // 守卫必须**无条件**延后撤下：否则离开布阵/销毁时残留 true，
+    // 会让后续所有棋盘点击被误判成"拖拽已消费"而静默失效。
+    if (this._dragConsumed) {
+      this.scheduleOnce(this.clearDragConsumed, 0);
+    }
+  }
+
+  /** scheduleOnce 的命名回调（避免匿名闭包，符合 AGENTS 红线 5） */
+  private clearDragConsumed(): void {
+    this._dragConsumed = false;
+  }
+
+  /** 只重置手势状态，不动视觉（视觉由 endDragGesture 处理） */
+  private resetDragGestureState(): void {
+    this._dragUnitIndex = -1;
+    this._dragActive = false;
+    this._dragFromBoard = false;
+    this._dragStartPos = null;
+    // 会话标记随本次交互释放；不清会让下一次交互被残留挡掉
+    this._dragSession = false;
+  }
+
+  /** UI 坐标是否落在兵牌容器范围内 */
+  private hitTestDeploySlot(x: number, y: number): boolean {
+    return this.indexOfDeploySlotAt(x, y) >= 0;
+  }
+
+  /** 命中的兵牌下标；未命中返回 -1 */
+  private indexOfDeploySlotAt(x: number, y: number): number {
+    const container = this.deployUnitList;
+    if (!container?.isValid || !container.activeInHierarchy) return -1;
+    // 直接用槽位自身的世界矩形判定（容器高度随数量变化，逐个比更可靠）
+    for (let i = 0; i < this._deployCards.length; i++) {
+      const slot = this._deployCards[i];
+      const ui = slot?.isValid ? slot.getComponent(UITransform) : null;
+      if (!ui) continue;
+      const w = ui.convertToWorldSpaceAR(new Vec3(0, 0, 0));
+      const halfW = ui.width * 0.5;
+      const halfH = ui.height * 0.5;
+      if (x >= w.x - halfW && x <= w.x + halfW && y >= w.y - halfH && y <= w.y + halfH) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /** 高亮落点：可放 = DEPLOYABLE 绿，不可放 = DEPLOY_DISABLED 灰，null 清除 */
+  private updateDropHighlight(unitIndex: number, fromBoard: boolean, x: number, y: number): void {
+    const api = this._dragApi;
+    if (!api) return;
+    if (this.hitTestDeploySlot(x, y)) {
+      api.previewDrop(null, true);
+      return;
+    }
+    const pos = api.worldToGrid(x, y);
+    if (!pos) {
+      api.previewDrop(null, true);
+      return;
+    }
+    const occupant = api.unitAtGrid(pos);
+    const ok = occupant === unitIndex
+      || (occupant >= 0 ? fromBoard : false)
+      || api.canPlaceAt(unitIndex, pos);
+    api.previewDrop(pos, ok);
+  }
+
+  /** 拖拽"幽灵"：跟随手指的槽位副本，原兵牌置半透明 */
+  private showDragGhost(unitIndex: number): void {
+    this.destroyDragGhost();
+    const src = this._deployCards[unitIndex];
+    if (!src?.isValid) return;
+
+    const ghost = new Node('DeployDragGhost');
+    const frame = this.getSolidSpriteFrame();
+    const bg = ghost.addComponent(Sprite);
+    if (frame) bg.spriteFrame = frame;
+    bg.sizeMode = Sprite.SizeMode.CUSTOM;
+    bg.type = Sprite.Type.SIMPLE;
+    bg.color = hex(COLOR.PRIMARY, ALPHA.DRAG_GHOST);
+    const ui = ghost.getComponent(UITransform);
+    if (ui) ui.setContentSize(SLOT_WIDTH, SLOT_HEIGHT);
+
+    const icon = src.getChildByName('IconLabel')?.getComponent(Label);
+    if (icon) {
+      const iconNode = new Node('IconLabel');
+      const iconUi = iconNode.addComponent(UITransform);
+      iconUi.setContentSize(SLOT_LABEL_WIDTH, SLOT_ICON_HEIGHT);
+      const l = iconNode.addComponent(Label);
+      l.string = icon.string;
+      applyFontAndColor(l, FONT_BODY, COLOR.TEXT_PRIMARY);
+      l.horizontalAlign = Label.HorizontalAlign.CENTER;
+      l.verticalAlign = Label.VerticalAlign.CENTER;
+      l.overflow = Label.Overflow.CLAMP;
+      iconNode.setPosition(0, SLOT_ICON_Y, 0);
+      ghost.addChild(iconNode);
+    }
+
+    // 挂在 deployUnitList 的父级下，保证与世界坐标同系
+    const parent = this.deployUnitList?.parent ?? this.node;
+    parent.addChild(ghost);
+    this._dragGhost = ghost;
+  }
+
+  private moveDragGhost(x: number, y: number): void {
+    const ghost = this._dragGhost;
+    if (!ghost?.isValid) return;
+    const parent = ghost.parent;
+    const ui = parent?.getComponent(UITransform);
+    if (ui) {
+      const local = ui.convertToNodeSpaceAR(new Vec3(x, y, 0));
+      ghost.setPosition(local);
+    } else {
+      ghost.setWorldPosition(new Vec3(x, y, 0));
+    }
+  }
+
+  private destroyDragGhost(): void {
+    if (this._dragGhost?.isValid) this._dragGhost.destroy();
+    this._dragGhost = null;
+  }
+
+  /** 原兵牌/单位置为拖拽态（淡化），避免拖动时"两个自己"看着打架 */
+  private setDragDimmed(unitIndex: number, dimmed: boolean): void {
+    const slot = this._deployCards[unitIndex];
+    const slotOpacity = slot?.getComponent(UIOpacity);
+    if (slotOpacity) slotOpacity.opacity = dimmed ? 120 : 255;
+    this._dragApi?.setUnitDimmed(unitIndex, dimmed);
+  }
+
   setupDeploySlots(
     unitNames: string[],
     unitIcons: string[],
@@ -483,6 +869,8 @@ export class BattleUI extends Component {
   }
 
   private onDeploySlotClicked(evt: EventTouch): void {
+    // 拖拽已消费本次触摸（含在槽位间拖动）→ 忽略随之而来的点击
+    if (this._dragConsumed) return;
     const slot = evt.currentTarget as Node;
     if (!slot?.isValid) return;
     const idx = slot['_deployIdx'] as number;
@@ -907,6 +1295,11 @@ export class BattleUI extends Component {
       this.unschedule(this._autoSkipNoticeCb);
       this._autoSkipNoticeCb = null;
     }
+    // 拖拽监听挂在 Canvas（本节点的父级）上，需显式解绑
+    this.unschedule(this.clearDragConsumed);
+    this.setDeployDragEnabled(false);
+    this.destroyDragGhost();
+    this._dragApi = null;
     this._deployCards = [];
     this._onDeployCardCb = null;
     this._onConfirmDeploy = null;

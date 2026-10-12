@@ -61,6 +61,8 @@ export const ALPHA = {
   DIMMED: 255,
   /** 连线等装饰性描边 */
   LINE: 220,
+  /** 拖拽中的"幽灵"节点（跟随手指的半透明副本） */
+  DRAG_GHOST: 200,
 } as const;
 
 /** 取一个新的 Color 实例。不要共享实例：Color 是可变的 ValueType。 */
@@ -98,6 +100,18 @@ export const GRID = {
   DEPLOY_DISABLED: hex(COLOR.TEXT_DISABLED, 110),
   /** 已部署格 */
   DEPLOYED: hex(COLOR.SUCCESS, 220),
+  /**
+   * 拖拽落点预览：可放。
+   * 不能直接用 DEPLOYABLE（180）—— 那正是部署区两行的**底色**，设上去等于零反馈。
+   * 用实心绿，保证相对底色可见。
+   */
+  DRAG_DROP_VALID: hex(COLOR.SUCCESS, 255),
+  /**
+   * 拖拽落点预览：不可放。
+   * 同理不能用 DEPLOY_DISABLED（110 灰）—— 那是敌方半场的底色；改用 DANGER 红，
+   * 与"敌方半场灰底"和"已占用绿底"都能区分。
+   */
+  DRAG_DROP_INVALID: hex(COLOR.DANGER, 210),
   /** 可移动范围 */
   MOVE_RANGE: hex(COLOR.SUCCESS, 180),
   /** 可攻击范围 */
