@@ -189,6 +189,11 @@ export class BattleManager extends Component {
         unit.node.active = false;
       }
     }
+    // 通知 UI 进入布阵阶段：UI 据此隐藏行动栏（等待/攻击/结束回合）。
+    // 原先不通知，UI 停在上一场战斗的按钮状态 —— 布阵时「结束回合」会露出来。
+    if (this._onUnitPhaseChanged) {
+      this._onUnitPhaseChanged('deploy', null, null);
+    }
   }
 
   public highlightDeployArea(): void {
@@ -782,6 +787,19 @@ export class BattleManager extends Component {
     return markBuff ? (markBuff.params.amount ?? 2) : 0;
   }
 
+  /**
+   * 取出并消耗施法者身上的「下次攻击附加伤害」（charge 的 bonus_damage）。
+   * 读取即移除，避免一次加成被连续攻击反复吃掉。
+   */
+  private _consumeBonusDamage(attacker: UnitController | null): number {
+    if (!attacker?.data) return 0;
+    const idx = attacker.data.buffs.findIndex(b => b.type === 'bonus_damage');
+    if (idx < 0) return 0;
+    const amount = attacker.data.buffs[idx].params.amount ?? 0;
+    attacker.data.buffs.splice(idx, 1);
+    return amount;
+  }
+
   private executeSkillEffects(
     caster: UnitController,
     target: UnitController | null,
@@ -867,15 +885,13 @@ export class BattleManager extends Component {
         }
 
         case 'bonus_damage': {
-          if (!target?.data) break;
-          const markBonus = this._getMarkBonus(target);
-          const bonusRaw = caster.data.stats.attack + (effect.params.amount ?? 2);
-          const totalDmg = Math.floor(bonusRaw * skillMultiplier) + markBonus;
-          const dmg = target.takeDamage(totalDmg, ignoreDefense, caster);
-          this._totalDamageDealt += dmg;
-          if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
-            this._onDamageDealtCallback(target.node, dmg);
-          }
+          // 语义是「本次攻击附带伤害」，不是独立伤害。
+          // 原实现直接对 target 造成伤害 —— 而冲锋（charge）是 targetType:'self'，
+          // 此时 target === caster，于是「空放冲锋」会把自己打伤、连放两次直接
+          // 打死并从棋盘消失（用户报告的「单位渲染没了」）。
+          // 改为挂一次性加成 buff，由 _consumeBonusDamage 在攻击时消费。
+          // duration 1：本回合没攻击则下回合开始自动过期，不会永久滞留。
+          caster.addBuff('bonus_damage', 1, { amount: effect.params.amount ?? 2 });
           break;
         }
 
@@ -1079,7 +1095,9 @@ export class BattleManager extends Component {
   }
 
   private executeAttack(attacker: UnitController, target: UnitController): void {
-    const damage = target.takeDamage(attacker.data?.stats.attack ?? 0, false, attacker);
+    // 冲锋等 preMove 技能会给施法者挂「本次攻击附带伤害」，在此消费（读取即移除）
+    const bonus = this._consumeBonusDamage(attacker);
+    const damage = target.takeDamage((attacker.data?.stats.attack ?? 0) + bonus, false, attacker);
     this._totalDamageDealt += damage;
     if (this._onDamageDealtCallback && target.node?.isValid) {
       this._onDamageDealtCallback(target.node, damage);

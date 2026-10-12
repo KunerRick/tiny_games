@@ -1,7 +1,7 @@
-import { _decorator, Component, Node, Sprite, Color, tween, Vec3, Label, Tween } from 'cc';
+import { _decorator, Component, Node, Sprite, Color, tween, Vec3, Label, Tween, UITransform } from 'cc';
 import { GridPosition, GridController } from './GridController';
 import { SkillConfig, getClassById, EnemyConfig, AIType } from '../config/GameData';
-import { CLASS_COLOR, COLOR, FACTION, FONT_ICON, applyFontAndColor, hex } from '../config/Theme';
+import { ALPHA, CLASS_COLOR, COLOR, FACTION, FONT_ICON, applyFontAndColor, hex, hpBarColor } from '../config/Theme';
 
 const { ccclass, property } = _decorator;
 
@@ -49,10 +49,20 @@ export class UnitController extends Component {
   @property({ type: Node, tooltip: '阵营光环节点' })
   factionGlow: Node = null;
 
+  /** 血条尺寸（与 UnitPrefab 里 HpBar/HpFill 的设定值一致） */
+  private static readonly HP_BAR_WIDTH = 50;
+  private static readonly HP_BAR_HEIGHT = 6;
+  /** 阵营光环边长（略大于单位，形成外圈光晕） */
+  private static readonly GLOW_SIZE = 72;
+
   private _data: UnitData | null = null;
   private _isSelected: boolean = false;
   private _countering: boolean = false;
   private _selectTween: Tween<Node> | null = null;
+  /** 血条填充（HpBar/HpFill 在 prefab 里 spriteFrame 为空、无人驱动，运行时补齐） */
+  private _hpFill: Sprite | null = null;
+  private _hpFillUi: UITransform | null = null;
+  private _hpFillFullWidth: number = 50;
 
   onDestroy(): void {
     if (this._selectTween) {
@@ -106,9 +116,12 @@ export class UnitController extends Component {
       this.selectionIndicator.active = false;
     }
 
-    this.setTintColor(hex(CLASS_COLOR.fallback));
+    // 敌人一律用阵营色（DANGER 红）。原先用 CLASS_COLOR.fallback（蓝），
+    // 与玩家战士同色 —— 棋盘上无法一眼分清敌我。
+    this.setTintColor(FACTION.ENEMY_TINT);
     this.setupFactionVisual();
     this.setupClassIcon();
+    this.setupHealthBar();
   }
 
   init(classId: string, isPlayer: boolean, gridPos: GridPosition): void {
@@ -153,6 +166,7 @@ export class UnitController extends Component {
     }
     this.setupFactionVisual();
     this.setupClassIcon();
+    this.setupHealthBar();
   }
 
   get data(): UnitData | null {
@@ -192,15 +206,93 @@ export class UnitController extends Component {
   }
 
   private setupFactionVisual(): void {
-    if (!this.factionGlow) return;
-    const glowSprite = this.factionGlow.getComponent(Sprite);
-    if (!glowSprite) return;
-    if (this._data?.isPlayer) {
-      glowSprite.color = FACTION.PLAYER_GLOW;
-    } else {
-      glowSprite.color = FACTION.ENEMY_GLOW;
+    // UnitPrefab 里没有 factionGlow 节点，@property 也未绑定 —— 原先首行
+    // `if (!this.factionGlow) return;` 直接早退，敌我双方都没有阵营光环。
+    // 改为：绑定了就用绑定的，否则运行时补一个（与 ClassIcon 同一套路）。
+    const glow = this.factionGlow ?? this.ensureRuntimeGlow();
+    if (!glow) return;
+    const glowSprite = glow.getComponent(Sprite);
+    if (glowSprite) {
+      glowSprite.color = this._data?.isPlayer ? FACTION.PLAYER_GLOW : FACTION.ENEMY_GLOW;
     }
-    this.factionGlow.active = true;
+    glow.active = true;
+  }
+
+  /** 运行时创建阵营光环（单位背后的光圈），仅在未绑定 @property 时使用 */
+  private ensureRuntimeGlow(): Node | null {
+    if (!this.unitSprite) return null;
+    let glowNode = this.node.getChildByName('FactionGlow');
+    if (!glowNode) {
+      glowNode = new Node('FactionGlow');
+      const ui = glowNode.addComponent(UITransform);
+      ui.setContentSize(UnitController.GLOW_SIZE, UnitController.GLOW_SIZE);
+      const sp = glowNode.addComponent(Sprite);
+      sp.sizeMode = Sprite.SizeMode.CUSTOM;
+      const base = this.unitSprite.getComponent(Sprite);
+      if (base?.spriteFrame) sp.spriteFrame = base.spriteFrame;
+      this.node.addChild(glowNode);
+      // 置为 node 的首个子节点 → 渲染在 unitSprite/血条之下，形成背景光圈
+      glowNode.setSiblingIndex(0);
+    }
+    return glowNode;
+  }
+
+  /**
+   * 补齐血条：HpBar/HpFill 在 prefab 里 spriteFrame 为空且全代码无引用，
+   * 即使 active=true 也不渲染。这里用单位自身的贴图作为底图接通它，
+   * 宽度按 HP 比例缩放 —— 棋盘上直接可读血量，不必只靠左侧小面板。
+   */
+  private setupHealthBar(): void {
+    if (!this.unitSprite) return;
+    const hpBar = this.node.getChildByName('HpBar');
+    const hpFill = hpBar?.getChildByName('HpFill');
+    if (!hpBar || !hpFill) return;
+
+    const base = this.unitSprite.getComponent(Sprite);
+    const bgSprite = hpBar.getComponent(Sprite);
+    const fillSprite = hpFill.getComponent(Sprite);
+
+    // 顺序要紧：先设 spriteFrame，再 sizeMode=CUSTOM，最后 setContentSize。
+    // 反过来会被贴图原始尺寸（2×2）覆盖 —— 见 AGENTS.md 教训 C。
+    if (bgSprite) {
+      if (!bgSprite.spriteFrame && base?.spriteFrame) bgSprite.spriteFrame = base.spriteFrame;
+      bgSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+      bgSprite.color = hex(COLOR.PANEL_BORDER, ALPHA.SOLID);
+    }
+    if (fillSprite) {
+      if (!fillSprite.spriteFrame && base?.spriteFrame) fillSprite.spriteFrame = base.spriteFrame;
+      fillSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+    }
+
+    const bgUi = hpBar.getComponent(UITransform);
+    const fillUi = hpFill.getComponent(UITransform);
+    // 锚点居中 + x 归零，血条才能与单位同心。
+    // prefab 里 anchorPoint 是 (0, 0.5)（左对齐），配上 x=0 会让整条血条
+    // 右移半个身位（实测偏右 27px）；改为居中后按比例缩宽度即可。
+    if (bgUi) {
+      bgUi.setAnchorPoint(0.5, 0.5);
+      bgUi.setContentSize(UnitController.HP_BAR_WIDTH, UnitController.HP_BAR_HEIGHT);
+    }
+    if (fillUi) {
+      fillUi.setAnchorPoint(0.5, 0.5);
+      fillUi.setContentSize(UnitController.HP_BAR_WIDTH, UnitController.HP_BAR_HEIGHT);
+    }
+
+    this._hpFill = fillSprite;
+    this._hpFillUi = fillUi;
+    this._hpFillFullWidth = UnitController.HP_BAR_WIDTH;
+    this.updateHealthBar();
+  }
+
+  /** 按 currentHp/maxHp 刷新血条宽度与颜色（居中收缩，两端同时内收） */
+  private updateHealthBar(): void {
+    if (!this._data || !this._hpFill || !this._hpFillUi) return;
+    const ratio = this._data.maxHp > 0
+      ? Math.max(0, Math.min(1, this._data.currentHp / this._data.maxHp))
+      : 0;
+    this._hpFillUi.setContentSize(this._hpFillFullWidth * ratio, this._hpFillUi.height);
+    this._hpFill.node.setPosition(0, 0, 0);
+    this._hpFill.color = hpBarColor(this._data.currentHp, this._data.maxHp);
   }
 
   private setupClassIcon(): void {
@@ -304,6 +396,7 @@ export class UnitController extends Component {
       this._onDeath();
     }
 
+    this.updateHealthBar();
     return actualDamage;
   }
 
@@ -336,11 +429,13 @@ export class UnitController extends Component {
   heal(amount: number): void {
     if (!this._data || !this._data.isAlive) return;
     this._data.currentHp = Math.min(this._data.maxHp, this._data.currentHp + amount);
+    this.updateHealthBar();
   }
 
   healFull(): void {
     if (!this._data || !this._data.isAlive) return;
     this._data.currentHp = this._data.maxHp;
+    this.updateHealthBar();
   }
 
   canUseSkill(skillIndex: number): boolean {

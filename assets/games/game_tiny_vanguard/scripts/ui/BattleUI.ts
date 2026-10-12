@@ -242,11 +242,15 @@ export class BattleUI extends Component {
     if (this.victoryPanel) this.victoryPanel.active = false;
     if (this.defeatPanel) this.defeatPanel.active = false;
     if (this.confirmDeployButton) this.confirmDeployButton.active = true;
-    if (this.waitButton) this.waitButton.active = false;
+    // 布阵阶段只保留「确认布阵」：等待/攻击/结束回合一并收起。
+    // 原先只关 waitButton，而布阵期间 BattleManager 又不通知阶段变化，
+    // 于是上一场残留的「结束回合」按钮会露在布阵界面下方。
+    this.setActionButtonsVisible(false);
     // 隐藏状态栏面板（仅在部署阶段）
     this.setStatPanelVisible(false);
     // 单一阶段条：阶段 + 操作提示合成一句，不再有多处重复文案
     this.setPhaseBar('\u5E03\u9635\u9636\u6BB5', '\u70B9\u51FB\u524D\u4E24\u884C\u90E8\u7F72\u5355\u4F4D');
+    // 兵牌由 setupPlatoonCards 直接挂在 BattleUI 下（不在此空容器内），故保持收起
     if (this.deployUnitList) this.deployUnitList.active = false;
   }
 
@@ -256,6 +260,13 @@ export class BattleUI extends Component {
     // 恢复状态栏面板
     this.setStatPanelVisible(true);
     if (this.deployUnitList) this.deployUnitList.active = false;
+  }
+
+  /** 行动栏三按钮的统一出口（布阵/敌方回合收起，我方回合按需显示） */
+  private setActionButtonsVisible(visible: boolean): void {
+    if (this.waitButton) this.waitButton.active = visible;
+    if (this.endTurnButton) this.endTurnButton.active = visible;
+    if (this.attackButton) this.attackButton.active = visible;
   }
 
   /**

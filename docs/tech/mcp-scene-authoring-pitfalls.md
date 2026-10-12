@@ -232,6 +232,25 @@ await call('node_set_node_transform', { uuid: CONTENT, position: { x: 0, y: y0, 
 
 **教训**：任何"固定表头 + 滚动内容"的组合，都要按**表头底边**给滚动区定高，而不是让滚动区占满全屏。
 
+### ⑧ 声明了 `@property` 但场景没绑 → 整段可视化**静默失效**
+
+`UnitPrefab` 上 `UnitController.factionGlow` 声明了却**从未绑定**，而实现在首行写了 `if (!this.factionGlow) return;` —— 于是阵营光环对敌我双方都不渲染，`console` 里也没有任何提示。同理 `HpBar` / `HpFill` 两个子节点 `active = true`，但 `spriteFrame = null` 且全代码**零引用**：它既不报错也不显示，是"永久空血条"。
+
+排查口诀：
+
+1. **先问"这个节点/属性真的被用了吗"**：`grep -rn "HpBar\|factionGlow" scripts/` 零命中就是死节点；
+2. 逐个 `activeInHierarchy` + `spriteFrame` + `getComponent('cc.Sprite').color` 三件套读回，别只看 `active`：
+
+```js
+// active=true 但 spriteFrame=null → 什么都不画
+const sp = node.getComponent('cc.Sprite');
+({ active: node.activeInHierarchy, frame: sp?.spriteFrame?.name ?? null, color: sp?.color.toHEX('#rrggbb') });
+```
+
+修法二选一：① 走 MCP 补绑定/补贴图（`propertyType:'component'` + 节点 UUID，见 ④）；② 在代码里**运行时补齐**（本项目 `ClassIcon` 就是这个套路）。若选 ②，`setupXxx()` 不要写成"拿不到就 `return`"，而应"拿不到就自己建一个"。
+
+> 顺带：给运行时新建的节点设尺寸时，**顺序仍是 `spriteFrame → sizeMode=CUSTOM → setContentSize`**。血条首次实现按"先 `setContentSize` 后设 `spriteFrame`"写，实测被贴图原始尺寸覆盖成 `2×2`（正是 §3 那条坑的复发）。
+
 ---
 
 ## 4. 同一节点只能有一个渲染组件
