@@ -718,8 +718,13 @@ export class BattleUI extends Component {
   /** 原兵牌/单位置为拖拽态（淡化），避免拖动时"两个自己"看着打架 */
   private setDragDimmed(unitIndex: number, dimmed: boolean): void {
     const slot = this._deployCards[unitIndex];
-    const slotOpacity = slot?.getComponent(UIOpacity);
-    if (slotOpacity) slotOpacity.opacity = dimmed ? 120 : 255;
+    if (slot?.isValid) {
+      // 拿不到就自己建：写成"拿不到就跳过"会让淡化反馈静默失效
+      // （同 AGENTS 教训 §3.5 ⑧：声明了却无人设置 → 整段可视化无声消失）
+      let slotOpacity = slot.getComponent(UIOpacity);
+      if (!slotOpacity) slotOpacity = slot.addComponent(UIOpacity);
+      if (slotOpacity) slotOpacity.opacity = dimmed ? 120 : 255;
+    }
     this._dragApi?.setUnitDimmed(unitIndex, dimmed);
   }
 
