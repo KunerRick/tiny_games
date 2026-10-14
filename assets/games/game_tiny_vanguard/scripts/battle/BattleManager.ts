@@ -42,6 +42,12 @@ export class BattleManager extends Component {
   private _onDeploySelectionChanged: ((index: number) => void) | null = null;
   /** 拖拽已消费本次触摸时返回 true —— 用于忽略紧随其后的格点击（§3.3 拖拽与点击共存） */
   private _deployDragGuard: (() => boolean) | null = null;
+  /**
+   * 当前被落点预览着色的格子。
+   * 拖拽会跨过多个格子，只给新格上色而不复原旧格 → 经过的格子会**残留高亮**
+   * （实测：从 (0,0) 拖到 (1,0)，(0,0) 仍是实心预览绿，直到释放才被全量重绘抹掉）。
+   */
+  private _dropPreviewPos: GridPosition | null = null;
   private _selectedUnit: UnitController | null = null;
   private _pendingSkill: import('../config/GameData').SkillConfig | null = null;
   private _skillTargets: GridPosition[] = [];
@@ -73,6 +79,8 @@ export class BattleManager extends Component {
     this._phase = 'deploy';
     this._turnCount = 0;
     this._deployedPositions = [];
+    // 上一场可能留下未清除的落点预览引用（跨场脏状态）
+    this._dropPreviewPos = null;
     
     if (isBoss) {
       this._currentBattleType = 'boss';
@@ -368,16 +376,50 @@ export class BattleManager extends Component {
   }
 
   /**
-   * 拖拽落点预览：可放 = 实心绿，不可放 = 红（null = 恢复部署区底色）。
+   * 拖拽落点预览：可放 = 实心绿，不可放 = 红（null = 清除预览）。
    * 注意不能复用 `GRID.DEPLOYABLE` / `GRID.DEPLOY_DISABLED` —— 那两个正是部署区
    * 两行与后四行的底色，设上去等于没有任何高亮反馈（实测色值完全相同）。
+   *
+   * 跨格拖拽必须先复原**上一个**预览格：只给新格上色会让拖过的格子留下残影
+   * （见 `_dropPreviewPos` 注释）。离开棋盘时走全量重绘兜底，清掉任何残留。
    */
   previewDeployDrop(pos: GridPosition | null, valid: boolean): void {
     if (!pos) {
+      // 离开棋盘 / 拖拽结束：全量重绘部署区，确保没有任何残影
+      this._dropPreviewPos = null;
       this._highlightDeployArea();
       return;
     }
+    // 同一格反复上报（拖拽中每帧都会调）→ 无需重设颜色
+    if (this._dropPreviewPos
+      && this._dropPreviewPos.row === pos.row
+      && this._dropPreviewPos.col === pos.col) {
+      // 但可放/不可放可能翻转（例如经过已占用格），仍需按最新判定刷新
+      this.gridController.setCellColor(pos, valid ? GRID.DRAG_DROP_VALID : GRID.DRAG_DROP_INVALID);
+      return;
+    }
+
+    this._clearDropPreview();
     this.gridController.setCellColor(pos, valid ? GRID.DRAG_DROP_VALID : GRID.DRAG_DROP_INVALID);
+    this._dropPreviewPos = { row: pos.row, col: pos.col };
+  }
+
+  /** 把上一个预览格恢复成它「本来的」部署区底色（不整块重绘，避免闪烁） */
+  private _clearDropPreview(): void {
+    const prev = this._dropPreviewPos;
+    this._dropPreviewPos = null;
+    if (!prev) return;
+    this.gridController.setCellColor(prev, this._deployCellBaseColor(prev));
+  }
+
+  /**
+   * 部署阶段某格「未预览时应有的底色」。
+   * 与 `_highlightDeployArea()` 的三条规则保持一致：已部署 > 可部署区 > 敌方半场。
+   */
+  private _deployCellBaseColor(pos: GridPosition): Color {
+    const placed = this._deployedPositions.some(p => p.row === pos.row && p.col === pos.col);
+    if (placed) return GRID.DEPLOYED;
+    return pos.row <= 1 ? GRID.DEPLOYABLE : GRID.DEPLOY_DISABLED;
   }
 
   /**
@@ -1557,5 +1599,7 @@ export class BattleManager extends Component {
     this._selectedUnit = null;
     this._onBattleEndCallback = null;
     this._aiController = null;
+    this._deployDragGuard = null;
+    this._dropPreviewPos = null;
   }
 }
