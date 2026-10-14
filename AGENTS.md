@@ -27,7 +27,7 @@
 | A | PowerShell `Set-Content`/`Out-File` 会把含中文的 `.ts` 重编码成 GBK/ANSI：中文全乱码、`tsc` 报大量 `Unterminated string literal` | [`tech/dev-toolchain-notes.md`](./docs/tech/dev-toolchain-notes.md) §1 |
 | B | `@property({ type: Button })` 绑的是 **Button 组件**、不是节点；MCP 绑节点 UUID → 运行时 `Cannot read properties of undefined (reading 'on')`。改用 `@property({ type: Node })` + `Node.EventType.TOUCH_END` | [`tech/mcp-scene-authoring-pitfalls.md`](./docs/tech/mcp-scene-authoring-pitfalls.md) §2 |
 | C | 新建/复制的按钮节点可能**没有 `Button` 组件** → `getComponent(Button)` 返回 null、按钮无响应；补挂 `cc.Button` 时**别再 `addComponent(UITransform)`**。另：设 `contentSize` 必须**在 `spriteFrame` 之后**（顺序反了会被贴图原始尺寸覆盖成 2×2），MCP 写 `anchorPoint` 的 `x=0` 会被吞掉，均须读回核对 | [`tech/mcp-scene-authoring-pitfalls.md`](./docs/tech/mcp-scene-authoring-pitfalls.md) §3、§3.5 |
-| D | 浏览器验证四坑：改完 `.ts` 先 `project_refresh_assets`；**点击入参比例每轮现场标定**（`clientX = 传入 / k`，k 随视口变化，曾误判成回归）；页面重载会清掉页内探针；懒初始化面板 `show()` 先置 `_showCalled` 再置 `active` | [`tech/browser-verify-cocos-preview.md`](./docs/tech/browser-verify-cocos-preview.md) §4、§7.1、§8 |
+| D | 浏览器验证五坑：改完 `.ts` 先 `project_refresh_assets`；**点击入参比例每轮现场标定**（`clientX = 传入 / k`，k 随视口变化，实测出现过 1/2/1.225，曾误判成回归）；页面重载会清掉页内探针；懒初始化面板 `show()` 先置 `_showCalled` 再置 `active`；**桌面拖拽结束派发的是 `TOUCH_CANCEL` 而非 `TOUCH_END`**（当成"中断回位"会让拖拽永不生效），且手势监听要挂到两个子树的**共同父级** | [`tech/browser-verify-cocos-preview.md`](./docs/tech/browser-verify-cocos-preview.md) §4、§7.1、§8、§11 |
 | E | 布局三坑：① 绑 `@property(Label)` 这类**组件引用**要 `propertyType:'component'` + **节点** UUID（写 `'cc.Label'` 会被拒，且内置组件返回的 `uuid` 常为 `null`）；② 跨面板常驻 HUD（`HudTop`）的显隐只能有**一个**管理者，否则 `active=false` 的面板 `onLoad()` 不执行、残留「回合 1」；③ 纵向 `ScrollView` **不校正 content 的 x**，且滚动区占满全屏时第一行会被固定表头压住 | [`tech/mcp-scene-authoring-pitfalls.md`](./docs/tech/mcp-scene-authoring-pitfalls.md) §3.5 ④–⑦ |
 
 > 维护约定：本表保持 **3–5 条**高价值教训；新教训超出时按主题迁到 `docs/tech/`，这里只留一行索引。
@@ -207,11 +207,12 @@ node tools/verify-battle-fixes.js
 - **预览地址**：`http://127.0.0.1:7456/`（先 `lsof -nP -iTCP:7456 -sTCP:LISTEN` 确认在跑）。MCP **不能**启动预览（`project_run_project` 只开构建面板、`project_start_preview_server` 返回不支持）。
 - **改了 `.ts`**：`project_refresh_assets` → 重载页面 → 用 `typeof comp.新方法 === 'function'` 确认新代码已加载。
 - **页内探针**：用 `eval` 读 `window.cc` 的节点/组件/私有状态（如 `_phase`、`_selectedUnit`、`activeInHierarchy`）做断言；组件用字符串名 `getComponent('cc.UITransform')`。
-- **点击坐标**：按设备像素传（= CSS 坐标 × `devicePixelRatio`）。
+- **点击坐标**：按设备像素传（= CSS 坐标 × `devicePixelRatio`）。注意 `k` **不一定等于 dpr、且每轮会变**（实测出现过 1 / 2 / 1.225），务必现场标定，见手册 §4。
+- **拖拽/手势**：能用真实 `drag` 驱动；但桌面下结束事件是 `TOUCH_CANCEL`、监听要挂共同父级 —— 语义与边界见手册 §11。
 - **日志**：浏览器 logs + `debug_get_console_logs`（`filter:"error"`）+ `debug_search_project_logs`。
 - 读数互相矛盾时**先怀疑探针**（字段名/坐标换算），再判定是否游戏缺陷。
 
-完整手册（坐标换算代码、加速注入与声明纪律、易错字段表、可复用验证顺序）：[`docs/tech/browser-verify-cocos-preview.md`](./docs/tech/browser-verify-cocos-preview.md)。
+完整手册（坐标换算代码、加速注入与声明纪律、易错字段表、可复用验证顺序、**拖拽/手势验证与能力边界**）：[`docs/tech/browser-verify-cocos-preview.md`](./docs/tech/browser-verify-cocos-preview.md)。
 
 ## Git 规范
 

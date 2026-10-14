@@ -2,6 +2,7 @@
 
 > **适用**：需要在**真实运行**的游戏上验证交互（点击、技能释放、面板流转、报错/崩溃），而不是仅凭读代码下结论。
 > **来源**：2026-10-08 小小先锋（TinyVanguard）可视化验证与修复实践（见 [`../plans/2026-10-08-tiny-vanguard-visual-verification.md`](../plans/2026-10-08-tiny-vanguard-visual-verification.md)）。
+> **补充**：2026-10-12 布阵交互改版一轮（拖拽手势、事件语义与能力边界，见 §11）。
 > 与 [`../cocos-best-practices.md`](../cocos-best-practices.md) 互补：那份讲**怎么写不崩**，这份讲**怎么验得准**。
 
 ---
@@ -62,6 +63,9 @@ const byName = (name) => { const f = (n) => { if (n.name === name) return n;
 
 - **组件查询用字符串名**：`node.getComponent('cc.UITransform')`。
   在当前上下文里 `cc.UITransform` 可能是 `undefined`，直接 `getComponent(cc.UITransform)` 会报 `getComponent: Type must be non-nil`。
+- **`cc.*` 命名空间导出在页内 `eval` 常缺失**：实测 `cc.input`、`cc.Input`、`cc.UITransform` 都取不到
+  （`Object.keys(cc)` 里带 `input` 的只有 `BlockInputEventsComponent`）。要读全局输入监听可改用
+  节点捕获层挂探针（手法见 §11.3），不要依赖 `cc.input`。
 - **读私有状态做断言**（比看截图可靠）：`comp._state`、`bm._phase`、`bm._selectedUnit`、`bm._deployedPositions`、`panel.children` 等。
 - **可见性**用 `node.activeInHierarchy`（区分自身 `active` 与父链激活态）。
 - 组件全清单：`node.components.map(c => c.constructor.name)`——排查"同节点挂了两个渲染组件"这类问题很好用。
@@ -84,8 +88,11 @@ clientX = 传入 x / k        // k 即「投影缩放」，不一定等于 dpr
 |------|----------------|--------------------|--------|
 | 首次打开 | 786 × 1354 | 2 | **1**（传 274 → `clientX` 274） |
 | 重载后（编辑器切到 iPhone 14 Pro 模拟） | 786 × 1354 | 2 | **2**（传 400 → `clientX` 200） |
+| 2026-10-12 布阵改版（iPhone 14 Pro 模拟） | 786 × 1308 | 2 | **1.225**（传 400 → `clientX` 326.5） |
 
-> 注意两个 k 下的 `rect`、`dpr`、`innerWidth` 读数完全一致 —— **只读这些属性推不出 k**，必须实测。
+> 注意这几个 k 下的 `rect`、`dpr`、`innerWidth` 读数完全一致 —— **只读这些属性推不出 k**，必须实测。
+> 同一台机器上 k 已实测出现过 **1 / 2 / 1.225** 三个值，且 canvas `rect` 也会变（上表后两行的高度就不同），
+> 所以「上次是几」没有任何参考价值。
 
 ### 4.1 标定 k（每次要点击之前先做）
 
@@ -180,6 +187,10 @@ gm.onRunComplete(true);                                            // 走真实�
 
 > **必须在报告里声明**哪些结论来自注入而非自然流程。别把"注入能跑通"写成"玩家自然通关没问题"。
 
+**还有一条同样要声明的**：用 `eval` **直接调方法**（`bm.placeUnit(...)`）验证，会绕过事件系统，
+从而漏掉"节点上拿不到组件就跳过"这类**静默失效**缺陷。**能点/能拖的路径就点、就拖**，
+`eval` 只用来读状态与加速末端流程。反例见 §11.4。
+
 ---
 
 ## 7. 本项目易错的字段与命名
@@ -239,9 +250,10 @@ show(): void { this._showCalled = true; this.node.active = true; }   // 先置�
 2. 改了 `.ts` → `project_refresh_assets` → 重载页面（并用 `typeof` 核对新方法）。
 3. 探针读初始状态（可见性、节点树、关键组件）。
 4. **标定点击比例 k**（§4.1）→ 真实点击 → 探针断言状态变化。
-5. 读日志（error 计数、新增 warning）。
-6. 类型检查（见 §10）。
-7. 结论里区分：自然流程 / 加速注入；设计像素 / 设备像素。
+5. 涉及**拖拽 / 手势**时：先按 §11.1 确认事件语义，再用真实 `drag` 驱动（§11.4 列了能验与不能验的边界）。
+6. 读日志（error 计数、新增 warning）。
+7. 类型检查（见 §10）。
+8. 结论里区分：自然流程 / 加速注入；设计像素 / 设备像素。
 
 ---
 
@@ -260,6 +272,114 @@ TSC=/Applications/Cocos/Creator/3.8.8/CocosCreator.app/Contents/Resources/app.as
 node "$TSC" --version        # Version 5.8.2
 node "$TSC" --noEmit && echo TS_OK
 ```
+
+---
+
+## 11. 拖拽 / 手势验证：事件语义与能力边界
+
+> **来源**：2026-10-12 小小先锋「布阵交互改版」（拖拽双向 + 棋盘内换位）一轮的实测。
+
+浏览器工具**能**驱动真实的指针拖拽，但桌面预览下 Cocos 对「拖拽结束」的事件语义与点击**不同**。
+不了解这一点，会把"实现没收到结束事件"误判成"工具不支持拖拽"。
+
+### 11.1 `click` 与 `drag` 派发的事件序列不同
+
+同一个 Canvas 捕获监听，两种工具动作的实测结果：
+
+| 工具动作 | Cocos 侧派发序列 |
+|---------|-----------------|
+| `click` | `touch-start` → **`touch-end`** |
+| `drag`  | `touch-start` → 多次 `touch-move` → **`touch-cancel`**（**没有 `touch-end`**） |
+
+而**纯 DOM 层**（在 canvas 上挂原生监听、不经 Cocos）看，`drag` 的底层指针序列是**完整的**：
+
+```
+pointerdown(btn=1) → 多段 pointermove(btn=1) → pointerup(btn=0) → mouseup(btn=0)
+```
+
+**结论**：桌面（`navigator.maxTouchPoints === 0`）下，Cocos 把「以拖拽方式结束」的指针序列
+合成为 **`TOUCH_CANCEL`**，而不是 `TOUCH_END`。
+
+**实现含义**：若把手势实现写成"`TOUCH_CANCEL` 一律视为中断、回位"，桌面拖拽将**永远不生效**
+（只有真机触摸才走 `TOUCH_END`）。判据用 `navigator.maxTouchPoints`：
+`0` ⇒ 这次 CANCEL 就是手势正常结束，照常结算；`> 0` ⇒ 按真机语义回位、不改变状态。
+
+> 别写成 `cc.sys.maxTouchPoints` —— 该字段在 3.8.8 不存在（TS 报
+> `Property 'maxTouchPoints' does not exist`），要用浏览器 `navigator`。
+
+### 11.2 监听宿主：兄弟子树收不到对方的事件
+
+布阵场景里 `Grid`（棋盘）与 `BattleUI`（兵牌）是 `Canvas` 下的**两个兄弟子树**。把
+`TOUCH_*` 监听挂在 `BattleUI` 自身，**收不到**"起点在棋盘格上"的手势 —— 表现为
+"棋盘内换位整条路径失效"，极易误判成手势逻辑写错。
+
+规则：
+
+- 要覆盖子树 A 与子树 B 的手势，监听挂在二者的**共同父级**（本例 `Canvas`）。
+- 事件起点在更深的子节点时，用**捕获阶段**（`useCapture = true`）：棋盘格的 `Button`
+  在 `TOUCH_START` 时会 `stopPropagation`，冒泡阶段读不到起点在棋盘上的手势。
+  捕获阶段只读事件、不阻断传播，不干扰 `Button` 自身的点击判定。
+
+### 11.3 诊断法：区分「工具没发」与「实现没收到」
+
+现象是"拖了没反应"时，按这个顺序定位，**不要先怀疑工具**：
+
+1. 在 `canvas` 上挂**纯 DOM** 监听（`pointerdown/up`、`mousedown/up`）→ 底层指针是否完整？
+2. 在目标节点的**捕获层**挂 Cocos 监听（`touch-start/move/end/cancel`）→ 事件是否到达？
+
+| DOM 层 | Cocos 层 | 结论 |
+|--------|---------|------|
+| 完整 | 只到 `start`/`move`，无 `end` | 属预期 —— 桌面把结束合成为 `touch-cancel`（§11.1） |
+| 完整 | 一个都没到 | **宿主或阶段选错**（§11.2），不是工具的问题 |
+| 缺失 | — | 工具真的没发；改用页内派发序列（§11.5，需声明为注入） |
+
+> ⚠️ **探针别重复注册**：`node.on(type, cb, target, useCapture)` 按 `(cb, target)` 判重，
+> 用**不同的 `target` 对象**挂两次同名监听，每个事件会被 push 两次 —— 看起来像"引擎派发了两遍"。
+> 诊断计数异常时先查这个（本轮踩过：`touch-start` / `touch-end` 各被记成 2 次，差点据此下错结论）。
+
+> 本轮正是因为**先怀疑工具**，把"宿主选错"误判成"`drag` 工具丢失 `pointerup`"，
+> 在报告里写错了归因。改用上面的双路取证后一次定位。
+
+### 11.4 能力边界（能验 / 不能验）
+
+**能验**：
+
+- 真实指针拖拽，含**中间态**：幽灵节点（跟随手指）、原槽位/单位淡化（`UIOpacity`）、落点高亮色；
+- 拖拽的**阈值分支**：位移 < 阈值（如 8px 设计像素）不触发拖拽，仍算点击；
+- **拖拽守卫**：拖拽已消费本次触摸时抑制随后派发的格点击（否则会重复落子）；
+- 四条路径（兵牌→棋盘 / 棋盘→兵牌 / 棋盘内换位 / 非法落点回位）都能读回真实状态做断言。
+
+**不能验 / 必须声明**：
+
+- **真机触摸分支**：本机 `maxTouchPoints = 0`，只能覆盖桌面分支；真机的 `TOUCH_END`
+  路径属**逻辑推导**而非实测，结论里要讲清。
+- **`eval` 直调方法会绕过真实 UI 路径**：绕过事件系统 ⇒ 漏掉"节点上拿不到组件就跳过"
+  这类**静默失效**缺陷。本轮实例：`setDragDimmed` 写成"拿不到 `UIOpacity` 就不做"，
+  而槽位节点本就没有该组件 —— 用 `eval` 直调时"看起来正常"，改用真实拖拽才暴露
+  （现象：槽位淡化零反馈）。修法与同类坑见
+  [`mcp-scene-authoring-pitfalls.md`](./mcp-scene-authoring-pitfalls.md) §3.5 ⑧。
+- **`k` 每轮现场标定**（§4），本轮实测 `k = 1.225`。
+
+### 11.5 页内派发拖拽序列（兜底手段）
+
+**优先用真实 `drag`**；仅当它确实不可用时才用下面的注入，并在报告里声明。
+
+```js
+// 设计像素 → canvas 客户端坐标（cam / rect 取法见 §4.1）
+const fire = (t, cx, cy) => c.dispatchEvent(new MouseEvent(t,
+  { clientX: cx, clientY: cy, bubbles: true, button: 0, detail: 1 }));
+
+const a = toClient(x1, y1); fire('mousedown', a[0], a[1]);
+for (let i = 1; i <= 6; i++) {                    // 分步移动，确保越过拖拽阈值
+  const q = toClient(x1 + (x2 - x1) * i / 6, y1 + (y2 - y1) * i / 6);
+  fire('mousemove', q[0], q[1]);
+}
+const z = toClient(x2, y2); fire('mouseup', z[0], z[1]);
+```
+
+> ⚠️ **必须分步 `await`**（`(async () => { ... })()`）：引擎按帧消费输入，把
+> `down/move/up` 在同一帧同步派发完，会只走到部分 `move`、拿不到 `end`。
+> 每步之间加约 40ms 延时。
 
 ---
 
