@@ -1,6 +1,6 @@
 import { _decorator, Component, Node, Label, Button, Sprite, SpriteFrame, UIOpacity, Vec2, Vec3, tween, instantiate, Prefab, UITransform, EventTouch } from 'cc';
 import {
-  ALPHA, CLASS_COLOR, COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_TITLE, FONT_TINY,
+  ALPHA, COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_TITLE, FONT_TINY,
   applyButtonTheme, applyFont, applyFontAndColor, hex,
 } from '../config/Theme';
 const { ccclass, property } = _decorator;
@@ -731,7 +731,6 @@ export class BattleUI extends Component {
   setupDeploySlots(
     unitNames: string[],
     unitIcons: string[],
-    unitClassIds: string[],
     callback: (index: number) => void
   ): void {
     const container = this.deployUnitList;
@@ -773,7 +772,6 @@ export class BattleUI extends Component {
       const y = -totalHeight / 2 + SLOT_HEIGHT / 2 + i * (SLOT_HEIGHT + CONTROL.ROW_GAP);
       slot.setPosition(0, y, 0);
       slot['_deployIdx'] = i;
-      slot['_deployClassId'] = unitClassIds[i] ?? '';
 
       // 背景：Sprite 的 @requireComponent 已自带 UITransform，不可重复 addComponent
       // 顺序要紧：spriteFrame → sizeMode=CUSTOM → color → contentSize（最后），
@@ -884,16 +882,20 @@ export class BattleUI extends Component {
 
   /**
    * 三态外观（§3.4）。
-   * `placed` 的语义是"兵还在、已上场"：底色压暗 + 图标/名字淡化，
-   * 边框改用该单位的**职业色**，一眼看出是哪一兵种占着这个站台。
+   *
+   * `placed` 的语义是"兵已上场，位子空着"：显示为**纯地面空格**——暗色凹坑 + 内凹描边，
+   * **隐藏图标与名字**。
+   *
+   * 为什么不再标兵种：左下槽位与单位是**强绑定**的（槽位 i 恒等于 `playerClasses[i]`，
+   * 全程不变、不可买卖替换），所以"看到 slot0 空了"本身就说明是哪个兵上了场；
+   * 再叠一层职业色描边属**冗余标识**。棋盘上的单位另带职业图标（`setupClassIcon`）可对照。
+   * 撤回也不要求精确命中原槽位（拖到兵牌区任意位置即可）。
    */
   setDeploySlotState(index: number, state: 'unplaced' | 'selected' | 'placed'): void {
     const slot = this._deployCards[index];
     if (!slot?.isValid) return;
 
     const bg = slot.getComponent(Sprite);
-    const classId = (slot['_deployClassId'] as string) ?? '';
-    const classColor = CLASS_COLOR[classId] ?? CLASS_COLOR.fallback;
     const applyBorder = (c: string) => {
       for (const b of BattleUI.SLOT_BORDERS) {
         const line = slot.getChildByName(b.name);
@@ -901,7 +903,14 @@ export class BattleUI extends Component {
         if (sp) sp.color = hex(c);
       }
     };
-    const setTextAlpha = (c: string) => {
+    // 图标/名字显隐：仅"空站台"隐藏（让它真的读作一个空格）
+    const setContentVisible = (visible: boolean) => {
+      const icon = slot.getChildByName('IconLabel');
+      const name = slot.getChildByName('NameLabel');
+      if (icon) icon.active = visible;
+      if (name) name.active = visible;
+    };
+    const setTextColor = (c: string) => {
       const icon = slot.getChildByName('IconLabel')?.getComponent(Label);
       const name = slot.getChildByName('NameLabel')?.getComponent(Label);
       if (icon) icon.color = hex(c);
@@ -912,21 +921,23 @@ export class BattleUI extends Component {
       case 'unplaced':
         if (bg) bg.color = hex(COLOR.SURFACE, ALPHA.PANEL_BG);
         applyBorder(COLOR.PANEL_BORDER);
-        setTextAlpha(COLOR.TEXT_PRIMARY);
+        setTextColor(COLOR.TEXT_PRIMARY);
+        setContentVisible(true);
         break;
 
       case 'selected':
         // 选中：主色背景 + 主色边框（取代旧的 1.12 放大与整块绿框）
         if (bg) bg.color = hex(COLOR.PRIMARY, ALPHA.PANEL_BG);
         applyBorder(COLOR.PRIMARY);
-        setTextAlpha(COLOR.TEXT_PRIMARY);
+        setTextColor(COLOR.TEXT_PRIMARY);
+        setContentVisible(true);
         break;
 
       case 'placed':
-        // 空站台：底色压暗 + 图标/名字淡化，边框用该单位职业色表示"兵还在、已上场"
-        if (bg) bg.color = hex(COLOR.PRIMARY_DISABLED, ALPHA.PANEL_BG);
-        applyBorder(classColor);
-        setTextAlpha(COLOR.TEXT_DISABLED);
+        // 纯地面空格：暗色凹坑 + 内凹描边，不显示兵种
+        if (bg) bg.color = hex(COLOR.SLOT_EMPTY_BG, ALPHA.SLOT_EMPTY_BG);
+        applyBorder(COLOR.SLOT_EMPTY_BORDER);
+        setContentVisible(false);
         break;
     }
 

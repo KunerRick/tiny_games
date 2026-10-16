@@ -50,6 +50,13 @@ export const COLOR = {
   TEXT_SECONDARY: '#9CA3AF',
   /** 不可用文字 */
   TEXT_DISABLED: '#6B7280',
+  /**
+   * 「空站台」凹坑底色：比 `PANEL_BG` 更暗，读感像"挖掉一块的地面"。
+   * 用于兵牌槽位已被拖上阵后的状态（§3.4）。
+   */
+  SLOT_EMPTY_BG: '#141A24',
+  /** 「空站台」凹坑描边：介于凹坑与 `PANEL_BORDER` 之间，形成内凹感 */
+  SLOT_EMPTY_BORDER: '#2A3342',
 } as const;
 
 /** 语义色的标准透明度（0–255），与 COLOR 配套使用 */
@@ -63,6 +70,8 @@ export const ALPHA = {
   LINE: 220,
   /** 拖拽中的"幽灵"节点（跟随手指的半透明副本） */
   DRAG_GHOST: 200,
+  /** “空站台”凹坑底色透明度（略透，露出下方面板色，强化凹陷感） */
+  SLOT_EMPTY_BG: 225,
 } as const;
 
 /** 取一个新的 Color 实例。不要共享实例：Color 是可变的 ValueType。 */
