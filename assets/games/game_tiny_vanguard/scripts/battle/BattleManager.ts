@@ -452,8 +452,12 @@ export class BattleManager extends Component {
     return other < 0 || other === unitIndex;
   }
 
-  /** 落子（棋盘内移动也走这里：先摘掉旧位置再放到新位置） */
-  placeUnit(unitIndex: number, pos: GridPosition): void {
+  /** 落子（棋盘内移动也走这里：先摘掉旧位置再放到新位置）
+   *
+   * `advanceSelection = false` 供**拖拽路径**使用：拖拽是"点着哪个拖哪个"的直接操作，
+   * 与"当前选中是哪张"互不相干，因此不得改写选中态（否则拖走 A 会把 B 点亮）。
+   */
+  placeUnit(unitIndex: number, pos: GridPosition, advanceSelection: boolean = true): void {
     const unit = this._playerUnits[unitIndex];
     if (!unit?.data || !unit.node?.isValid) return;
 
@@ -469,11 +473,14 @@ export class BattleManager extends Component {
     this._deployedPositions.push({ row: pos.row, col: pos.col });
     unit.node.active = true;
 
-    this._afterDeployChanged(unitIndex);
+    this._afterDeployChanged(unitIndex, false, advanceSelection);
   }
 
-  /** 撤回上阵（持牌回到棋盘外） */
-  unplaceUnit(unitIndex: number): void {
+  /** 撤回上阵（持牌回到棋盘外）
+   *
+   * `advanceSelection = false` 供拖拽路径使用，理由同 `placeUnit`。
+   */
+  unplaceUnit(unitIndex: number, advanceSelection: boolean = true): void {
     const unit = this._playerUnits[unitIndex];
     if (!unit?.data || !unit.node?.isValid) return;
 
@@ -492,7 +499,7 @@ export class BattleManager extends Component {
     );
     unit.node.active = false;
 
-    this._afterDeployChanged(unitIndex, true);
+    this._afterDeployChanged(unitIndex, true, advanceSelection);
   }
 
   /** 场上两兵互换位置 */
@@ -514,13 +521,44 @@ export class BattleManager extends Component {
 
     this._highlightDeployArea();
     this._notifyDeployPlaced();
+    // 棋盘内换位同样不涉及"选中哪张"，但上面的三态刷新会抹掉选中高亮，故补绘
+    this._paintDeploySelection();
   }
 
   /** 落子/撤回后的统一收尾：重绘部署区高亮 + 刷新兵牌三态 + 选中推进 */
-  private _afterDeployChanged(changedIndex: number, selectSelf: boolean = false): void {
+  private _afterDeployChanged(
+    changedIndex: number,
+    selectSelf: boolean = false,
+    advanceSelection: boolean = true
+  ): void {
     this._highlightDeployArea();
     this._notifyDeployPlaced();
-    this._advanceDeploySelection(changedIndex, selectSelf);
+    if (advanceSelection) {
+      this._advanceDeploySelection(changedIndex, selectSelf);
+      return;
+    }
+    // 拖拽路径：不改写"选中哪张"。但上面的三态刷新会把所有未上阵槽位一律重置为
+    // unplaced（含当前选中那张），故补绘一次选中态，避免高亮被静默抹掉。
+    this._paintDeploySelection();
+  }
+
+  /**
+   * 只**重绘**当前选中态，不推进。
+   *
+   * 供拖拽路径使用：拖拽是"点着哪个拖哪个"的直接操作，与"当前选中是哪张"无关，
+   * 因此不得改写选中态；但若选中的那张已因本次操作上阵，则按点击路径的语义清空选中
+   * （不会跳到别的卡上，这正是"拖走 A 却点亮 B"的割裂来源）。
+   */
+  private _paintDeploySelection(): void {
+    let idx = this._selectedDeployUnitIndex;
+    if (idx >= 0) {
+      const cur = this._playerUnits[idx];
+      if ((cur?.data?.gridPos.col ?? -1) >= 0) idx = -1;
+    }
+    this._selectedDeployUnitIndex = idx;
+    if (this._onDeploySelectionChanged) {
+      this._onDeploySelectionChanged(idx);
+    }
   }
 
   private _notifyDeployPlaced(): void {

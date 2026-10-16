@@ -528,8 +528,10 @@ export class TinyVanguardMain extends Component {
       worldToGrid: (x, y) => this.battleManager.gridPosFromUI(x, y),
       unitAtGrid: (pos) => this.battleManager.playerUnitAt(pos),
       canPlaceAt: (unitIndex, pos) => this.battleManager.canPlaceAt(unitIndex, pos),
-      placeUnit: (unitIndex, pos) => this.battleManager.placeUnit(unitIndex, pos),
-      unplaceUnit: (unitIndex) => this.battleManager.unplaceUnit(unitIndex),
+      // 拖拽路径一律 advanceSelection=false：拖拽是"点着哪个拖哪个"的直接操作，
+      // 与"当前选中是哪张"无关，不得改写选中态（否则拖走 A 会把 B 点亮）。
+      placeUnit: (unitIndex, pos) => this.battleManager.placeUnit(unitIndex, pos, false),
+      unplaceUnit: (unitIndex) => this.battleManager.unplaceUnit(unitIndex, false),
       swapUnits: (indexA, indexB) => this.battleManager.swapUnits(indexA, indexB),
       previewDrop: (pos, valid) => this.battleManager.previewDeployDrop(pos, valid),
       beginDrag: (unitIndex) => this.battleManager.setDeployDragging(unitIndex, true),
