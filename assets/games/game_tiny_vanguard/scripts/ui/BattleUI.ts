@@ -175,6 +175,15 @@ export class BattleUI extends Component {
   private _dragHost: Node | null = null;
   /** 本次交互是否已开始过手势（幂等标记，见 setDeployDragEnabled 注释） */
   private _dragSession: boolean = false;
+  /**
+   * 本次手势所属触摸点的 id（`EventTouch.getID()`）；-1 = 无手势。
+   *
+   * 只用 `_dragSession` 挡不住**第二根手指**：多指时第二指按下会被幂等标记挡掉、不覆盖
+   * `_dragUnitIndex`，但它的 `TOUCH_MOVE`/`TOUCH_END` 仍会走到本类 —— 于是第二指抬起会
+   * 拿第一指锁定的兵去"结算落点"，把单位落到第二指的位置。桌面鼠标的 id 恒为 0（实测
+   * start/move/cancel 全是 `id=0`），故该校验对桌面是无副作用的纯加固。
+   */
+  private _dragTouchId: number = -1;
   private _autoSkipNoticeCb: (() => void) | null = null;
   private _battleStartOverlay: Node | null = null;
   private _onBattleStartComplete: (() => void) | null = null;
@@ -490,21 +499,21 @@ export class BattleUI extends Component {
 
   private onDragTouchStart(evt: EventTouch): void {
     if (!this._dragEnabled) return;
-    this.beginDragGesture(evt.getUILocation());
+    this.beginDragGesture(evt);
   }
 
   private onDragTouchMove(evt: EventTouch): void {
-    if (!this._dragEnabled) return;
+    if (!this._dragEnabled || !this.isDragPointer(evt)) return;
     this.moveDragGesture(evt.getUILocation());
   }
 
   private onDragTouchEnd(evt: EventTouch): void {
-    if (!this._dragEnabled) return;
+    if (!this._dragEnabled || !this.isDragPointer(evt)) return;
     this.finishDragGesture(evt.getUILocation());
   }
 
   private onDragTouchCancel(evt: EventTouch): void {
-    if (!this._dragEnabled) return;
+    if (!this._dragEnabled || !this.isDragPointer(evt)) return;
     // ⚠️ 实测：桌面环境（无真实触摸）下鼠标拖拽抬起被引擎派发为 TOUCH_CANCEL 而非
     // TOUCH_END。若照搬方案"取消一律回位"，桌面拖拽永不生效 —— 故按输入设备分流：
     // 无真实触摸 ⇒ 这次 CANCEL 就是"手势正常结束"；真机 ⇒ 按方案回位、不改状态。
@@ -519,12 +528,23 @@ export class BattleUI extends Component {
     this.endDragGesture();
   }
 
+  /**
+   * 该事件是否属于**当前手势**的那个触摸点。
+   * 用于丢弃多指时其它手指的 MOVE/END/CANCEL（见 `_dragTouchId`）。
+   * `beginDragGesture` 走的是 `_dragSession` 幂等标记，故这里也覆盖 START 之后的全部阶段。
+   */
+  private isDragPointer(evt: EventTouch): boolean {
+    return this._dragSession && evt.getID() === this._dragTouchId;
+  }
+
   /** 手势起点：锁定棋盘上的己方单位或兵牌槽位内的单位 */
-  private beginDragGesture(p: { x: number; y: number }): void {
+  private beginDragGesture(evt: EventTouch): void {
     if (!this._dragEnabled || !this._dragApi) return;
     // 幂等：两套源都会派发 START/DOWN，第一个到达的认领本次手势，其余忽略
     if (this._dragSession) return;
     this._dragSession = true;
+    this._dragTouchId = evt.getID();
+    const p = evt.getUILocation();
     this._dragStartPos = new Vec2(p.x, p.y);
     this._dragActive = false;
     this._dragConsumed = false;
@@ -565,7 +585,10 @@ export class BattleUI extends Component {
     this.updateDropHighlight(this._dragUnitIndex, this._dragFromBoard, p.x, p.y);
   }
 
-  /** 手势结束：未达阈值时交给既有点击路径；否则结算落点 */
+  /**
+   * 手势结束：位移未达阈值时交给既有点击路径；否则结算落点。
+   * 结算后若**什么都没改**、且手势起于兵牌，则补一次「轻触兵牌」（见 `fallbackToCardTap`）。
+   */
   private finishDragGesture(p: { x: number; y: number }): void {
     if (!this._dragEnabled || !this._dragApi) return;
     if (!this._dragActive) {
@@ -573,34 +596,66 @@ export class BattleUI extends Component {
       this.resetDragGestureState();
       return;
     }
-    this.applyDrop(this._dragUnitIndex, this._dragFromBoard, p.x, p.y);
+    const applied = this.applyDrop(this._dragUnitIndex, this._dragFromBoard, p.x, p.y);
+    if (!applied) this.fallbackToCardTap();
     this.endDragGesture();
   }
 
-  /** 拖拽落点结算（真实规则全部走 DeployDragApi） */
-  private applyDrop(unitIndex: number, fromBoard: boolean, x: number, y: number): void {
+  /**
+   * 拖拽「落空」时的兜底：手势起于兵牌 → 按轻触兵牌处理（调用与 `onDeploySlotClicked`
+   * 同一个回调，即 `selectDeployUnit(idx)`）。
+   *
+   * 为什么需要：兵牌只有 100×64，而 `DRAG_THRESHOLD` 只有 8 **设计**像素（本机渲染比例下
+   * ≈ 4.3pt），手指/鼠标稍有抖动就判定为拖拽；此时落点又什么都没改，`_dragConsumed` 还把
+   * 随后派发的点击吞掉 —— 表现为**点兵牌选中/撤回完全没反应**。实测横移 5 CSS 像素即复现
+   * （3 CSS 像素正常、5 起失效）；量测与事件语义见
+   * `docs/tech/browser-verify-cocos-preview.md` §11.6。
+   *
+   * 为什么不「清掉 `_dragConsumed` 让引擎补发点击」：落点不在该兵牌上时引擎派发的是
+   * `TOUCH_CANCEL` 而非 `TOUCH_END`，点击路径收不到；即便收到，点击也会派发给**落点那个**
+   * 节点（落在棋盘格上会拿"当前选中"去落子、落在别的兵牌上会选中别人），语义完全错位。
+   * 显式调用原槽位回调则与落点无关，跨平台一致。
+   *
+   * 只兜底**兵牌**、不动棋盘：棋盘上「拖起又放回原格」是 `applyDrop` 明确定义的**无操作**，
+   * 若补发点击会变成「撤回该单位」（点击路径里点已上阵单位 = 撤回），与"放回去"的意图相反。
+   */
+  private fallbackToCardTap(): void {
+    const idx = this._dragUnitIndex;
+    if (this._dragFromBoard || idx < 0) return;
+    if (this._onDeployCardCb) this._onDeployCardCb(idx);
+  }
+
+  /**
+   * 拖拽落点结算（真实规则全部走 DeployDragApi）。
+   * 返回本次是否真的改变了布阵状态 —— `false` 供 `fallbackToCardTap` 判断"拖了个空"。
+   */
+  private applyDrop(unitIndex: number, fromBoard: boolean, x: number, y: number): boolean {
     const api = this._dragApi;
-    if (!api) return;
+    if (!api) return false;
 
     // 落在兵牌区 → 撤回（仅棋盘上提起的兵允许拖回，避免原地抬起又放下被当成撤回）
     if (this.hitTestDeploySlot(x, y)) {
-      if (fromBoard) api.unplaceUnit(unitIndex);
-      return;
+      if (!fromBoard) return false;
+      api.unplaceUnit(unitIndex);
+      return true;
     }
 
     const pos = api.worldToGrid(x, y);
-    if (!pos) return;
+    if (!pos) return false;
 
     const occupant = api.unitAtGrid(pos);
-    if (occupant === unitIndex) return;                    // 落回原格 → 无操作
+    if (occupant === unitIndex) return false;              // 落回原格 → 无操作
 
     if (occupant >= 0) {
       // 目标格被己方占用：仅"棋盘内拖动"可换位；从兵牌拖来视为非法落点（回位）
-      if (fromBoard) api.swapUnits(unitIndex, occupant);
-      return;
+      if (!fromBoard) return false;
+      api.swapUnits(unitIndex, occupant);
+      return true;
     }
 
-    if (api.canPlaceAt(unitIndex, pos)) api.placeUnit(unitIndex, pos);
+    if (!api.canPlaceAt(unitIndex, pos)) return false;
+    api.placeUnit(unitIndex, pos);
+    return true;
   }
 
   /** 统一收尾：清幽灵/高亮/淡化，恢复选中缩放 */
@@ -636,6 +691,7 @@ export class BattleUI extends Component {
     this._dragStartPos = null;
     // 会话标记随本次交互释放；不清会让下一次交互被残留挡掉
     this._dragSession = false;
+    this._dragTouchId = -1;
   }
 
   /** UI 坐标是否落在兵牌容器范围内 */
