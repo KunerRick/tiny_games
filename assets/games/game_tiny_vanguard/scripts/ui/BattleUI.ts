@@ -1,6 +1,6 @@
 import { _decorator, Component, Node, Label, Button, Sprite, SpriteFrame, UIOpacity, Vec2, Vec3, tween, instantiate, Prefab, UITransform, EventTouch } from 'cc';
 import {
-  ALPHA, COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_TITLE, FONT_TINY,
+  ALPHA, CLASS_COLOR, COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_ICON, FONT_TITLE, FONT_TINY,
   applyButtonTheme, applyFont, applyFontAndColor, hex,
 } from '../config/Theme';
 const { ccclass, property } = _decorator;
@@ -30,6 +30,20 @@ const SLOT_ICON_HEIGHT = 28;
 const SLOT_ICON_Y = 15;
 const SLOT_NAME_HEIGHT = 24;
 const SLOT_NAME_Y = -17;
+
+/**
+ * 拖拽跟随徽章（ghost）的边长。
+ *
+ * 取 72 与 `UnitController.GLOW_SIZE`（棋盘单位的阵营光环）同值：拖拽中看到的就是
+ * "落下去会变成的那个东西"的形状，与 80×80 的棋盘格子也对得上。
+ * 旧实现直接复制兵牌形状（100×64 横条）且只有图标、没名字，下半截空着，
+ * 读起来像一条色块 —— 与落点形状不一致，这是"长方形"观感不佳的根因。
+ */
+const DRAG_GHOST_SIZE = 72;
+/** 徽章描边线宽 */
+const DRAG_GHOST_BORDER = 2;
+/** 徽章内图标块边长（避开四周边框，各留 1px 间隙，避免审计判为重叠） */
+const DRAG_GHOST_ICON_SIZE = DRAG_GHOST_SIZE - 2 * DRAG_GHOST_BORDER - 2;
 
 /** 棋盘坐标（与 GridController.GridPosition 结构一致；此处只做结构约束，避免 ui→battle 的类型依赖） */
 export interface DeployDropPos {
@@ -133,6 +147,14 @@ export class BattleUI extends Component {
   private _eventsBound: boolean = false;
   private _deployCards: Node[] = [];
   private _onDeployCardCb: ((index: number) => void) | null = null;
+  /**
+   * 各槽位的图标与兵种 id，供**拖拽徽章**着色/取图标。
+   *
+   * 槽位自身不显示兵种（已上阵即"纯地面空格"），但拖拽徽章需要"这是哪个兵"的
+   * 职业色与图标 —— 两者用途不同，故在此单独留存。
+   */
+  private _deployIcons: string[] = [];
+  private _deployClassIds: string[] = [];
   /** 纯色块贴图缓存（undefined = 尚未查询；null = 查询失败，不再重试） */
   private _solidFrame: SpriteFrame | null | undefined = undefined;
   // --- 布阵拖拽（§3.3）：视觉与手势在本类，规则在 DeployDragApi ---
@@ -660,34 +682,45 @@ export class BattleUI extends Component {
     api.previewDrop(pos, ok);
   }
 
-  /** 拖拽"幽灵"：跟随手指的槽位副本，原兵牌置半透明 */
+  /**
+   * 拖拽跟随徽章：**方形**（`DRAG_GHOST_SIZE`）+ 职业色底 + 居中职业图标 + 同色描边。
+   *
+   * 旧实现复制兵牌形状（100×64 横条）且只有图标、没名字，下半截空着 ——
+   * 既读作"一条色块"，又与 80×80 的落点方格形状不一致。改成方形徽章后，
+   * 拖拽中看到的形状就是"落下去会变成的那个单位"（与棋盘阵营光环同为 72）。
+   */
   private showDragGhost(unitIndex: number): void {
     this.destroyDragGhost();
-    const src = this._deployCards[unitIndex];
-    if (!src?.isValid) return;
+    const frame = this.getSolidSpriteFrame();
+    const classColor = CLASS_COLOR[this._deployClassIds[unitIndex]] ?? CLASS_COLOR.fallback;
 
     const ghost = new Node('DeployDragGhost');
-    const frame = this.getSolidSpriteFrame();
     const bg = ghost.addComponent(Sprite);
     if (frame) bg.spriteFrame = frame;
     bg.sizeMode = Sprite.SizeMode.CUSTOM;
     bg.type = Sprite.Type.SIMPLE;
-    bg.color = hex(COLOR.PRIMARY, ALPHA.DRAG_GHOST);
+    // 略透，露出下方的落点高亮，保留"幽灵"语义
+    bg.color = hex(classColor, ALPHA.DRAG_GHOST);
     const ui = ghost.getComponent(UITransform);
-    if (ui) ui.setContentSize(SLOT_WIDTH, SLOT_HEIGHT);
+    if (ui) ui.setContentSize(DRAG_GHOST_SIZE, DRAG_GHOST_SIZE);
 
-    const icon = src.getChildByName('IconLabel')?.getComponent(Label);
+    // 描边用职业色实心，与 200 的底色拉开层次（同一套拼接规则，不会有 2×2 自重叠）
+    BattleUI.createBorderLines(
+      ghost, DRAG_GHOST_SIZE, DRAG_GHOST_SIZE, DRAG_GHOST_BORDER, classColor, frame
+    );
+
+    const icon = this._deployIcons[unitIndex] ?? '';
     if (icon) {
       const iconNode = new Node('IconLabel');
       const iconUi = iconNode.addComponent(UITransform);
-      iconUi.setContentSize(SLOT_LABEL_WIDTH, SLOT_ICON_HEIGHT);
+      iconUi.setContentSize(DRAG_GHOST_ICON_SIZE, DRAG_GHOST_ICON_SIZE);
       const l = iconNode.addComponent(Label);
-      l.string = icon.string;
-      applyFontAndColor(l, FONT_BODY, COLOR.TEXT_PRIMARY);
+      l.string = icon;
+      applyFontAndColor(l, FONT_ICON, COLOR.TEXT_PRIMARY);
       l.horizontalAlign = Label.HorizontalAlign.CENTER;
       l.verticalAlign = Label.VerticalAlign.CENTER;
       l.overflow = Label.Overflow.CLAMP;
-      iconNode.setPosition(0, SLOT_ICON_Y, 0);
+      iconNode.setPosition(0, 0, 0);
       ghost.addChild(iconNode);
     }
 
@@ -731,6 +764,7 @@ export class BattleUI extends Component {
   setupDeploySlots(
     unitNames: string[],
     unitIcons: string[],
+    unitClassIds: string[],
     callback: (index: number) => void
   ): void {
     const container = this.deployUnitList;
@@ -750,6 +784,9 @@ export class BattleUI extends Component {
     }
     this._deployCards = [];
     this._onDeployCardCb = callback;
+    // 供拖拽徽章取职业色/图标（槽位自身不显示兵种，见 _deployIcons 注释）
+    this._deployIcons = unitIcons.slice();
+    this._deployClassIds = unitClassIds.slice();
 
     const count = unitNames.length;
     const totalHeight = count * SLOT_HEIGHT + Math.max(0, count - 1) * CONTROL.ROW_GAP;
@@ -786,18 +823,7 @@ export class BattleUI extends Component {
       if (slotUi) slotUi.setContentSize(SLOT_WIDTH, SLOT_HEIGHT);
 
       // 4 条细 Sprite 拼实线边框（项目无虚线贴图 → 方案 §3.4 的默认方案 (a)）
-      for (const b of BattleUI.SLOT_BORDERS) {
-        const line = new Node(b.name);
-        const lineSprite = line.addComponent(Sprite);
-        if (frame) lineSprite.spriteFrame = frame;
-        lineSprite.sizeMode = Sprite.SizeMode.CUSTOM;
-        lineSprite.type = Sprite.Type.SIMPLE;
-        lineSprite.color = hex(COLOR.PANEL_BORDER);
-        const lineUi = line.getComponent(UITransform);
-        if (lineUi) lineUi.setContentSize(b.w, b.h);
-        line.setPosition(b.x, b.y, 0);
-        slot.addChild(line);
-      }
+      BattleUI.createBorderLines(slot, SLOT_WIDTH, SLOT_HEIGHT, SLOT_BORDER_WIDTH, COLOR.PANEL_BORDER, frame);
 
       // 图标（上半部分）
       // 宽度避开左右边框、高度钳制后与上下边框各留 1px 间隙：
@@ -835,17 +861,43 @@ export class BattleUI extends Component {
     }
   }
 
+  /** 边框节点名（4 条细 Sprite；供 `setDeploySlotState` 等只改色的地方按名查找） */
+  private static readonly BORDER_NAMES = ['BorderTop', 'BorderBottom', 'BorderLeft', 'BorderRight'];
+
   /**
-   * 4 条边框相对槽位中心的偏移与尺寸（线宽 SLOT_BORDER_WIDTH）。
-   * 上下边框两端各让出 SLOT_BORDER_WIDTH，与左右边框**拼接**而非交叠 ——
-   * 否则四角会形成 2×2 的自重叠（审计会判为重叠）。
+   * 给节点加 4 条细 Sprite 拼成的实线边框（项目无虚线贴图 → 方案 §3.4 默认 (a)）。
+   * 上下边框两端各让出线宽，与左右边框**拼接**而非交叠 ——
+   * 否则四角会形成 2×2 的自重叠（量化审计会判为重叠）。
+   *
+   * 兵牌槽位与拖拽徽章共用同一套规则，抽成静态方法避免两处各写一遍后改漏。
    */
-  private static readonly SLOT_BORDERS = [
-    { name: 'BorderTop',    x: 0, y:  SLOT_HEIGHT / 2 - SLOT_BORDER_WIDTH / 2, w: SLOT_WIDTH - 2 * SLOT_BORDER_WIDTH, h: SLOT_BORDER_WIDTH },
-    { name: 'BorderBottom', x: 0, y: -SLOT_HEIGHT / 2 + SLOT_BORDER_WIDTH / 2, w: SLOT_WIDTH - 2 * SLOT_BORDER_WIDTH, h: SLOT_BORDER_WIDTH },
-    { name: 'BorderLeft',   x: -SLOT_WIDTH / 2 + SLOT_BORDER_WIDTH / 2, y: 0, w: SLOT_BORDER_WIDTH, h: SLOT_HEIGHT },
-    { name: 'BorderRight',  x:  SLOT_WIDTH / 2 - SLOT_BORDER_WIDTH / 2, y: 0, w: SLOT_BORDER_WIDTH, h: SLOT_HEIGHT },
-  ] as const;
+  private static createBorderLines(
+    parent: Node,
+    width: number,
+    height: number,
+    thickness: number,
+    colorHex: string,
+    frame: SpriteFrame | null
+  ): void {
+    const defs = [
+      { name: 'BorderTop',    x: 0,                          y:  height / 2 - thickness / 2, w: width - 2 * thickness, h: thickness },
+      { name: 'BorderBottom', x: 0,                          y: -height / 2 + thickness / 2, w: width - 2 * thickness, h: thickness },
+      { name: 'BorderLeft',   x: -width / 2 + thickness / 2, y: 0,                            w: thickness,             h: height },
+      { name: 'BorderRight',  x:  width / 2 - thickness / 2, y: 0,                            w: thickness,             h: height },
+    ];
+    for (const d of defs) {
+      const line = new Node(d.name);
+      const lineSprite = line.addComponent(Sprite);
+      if (frame) lineSprite.spriteFrame = frame;
+      lineSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+      lineSprite.type = Sprite.Type.SIMPLE;
+      lineSprite.color = hex(colorHex);
+      const lineUi = line.getComponent(UITransform);
+      if (lineUi) lineUi.setContentSize(d.w, d.h);
+      line.setPosition(d.x, d.y, 0);
+      parent.addChild(line);
+    }
+  }
 
   /**
    * 纯色块用的贴图。旧实现只写 color 不写 spriteFrame，
@@ -897,8 +949,8 @@ export class BattleUI extends Component {
 
     const bg = slot.getComponent(Sprite);
     const applyBorder = (c: string) => {
-      for (const b of BattleUI.SLOT_BORDERS) {
-        const line = slot.getChildByName(b.name);
+      for (const name of BattleUI.BORDER_NAMES) {
+        const line = slot.getChildByName(name);
         const sp = line?.getComponent(Sprite);
         if (sp) sp.color = hex(c);
       }
@@ -1317,6 +1369,8 @@ export class BattleUI extends Component {
     this.destroyDragGhost();
     this._dragApi = null;
     this._deployCards = [];
+    this._deployIcons = [];
+    this._deployClassIds = [];
     this._onDeployCardCb = null;
     this._onConfirmDeploy = null;
     this._onWait = null;
