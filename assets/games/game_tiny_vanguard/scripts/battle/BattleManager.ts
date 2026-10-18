@@ -139,10 +139,11 @@ export class BattleManager extends Component {
     if (isBoss) {
       // spawnEnemy() 内部已经 push 进 _enemyUnits，此处不能再 push 一次
       // （否则 Boss 战出现两个「战争领主」，敌方回合让 Boss 行动两次）
+      // Boss 属性不随进度缩放：设计 §5.3 给的是「Boss 特有属性」固定值
       this.spawnEnemy(BOSS_CONFIG as EnemyConfig, { row: 5, col: 3 });
       enemyConfigs = [
-        { ...ENEMIES[0], stats: { ...ENEMIES[0].stats, hp: Math.floor(ENEMIES[0].stats.hp * (1 + difficulty * 0.1)) } },
-        { ...ENEMIES[1], stats: { ...ENEMIES[1].stats, hp: Math.floor(ENEMIES[1].stats.hp * (1 + difficulty * 0.1)) } },
+        { ...ENEMIES[0], stats: this.scaleEnemyStats(ENEMIES[0].stats, difficulty) },
+        { ...ENEMIES[1], stats: this.scaleEnemyStats(ENEMIES[1].stats, difficulty) },
       ];
     } else if (isElite) {
       const elitePool = isElite ? ELITE_ENEMIES : ENEMIES;
@@ -150,7 +151,7 @@ export class BattleManager extends Component {
       enemyConfigs = [];
       for (let i = 0; i < count; i++) {
         const config = { ...elitePool[i % elitePool.length] };
-        config.stats = { ...config.stats, hp: Math.floor(config.stats.hp * (1 + difficulty * 0.1)) };
+        config.stats = this.scaleEnemyStats(config.stats, difficulty);
         enemyConfigs.push(config);
       }
     } else {
@@ -158,7 +159,7 @@ export class BattleManager extends Component {
       enemyConfigs = [];
       for (let i = 0; i < count; i++) {
         const config = { ...ENEMIES[i % ENEMIES.length] };
-        config.stats = { ...config.stats, hp: Math.floor(config.stats.hp * (1 + difficulty * 0.1)) };
+        config.stats = this.scaleEnemyStats(config.stats, difficulty);
         enemyConfigs.push(config);
       }
     }
@@ -169,6 +170,25 @@ export class BattleManager extends Component {
       const row = 5 - Math.floor(i / 2);
       this.spawnEnemy(enemyConfigs[i], { row, col });
     }
+  }
+
+  /**
+   * 按进度缩放敌人**基础属性**（设计 §5.5：中期 ×1.2~1.4、后期 ×1.5~1.8）。
+   *
+   * 原实现只缩放 `hp`，攻击/防御恒为基础值 —— 实测打到第 4 场敌人仍是 atk3/atk2/atk4，
+   * 玩家靠升级涨血涨攻之后伤害压力趋近于 0。改为同一倍率作用于 hp/攻击/防御
+   * （向下取整：属性都是整数，且防御很敏感，宁可慢一点也不取整过头）。
+   * **移速与射程不缩放**：它们决定走位与射程判定，放大后会让 AI 的可达性假设失效。
+   * Boss 不调用本方法（设计 §5.3 的 Boss 属性是固定值）。
+   */
+  private scaleEnemyStats(base: EnemyConfig['stats'], difficulty: number): EnemyConfig['stats'] {
+    const mult = 1 + difficulty * 0.1;
+    return {
+      ...base,
+      hp: Math.floor(base.hp * mult),
+      attack: Math.floor(base.attack * mult),
+      defense: Math.floor(base.defense * mult),
+    };
   }
 
   private spawnEnemy(config: EnemyConfig, pos: GridPosition): UnitController | null {
@@ -1179,9 +1199,13 @@ export class BattleManager extends Component {
           const center = target?.data?.gridPos ?? targetPos ?? caster.data.gridPos;
           for (const enemy of this._enemyUnits) {
             if (enemy.data?.isAlive) {
-              const dist = Math.abs(enemy.data.gridPos.row - center.row) +
-                Math.abs(enemy.data.gridPos.col - center.col);
-              if (dist <= 1) {
+              // 必须是 3×3 方块（Chebyshev），与 _getAoePreviewPositions 的高亮范围一致。
+              // 原实现用曼哈顿距离（|dr|+|dc| <= 1）= 只打十字 5 格，而预览高亮 9 格 ——
+              // 玩家看到对角格被高亮、技能落下去却打不到（实测：中心 (3,3)，对角 (2,4) 的
+              // 弩手零伤害）。火球文案"目标周围 1 格"指的也是 3×3。
+              const dr = Math.abs(enemy.data.gridPos.row - center.row);
+              const dc = Math.abs(enemy.data.gridPos.col - center.col);
+              if (dr <= 1 && dc <= 1) {
                 const markBonus = this._getMarkBonus(enemy);
                 const dmg = enemy.takeDamage(baseDmg + markBonus, ignoreDefense, caster);
                 this._totalDamageDealt += dmg;
