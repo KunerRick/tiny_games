@@ -89,19 +89,6 @@ export interface DeployDragApi {
 /** 位移超过该距离（设计像素）才判定为拖拽，避免误伤点击（§3.3） */
 const DRAG_THRESHOLD = 8;
 
-/**
- * 是否存在真实触摸输入（桌面浏览器 = 0，真机 / 设备模拟 > 0）。
- *
- * 用于分辨 `TOUCH_CANCEL` 的两种含义，见 `onDragTouchCancel`：
- * 桌面鼠标拖拽在抬起时被引擎派发为 CANCEL（把 CANCEL 当"中断"会让桌面拖拽永不生效）；
- * 真机上的 CANCEL 才是真正的手势中断。
- */
-function hasRealTouchInput(): boolean {
-  return typeof navigator !== 'undefined'
-    && typeof navigator.maxTouchPoints === 'number'
-    && navigator.maxTouchPoints > 0;
-}
-
 @ccclass('BattleUI')
 export class BattleUI extends Component {
   @property({ type: Label, tooltip: '单位名称' })
@@ -534,8 +521,9 @@ export class BattleUI extends Component {
    *   故不影响 `Button` 自身的点击判定（点击兜底路径另由 `isDragConsumingTouch`
    *   在 `onDeployCellClicked` 里抑制）。
    *
-   * 结束语义：桌面（无真实触摸）下拖拽抬起被引擎派发为 `TOUCH_CANCEL`、
-   * 没有 `TOUCH_END`，而真机两者都有 —— 差异在 `onDragTouchCancel` 里分流。
+   * 结束语义：拖拽抬起可能被派发为 `TOUCH_END`，也可能被派发为 `TOUCH_CANCEL`
+   * （END 位置不在起始节点内时引擎派发 CANCEL）。两者在 `onDragTouchCancel` 里
+   * **同等结算落点**，不再按输入设备分流。
    */
   setDeployDragEnabled(enabled: boolean): void {
     if (this._dragEnabled === enabled) return;
@@ -588,18 +576,21 @@ export class BattleUI extends Component {
 
   private onDragTouchCancel(evt: EventTouch): void {
     if (!this._dragEnabled || !this.isDragPointer(evt)) return;
-    // ⚠️ 实测：桌面环境（无真实触摸）下鼠标拖拽抬起被引擎派发为 TOUCH_CANCEL 而非
-    // TOUCH_END。若照搬方案"取消一律回位"，桌面拖拽永不生效 —— 故按输入设备分流：
-    // 无真实触摸 ⇒ 这次 CANCEL 就是"手势正常结束"；真机 ⇒ 按方案回位、不改状态。
-    if (!hasRealTouchInput()) {
-      this.finishDragGesture(evt.getUILocation());
-      return;
-    }
-    if (!this._dragActive) {
-      this.resetDragGestureState();
-      return;
-    }
-    this.endDragGesture();
+    // CANCEL 与 END 一律**同等结算**（同一个 `finishDragGesture`）。
+    //
+    // 曾经的写法是按输入设备分流（`navigator.maxTouchPoints > 0` 时把 CANCEL 当"手势中断"
+    // → 只回位、不结算落点）。那个分流是**错的**，实测复现：
+    // 伪造 `navigator.maxTouchPoints = 3` 后，同一次"兵牌 → 棋盘格"拖拽只派发
+    // `start` + `cancel`（无 `end`），落子被丢弃、单位留在原地 ——
+    // 即**任何上报了触摸能力的设备**（真机、触屏笔记本、开启触摸模拟的浏览器）
+    // 拖拽放置全部失效，这正是"布阵拖拽没实现"的来源。
+    //
+    // CANCEL 的真实语义是"结束点不落在起始节点内"（引擎按 END 位置做 hitTest，
+    // 命中失败就派发 CANCEL），而这**恰恰是拖拽成功的样子**（把兵拖到别处再松手）。
+    // 何况宿主是 Canvas（起点节点与落点节点的共同祖先），此前端可正常拖拽也依赖它。
+    // 因此按落点结算既正确又跨端一致；真被中断（场景切换/节点销毁）时
+    // `_dragEnabled`/`_dragApi` 已失效或落点判定为非法，`applyDrop` 自然返回 false。
+    this.finishDragGesture(evt.getUILocation());
   }
 
   /**
@@ -1237,12 +1228,23 @@ export class BattleUI extends Component {
     if (this._onAttackCallback) this._onAttackCallback();
   }
 
+  /**
+   * 伤害飘字。
+   * - 挂到**单位父级**而不是单位节点上：阵亡演出结束会 `active=false`，
+   *   挂在单位上的数字会被一起收走 —— "最后一击看不到伤害"。
+   * - 出手用 scale 弹一下（0.6 → 1.15 → 1）+ 缓出上飘，比匀速直线飘读感更"有撞击力"。
+   */
   showDamageNumber(targetNode: Node, amount: number): void {
     if (!this.damageNumberPrefab || !targetNode?.isValid) return;
+    const host = targetNode.parent;
+    if (!host?.isValid) return;
 
     const node = instantiate(this.damageNumberPrefab);
-    node.setPosition(0, 40, 0);
-    targetNode.addChild(node);
+    const origin = targetNode.position;
+    const startY = origin.y + 40;
+    node.setPosition(origin.x, startY, 0);
+    node.setScale(new Vec3(0.6, 0.6, 1));
+    host.addChild(node);
 
     const label = node.getComponentInChildren(Label);
     if (label) {
@@ -1256,8 +1258,14 @@ export class BattleUI extends Component {
       sprite.color = amount > 0 ? hex(COLOR.DANGER) : hex(COLOR.SUCCESS);
     }
 
+    // 缩放与位移各写各的属性，两条并行补间不冲突；销毁挂时长更长的那条
     tween(node)
-      .to(0.6, { position: new Vec3(0, 100, 0) })
+      .to(0.12, { scale: new Vec3(1.15, 1.15, 1) }, { easing: 'backOut' })
+      .to(0.10, { scale: new Vec3(1, 1, 1) }, { easing: 'quadOut' })
+      .start();
+
+    tween(node)
+      .to(0.6, { position: new Vec3(origin.x, startY + 60, 0) }, { easing: 'quadOut' })
       .call(() => {
         if (node?.isValid) {
           node.destroy();

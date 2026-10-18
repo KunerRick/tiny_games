@@ -56,6 +56,28 @@ export class BattleManager extends Component {
   /** 本场难度（0 起，= 已完成的战斗场次）：Boss 召唤物按同一曲线缩放 */
   private _difficulty: number = 0;
   private _autoSkipUnitRef: UnitController | null = null;
+  /**
+   * 本场是否已判出胜负。与 `_phase` 不同：`_phase` 到 `victory/defeat` 后
+   * 还会留 ~0.34s 播阵亡演出（见 `checkBattleEnd`），这个标记是**幂等闸门**，
+   * 避免同一个结算被重复排期（重复结算 = 重复发金币）。
+   */
+  private _battleOver: boolean = false;
+
+  /**
+   * 敌方回合里"两个单位之间"的间隔（秒）。原先是两个魔数写死在这条链上
+   * （移动 0.25 + `scheduleOnce(…, 0.5)`），结果是**不管有没有出手都要等半秒**，
+   * 一回合三四个敌人就拖成一长段沉默。现在按"这一拍有没有出手"分别取值：
+   * 出手要留够攻击演出（突刺 0.08 + 回收 0.12 + 伤害飘字）收尾，只是走路则不必等。
+   */
+  private static readonly AI_STEP_AFTER_ACTION = 0.34;
+  private static readonly AI_STEP_AFTER_MOVE = 0.10;
+  /**
+   * 行动演出（移动 / 攻击）进行中：期间**不接受新的棋盘点击与技能**。
+   * 为什么需要它 —— 普通攻击的伤害现在落在突刺顶点（约 0.08s 后），
+   * 如果这 0.08s 里还能点，玩家可以点第二个敌人让同一个单位连打两下
+   * （`hasActed` 那一刻还没置位）。锁定从"发出动作"持续到"动作收尾"。
+   */
+  private _actionLocked: boolean = false;
 
   get phase(): BattlePhase { return this._phase; }
   get playerUnits(): UnitController[] { return this._playerUnits; }
@@ -80,6 +102,11 @@ export class BattleManager extends Component {
     this._phase = 'deploy';
     this._turnCount = 0;
     this._deployedPositions = [];
+    // 新一场开打：清掉上一场的胜负闸门（否则第二场会立刻被判成"已经结束"）
+    this._battleOver = false;
+    this._actionLocked = false;
+    // 上一场可能留下未结算的排期（例如结束回合时的 AI 队列）
+    this.unscheduleAllCallbacks();
     // 本场难度（0 起）：Boss 集结的召唤物要按同一曲线缩放，故存一份
     this._difficulty = difficulty;
     // 上一场可能留下未清除的落点预览引用（跨场脏状态）
@@ -849,6 +876,7 @@ export class BattleManager extends Component {
   }
 
   waitCurrentUnit(): void {
+    if (this._actionLocked) return;
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive) return;
     unit.data.hasActed = true;
@@ -867,6 +895,7 @@ export class BattleManager extends Component {
   }
 
   onAttackSelected(): void {
+    if (this._actionLocked) return;
     if (this._phase !== 'player_turn') return;
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive || unit.data.hasActed) return;
@@ -879,6 +908,8 @@ export class BattleManager extends Component {
   }
 
   onCellClicked(gridPos: GridPosition): void {
+    // 行动演出期间锁输入（见 `_actionLocked`）：既防连打，也防"移动补间途中又落一个移动"
+    if (this._actionLocked) return;
     if (this._phase === 'skill_target') {
       this.handleSkillTargetClick(gridPos);
       return;
@@ -917,7 +948,9 @@ export class BattleManager extends Component {
           this._movePreviewPos.col === gridPos.col) {
         this._movePreviewPos = null;
         this.gridController.clearPreview();
-        unit.moveToPositionAnimated(gridPos, 0.25, () => {
+        this._actionLocked = true;
+        unit.moveToPositionAnimated(gridPos, UnitController.MOVE_ANIM_DURATION, () => {
+          this._actionLocked = false;
           if (!unit.data || this._phase !== 'player_turn') return;
           this._unitPhase = 'action';
           this.highlightAttackRange(unit);
@@ -943,9 +976,15 @@ export class BattleManager extends Component {
       if (targetEnemy) {
         const dist = Math.abs(gridPos.row - unit.data.gridPos.row) + Math.abs(gridPos.col - unit.data.gridPos.col);
         if (dist <= unit.data.stats.range) {
-          this.executeAttack(unit, targetEnemy);
-          unit.data.hasActed = true;
-          this.finishUnitTurn();
+          this._actionLocked = true;
+          // 打完（伤害落到突刺顶点）再收尾回合：这样"最后一击打死全部敌人"时
+          // `checkBattleEnd` 已经把 `_phase` 切走，`endPlayerTurn` 会自行早退
+          // （与原先同步结算时的时序一致，避免胜利后敌方还接着行动）
+          this.executeAttack(unit, targetEnemy, () => {
+            this._actionLocked = false;
+            if (unit.data) unit.data.hasActed = true;
+            this.finishUnitTurn();
+          });
           return;
         }
       }
@@ -1101,6 +1140,12 @@ export class BattleManager extends Component {
     effects: SkillEffect[]
   ): void {
     if (!caster.data) return;
+
+    // 施法提示（一胀 + 淡蓝闪）。放在统一的结算入口，玩家技能与敌人技能就都有反馈；
+    // 效果本身仍同步结算 —— 演出只是"提示要放了"，不该让判定等动画。
+    if (caster.node?.isValid) {
+      caster.playCastCue();
+    }
     
     const nextSkillBuff = caster.data.buffs.find(b => b.type === 'buff_next_skill');
     const skillMultiplier = nextSkillBuff ? (nextSkillBuff.params.multiplier ?? 1.5) : 1.0;
@@ -1119,9 +1164,7 @@ export class BattleManager extends Component {
           const totalDmg = Math.floor(rawDmg * skillMultiplier) + markBonus;
           const dmg = target.takeDamage(totalDmg, ignoreDefense, caster);
           this._totalDamageDealt += dmg;
-          if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
-            this._onDamageDealtCallback(target.node, dmg);
-          }
+          this._reportDamage(target, dmg);
           break;
         }
 
@@ -1132,9 +1175,7 @@ export class BattleManager extends Component {
           const rawDmg = Math.floor(caster.data.stats.attack * mult * skillMultiplier);
           const dmg = target.takeDamage(rawDmg + markBonus, ignoreDefense, caster);
           this._totalDamageDealt += dmg;
-          if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
-            this._onDamageDealtCallback(target.node, dmg);
-          }
+          this._reportDamage(target, dmg);
           break;
         }
 
@@ -1153,9 +1194,7 @@ export class BattleManager extends Component {
             const rawDmg = Math.floor(caster.data.stats.attack * mult * skillMultiplier);
             const dmg = target.takeDamage(rawDmg + markBonus, ignoreDefense, caster);
             this._totalDamageDealt += dmg;
-            if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
-              this._onDamageDealtCallback(target.node, dmg);
-            }
+            this._reportDamage(target, dmg);
             if (!target.data.isAlive) break;
           }
           break;
@@ -1172,9 +1211,7 @@ export class BattleManager extends Component {
             : Math.floor(caster.data.stats.attack * skillMultiplier);
           const dmg = target.takeDamage(rawDmg + markBonus, ignoreDefense, caster);
           this._totalDamageDealt += dmg;
-          if (dmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
-            this._onDamageDealtCallback(target.node, dmg);
-          }
+          this._reportDamage(target, dmg);
           break;
         }
 
@@ -1200,9 +1237,7 @@ export class BattleManager extends Component {
                 const markBonus = this._getMarkBonus(enemy);
                 const dmg = enemy.takeDamage(baseDmg + markBonus, ignoreDefense, caster);
                 this._totalDamageDealt += dmg;
-                if (dmg > 0 && this._onDamageDealtCallback && enemy.node?.isValid) {
-                  this._onDamageDealtCallback(enemy.node, dmg);
-                }
+                this._reportDamage(enemy, dmg);
               }
             }
           }
@@ -1225,9 +1260,7 @@ export class BattleManager extends Component {
                 const markBonus = this._getMarkBonus(enemy);
                 const dmg = enemy.takeDamage(baseDmg + markBonus, ignoreDefense, caster);
                 this._totalDamageDealt += dmg;
-                if (dmg > 0 && this._onDamageDealtCallback && enemy.node?.isValid) {
-                  this._onDamageDealtCallback(enemy.node, dmg);
-                }
+                this._reportDamage(enemy, dmg);
               }
             }
           }
@@ -1246,9 +1279,7 @@ export class BattleManager extends Component {
                 const markBonus = this._getMarkBonus(enemy);
                 const dmg = enemy.takeDamage(baseDmg + markBonus, ignoreDefense, caster);
                 this._totalDamageDealt += dmg;
-                if (dmg > 0 && this._onDamageDealtCallback && enemy.node?.isValid) {
-                  this._onDamageDealtCallback(enemy.node, dmg);
-                }
+                this._reportDamage(enemy, dmg);
               }
             }
           }
@@ -1279,9 +1310,7 @@ export class BattleManager extends Component {
           const markBonus = this._getMarkBonus(target);
           const mainDmg = target.takeDamage(baseChainDmg + markBonus, ignoreDefense, caster);
           this._totalDamageDealt += mainDmg;
-          if (mainDmg > 0 && this._onDamageDealtCallback && target.node?.isValid) {
-            this._onDamageDealtCallback(target.node, mainDmg);
-          }
+          this._reportDamage(target, mainDmg);
           const otherEnemies = this._enemyUnits.filter(e =>
             e !== target && e.data?.isAlive
           );
@@ -1297,9 +1326,7 @@ export class BattleManager extends Component {
             const chainMarkBonus = this._getMarkBonus(chainTarget);
             const chainDmg = chainTarget.takeDamage(baseChainDmg + chainMarkBonus, ignoreDefense, caster);
             this._totalDamageDealt += chainDmg;
-            if (chainDmg > 0 && this._onDamageDealtCallback && chainTarget.node?.isValid) {
-              this._onDamageDealtCallback(chainTarget.node, chainDmg);
-            }
+            this._reportDamage(chainTarget, chainDmg);
             if (!chainTarget.data?.isAlive) break;
           }
           break;
@@ -1315,7 +1342,8 @@ export class BattleManager extends Component {
           const newRow = target.data.gridPos.row + (dir.row !== 0 ? Math.sign(dir.row) * distance : 0);
           const newCol = target.data.gridPos.col + (dir.col !== 0 ? Math.sign(dir.col) * distance : 0);
           if (newRow >= 0 && newRow < GridController.GRID_SIZE && newCol >= 0 && newCol < GridController.GRID_SIZE && !this.isOccupied({ row: newRow, col: newCol })) {
-            target.setGridPosition({ row: newRow, col: newCol });
+            // 击退是被外力搬动：立即生效、只补间视图（AGENTS 教训 D 的"瞬移不该走过去"）
+            target.slideToPosition({ row: newRow, col: newCol });
           }
           break;
         }
@@ -1330,14 +1358,14 @@ export class BattleManager extends Component {
           const newRow = caster.data.gridPos.row + (retreatDir.row !== 0 ? Math.sign(retreatDir.row) * retreatDist : 0);
           const newCol = caster.data.gridPos.col + (retreatDir.col !== 0 ? Math.sign(retreatDir.col) * retreatDist : 0);
           if (newRow >= 0 && newRow < GridController.GRID_SIZE && newCol >= 0 && newCol < GridController.GRID_SIZE && !this.isOccupied({ row: newRow, col: newCol })) {
-            caster.setGridPosition({ row: newRow, col: newCol });
+            caster.slideToPosition({ row: newRow, col: newCol });
           }
           break;
         }
 
         case 'teleport': {
           if (!caster.data || !targetPos) break;
-          caster.setGridPosition(targetPos);
+          caster.slideToPosition(targetPos);
           break;
         }
 
@@ -1364,9 +1392,7 @@ export class BattleManager extends Component {
               const markBonus = this._getMarkBonus(foe);
               const dmg = foe.takeDamage(lineDmg + markBonus, ignoreDefense, caster);
               this._totalDamageDealt += dmg;
-              if (dmg > 0 && this._onDamageDealtCallback && foe.node?.isValid) {
-                this._onDamageDealtCallback(foe.node, dmg);
-              }
+              this._reportDamage(foe, dmg);
             }
           }
           break;
@@ -1383,7 +1409,7 @@ export class BattleManager extends Component {
           if (row < 0 || row >= GridController.GRID_SIZE) break;
           if (col < 0 || col >= GridController.GRID_SIZE) break;
           if (this.isOccupied({ row, col })) break;
-          caster.setGridPosition({ row, col });
+          caster.slideToPosition({ row, col });
           break;
         }
 
@@ -1461,24 +1487,51 @@ export class BattleManager extends Component {
     this.checkBattleEnd();
   }
 
-  private executeAttack(attacker: UnitController, target: UnitController): void {
+  /**
+   * 伤害数字上报的唯一入口。原先十几处各自判空 + 回调，改到一处是为了顺手统一
+   * "0 伤害不飘字"这类规则（也避免以后加规则时漏掉某几处）。
+   */
+  private _reportDamage(target: UnitController | null | undefined, amount: number): void {
+    if (amount <= 0) return;
+    if (!target?.node?.isValid) return;
+    if (!this._onDamageDealtCallback) return;
+    this._onDamageDealtCallback(target.node, amount);
+  }
+
+  /**
+   * 普通攻击。手感要点：**先出手、后结算** —— 近战的伤害落在突刺到顶的那一帧
+   * （`playAttackAnim` 的 `onImpact`），远程（闪白）则是同步的。
+   * 注意结算被推到回调里之后，`executeAttack` 返回时伤害**可能尚未生效**，
+   * 调用方不要在这之后立刻假设目标已死（一律通过 `checkBattleEnd` 收口），
+   * 需要"打完再走下一步"的调用方请用 `onDone`，不要另外排时间。
+   */
+  private executeAttack(attacker: UnitController, target: UnitController, onDone?: () => void): void {
     // 冲锋等 preMove 技能会给施法者挂「本次攻击附带伤害」，在此消费（读取即移除）
     const bonus = this._consumeBonusDamage(attacker);
-    const damage = target.takeDamage((attacker.data?.stats.attack ?? 0) + bonus, false, attacker);
-    this._totalDamageDealt += damage;
-    if (this._onDamageDealtCallback && target.node?.isValid) {
-      this._onDamageDealtCallback(target.node, damage);
-    }
-    // 攻击后触发被动
-    if (attacker.data && attacker.hasPassive('poison_arrows')) {
-      target.addBuff('poison', 2, { damage: 1 });
-    }
-    if (!attacker.data?.isAlive || !target.data?.isAlive) {
-      this.checkBattleEnd();
-    }
+
+    const impact = (): void => {
+      // 与原先的同步版本语义一致：只判定"目标是否还活着"（takeDamage 对尸体返回 0）
+      if (target.data?.isAlive) {
+        const damage = target.takeDamage((attacker.data?.stats.attack ?? 0) + bonus, false, attacker);
+        this._totalDamageDealt += damage;
+        this._reportDamage(target, damage);
+        // 攻击后触发被动
+        if (attacker.data && attacker.hasPassive('poison_arrows')) {
+          target.addBuff('poison', 2, { damage: 1 });
+        }
+        if (!attacker.data?.isAlive || !target.data?.isAlive) {
+          this.checkBattleEnd();
+        }
+      }
+      // 收尾回调一定执行：目标已死也要让调用方把回合走完（否则会卡住）
+      if (onDone) onDone();
+    };
+
+    attacker.playAttackAnim(target.data?.gridPos ?? null, impact);
   }
 
   onSkillUsed(skillIndex: number): void {
+    if (this._actionLocked) return;
     if (this._phase !== 'player_turn') return;
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive) return;
@@ -1577,6 +1630,7 @@ export class BattleManager extends Component {
   }
 
   endCurrentUnitTurn(): void {
+    if (this._actionLocked) return;
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive) return;
     unit.data.hasActed = true;
@@ -1585,6 +1639,7 @@ export class BattleManager extends Component {
   }
 
   private endPlayerTurn(): void {
+    if (this._actionLocked) return;
     if (this._phase !== 'player_turn') return;
     this._phase = 'enemy_turn';
 
@@ -1630,21 +1685,33 @@ export class BattleManager extends Component {
       return;
     }
 
-    const moveDuration = 0.25;
     const moveTarget = action.moveTo ?? enemy.data.gridPos;
-    enemy.moveToPositionAnimated(moveTarget, moveDuration, () => {
+    let acted = false;
+    // 移动补间结束后才出手（出手要落在"到位之后"，而不是和移动同时开始）；
+    // 已经在目标格时 moveToPositionAnimated 会**同步**回调，不再白等一段空补间。
+    enemy.moveToPositionAnimated(moveTarget, UnitController.MOVE_ANIM_DURATION, () => {
       // 有可用技能就用技能（冷却在释放时开始计）；否则普通攻击
-      if (!this._tryEnemyAbility(enemy, action) && action.attackTarget?.data?.isAlive) {
+      if (this._tryEnemyAbility(enemy, action)) {
+        acted = true;
+      } else if (action.attackTarget?.data?.isAlive) {
         const dist = Math.abs(action.attackTarget.data.gridPos.row - enemy.data.gridPos.row) +
           Math.abs(action.attackTarget.data.gridPos.col - enemy.data.gridPos.col);
         if (dist <= enemy.data.stats.range) {
           this.executeAttack(enemy, action.attackTarget);
+          acted = true;
         }
       }
-      this.scheduleOnce(() => {
-        this._processNextAIUnit();
-      }, 0.5);
+      // 出手了要留够攻击演出的时间；只是走了两步就不必再等（原先固定 0.5s 是浪费）
+      this.scheduleOnce(
+        this._onAINextStep,
+        acted ? BattleManager.AI_STEP_AFTER_ACTION : BattleManager.AI_STEP_AFTER_MOVE
+      );
     });
+  }
+
+  /** 敌方回合的下一拍（`scheduleOnce` 收方法引用，不能用匿名函数 —— AGENTS 守则 5） */
+  private _onAINextStep(): void {
+    this._processNextAIUnit();
   }
 
   /**
@@ -1731,33 +1798,46 @@ export class BattleManager extends Component {
     }
   }
 
+  /**
+   * 胜负判定。两个要点：
+   * 1. **同步**把 `_phase` 切到 `victory/defeat`（不再接受输入，`finishAITurn`
+   *    之类的"还在敌方回合吗"判断也立刻失效），但**延后** ~0.34s 才真正结算 ——
+   *    让阵亡演出播完再弹结算面板，否则"最后一击"的反馈和面板一起挤在同一帧；
+   * 2. 幂等（`_battleOver`）：这个函数被十几处调用，重复进入会重复排期结算
+   *    （重复发金币、重复触发回调）。
+   * 另外这里**不再强制隐藏**死亡单位 —— 隐藏现在由 `UnitController.playDeath()`
+   * 在演出结束时自己做；同帧 `active = false` 会把阵亡演出整个切掉。
+   */
   private checkBattleEnd(): void {
-    // 死亡单位立即隐藏（敌方单位死亡不消失 bug 修复）
-    for (const u of this._enemyUnits) {
-      if (!u.data?.isAlive && u.node?.isValid) {
-        u.node.active = false;
-      }
-    }
-    for (const u of this._playerUnits) {
-      if (!u.data?.isAlive && u.node?.isValid) {
-        u.node.active = false;
-      }
-    }
+    if (this._battleOver) return;
+
     const allEnemiesDead = this._enemyUnits.every(u => !u.data?.isAlive);
     const allPlayersDead = this._playerUnits.every(u => !u.data?.isAlive);
+    if (!allEnemiesDead && !allPlayersDead) return;
 
-    if (allEnemiesDead) {
-      this._phase = 'victory';
-      this.onBattleEnd(true);
-    } else if (allPlayersDead) {
-      this._phase = 'defeat';
-      this.onBattleEnd(false);
-    }
+    this._battleOver = true;
+    this._phase = allEnemiesDead ? 'victory' : 'defeat';
+    const victory = allEnemiesDead;
+    this.scheduleOnce(
+      victory ? this._settleVictory : this._settleDefeat,
+      UnitController.DEATH_ANIM_DURATION
+    );
+  }
+
+  private _settleVictory(): void {
+    this.onBattleEnd(true);
+  }
+
+  private _settleDefeat(): void {
+    this.onBattleEnd(false);
   }
 
   private onBattleEnd(victory: boolean): void {
     this.unscheduleAllCallbacks();
     this._aiQueue = [];
+    // 结算时解开输入锁：锁是在"行动收尾回调"里释放的，而结算可能把这个回调打断
+    // （例如最后一击打死全部敌人 → `finishUnitTurn` 早退），不解开会把下一场也卡住
+    this._actionLocked = false;
     if (this._selectedUnit) {
       this._selectedUnit.setSelected(false);
       this._selectedUnit = null;

@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Sprite, Color, tween, Vec3, Label, Tween, UITransform } from 'cc';
+import { _decorator, Component, Node, Sprite, Color, tween, Vec3, Label, Tween, UITransform, UIOpacity } from 'cc';
 import { GridPosition, GridController } from './GridController';
 import { SkillConfig, getClassById, EnemyConfig, AIType, getEnemyAbilityById } from '../config/GameData';
 import { ALPHA, CLASS_COLOR, COLOR, FACTION, FONT_ICON, applyFontAndColor, hex, hpBarColor } from '../config/Theme';
@@ -59,6 +59,26 @@ export class UnitController extends Component {
   /** 阵营光环边长（略大于单位，形成外圈光晕） */
   private static readonly GLOW_SIZE = 72;
 
+  // ── 战斗演出时长（纯观感，与玩法规则无关） ───────────────────────────
+  /** 一格/一次移动的时长（`BattleManager` 编排敌方回合时也按它排期） */
+  static readonly MOVE_ANIM_DURATION = 0.22;
+  /** 近战突刺：出击 / 回收 */
+  private static readonly ANIM_LUNGE_OUT = 0.08;
+  private static readonly ANIM_LUNGE_BACK = 0.12;
+  /** 受击抖动（位移衰减振荡）总时长 */
+  private static readonly ANIM_SHAKE = 0.18;
+  /** 瞬移 / 击退 / 撤退的位移补间时长 */
+  private static readonly ANIM_SLIDE = 0.16;
+  /** 蓄力提示（施法 / 放技能）总时长 */
+  private static readonly ANIM_CAST = 0.14;
+  /** 阵亡演出总时长（弹一下 → 塌陷淡出） */
+  private static readonly ANIM_DEATH = 0.30;
+  /**
+   * 阵亡演出对外时长（`BattleManager` 排到 Victory/Defeat 结算用的等待量）。
+   * 故意比 `ANIM_DEATH` 多一点：结算面板出现前让尸体先消失干净。
+   */
+  static readonly DEATH_ANIM_DURATION = 0.34;
+
   private _data: UnitData | null = null;
   private _isSelected: boolean = false;
   private _countering: boolean = false;
@@ -67,6 +87,22 @@ export class UnitController extends Component {
   private _hpFill: Sprite | null = null;
   private _hpFillUi: UITransform | null = null;
   private _hpFillFullWidth: number = 50;
+
+  // ── 战斗演出状态 ───────────────────────────────────────────────────
+  /** 单位精灵的本色（`setTintColor` 同步刷新）：闪白/闪红之后必须还原，否则色调永久变样 */
+  private _tintBase: Color | null = null;
+  private _moveTween: Tween<Node> | null = null;
+  private _shakeTween: Tween<Node> | null = null;
+  private _lungeTween: Tween<Node> | null = null;
+  private _flashTween: Tween<Sprite> | null = null;
+  private _castTween: Tween<Node> | null = null;
+  private _deathTween: Tween<Node> | null = null;
+  private _fadeTween: Tween<UIOpacity> | null = null;
+  private _uiOpacity: UIOpacity | null = null;
+  /** 突刺期间位移被占用：此时受击只闪不抖（两者都写 node.position，会互相抢） */
+  private _lungeActive: boolean = false;
+  /** 阵亡演出进行中（幂等标记，防止 takeDamage 与 checkBattleEnd 重复触发） */
+  private _deathPlaying: boolean = false;
   /**
    * 同阵营单位列表的提供者（由 BattleManager 注入）。
    * 仅用于**光环类被动**（如盾兵的"盾墙：相邻友方受伤 -1"）—— `takeDamage`
@@ -75,9 +111,26 @@ export class UnitController extends Component {
   private _allyProvider: (() => UnitController[]) | null = null;
 
   onDestroy(): void {
+    // 只停 JS 引用持有的补间，不访问任何 @property(Node) —— 场景销毁时可能已是 null
     if (this._selectTween) {
       this._selectTween.stop();
       this._selectTween = null;
+    }
+    for (const t of [this._moveTween, this._shakeTween, this._lungeTween, this._castTween, this._deathTween]) {
+      if (t) t.stop();
+    }
+    this._moveTween = null;
+    this._shakeTween = null;
+    this._lungeTween = null;
+    this._castTween = null;
+    this._deathTween = null;
+    if (this._flashTween) {
+      this._flashTween.stop();
+      this._flashTween = null;
+    }
+    if (this._fadeTween) {
+      this._fadeTween.stop();
+      this._fadeTween = null;
     }
   }
 
@@ -201,6 +254,10 @@ export class UnitController extends Component {
       this._selectTween.stop();
       this._selectTween = null;
     }
+    // 蓄力脉冲也在写 scale。脉冲正在跑时**不要打断它**：技能结算完紧接着就会取消选中
+    // （本回合结束），在这里 stop 会让脉冲永远停在第一帧、看起来"放技能没动静"。
+    // 交给它自己收尾：playCastCue 的回调按"收尾那一刻"的选中态把缩放归位。
+    if (this._castTween) return;
     if (selected) {
       this._selectTween = tween(this.node)
         .to(0.2, { scale: new Vec3(1.08, 1.08, 1) })
@@ -211,6 +268,8 @@ export class UnitController extends Component {
   }
 
   private setTintColor(color: Color): void {
+    // 记录本色：闪白/闪红之后要还原到它（见 flashSprite），否则色调被永久改掉
+    this._tintBase = color.clone();
     if (this.unitSprite) {
       const sprite = this.unitSprite.getComponent(Sprite);
       if (sprite) {
@@ -342,12 +401,18 @@ export class UnitController extends Component {
     }
   }
 
+  /** 网格坐标 → 节点本地坐标（棋盘 6×6，原点在棋盘中心） */
+  positionForGrid(pos: GridPosition): Vec3 {
+    return new Vec3(
+      (pos.col - 2.5) * GridController.CELL_SIZE,
+      (pos.row - 2.5) * GridController.CELL_SIZE,
+      0
+    );
+  }
+
   private updatePosition(): void {
     if (this._data) {
-      this.node.setPosition(
-        (this._data.gridPos.col - 2.5) * GridController.CELL_SIZE,
-        (this._data.gridPos.row - 2.5) * GridController.CELL_SIZE
-      );
+      this.node.setPosition(this.positionForGrid(this._data.gridPos));
     }
   }
 
@@ -358,21 +423,310 @@ export class UnitController extends Component {
     this.updatePosition();
   }
 
-  moveToPositionAnimated(pos: GridPosition, duration: number = 0.3, onComplete?: () => void): void {
+  /**
+   * 移动到位（战斗中的"走过去"）。手感要点：
+   * - **先冲后缓**：前 70% 用 `quadOut` 冲出去，后 30% 用 `sineOut` 收速落位，
+   *   读起来是"落脚"而不是"匀速滑行"（原先整段 `linear`，正是"僵硬"的来源之一）；
+   * - 已经在目标格时**不补间、直接回调**（原先会白跑一段 0.3s 的空补间，敌方
+   *   "原地不动也要等半秒"就是这个）；
+   * - 以下语义与原实现保持一致，改动会波及玩法：`gridPos` 在**开始时**就更新
+   *   （判定/射程/AI 在补间期间就要读到新坐标），`hasMoved` 在**结束时**才置位
+   *   （调用方的回调依赖它）。
+   */
+  moveToPositionAnimated(
+    pos: GridPosition,
+    duration: number = UnitController.MOVE_ANIM_DURATION,
+    onComplete?: () => void
+  ): void {
     if (!this._data || !this.node?.isValid) {
       if (onComplete) onComplete();
       return;
     }
     this._data.gridPos = { ...pos };
-    const targetX = (pos.col - 2.5) * GridController.CELL_SIZE;
-    const targetY = (pos.row - 2.5) * GridController.CELL_SIZE;
-    tween(this.node)
-      .to(duration, { position: new Vec3(targetX, targetY, 0) })
+    const target = this.positionForGrid(pos);
+    this._stopMoveTween();
+    const finish = (): void => {
+      this._moveTween = null;
+      if (this.node?.isValid) this.node.setPosition(target);
+      if (this._data) this._data.hasMoved = true;
+      if (onComplete) onComplete();
+    };
+    const from = this.node.position;
+    const dx = target.x - from.x;
+    const dy = target.y - from.y;
+    if (duration <= 0 || (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5)) {
+      finish();
+      return;
+    }
+    // 中途点留 18% 的余量给第二段收速，避免"冲到位再抖一下"
+    const mid = new Vec3(target.x - dx * 0.18, target.y - dy * 0.18, 0);
+    this._moveTween = tween(this.node)
+      .to(duration * 0.7, { position: mid }, { easing: 'quadOut' })
+      .to(duration * 0.3, { position: target }, { easing: 'sineOut' })
+      .call(finish)
+      .start();
+  }
+
+  /**
+   * 位移（击退 / 撤退 / 瞬移换位）：**逻辑位置立即生效**，只把视图补间过去。
+   * 和 `moveToPositionAnimated` 的区别是刻意的 —— 这些是被外力搬动或瞬移，
+   * 不该让判定等动画，也不该让单位"慢慢走过去"。
+   */
+  slideToPosition(
+    pos: GridPosition,
+    duration: number = UnitController.ANIM_SLIDE,
+    onComplete?: () => void
+  ): void {
+    if (!this._data || !this.node?.isValid) {
+      if (onComplete) onComplete();
+      return;
+    }
+    this._data.gridPos = { ...pos };
+    this._data.hasMoved = true;
+    const target = this.positionForGrid(pos);
+    this._stopMoveTween();
+    if (duration <= 0) {
+      this.node.setPosition(target);
+      if (onComplete) onComplete();
+      return;
+    }
+    this._moveTween = tween(this.node)
+      .to(duration, { position: target }, { easing: 'sineOut' })
       .call(() => {
-        if (this._data) {
-          this._data.hasMoved = true;
-        }
+        this._moveTween = null;
+        if (this.node?.isValid) this.node.setPosition(target);
         if (onComplete) onComplete();
+      })
+      .start();
+  }
+
+  /**
+   * 攻击演出。近战：朝目标方向突刺一下再收回，`onImpact` 在**突刺顶点**回调 ——
+   * 伤害数字/受击抖动应该排在"打到"的那一刻，而不是和出手同时。
+   * 远程（射程 > 1）：只闪一下白，射程越远越不该有"扑上去"的错觉。
+   */
+  playAttackAnim(targetPos: GridPosition | null, onImpact?: () => void): void {
+    if (!this._data || !this.node?.isValid) {
+      if (onImpact) onImpact();
+      return;
+    }
+    const isRanged = (this._data.stats.range ?? 1) > 1;
+    if (isRanged || !targetPos) {
+      this.flashSprite(Color.WHITE.clone(), 0.12);
+      if (onImpact) onImpact();
+      return;
+    }
+
+    const base = this.positionForGrid(this._data.gridPos);
+    const dx = targetPos.col - this._data.gridPos.col;
+    const dy = targetPos.row - this._data.gridPos.row;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    // 只冲 0.42 个身位：够表达"扑上去"，又不至于盖住目标格上的单位
+    const dart = GridController.CELL_SIZE * 0.42;
+    const apex = new Vec3(base.x + (dx / len) * dart, base.y + (dy / len) * dart, 0);
+
+    this._stopMoveTween();
+    this._stopShakeTween();
+    this.node.setPosition(base);
+    if (this._lungeTween) {
+      this._lungeTween.stop();
+      this._lungeTween = null;
+    }
+    this._lungeActive = true;
+    this._lungeTween = tween(this.node)
+      .to(UnitController.ANIM_LUNGE_OUT, { position: apex }, { easing: 'quadOut' })
+      .call(() => {
+        if (onImpact) onImpact();
+      })
+      .to(UnitController.ANIM_LUNGE_BACK, { position: base }, { easing: 'sineInOut' })
+      .call(() => {
+        this._lungeActive = false;
+        this._lungeTween = null;
+        if (this.node?.isValid) this.node.setPosition(base);
+      })
+      .start();
+  }
+
+  /** 受击反馈：先闪红（一定会发生），位移抖动只在没有别的补间占用 position 时才做 */
+  playHitReaction(): void {
+    if (!this._data || !this.node?.isValid) return;
+    this.flashSprite(new Color(255, 92, 92, 255), 0.16);
+    // 突刺/移动期间 position 已被别人驱动，再叠一层抖动会互相抢（抖动会盖掉突刺）
+    if (this._lungeActive || this._moveTween) return;
+    this._stopShakeTween();
+    const base = this.positionForGrid(this._data.gridPos);
+    const dx = GridController.CELL_SIZE * 0.09 * (this._data.isPlayer ? -1 : 1);
+    this._shakeTween = tween(this.node)
+      .to(UnitController.ANIM_SHAKE * 0.25, { position: new Vec3(base.x + dx, base.y, 0) }, { easing: 'quadOut' })
+      .to(UnitController.ANIM_SHAKE * 0.30, { position: new Vec3(base.x - dx * 0.6, base.y, 0) }, { easing: 'sineInOut' })
+      .to(UnitController.ANIM_SHAKE * 0.45, { position: base }, { easing: 'sineOut' })
+      .call(() => {
+        this._shakeTween = null;
+        if (this.node?.isValid) this.node.setPosition(base);
+      })
+      .start();
+  }
+
+  /** 施法/放技能前的蓄力提示：轻轻一胀 + 一层淡蓝闪光（调用方随后再结算效果） */
+  playCastCue(): void {
+    if (!this._data || !this.node?.isValid) return;
+    this.flashSprite(new Color(120, 200, 255, 255), 0.18);
+    if (this._castTween) {
+      this._castTween.stop();
+      this._castTween = null;
+    }
+    // 第二腿回落的目标是"创建时"的选中态，但脉冲期间选中态可能已经变了（技能结算后本回合
+    // 结束 → 单位被取消选中），所以收尾时按**此刻**的选中态再归一次位，避免缩放停在
+    // 中间值（差了选中缩放 1.08 与常态 1.0 之间的 0.08）。
+    const rest = this._isSelected ? new Vec3(1.08, 1.08, 1) : new Vec3(1, 1, 1);
+    this._castTween = tween(this.node)
+      .to(UnitController.ANIM_CAST * 0.5, { scale: new Vec3(1.12, 1.12, 1) }, { easing: 'quadOut' })
+      .to(UnitController.ANIM_CAST * 0.5, { scale: rest }, { easing: 'sineInOut' })
+      .call(() => {
+        this._castTween = null;
+        if (this.node?.isValid) {
+          this.node.setScale(this._isSelected ? new Vec3(1.08, 1.08, 1) : new Vec3(1, 1, 1));
+        }
+      })
+      .start();
+  }
+
+  /**
+   * 阵亡演出：闪白 → 弹一下 → 塌陷 + 上飘 + 淡出 → 隐藏节点。
+   * 幂等（`_deathPlaying`）：`takeDamage` 和 `checkBattleEnd` 都可能触发它，
+   * 重复进入只会白跑一遍补间。
+   */
+  playDeath(): void {
+    if (this._deathPlaying || !this.node?.isValid) return;
+    this._deathPlaying = true;
+    this._stopMoveTween();
+    this._stopShakeTween();
+    if (this._castTween) {
+      this._castTween.stop();
+      this._castTween = null;
+    }
+    // 不主动停 `_lungeTween`：它可能是"正在执行的这一帧"（近战突刺顶点里被打死，
+    // 例如同归于尽的反击）。在自己的回调里 stop 自己会让剩下那一段的归属变得
+    // 不可预期；而它只写 position，且**注册早于**死亡补间 → 死亡补间每帧后写、
+    // 天然覆盖它，0.12s 后它自己收尾（含 `_lungeActive = false`）。
+    this.flashSprite(Color.WHITE.clone(), 0.1);
+
+    const base = this.positionForGrid(this._data?.gridPos ?? { row: 0, col: 0 });
+    if (this._deathTween) {
+      this._deathTween.stop();
+      this._deathTween = null;
+    }
+    this._deathTween = tween(this.node)
+      .to(UnitController.ANIM_DEATH * 0.3, { scale: new Vec3(1.18, 1.18, 1) }, { easing: 'quadOut' })
+      .to(
+        UnitController.ANIM_DEATH * 0.7,
+        { scale: new Vec3(0.3, 0.3, 1), position: new Vec3(base.x, base.y + 14, 0) },
+        { easing: 'quadIn' }
+      )
+      .call(() => {
+        this._deathTween = null;
+        // 演出结束才真正隐藏（原先在 takeDamage 同帧就 active=false，看不到任何阵亡过程）
+        if (this.node?.isValid) this.node.active = false;
+      })
+      .start();
+
+    const opacity = this.ensureOpacity();
+    if (opacity) {
+      if (this._fadeTween) {
+        this._fadeTween.stop();
+        this._fadeTween = null;
+      }
+      this._fadeTween = tween(opacity)
+        .to(UnitController.ANIM_DEATH, { opacity: 0 }, { easing: 'quadIn' })
+        .call(() => {
+          this._fadeTween = null;
+        })
+        .start();
+    }
+  }
+
+  /** 阵亡演出是否在进行中（外部据此决定"这个单位還能不能被当作可点目标"） */
+  get isDeathPlaying(): boolean {
+    return this._deathPlaying;
+  }
+
+  /**
+   * 复位所有演出状态（新战斗 / 复活时调用）。必须逐项还原 —— 残留的
+   * scale / 透明度 / 位移 / 闪光色都会跨战斗带过去。
+   */
+  resetVisualState(): void {
+    this._stopMoveTween();
+    this._stopShakeTween();
+    if (this._lungeTween) {
+      this._lungeTween.stop();
+      this._lungeTween = null;
+    }
+    this._lungeActive = false;
+    if (this._castTween) {
+      this._castTween.stop();
+      this._castTween = null;
+    }
+    if (this._deathTween) {
+      this._deathTween.stop();
+      this._deathTween = null;
+    }
+    if (this._fadeTween) {
+      this._fadeTween.stop();
+      this._fadeTween = null;
+    }
+    if (this._flashTween) {
+      this._flashTween.stop();
+      this._flashTween = null;
+    }
+    this._deathPlaying = false;
+    if (!this.node?.isValid) return;
+    this.node.setScale(new Vec3(1, 1, 1));
+    if (this._data) this.node.setPosition(this.positionForGrid(this._data.gridPos));
+    if (this._uiOpacity?.isValid) this._uiOpacity.opacity = 255;
+    const sprite = this.unitSprite?.getComponent(Sprite);
+    if (sprite && this._tintBase) sprite.color = this._tintBase.clone();
+  }
+
+  private _stopMoveTween(): void {
+    if (this._moveTween) {
+      this._moveTween.stop();
+      this._moveTween = null;
+    }
+  }
+
+  private _stopShakeTween(): void {
+    if (this._shakeTween) {
+      this._shakeTween.stop();
+      this._shakeTween = null;
+    }
+  }
+
+  private ensureOpacity(): UIOpacity | null {
+    if (!this.node?.isValid) return null;
+    if (!this._uiOpacity || !this._uiOpacity.isValid) {
+      this._uiOpacity = this.node.getComponent(UIOpacity) ?? this.node.addComponent(UIOpacity);
+    }
+    return this._uiOpacity;
+  }
+
+  /**
+   * 把单位精灵短暂染成某色再还原。
+   * 关键：还原目标是 `_tintBase`（职业/阵营本色），不是"当前色" ——
+   * 否则闪白一次就会把战士的蓝、敌人的红永久洗掉。
+   */
+  private flashSprite(color: Color, duration: number): void {
+    const sprite = this.unitSprite?.getComponent(Sprite);
+    if (!sprite) return;
+    const base = this._tintBase ?? sprite.color.clone();
+    if (this._flashTween) {
+      this._flashTween.stop();
+      this._flashTween = null;
+    }
+    sprite.color = color.clone();
+    this._flashTween = tween(sprite)
+      .to(duration, { color: base.clone() }, { easing: 'linear' })
+      .call(() => {
+        this._flashTween = null;
       })
       .start();
   }
@@ -422,6 +776,10 @@ export class UnitController extends Component {
 
     if (isDead) {
       this._onDeath();
+    } else {
+      // 受击反馈（闪红 + 抖动）。放在这里而不是 executeAttack 里：
+      // 反击、毒伤、AOE 走的都是 takeDamage，一处接线全局生效。
+      this.playHitReaction();
     }
 
     this.updateHealthBar();
@@ -487,9 +845,6 @@ export class UnitController extends Component {
       this._selectTween.stop();
       this._selectTween = null;
     }
-    if (this.node?.isValid) {
-      this.node.active = false;
-    }
     if (this.selectionIndicator) {
       this.selectionIndicator.active = false;
     }
@@ -498,6 +853,8 @@ export class UnitController extends Component {
       this._data.buffs = [];
       this._data.shieldAmount = 0;
     }
+    // 演出结束后才隐藏节点（原先在此处同帧 active=false，阵亡是"啪一下就没了"）
+    this.playDeath();
   }
 
   heal(amount: number): void {
@@ -746,6 +1103,8 @@ export class UnitController extends Component {
 
   resetForNewBattle(): void {
     if (!this._data) return;
+    // 先复位演出状态：上一场残留的缩放/透明度/闪光色/阵亡标记都会跟着节点进新战斗
+    this.resetVisualState();
     this._data.currentHp = this._data.maxHp;
     this._data.energy = this._data.maxEnergy;
     this._data.isAlive = true;
