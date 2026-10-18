@@ -58,6 +58,7 @@
 | 修复计划 | [`plans/2026-07-10-tiny-vanguard-fix.md`](./plans/2026-07-10-tiny-vanguard-fix.md) | 近期修复 |
 | 修复计划 | [`plans/2026-07-15-tiny-vanguard-fix-all.md`](./plans/2026-07-15-tiny-vanguard-fix-all.md) | 综合修复 |
 | 修复计划 | [`plans/2026-07-16-tiny-vanguard-ux-improvements.md`](./plans/2026-07-16-tiny-vanguard-ux-improvements.md) | 最新 UX 改进 |
+| 手感方案 | [`plans/2026-10-18-tiny-vanguard-combat-feel.md`](./plans/2026-10-18-tiny-vanguard-combat-feel.md) | 布阵拖拽修复 + 移动/攻击/技能动画层（含逐帧实测与后续打磨项） |
 
 ### 贪吃蛇（Snake）
 
