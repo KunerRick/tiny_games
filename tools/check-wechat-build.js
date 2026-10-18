@@ -11,13 +11,21 @@
  *
  * 退出码：有任一 ❌ 时返回 1，否则 0（可直接串进脚本）。
  *
- * 背景（本项目实际踩过的坑，见 docs/tech/wechat-build-pitfalls.md）：
- *   2026-10-18 微信开发者工具报 `game.json: 未找到 game.json 文件，或者文件读取失败`。
+ * 背景（本项目实际踩过的两个坑，见 docs/tech/wechat-build-pitfalls.md）：
+ *   ① 时序（§1–§4）：开发者工具报 `game.json: 未找到 game.json 文件，或者文件读取失败`。
  *   根因不是构建内容有问题，而是 **时序**：Cocos 构建会先清空再重写输出目录，
  *   而开发者工具此时正开着该项目、文件监听一有变动就自动重新编译。
  *   实测时间线 —— 构建产物落盘 20:00:50，开发者工具最后一次尝试编译停在 20:00:49，
  *   于是它永远停在「目录里还没有 game.json」的那个过期状态。
  *   内容一字未改、只重新编译一次，日志即从 launch failed 变为 launch success。
+ *   ② 包装器 / 项目类型（§8）：启动期 `TypeError: Object.defineProperty called on non-object`。
+ *   开发者工具若把项目编译成「小程序」，会给每个模块套上
+ *   `function(require, module, exports, window, top, document, ...)` 的包装（BOM 全是形参），
+ *   而小游戏运行时只按 3 个实参调用模块工厂 ⇒ window 等全是 undefined ⇒ 适配器里
+ *   `Object.defineProperty(window, ...)` 直接抛原生 TypeError。用「小游戏」包装
+ *   （`function(require, module, exports, process)`）则正常。判据在第 9 项里直接从
+ *   开发者工具自己的编译缓存读包装头，第 8 项负责 AppID（它决定 isGame）。
+ *   复现器：node tools/replay-wechat-bundle.js
  *
  * 本脚本不依赖任何第三方包；语法级检查用到 Cocos 自带的那份 TypeScript，
  * 找不到就跳过该项（不会因此判定失败）。
@@ -69,6 +77,12 @@ function hms(ms) {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+/** 输出 AppID 时打码（本仓库提交记录里不该出现完整 AppID）。 */
+function maskAppId(appid) {
+  const s = String(appid || '');
+  return s.length > 10 ? `${s.slice(0, 5)}…${s.slice(-4)}` : s;
+}
+
 /** 递归列出目录下所有文件（相对路径）。目录不存在时返回空数组。 */
 function walkFiles(dir) {
   const out = [];
@@ -106,6 +120,17 @@ const REQUIRED_FILES = [
 
 /** 微信小游戏主包体积上限（4 MB）。 */
 const MAIN_PACKAGE_LIMIT = 4 * 1024 * 1024;
+
+/**
+ * 不能出现在 project.config.json 里的 AppID（占位 / 样例）。
+ * wx6ac3f5090a6b99c5 是 Cocos Creator 自带样例项目的 AppID —— 它出现在编辑器自身
+ * 打包的构建 profile 里，而不属于任何真实开发者。用它构建出来的小游戏，
+ * 开发者工具在服务端查不到「这是小游戏」的属性（isGame = attr.gameApp 取不到），
+ * 会按小程序编译 → 启动期 Object.defineProperty 崩溃（见 §8）。
+ */
+const SAMPLE_APPIDS = new Map([
+  ['wx6ac3f5090a6b99c5', 'Cocos Creator 自带样例项目的 AppID'],
+]);
 
 // ─────────────────────────────── 检查项 ───────────────────────────────
 
@@ -177,7 +202,7 @@ if (projJson.error) {
   if (cfg.compileType !== 'game') problems.push(`compileType 应为 "game"，实际为 ${JSON.stringify(cfg.compileType)}`);
   if (!cfg.appid) problems.push('缺少 appid');
   if (problems.length) report('fail', 'project.config.json 关键字段不对', problems.join('\n'));
-  else report('pass', `project.config.json 关键字段正确（compileType="game", appid=${cfg.appid}）`);
+  else report('pass', `project.config.json 关键字段正确（compileType="game", appid=${maskAppId(cfg.appid)}）`);
 }
 
 // ── 3. 构建是否已经「写完」（本项目那次编译报错的直接原因） ──────────
@@ -381,6 +406,179 @@ if (logDirs.length === 0) {
     );
   } else {
     report('pass', `开发者工具已跟上本次构建（最后编译 ${hms(latest)}）`);
+  }
+}
+
+// ── 8. AppID：开发者工具据此判断「这是小游戏」（isGame = 服务端 attr.gameApp） ──
+
+section('8. AppID（决定开发者工具把小游戏包成小游戏还是小程序）');
+
+if (projJson.error) {
+  report('warn', '跳过：project.config.json 不可用', '先修好第 2 项');
+} else {
+  const appid = String(projJson.data.appid || '').trim();
+  const sampleReason = SAMPLE_APPIDS.get(appid);
+  if (!appid) {
+    report(
+      'fail',
+      'project.config.json 里没有 appid',
+      '到 Cocos Creator 构建面板的「微信小游戏」配置里填写自己的 AppID，再重新构建。',
+    );
+  } else if (sampleReason) {
+    report(
+      'fail',
+      `appid 是样例值：${maskAppId(appid)}（${sampleReason}）`,
+      [
+        '开发者工具需要 AppID 在服务端的属性（game_app / app_type）才能把项目当小游戏编译；',
+        '样例 AppID 拿不到该属性（日志里会伴随「登录用户不是该小程序的开发者」），',
+        '于是它按「小程序」编译 ⇒ 启动期 `TypeError: Object.defineProperty called on non-object`。',
+        '动作：到 Cocos Creator「构建 → 微信小游戏」里换成自己的小游戏 AppID（或先用微信测试号），',
+        '      重新构建后在开发者工具里按「小游戏」导入本项目。',
+        '不想改构建配置时，也可直接在开发者工具里按「小游戏」重新导入，并填入自己的 AppID。',
+      ].join('\n'),
+    );
+  } else {
+    report(
+      'pass',
+      `appid 已填写：${maskAppId(appid)}`,
+      '注意：本脚本无法核验它是否属于当前登录的微信账号、是否已注册为小游戏 —— 这正是第 9 项要看的。',
+    );
+  }
+}
+
+// ── 9. 开发者工具到底把这份产物编译成了哪种包装（启动期崩溃的直接判据） ──
+
+section('9. 开发者工具编译缓存里的包装方式');
+
+/** 找到开发者工具的编译缓存目录（macOS；找不到不算失败）。 */
+function findCompileCacheDirs() {
+  const dirs = [];
+  const macBase = path.join(os.homedir(), 'Library', 'Application Support', '微信开发者工具');
+  try {
+    for (const e of fs.readdirSync(macBase, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      const c = path.join(macBase, e.name, 'WeappCache', 'WeappCompileCache');
+      if (fs.existsSync(c)) dirs.push(c);
+    }
+  } catch {
+    /* 没装开发者工具就跳过 */
+  }
+  return dirs;
+}
+
+/** 包装头分类：小游戏 = 只有 process 形参；小程序 = BOM 全是形参。 */
+function classifyWrapper(head) {
+  if (/function\(require, module, exports, process\)/.test(head)) return 'game';
+  if (/function\(require, module, exports, (window|self|global)\b/.test(head)) return 'miniprogram';
+  return 'unknown';
+}
+
+/**
+ * 在编译缓存里找「就是这份产物」的编译结果。
+ * 判据：缓存侧车 .json 的 mtimeMs 与构建产物文件的 mtimeMs 相同（开发者工具记的是源文件 mtime）。
+ */
+function findCompiledCounterparts(cacheDirs, probes) {
+  const found = [];
+  for (const root of cacheDirs) {
+    let subdirs;
+    try {
+      subdirs = fs.readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory());
+    } catch {
+      continue;
+    }
+    for (const sub of subdirs) {
+      const dir = path.join(root, sub.name);
+      let entries;
+      try {
+        entries = fs.readdirSync(dir);
+      } catch {
+        continue;
+      }
+      for (const name of entries) {
+        if (name.endsWith('.json')) continue;
+        const side = path.join(dir, `${name}.json`);
+        let meta;
+        try {
+          meta = JSON.parse(fs.readFileSync(side, 'utf8'));
+        } catch {
+          continue;
+        }
+        const hit = probes.find((p) => Math.abs((meta.mtimeMs || 0) - p.mtimeMs) < 1);
+        if (!hit) continue;
+        let head = '';
+        try {
+          const fd = fs.openSync(path.join(dir, name), 'r');
+          const buf = Buffer.allocUnsafe(8192);
+          const n = fs.readSync(fd, buf, 0, buf.length, 0);
+          fs.closeSync(fd);
+          head = buf.slice(0, n).toString('latin1');
+        } catch {
+          continue;
+        }
+        const i = head.indexOf('define(');
+        found.push({
+          probe: hit.rel,
+          kind: classifyWrapper(head),
+          head: i >= 0 ? head.slice(i, i + 120) : '(未见 define 头)',
+          when: meta.mtimeMs,
+        });
+      }
+    }
+  }
+  return found;
+}
+
+/** 用来与缓存比对 mtime 的探针文件（Cocos 小游戏产物特有、一定存在）。 */
+const PROBES = ['web-adapter.js', 'engine-adapter.js', 'game.js', 'first-screen.js']
+  .map((rel) => byRel.get(rel))
+  .filter(Boolean);
+
+const cacheDirs = findCompileCacheDirs();
+if (cacheDirs.length === 0) {
+  report('warn', '没找到开发者工具的编译缓存，跳过本项', '本机没装（或从未打开过）微信开发者工具时属正常');
+} else if (PROBES.length === 0) {
+  report('warn', '构建目录里没有可比对的探针文件，跳过本项');
+} else {
+  const hits = findCompiledCounterparts(cacheDirs, PROBES);
+  if (hits.length === 0) {
+    report(
+      'warn',
+      '缓存里没有对应本次构建的编译结果',
+      '说明开发者工具还没编译过这一版产物（或换了构建目录）。先在开发者工具里编译一次，再重跑本项。',
+    );
+  } else {
+    const bad = hits.filter((h) => h.kind === 'miniprogram');
+    const good = hits.filter((h) => h.kind === 'game');
+    const unknown = hits.filter((h) => h.kind === 'unknown');
+    for (const h of hits) {
+      const label = h.kind === 'game' ? '小游戏包装(process)' : h.kind === 'miniprogram' ? '小程序包装(BOM 形参)' : '未识别';
+      console.log(`     ${h.probe} @ ${hms(h.when)} → ${label}`);
+      console.log(`       ${h.head}`);
+    }
+    if (bad.length) {
+      report(
+        'fail',
+        `${bad.length} 个模块被编译成了「小程序包装」⇒ 打开即崩`,
+        [
+          '小游戏运行时只按 3 个实参调用模块工厂，而这些包装把 window/top/document/… 提升成了形参，',
+          '它们会全部是 undefined ⇒ 适配器里 Object.defineProperty(window, ...) 抛原生 TypeError：',
+          '  TypeError: Object.defineProperty called on non-object   （web-adapter.js:1）',
+          '',
+          '动作（按顺序试）：',
+          '  1) 在开发者工具的「新建/导入项目」处按【小游戏】导入本目录，不要从小程序入口进；',
+          '  2) 确认 AppID 是自己账号下的小游戏 AppID（见第 8 项），然后重新编译；',
+          '  3) 只想先跑起来：用微信测试号新建一个【小游戏】项目，或直接 iPhone/Android 上预览。',
+          '本地复现与反证：node tools/replay-wechat-bundle.js',
+        ].join('\n'),
+      );
+    } else if (good.length) {
+      report('pass', `${good.length} 个模块都用了「小游戏包装」`);
+    } else {
+      report('warn', '缓存里的包装头无法识别（开发者工具版本可能已变）', '请以实际打开项目后的表现为准');
+    }
+    if (unknown.length && (bad.length || good.length)) {
+      console.log(`     （另有 ${unknown.length} 个缓存项包装头未识别，已忽略）`);
+    }
   }
 }
 
