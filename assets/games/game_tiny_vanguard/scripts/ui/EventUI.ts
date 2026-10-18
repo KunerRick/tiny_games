@@ -26,13 +26,22 @@ export class EventUI extends Component {
     return spend ? (spend.params?.amount ?? 0) : 0;
   }
 
+  /** 该选项是否依赖"有单位能学新技能"（技能位全满时这个选项交付不了任何东西） */
+  private static needsSkillSlot(option: ChoiceOption): boolean {
+    return !!option.effects?.some(e => e.type === 'learn_skill' || e.type === 'learn_rare_skill');
+  }
+
   onLoad(): void {
     if (!this._showCalled) {
       this.node.active = false;
     }
   }
 
-  showEvent(event: EventConfig, onChoice: (index: number) => void, gold: number = 0): void {
+  /**
+   * @param anyFreeSkillSlot 队伍里是否还有单位能学新技能（技能位未满）。
+   *        为 false 时，含 learn_skill 的选项置灰 —— 否则玩家花钱选了却什么都拿不到。
+   */
+  showEvent(event: EventConfig, onChoice: (index: number) => void, gold: number = 0, anyFreeSkillSlot: boolean = true): void {
     // 置位必须先于 node.active = true：节点首次激活会同步触发 onLoad，
     // 若此时 _showCalled 仍为 false，onLoad 会立即把面板关掉，事件永远无法交互
     this._showCalled = true;
@@ -62,20 +71,25 @@ export class EventUI extends Component {
           btnNode.setPosition(0, startY - i * (btnHeight + gap), 0);
 
           // 金币校验：选项效果含 spend_gold 且钱不够 → 置灰不可点
+          // 交付校验：选项含 learn_skill 但全队技能位已满 → 也置灰。
+          // 否则玩家付了钱却什么都拿不到（实测"花10金币买随机技能"扣了 10 金、技能数不变）。
           const cost = EventUI.goldCostOf(choice);
           const affordable = cost <= gold;
+          const learnable = !EventUI.needsSkillSlot(choice) || anyFreeSkillSlot;
+          const enabled = affordable && learnable;
 
           const label = btnNode.getComponentInChildren(Label);
           if (label) {
-            label.string = affordable
-              ? choice.description
-              : `${choice.description}\uFF08\u91D1\u5E01\u4E0D\u8DB3\uFF09`;
-            applyFontAndColor(label, FONT_BODY, affordable ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED);
+            const reason = !affordable
+              ? '（金币不足）'
+              : (!learnable ? '（技能位已满）' : '');
+            label.string = reason ? `${choice.description}${reason}` : choice.description;
+            applyFontAndColor(label, FONT_BODY, enabled ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED);
           }
           const btn = btnNode.getComponent(Button);
           if (btn) {
             btn.transition = Button.Transition.SCALE;
-            btn.interactable = affordable;
+            btn.interactable = enabled;
             btnNode['_choiceIndex'] = i;
             btn.node.off(Button.EventType.CLICK, this.onChoiceClicked, this);
             btn.node.on(Button.EventType.CLICK, this.onChoiceClicked, this);

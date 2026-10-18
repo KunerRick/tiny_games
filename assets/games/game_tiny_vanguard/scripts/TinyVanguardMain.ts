@@ -1,5 +1,5 @@
-import { _decorator, Component, Node, Label, Button, Sprite } from 'cc';
-import { COLOR, hex, applyButtonTheme, ButtonVariant } from './config/Theme';
+import { _decorator, Component, Node, Label, Button, Sprite, UITransform } from 'cc';
+import { COLOR, CONTROL, FONT_BODY, applyFont, hex, applyButtonTheme, ButtonVariant } from './config/Theme';
 import { RouteMapUI, RouteNode } from './ui/RouteMapUI';
 import { BattleManager, BattleResult, UnitActionPhase } from './battle/BattleManager';
 import { UpgradeUI, UpgradeOption } from './ui/UpgradeUI';
@@ -16,6 +16,13 @@ import { SceneManager } from '../../../common/managers/SceneManager';
 const { ccclass, property } = _decorator;
 
 const CLASS_ORDER = ['warrior', 'archer', 'mage', 'cleric'];
+
+/**
+ * 队伍人数上限（设计 §1/§2.2：玩家指挥一支 **3 人**小队）。
+ * 原实现只要 `>= 3` 就能开局，可以选满 4 个职业 → 按钮文案出现"(4/3)"这种自相矛盾读数，
+ * 且 4 人明显更简单（多一具肉盾、每场多一张升级卡），而敌人数量/强度不随人数变化。
+ */
+const SQUAD_SIZE = 3;
 
 /** 技能卡图标：按目标类型/主动被动推导（SkillConfig 无 icon 字段） */
 function skillIconOf(skill: SkillConfig): string {
@@ -38,7 +45,7 @@ const BUFF_ICON: Record<string, string> = {
 
 export type GameState =
   | 'route_map' | 'deploy' | 'battle' | 'upgrade'
-  | 'shop' | 'rest' | 'event' | 'game_over' | 'class_select';
+  | 'shop' | 'rest' | 'event' | 'game_over' | 'run_victory' | 'class_select';
 
 @ccclass('TinyVanguardMain')
 export class TinyVanguardMain extends Component {
@@ -101,6 +108,11 @@ export class TinyVanguardMain extends Component {
   private _currentEnemyCount: number = 0;
   private _currentDifficulty: number = 0;
   private _battleCount: number = 0;
+  /**
+   * 本局开始时的荣誉值快照。
+   * `honor` 是**跨局累积**的（存在 meta 里），所以结算面板不能拿绝对值当"本局收益"。
+   */
+  private _honorAtRunStart: number = 0;
 
   onLoad(): void {
     if (this.gameOverPanel) this.gameOverPanel.active = false;
@@ -195,6 +207,42 @@ export class TinyVanguardMain extends Component {
     if (this.victoryPanel) {
       setBtn(this.victoryPanel.getChildByName('ReturnBtn'), 'primary');
     }
+    // 商店/休息面板的按钮尺寸与字号不在改版 §8.1 的场景重构清单里，仍是 30/36 高、16 号字，
+    // 运行时统一到令牌（高 48、正文 20），避免与战斗界面并存两套控件规格。
+    this.normalizeSmallPanelButtons();
+  }
+
+  /** 商店/休息面板的小按钮统一到设计令牌（幂等） */
+  private normalizeSmallPanelButtons(): void {
+    const norm = (node: Node | null): void => {
+      if (!node?.isValid) return;
+      const ui = node.getComponent(UITransform);
+      if (ui) ui.setContentSize(ui.width, CONTROL.BTN_HEIGHT);
+      applyFont(node.getComponentInChildren(Label), FONT_BODY);
+    };
+    for (const name of ['BuySkillBtn', 'HealBtn', 'CloseBtn']) {
+      norm(this.shopPanel?.getChildByName(name) ?? null);
+    }
+    for (const name of ['ConfirmRestBtn', 'SkipBtn']) {
+      norm(this.restPanel?.getChildByName(name) ?? null);
+    }
+  }
+
+  /**
+   * 商店按钮可用性：买不起 / 全队没单位能学 → 置灰。
+   * 原先这两个按钮外观永远是"可点"，点了只写一行 console（实测金币 4 < 10 时
+   * 点"买技能 - 10金币"毫无反应）。与事件面板的金币不足置灰保持一致。
+   */
+  private updateShopButtons(): void {
+    const setEnabled = (node: Node | null, enabled: boolean): void => {
+      const btn = node?.getComponent(Button);
+      if (btn) btn.interactable = enabled;
+    };
+    setEnabled(
+      this.shopPanel?.getChildByName('BuySkillBtn') ?? null,
+      this._runData.gold >= 10 && this.hasAnyFreeSkillSlot()
+    );
+    setEnabled(this.shopPanel?.getChildByName('HealBtn') ?? null, this._runData.gold >= 5);
   }
 
   /**
@@ -330,10 +378,27 @@ export class TinyVanguardMain extends Component {
       this._selectedClasses = this._selectedClasses.filter(c => c !== classId);
       this.setClassButtonVisual(btn.node, false);
     } else {
+      // 队伍固定 3 人：选满后再点第 4 个 → 顶掉**最早选**的那个（FIFO）。
+      // 既不是静默无反应（玩家会以为按钮坏了），也不用"先取消再选"两步操作。
+      if (this._selectedClasses.length >= SQUAD_SIZE) {
+        const dropped = this._selectedClasses.shift();
+        const droppedNode = dropped ? this.classButtonNodeOf(dropped) : null;
+        if (droppedNode) this.setClassButtonVisual(droppedNode, false);
+      }
       this._selectedClasses.push(classId);
       this.setClassButtonVisual(btn.node, true);
     }
     this.updateStartBtnInteractable();
+  }
+
+  /** 按 classId 反查职业按钮节点（供"顶掉最早选择"时复位它的外观） */
+  private classButtonNodeOf(classId: string): Node | null {
+    if (!this.classSelectPanel) return null;
+    for (let i = 0; i < CLASS_ORDER.length; i++) {
+      const n = this.classSelectPanel.getChildByName(`Class${i + 1}Btn`);
+      if (n && n['_classId'] === classId) return n;
+    }
+    return null;
   }
 
   /**
@@ -411,6 +476,8 @@ export class TinyVanguardMain extends Component {
   private startNewRun(): void {
     this._state = 'route_map';
     this._battleCount = 0;
+    // 记录起点荣誉：结算面板的"本局荣誉收益"要用它与当前值的差
+    this._honorAtRunStart = this._runData.honor;
 
     // 路线图：金币可见（局内资源）、回合隐藏（仅战斗有意义）
     this.setHudVisible(true, false);
@@ -860,6 +927,29 @@ export class TinyVanguardMain extends Component {
     if (this.shopPanel) {
       this.shopPanel.active = true;
     }
+    this.updateShopButtons();
+  }
+
+  /**
+   * 挑一个能学新技能的存活单位：**技能位未满者中技能数最少**的（并列取下标最小）。
+   *
+   * 为什么要挑：商店与事件的"学技能"原先写死 `playerUnits[0]`，等于把奖励全砸在 0 号身上；
+   * 它一旦满位，这两个奖励就在**整局**里彻底失效（实测：金币 100 连点 3 次买技能纹丝不动）。
+   */
+  private pickUnitForNewSkill(): UnitController | null {
+    let best: UnitController | null = null;
+    for (const u of this.battleManager?.playerUnits ?? []) {
+      if (!u.data?.isAlive || !u.hasFreeSkillSlot) continue;
+      if (!best || u.data.skills.length < (best.data?.skills.length ?? Number.MAX_SAFE_INTEGER)) {
+        best = u;
+      }
+    }
+    return best;
+  }
+
+  /** 队里是否还有单位能学新技能（事件面板据此把"学技能"选项置灰） */
+  private hasAnyFreeSkillSlot(): boolean {
+    return (this.battleManager?.playerUnits ?? []).some(u => u.data?.isAlive && u.hasFreeSkillSlot);
   }
 
   /**
@@ -883,9 +973,14 @@ export class TinyVanguardMain extends Component {
 
     // 先尝试学习，成功才扣费：原先无条件扣 10 金币，而技能位已满或随机到
     // 已学技能时 addSkill 会被拒绝 → 玩家花了钱却没得到任何东西
-    const firstUnit = this.battleManager?.playerUnits?.[0] ?? null;
-    const learned = this.learnRandomSkillFor(firstUnit);
+    // 学习目标由 pickUnitForNewSkill 挑（技能位未满者中技能数最少）；
+    // 原先写死 0 号单位，它满位后这个购买项就永久失效
+    const learner = this.pickUnitForNewSkill();
+    const learned = learner ? this.learnRandomSkillFor(learner) : null;
+    // 学不了时也要把按钮刷成不可点：按钮外观必须与实际能力一致，
+    // 否则玩家会对着一个"看着能点"的按钮反复点（这正是本轮修的缺陷类）
     if (!learned) {
+      this.updateShopButtons();
       console.info('[Shop] \u65E0\u6CD5\u5B66\u4E60\u65B0\u6280\u80FD\uFF08\u6280\u80FD\u4F4D\u5DF2\u6EE1\u6216\u5DF2\u5168\u90E8\u5B66\u4F1A\uFF09\uFF0C\u672C\u6B21\u4E0D\u6263\u91D1\u5E01');
       return;
     }
@@ -893,6 +988,7 @@ export class TinyVanguardMain extends Component {
     this._runData.gold -= 10;
     this._syncUnitSkillsToRunData();
     this.updateGoldDisplay();
+    this.updateShopButtons();
   }
 
   private onShopHeal(): void {
@@ -905,6 +1001,7 @@ export class TinyVanguardMain extends Component {
       }
     }
     this.updateGoldDisplay();
+    this.updateShopButtons();
   }
 
   private closeShop(): void {
@@ -955,52 +1052,81 @@ export class TinyVanguardMain extends Component {
       this.applyEventEffects(event, choiceIndex);
       this.eventUI.hide();
       this.completeNonBattleNode();
-    }, this._runData.gold);
+    }, this._runData.gold, this.hasAnyFreeSkillSlot());
   }
 
+  /**
+   * 应用事件选项的效果。
+   *
+   * **两遍执行**：先跑"交付类"效果，再跑"代价类"（`spend_gold`），且只有在交付成功时才收代价。
+   * 原实现按数据顺序执行，而 `spend_gold` 在数据里排在前 ⇒ 先扣款；若随后的 `learn_skill`
+   * 因技能位已满而失败，玩家就白花 10 金币（实测金币 95→85、三个单位技能数完全不变）。
+   * 商店的同名路径早已改成"先学、成功才扣费"，这里补齐到同一语义。
+   */
   private applyEventEffects(event: import('./config/GameData').EventConfig, choiceIndex: number): void {
-    if (event.type === 'choice' && event.choices?.[choiceIndex]) {
-      const effects = event.choices[choiceIndex].effects;
-      for (const effect of effects) {
-        this.applySingleEffect(effect.type, effect.params);
+    let effects: { type: string; params: Record<string, number> }[] | undefined;
+    if (event.type === 'choice') {
+      effects = event.choices?.[choiceIndex]?.effects;
+    } else if (event.type === 'random') {
+      effects = event.randomOutcomes?.[choiceIndex]?.effects;
+    }
+
+    if (effects && effects.length > 0) {
+      const payload = effects.filter(e => e.type !== 'spend_gold');
+      const costs = effects.filter(e => e.type === 'spend_gold');
+
+      let delivered = payload.length === 0;
+      for (const effect of payload) {
+        if (this.applySingleEffect(effect.type, effect.params)) delivered = true;
       }
-    } else if (event.type === 'random' && event.randomOutcomes?.[choiceIndex]) {
-      const effects = event.randomOutcomes[choiceIndex].effects;
-      for (const effect of effects) {
-        this.applySingleEffect(effect.type, effect.params);
+      // 什么都没交付 → 不收代价（纯代价选项除外：payload 为空时按数据照收）
+      if (delivered) {
+        for (const effect of costs) {
+          this.applySingleEffect(effect.type, effect.params);
+        }
+      } else {
+        console.info('[Event] 本次选项未交付任何结果，跳过代价结算');
       }
     }
     this.updateGoldDisplay();
   }
 
-  private applySingleEffect(type: string, params: Record<string, number>): void {
+  /**
+   * 应用单个事件效果。
+   * @returns 该效果是否**真的交付了结果** —— `spend_gold` 据此决定收不收费
+   *          （见 `applyEventEffects` 的两遍执行）。
+   */
+  private applySingleEffect(type: string, params: Record<string, number>): boolean {
     switch (type) {
       case 'heal_all':
         for (const unit of this.battleManager.playerUnits) {
           unit.heal(params.amount ?? 3);
         }
-        break;
+        return true;
 
       case 'gain_gold':
         this._runData.gold += params.amount ?? 10;
-        break;
+        return true;
 
       case 'spend_gold':
         this._runData.gold = Math.max(0, this._runData.gold - (params.amount ?? 10));
-        break;
+        return true;
 
       case 'damage_all':
         for (const unit of this.battleManager.playerUnits) {
           unit.takeDamage(params.amount ?? 1);
         }
-        break;
+        return true;
 
       case 'learn_skill':
       case 'learn_rare_skill': {
-        // 与商店一致：排除已学技能、技能位满时不产生副作用
-        this.learnRandomSkillFor(this.battleManager.playerUnits[0] ?? null);
-        this._syncUnitSkillsToRunData();
-        break;
+        // 与商店一致：排除已学技能、技能位满时不产生副作用；
+        // 并且**自动挑一个还能学的单位**（原先死盯 0 号单位 —— 它一旦满位，
+        // 本局所有"学技能"类奖励就全部失效了）
+        const unit = this.pickUnitForNewSkill();
+        const learned = unit ? this.learnRandomSkillFor(unit) : null;
+        if (learned) this._syncUnitSkillsToRunData();
+        return !!learned;
       }
 
       case 'buff_all_attack':
@@ -1009,7 +1135,7 @@ export class TinyVanguardMain extends Component {
             unit.data.stats.attack += params.amount ?? 1;
           }
         }
-        break;
+        return true;
 
       case 'debuff_random_attack': {
         const alive = this.battleManager.playerUnits.filter(u => u.data?.isAlive);
@@ -1018,16 +1144,18 @@ export class TinyVanguardMain extends Component {
           if (target.data) {
             target.data.stats.attack = Math.max(0, target.data.stats.attack - (params.amount ?? 1));
           }
+          return true;
         }
-        break;
+        return false;
       }
 
       case 'sacrifice_hp': {
         const unit = this.battleManager.playerUnits[0];
         if (unit?.data?.isAlive) {
           unit.takeDamage(params.amount ?? 1);
+          return true;
         }
-        break;
+        return false;
       }
 
       case 'buff_energy_max':
@@ -1036,8 +1164,10 @@ export class TinyVanguardMain extends Component {
             unit.data.maxEnergy += params.amount ?? 1;
           }
         }
-        break;
+        return true;
     }
+    // 未知效果类型：视为没有交付，不收代价
+    return false;
   }
 
   /** 将当前 playerUnits 的技能列表同步到 _runData.unitSkills */
@@ -1074,9 +1204,19 @@ export class TinyVanguardMain extends Component {
     // 结算页不需要任何 HUD（回合与金币一并收起）
     this.setHudVisible(false, false);
     if (this.routeMapUI) this.routeMapUI.hide();
+    // 终局态：原先两种结算都停在 'battle'（GameState 里的 'game_over' 从未被赋值过）
+    this._state = victory ? 'run_victory' : 'game_over';
 
     if (victory) {
       this._runData.honor += 100;
+
+      // 本局**实际入账**的荣誉：honor 存在 meta 里、跨局累积，不能拿绝对值当收益。
+      // 原来通关面板写死 "+100"、失败面板用 `honor - 100` 猜本局起点 ——
+      // 实测失败时本局只 +1，面板却显示 "获得 +21 荣誉"。
+      const honorGain = this._runData.honor - this._honorAtRunStart;
+      // 摘要里的关卡用**路线节点序号**（设计 §4.1 的关卡概念）。
+      // 原来用 _battleCount（战斗场次），通关时会显示"抵达第 4 关"，而实际已在第 9 节点/Boss。
+      const routeNo = (this._currentNode?.id ?? 0) + 1;
 
       // 两个结算面板互斥：Boss 关通关与失败可能连续触发，不收起另一个会叠版
       if (this.gameOverPanel) this.gameOverPanel.active = false;
@@ -1084,8 +1224,8 @@ export class TinyVanguardMain extends Component {
         this.victoryPanel.active = true;
       }
       // P2 统一版式：标题固定，数据写进两行摘要（不再往标题 Label 里拼多行字符串）
-      this.fillPanelSummary(this.victoryPanel, 1, `\u62B5\u8FBE\u7B2C ${this._battleCount} \u5173`);
-      this.fillPanelSummary(this.victoryPanel, 2, `\u8363\u8A89 +100 \u00B7 \u91D1\u5E01 ${this._runData.gold}`);
+      this.fillPanelSummary(this.victoryPanel, 1, `\u62B5\u8FBE\u7B2C ${routeNo} \u5173`);
+      this.fillPanelSummary(this.victoryPanel, 2, `\u8363\u8A89 +${honorGain} \u00B7 \u91D1\u5E01 ${this._runData.gold}`);
     } else {
       if (this.victoryPanel) this.victoryPanel.active = false;
       if (this.gameOverPanel) {
@@ -1095,8 +1235,9 @@ export class TinyVanguardMain extends Component {
       if (this.gameOverLabel) {
         this.gameOverLabel.string = '\u6E38\u620F\u7ED3\u675F';
       }
-      const honorGain = this._runData.honor > 100 ? this._runData.honor - 100 : 0;
-      this.fillPanelSummary(this.gameOverPanel, 1, `\u62B5\u8FBE\u7B2C ${this._battleCount} \u5173`);
+      const honorGain = this._runData.honor - this._honorAtRunStart;
+      const routeNo = (this._currentNode?.id ?? 0) + 1;
+      this.fillPanelSummary(this.gameOverPanel, 1, `\u62B5\u8FBE\u7B2C ${routeNo} \u5173`);
       this.fillPanelSummary(this.gameOverPanel, 2, `\u83B7\u5F97 +${honorGain} \u8363\u8A89`);
     }
 
