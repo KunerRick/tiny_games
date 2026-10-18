@@ -79,6 +79,28 @@ export class BattleManager extends Component {
    */
   private _actionLocked: boolean = false;
 
+  /**
+   * 敌方回合看门狗宽限（秒）。每一拍都会续期它；链路任一环断裂
+   * （补间回调没来、排期被引擎丢弃、回调抛异常）时超过该时限就强制推进，
+   * 而不是把整个回合**硬卡死**。单拍上限 ≈ MOVE_ANIM_DURATION(0.22) +
+   * AI_STEP_AFTER_ACTION(0.34)，2s 足够宽松。
+   */
+  private static readonly AI_WATCHDOG_GRACE = 2.0;
+
+  /** 组件内累计时钟（秒）：给 AI 拍点/看门狗做绝对时间比较，不依赖性能时钟 */
+  private _clock = 0;
+  /**
+   * 下一拍敌方 AI 的**绝对**时间；0 = 当前没有待执行的拍。
+   * 为什么用"数字 + update() 泵"而不是 `scheduleOnce`：
+   * 旧写法在 `_onAINextStep` 的**自身触发中**再排同一个 `(target, method)`，
+   * 引擎 `Scheduler.schedule` 命中同回调去重（logID 1507）并把一次性计时器
+   * 立即取消 → 排期被**静默丢弃**，`_phase` 永远停在 `enemy_turn`（实测卡死）。
+   * 延迟变成纯状态就没有"调度器同一性"可冲突，也没有补间句柄可以被弄丢。
+   */
+  private _aiNextStepAt = 0;
+  /** 敌方回合心跳截止时间；>0 且已过期 → 看门狗介入 */
+  private _aiWatchdogAt = 0;
+
   get phase(): BattlePhase { return this._phase; }
   get playerUnits(): UnitController[] { return this._playerUnits; }
   get enemyUnits(): UnitController[] { return this._enemyUnits; }
@@ -107,6 +129,11 @@ export class BattleManager extends Component {
     this._actionLocked = false;
     // 上一场可能留下未结算的排期（例如结束回合时的 AI 队列）
     this.unscheduleAllCallbacks();
+    // AI 拍点泵不是 scheduler 条目、也不是补间：清这两个数字就是"取消"（见 _aiNextStepAt 注释）
+    this._aiNextStepAt = 0;
+    this._aiWatchdogAt = 0;
+    // 时钟只在开局归零，保证一场之内绝对时间单调递增
+    this._clock = 0;
     // 本场难度（0 起）：Boss 集结的召唤物要按同一曲线缩放，故存一份
     this._difficulty = difficulty;
     // 上一场可能留下未清除的落点预览引用（跨场脏状态）
@@ -1674,22 +1701,29 @@ export class BattleManager extends Component {
       this._aiQueue = [];
       return;
     }
+    // 每一拍续期看门狗：链路正常时它永远到不了点
+    this._aiWatchdogAt = this._clock + BattleManager.AI_WATCHDOG_GRACE;
     if (this._aiQueue.length === 0) {
       this.finishAITurn();
       return;
     }
-    const item = this._aiQueue.shift()!;
-    const { enemy, action } = item;
-    if (!enemy.data?.isAlive) {
-      this._processNextAIUnit();
+    // 非递归排空已阵亡的敌人：原先是自递归 `this._processNextAIUnit()`，
+    // 与"在自身回调里排期"同源隐患（队列里连着一串尸体就会一口气递归到底）
+    let next = this._aiQueue.shift();
+    while (next && !next.enemy.data?.isAlive) next = this._aiQueue.shift();
+    if (!next) {
+      this.finishAITurn();
       return;
     }
+    const { enemy, action } = next;
 
     const moveTarget = action.moveTo ?? enemy.data.gridPos;
     let acted = false;
     // 移动补间结束后才出手（出手要落在"到位之后"，而不是和移动同时开始）；
     // 已经在目标格时 moveToPositionAnimated 会**同步**回调，不再白等一段空补间。
     enemy.moveToPositionAnimated(moveTarget, UnitController.MOVE_ANIM_DURATION, () => {
+      // 补间途中可能已经分出胜负（结算会切到 victory/defeat），不要再把回合续下去
+      if (this._phase !== 'enemy_turn') return;
       // 有可用技能就用技能（冷却在释放时开始计）；否则普通攻击
       if (this._tryEnemyAbility(enemy, action)) {
         acted = true;
@@ -1701,17 +1735,12 @@ export class BattleManager extends Component {
           acted = true;
         }
       }
-      // 出手了要留够攻击演出的时间；只是走了两步就不必再等（原先固定 0.5s 是浪费）
-      this.scheduleOnce(
-        this._onAINextStep,
-        acted ? BattleManager.AI_STEP_AFTER_ACTION : BattleManager.AI_STEP_AFTER_MOVE
-      );
+      // 出手了要留够攻击演出的时间；只是走了两步就不必再等（原先固定 0.5s 是浪费）。
+      // 只写"下一拍的时间点"，由 update() 泵驱动 —— 不再 scheduleOnce 自身，
+      // 否则同步回调路径下会被引擎当成重复排期静默丢弃（见 _aiNextStepAt 注释）。
+      this._aiNextStepAt = this._clock +
+        (acted ? BattleManager.AI_STEP_AFTER_ACTION : BattleManager.AI_STEP_AFTER_MOVE);
     });
-  }
-
-  /** 敌方回合的下一拍（`scheduleOnce` 收方法引用，不能用匿名函数 —— AGENTS 守则 5） */
-  private _onAINextStep(): void {
-    this._processNextAIUnit();
   }
 
   /**
@@ -1781,6 +1810,9 @@ export class BattleManager extends Component {
   }
 
   private finishAITurn(): void {
+    // 敌方回合结束：泵与看门狗一并停掉（phase 守卫也会拦住，但显式清零更好排查）
+    this._aiNextStepAt = 0;
+    this._aiWatchdogAt = 0;
     this.checkBattleEnd();
     if (this._phase === 'enemy_turn') {
       this._turnCount++;
@@ -1835,6 +1867,10 @@ export class BattleManager extends Component {
   private onBattleEnd(victory: boolean): void {
     this.unscheduleAllCallbacks();
     this._aiQueue = [];
+    // 泵不是 scheduler 条目、也不是补间 —— `unscheduleAllCallbacks()` 停不掉它，
+    // 「清这两个数字」才是取消（比存一个 tween 句柄更彻底：句柄还可能被别的 bug 弄丢）
+    this._aiNextStepAt = 0;
+    this._aiWatchdogAt = 0;
     // 结算时解开输入锁：锁是在"行动收尾回调"里释放的，而结算可能把这个回调打断
     // （例如最后一击打死全部敌人 → `finishUnitTurn` 早退），不解开会把下一场也卡住
     this._actionLocked = false;
@@ -1889,6 +1925,39 @@ export class BattleManager extends Component {
     }
   }
 
+  /**
+   * 敌方回合的拍点泵 + 看门狗。
+   *
+   * 这一层存在的唯一理由是**让回合推进不依赖"在正在执行的回调里再排期"**：
+   * 旧实现用 `scheduleOnce(this._onAINextStep, …)`，而那一句恰好是在
+   * `_onAINextStep` 自身（经同步补间回调）触发时执行的，引擎会把同
+   * `(target, callback)` 的排期当成"已存在"而只更新间隔、随后又按一次性
+   * 计时器取消掉 → 回合永久卡在 `enemy_turn`。把延迟降级成一个数字后，
+   * 推进由每帧轮询完成，没有任何"同一性"可冲突，链路万一还是断了
+   * （补间回调没来 / 抛异常），看门狗也会在 2s 内强制接管。
+   */
+  update(dt: number): void {
+    this._clock += dt;
+    // 成本守卫：整场战斗里绝大多数帧都走这一行就返回
+    if (this._phase !== 'enemy_turn') return;
+
+    if (this._aiNextStepAt > 0 && this._clock >= this._aiNextStepAt) {
+      this._aiNextStepAt = 0;
+      this._processNextAIUnit();
+      return;
+    }
+    if (this._aiWatchdogAt > 0 && this._clock >= this._aiWatchdogAt) {
+      console.warn('[BattleManager] 敌方回合看门狗触发，强制推进');
+      this._aiNextStepAt = 0;
+      this._aiWatchdogAt = 0;
+      if (this._aiQueue.length === 0) {
+        this.finishAITurn();
+      } else {
+        this._processNextAIUnit();
+      }
+    }
+  }
+
   onDestroy(): void {
     this.unscheduleAllCallbacks();
     this._playerUnits = [];
@@ -1898,5 +1967,9 @@ export class BattleManager extends Component {
     this._aiController = null;
     this._deployDragGuard = null;
     this._dropPreviewPos = null;
+    // 只清 JS 引用/数字，不碰任何 @property(Node)（守则 2）
+    this._aiQueue = [];
+    this._aiNextStepAt = 0;
+    this._aiWatchdogAt = 0;
   }
 }
