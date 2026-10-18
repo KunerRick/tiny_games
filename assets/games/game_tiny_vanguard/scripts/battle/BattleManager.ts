@@ -2,7 +2,7 @@ import { _decorator, Component, Node, Color, Vec3, UITransform, UIOpacity, insta
 import { GridController, GridPosition } from './GridController';
 import { UnitController } from './UnitController';
 import { AIController, AIAction } from './AIController';
-import { EnemyConfig, SkillEffect, ENEMIES, ELITE_ENEMIES, BOSS_CONFIG, getClassById, getEnemyAbilityById, getRandomSkillsFromPool } from '../config/GameData';
+import { EnemyConfig, SkillEffect, SkillConfig, ENEMIES, ELITE_ENEMIES, BOSS_CONFIG, getClassById, getEnemyAbilityById, getRandomSkillsFromPool } from '../config/GameData';
 import { GRID } from '../config/Theme';
 
 const { ccclass, property } = _decorator;
@@ -56,6 +56,13 @@ export class BattleManager extends Component {
   /** 本场难度（0 起，= 已完成的战斗场次）：Boss 召唤物按同一曲线缩放 */
   private _difficulty: number = 0;
   private _autoSkipUnitRef: UnitController | null = null;
+  private _onAutoSkipCancelledCallback: (() => void) | null = null;
+  /**
+   * 本回合是以「原地待命」进入 action 的（而不是真的移动过）。
+   * 只有它为 true 时，action 阶段点自己才允许退回 move 阶段 ——
+   * 否则「撤销待命」会把 `hasMoved` 还原成 false，等于白送一次移动。
+   */
+  private _stoodStill: boolean = false;
   /**
    * 本场是否已判出胜负。与 `_phase` 不同：`_phase` 到 `victory/defeat` 后
    * 还会留 ~0.34s 播阵亡演出（见 `checkBattleEnd`），这个标记是**幂等闸门**，
@@ -71,6 +78,12 @@ export class BattleManager extends Component {
    */
   private static readonly AI_STEP_AFTER_ACTION = 0.34;
   private static readonly AI_STEP_AFTER_MOVE = 0.10;
+  /**
+   * 自动跳过的宽限时间（秒）。原先是硬编码的 0.6 —— 玩家还没读完横幅就被跳过，
+   * 而且这段时间里 `hasActed` 已经置位，想反悔也没救。放宽到 1s 并让**任何输入**
+   * 都能取消（见 `_cancelAutoSkip`），这条路径才是"建议"而不是"判决"。
+   */
+  private static readonly AUTO_SKIP_GRACE = 1.0;
   /**
    * 行动演出（移动 / 攻击）进行中：期间**不接受新的棋盘点击与技能**。
    * 为什么需要它 —— 普通攻击的伤害现在落在突刺顶点（约 0.08s 后），
@@ -127,6 +140,7 @@ export class BattleManager extends Component {
     // 新一场开打：清掉上一场的胜负闸门（否则第二场会立刻被判成"已经结束"）
     this._battleOver = false;
     this._actionLocked = false;
+    this._stoodStill = false;
     // 上一场可能留下未结算的排期（例如结束回合时的 AI 队列）
     this.unscheduleAllCallbacks();
     // AI 拍点泵不是 scheduler 条目、也不是补间：清这两个数字就是"取消"（见 _aiNextStepAt 注释）
@@ -377,6 +391,11 @@ export class BattleManager extends Component {
 
   setAutoSkipCallback(callback: (unitName: string) => void): void {
     this._onAutoSkipCallback = callback;
+  }
+
+  /** 自动跳过被玩家输入取消时回调 —— UI 据此立刻收掉"即将跳过"横幅 */
+  setAutoSkipCancelledCallback(callback: () => void): void {
+    this._onAutoSkipCancelledCallback = callback;
   }
 
   confirmDeploy(): boolean {
@@ -713,6 +732,7 @@ export class BattleManager extends Component {
     // 取消任何未完成的自动跳过延迟，防止用户切换单位后回调冲突
     this._cancelAutoSkip();
     this._movePreviewPos = null;
+    this._stoodStill = false;
     this.gridController.clearPreview();
 
     if (this._selectedUnit) {
@@ -819,6 +839,7 @@ export class BattleManager extends Component {
   private handleMovePhase(unit: UnitController, gridPos: GridPosition): void {
     if (unit.data.gridPos.row === gridPos.row && unit.data.gridPos.col === gridPos.col) {
       unit.data.hasMoved = true;
+      this._stoodStill = true;
       this._unitPhase = 'action';
       this.highlightAttackRange(unit);
       if (this._onUnitPhaseChanged) {
@@ -840,34 +861,71 @@ export class BattleManager extends Component {
     return;
   }
 
-  private _checkAutoSkipIfNoTargets(unit: UnitController): void {
-    if (!unit.data) return;
-    const targets = this.getAttackableEnemies(unit);
-    if (targets.length === 0) {
-      // 通知 UI 显示自动跳过提示
-      if (this._onAutoSkipCallback) {
-        this._onAutoSkipCallback(unit.data.name);
+  /**
+   * 找出这个单位"真有用"的技能；返回技能配置（取名字做提示），没有则 null。
+   *
+   * 为什么要有它：自动跳过原先**只看普通攻击射程**，于是"攻击范围外、但技能够得着"
+   * 的单位被系统抢走回合 —— 玩家想放技能都来不及点（用户报告的核心痛点）。
+   * 判定口径（已与玩家确认）：①射程内有敌人的技能；②自身增益类技能；
+   * ③友方能吃到效果的技能。**不算** AoE 点空位、没意义的位移 ——
+   * aoe / tile / line 一律不计："能点"不等于"有用"，不该拦住自动跳过。
+   */
+  private _findUsefulSkill(unit: UnitController): SkillConfig | null {
+    if (!unit.data) return null;
+    for (let i = 0; i < unit.data.skills.length; i++) {
+      const skill = unit.data.skills[i];
+      if (skill.type === 'passive') continue;                    // 被动不是"能做的事"
+      if (!unit.canUseSkill(i)) continue;                        // 能量不足
+      if (skill.preMove && unit.data.preMoveSkillUsed) continue; // 本回合已用
+      if (skill.targetType === 'self') return skill;             // ②自身增益
+      if (skill.targetType === 'enemy' || skill.targetType === 'ally') {
+        if (this.getValidSkillTargets(unit, skill).length > 0) return skill; // ① ③
       }
-      unit.data.hasActed = true;
-      this._autoSkipUnitRef = unit;
-      // 延迟跳过，让玩家看到提示
-      this.scheduleOnce(this._onAutoSkipTimeout, 0.6);
     }
+    return null;
   }
 
+  private _checkAutoSkipIfNoTargets(unit: UnitController): void {
+    if (!unit.data) return;
+    if (this.getAttackableEnemies(unit).length > 0) return;
+    const usefulSkill = this._findUsefulSkill(unit);
+    if (usefulSkill) {
+      // 没得打、但技能有用 —— **不跳过**，保持选中，只提示玩家还有牌可打
+      if (this._onAutoSkipCallback) {
+        this._onAutoSkipCallback(`${unit.data.name} 无可攻击目标 · 可用技能：${usefulSkill.name}`);
+      }
+      return;
+    }
+    if (this._onAutoSkipCallback) {
+      this._onAutoSkipCallback(
+        `${unit.data.name} 本回合无事可做，${BattleManager.AUTO_SKIP_GRACE.toFixed(1)} 秒后自动跳过（点击可取消）`
+      );
+    }
+    this._autoSkipUnitRef = unit;
+    // 注意这里**不**立刻置 `hasActed`：宽限期内玩家点棋盘/技能都能把它撤回来，
+    // 置位挪到 `_onAutoSkipTimeout` —— 否则"想反悔"时单位已经被判过行动了
+    this.scheduleOnce(this._onAutoSkipTimeout, BattleManager.AUTO_SKIP_GRACE);
+  }
+
+  /**
+   * 取消待执行的自动跳过。**任何玩家输入**（点格、放技能、攻击、待命）都该调它 ——
+   * 一是让玩家能反悔，二是顺手收掉"即将跳过"横幅（回调给 UI）。
+   */
   private _cancelAutoSkip(): void {
-    if (this._autoSkipUnitRef) {
-      this._autoSkipUnitRef = null;
-      this.unschedule(this._onAutoSkipTimeout);
+    if (!this._autoSkipUnitRef) return;
+    this._autoSkipUnitRef = null;
+    this.unschedule(this._onAutoSkipTimeout);
+    if (this._onAutoSkipCancelledCallback) {
+      this._onAutoSkipCancelledCallback();
     }
   }
 
   private _onAutoSkipTimeout(): void {
-    if (!this._autoSkipUnitRef?.data?.isAlive) {
-      this._autoSkipUnitRef = null;
-      return;
-    }
+    const unit = this._autoSkipUnitRef;
     this._autoSkipUnitRef = null;
+    if (!unit?.data?.isAlive) return;
+    // 真到点了才落定"本回合不再行动"
+    unit.data.hasActed = true;
     this.finishUnitTurn();
   }
 
@@ -895,6 +953,7 @@ export class BattleManager extends Component {
     }
     this.gridController.clearHighlights();
     this._skillPreviewPos = null;
+    this._stoodStill = false;
 
     if (this._phase !== 'player_turn') return;
     this._unitPhase = 'done';
@@ -927,6 +986,7 @@ export class BattleManager extends Component {
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive || unit.data.hasActed) return;
     if (this._unitPhase !== 'action') return;
+    this._cancelAutoSkip();
     this._unitPhase = 'attack_target';
     this.highlightAttackRange(unit);
     if (this._onUnitPhaseChanged) {
@@ -937,6 +997,8 @@ export class BattleManager extends Component {
   onCellClicked(gridPos: GridPosition): void {
     // 行动演出期间锁输入（见 `_actionLocked`）：既防连打，也防"移动补间途中又落一个移动"
     if (this._actionLocked) return;
+    // 任何棋盘输入都撤销待执行的自动跳过：跳过是"建议"，玩家一动手就该让位
+    this._cancelAutoSkip();
     if (this._phase === 'skill_target') {
       this.handleSkillTargetClick(gridPos);
       return;
@@ -946,11 +1008,20 @@ export class BattleManager extends Component {
     if (!unit?.data?.isAlive) return;
 
     if (this._unitPhase === 'move') {
-      // 点击自己：原地不动，进入行动阶段
-      if (unit.data.gridPos.row === gridPos.row && unit.data.gridPos.col === gridPos.col) {
+      const isOwnTile = unit.data.gridPos.row === gridPos.row && unit.data.gridPos.col === gridPos.col;
+      // 点自己（已有移动预览）：只撤销预览，仍留在移动阶段
+      if (isOwnTile && this._movePreviewPos) {
+        this.gridController.clearPreview();
+        this._movePreviewPos = null;
+        return;
+      }
+      // 点自己（无预览）：原地待命，进入行动阶段。
+      // 这是**可撤销**的（见下面 action 分支），所以先记 `_stoodStill`
+      if (isOwnTile) {
         this.gridController.clearPreview();
         this._movePreviewPos = null;
         unit.data.hasMoved = true;
+        this._stoodStill = true;
         this._unitPhase = 'action';
         this.highlightAttackRange(unit);
         if (this._onUnitPhaseChanged) {
@@ -979,6 +1050,8 @@ export class BattleManager extends Component {
         unit.moveToPositionAnimated(gridPos, UnitController.MOVE_ANIM_DURATION, () => {
           this._actionLocked = false;
           if (!unit.data || this._phase !== 'player_turn') return;
+          // 真的走过一步 → 不再是"原地待命"，这一手不可撤销
+          this._stoodStill = false;
           this._unitPhase = 'action';
           this.highlightAttackRange(unit);
           if (this._onUnitPhaseChanged) {
@@ -993,6 +1066,24 @@ export class BattleManager extends Component {
       // 第一次点击可移动格：设置预览
       this._movePreviewPos = { row: gridPos.row, col: gridPos.col };
       this.gridController.highlightPreviewCell(gridPos);
+      return;
+    }
+
+    // action 阶段点自己 = 撤销「原地待命」，退回移动阶段。
+    // 只在 `_stoodStill` 时允许 —— 真移动过的回合不给撤销，否则等于白送一次移动。
+    if (this._unitPhase === 'action' &&
+        unit.data.gridPos.row === gridPos.row && unit.data.gridPos.col === gridPos.col) {
+      if (this._stoodStill) {
+        // 顺序要紧：`highlightMoveRange` 会读 `hasMoved` 决定画移动范围还是攻击范围
+        unit.data.hasMoved = false;
+        this._stoodStill = false;
+        this._unitPhase = 'move';
+        this._cancelAutoSkip();
+        this.highlightMoveRange(unit);
+        if (this._onUnitPhaseChanged) {
+          this._onUnitPhaseChanged('player_turn', unit, 'move');
+        }
+      }
       return;
     }
 
@@ -1562,6 +1653,8 @@ export class BattleManager extends Component {
     if (this._phase !== 'player_turn') return;
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive) return;
+    // 点技能 = 玩家要行动了，撤销待执行的自动跳过
+    this._cancelAutoSkip();
     const skill = unit.peekSkill(skillIndex);
     if (!skill) return;
     
@@ -1669,6 +1762,7 @@ export class BattleManager extends Component {
     if (this._actionLocked) return;
     if (this._phase !== 'player_turn') return;
     this._phase = 'enemy_turn';
+    this._stoodStill = false;
 
     if (this._selectedUnit) {
       this._selectedUnit.setSelected(false);

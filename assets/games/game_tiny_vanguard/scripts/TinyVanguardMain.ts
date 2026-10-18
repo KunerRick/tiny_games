@@ -620,9 +620,13 @@ export class TinyVanguardMain extends Component {
       this.battleManager.setDeploySelectionChangedCallback((index) => {
         this.battleUI.selectDeploySlot(index);
       });
-      // 自动跳过提示
-      this.battleManager.setAutoSkipCallback((unitName) => {
-        this.battleUI.showAutoSkipNotice(unitName);
+      // 自动跳过提示（文案由 BattleManager 组装：它才知道是"无事可做"还是"有技能可放"）
+      this.battleManager.setAutoSkipCallback((message) => {
+        this.battleUI.showAutoSkipNotice(message);
+      });
+      // 玩家一动手就撤销跳过 → 顺手收掉横幅
+      this.battleManager.setAutoSkipCancelledCallback(() => {
+        this.battleUI.clearAutoSkipNotice();
       });
     }
 
@@ -770,11 +774,13 @@ export class TinyVanguardMain extends Component {
       case 'player_turn':
         if (unit?.data) {
           const idx = aliveUnits.findIndex(u => u === unit) + 1;
-          const hint = actionPhase === 'move' ? '\u70B9\u51FB\u53EF\u79FB\u52A8\u4F4D\u7F6E' :
-                       actionPhase === 'attack_target' ? '\u9009\u62E9\u653B\u51FB\u76EE\u6807' :
-                       actionPhase === 'skill_target' ? '\u9009\u62E9\u6280\u80FD\u76EE\u6807\uFF0C\u518D\u6B21\u70B9\u51FB\u786E\u8BA4' :
-                       actionPhase === 'skill_target_aoe' ? '\u9009\u62E9AOE\u4E2D\u5FC3\u70B9\uFF0C\u518D\u6B21\u70B9\u51FB\u786E\u8BA4' :
-                       '\u70B9\u51FB\u653B\u51FB\u6309\u94AE\u6216\u6280\u80FD\u6309\u94AE';
+          // 提示语要能解释"点自己"的语义 —— 这是本次交互改造的核心：
+          // 移动阶段点自己 = 原地待命，行动阶段点自己 = 撤销待命
+          const hint = actionPhase === 'move' ? '点击可移动位置；点自己原地待命' :
+                       actionPhase === 'attack_target' ? '选择攻击目标' :
+                       actionPhase === 'skill_target' ? '选择技能目标，再次点击确认' :
+                       actionPhase === 'skill_target_aoe' ? '选择AOE中心点，再次点击确认' :
+                       '点击攻击/技能，点自己可撤销待命';
           this.battleUI.updatePhase(
             `\u6211\u65B9\u56DE\u5408 \u7B2C${this.battleManager.turnCount}\u8F6E`,
             hint,
@@ -813,12 +819,22 @@ export class TinyVanguardMain extends Component {
         this.battleManager.turnCount
       );
 
-      const skillNames = selected.data.skills.map(s => `${s.name} [${s.energyCost}\u26A1]`);
-      const canUse = selected.data.skills.map((_, i) =>
+      // 只显示主动技能。被动（counter/toughness/eagle_eye/…）摆进技能栏是个陷阱：
+      // 点一下会走 useSkill(setActed=true) 直接结束回合，玩家以为"点了没反应"。
+      // 用「保留原始下标」的方式过滤 —— showSkillButtons 回调的下标语义（原始 skillIndex）不变。
+      const skillIndices: number[] = [];
+      for (let i = 0; i < selected.data.skills.length; i++) {
+        if (selected.data.skills[i].type !== 'passive') skillIndices.push(i);
+      }
+      const skillNames = skillIndices.map(i => {
+        const s = selected.data.skills[i];
+        return `${s.name} [${s.energyCost}\u26A1]`;
+      });
+      const canUse = skillIndices.map(i =>
         this.battleManager.canUseSkillWithTargets(selected, i)
       );
       this.battleUI.showSkillButtons(skillNames, canUse, (index) => {
-        this.battleManager.onSkillUsed(index);
+        this.battleManager.onSkillUsed(skillIndices[index]);
         this.updateBattleUI();
       });
     } else {

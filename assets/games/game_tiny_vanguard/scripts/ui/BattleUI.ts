@@ -180,7 +180,6 @@ export class BattleUI extends Component {
    * start/move/cancel 全是 `id=0`），故该校验对桌面是无副作用的纯加固。
    */
   private _dragTouchId: number = -1;
-  private _autoSkipNoticeCb: (() => void) | null = null;
   private _battleStartOverlay: Node | null = null;
   private _onBattleStartComplete: (() => void) | null = null;
   private _skillButtonPool: Node[] = [];
@@ -1430,25 +1429,37 @@ export class BattleUI extends Component {
     this.hideAttackButton();
   }
 
-  /** 显示自动跳过提示（短暂展示后恢复） */
-  showAutoSkipNotice(unitName: string): void {
+  /**
+   * 显示「即将自动跳过 / 有可用技能」提示（短暂展示后恢复阶段提示）。
+   * 文案由 `BattleManager` 给出 —— 只有它知道这次是「无事可做」还是「技能还有得放」，
+   * UI 不再自己拼串（原先写死「无可攻击目标，自动跳过」，与「有技能可放」矛盾）。
+   */
+  showAutoSkipNotice(message: string): void {
     if (this.phaseLabel) {
-      this.phaseLabel.string = `${unitName} \u65E0\u53EF\u653B\u51FB\u76EE\u6807\uFF0C\u81EA\u52A8\u8DF3\u8FC7`;
+      this.phaseLabel.string = message;
       this.phaseLabel.color = hex(COLOR.WARNING);
     }
-    // 2 秒后自动恢复提示
-    if (this._autoSkipNoticeCb) {
-      this.unschedule(this._autoSkipNoticeCb);
-      this._autoSkipNoticeCb = null;
+    // 2 秒后自动恢复提示。用**命名方法**而不是匿名 lambda（AGENTS 红线 5）：
+    // 匿名函数存进字段后就 unschedule 不干净，玩家连续操作会留下游离回调
+    this.unschedule(this._onNoticeTimeout);
+    this.scheduleOnce(this._onNoticeTimeout, 2);
+  }
+
+  /** 立刻收掉提示、恢复上一帧的阶段文案。玩家一动手（取消跳过）就调它 */
+  clearAutoSkipNotice(): void {
+    this.unschedule(this._onNoticeTimeout);
+    this._restorePhaseText();
+  }
+
+  private _onNoticeTimeout(): void {
+    this._restorePhaseText();
+  }
+
+  private _restorePhaseText(): void {
+    if (this.phaseLabel) {
+      this.phaseLabel.string = this._lastPhaseText;
+      this.phaseLabel.color = hex(this._lastPhaseColor);
     }
-    this._autoSkipNoticeCb = () => {
-      this._autoSkipNoticeCb = null;
-      if (this.phaseLabel) {
-        this.phaseLabel.string = this._lastPhaseText;
-        this.phaseLabel.color = hex(this._lastPhaseColor);
-      }
-    };
-    this.scheduleOnce(this._autoSkipNoticeCb, 2);
   }
 
   playBattleStartAnimation(onComplete: () => void): void {
@@ -1520,10 +1531,7 @@ export class BattleUI extends Component {
   onDestroy(): void {
     // onDestroy 不访问 @property(Node) — 事件解绑已在 hide() 中完成
     // 只清 JS 引用和 schedule 回调
-    if (this._autoSkipNoticeCb) {
-      this.unschedule(this._autoSkipNoticeCb);
-      this._autoSkipNoticeCb = null;
-    }
+    this.unschedule(this._onNoticeTimeout);
     // 拖拽监听挂在 Canvas（本节点的父级）上，需显式解绑
     this.unschedule(this.clearDragConsumed);
     this.setDeployDragEnabled(false);
