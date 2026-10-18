@@ -476,7 +476,7 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 40,
+      "width": 192.6171875,
       "height": 50.4
     },
     "_anchorPoint": {
@@ -506,7 +506,7 @@
       "b": 255,
       "a": 255
     },
-    "_string": "标题",
+    "_string": "Tiny Games 游戏大厅",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
     "_actualFontSize": 20,
@@ -663,7 +663,7 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 113.017578125,
+      "width": 107.556640625,
       "height": 50.4
     },
     "_anchorPoint": {
