@@ -1145,7 +1145,7 @@ export class BattleUI extends Component {
    * `activeIndex` = **显示下标**（调用方已过滤掉被动技能），指向"当前正在选目标的技能"，
    * 用 WARNING 底色区分 —— 这是「再点一次就取消」唯一可被发现的线索。
    *
-   * ⚠️ 不可用的技能**仍然 `interactable = true`**：置 `false` 会让 Button 吞掉 CLICK，
+   * ⚠ 不可用的技能**仍然 `interactable = true`**：置 `false` 会让 Button 吞掉 CLICK，
    * 玩家点了毫无反应，也就永远听不到"为什么不能用"（能量不足 / 射程内无目标）。
    * 禁用观感改用**颜色**表达（PRIMARY_DISABLED），而不是靠吞事件。
    * 代价是不能再用 `applyButtonTheme`（它把禁用态绑在 interactable 上），

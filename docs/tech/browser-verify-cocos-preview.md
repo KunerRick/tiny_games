@@ -227,6 +227,25 @@ for (const e of visible) (groups[e.parent || 'ROOT'] ||= []).push(e);
 
 **④ 探针要给「字号违规」而不是只给字号。** 把判定固化成 `lineHeight < fontSize × 1.2`，输出违规清单而不是让读者自己比大小 —— 本项目 `fontSize 48 / lineHeight 40`、`28 / 25` 这类问题就是这样被稳定检出的。
 
+### 7.2 读 `Sprite.color` 会被 `Button` 的 COLOR 过渡改写
+
+**现象**：代码明明写了 `btnSprite.color = hex(COLOR.WARNING)`，探针却读到另一个颜色；
+而且**时读时对** —— 同一段代码换一轮点击就读到了"正确"值。
+
+**原因**：`Button.transition = COLOR` 时，引擎在**状态变化**（normal → hover → pressed）那一刻
+把 `normalColor`/`hoverColor`/`pressedColor` 写进目标 Sprite。于是：
+
+- 若设色之后**没有**状态变化（鼠标一直停在同一个按钮上），读到的是代码设的值；
+- 若鼠标**移出再移入**（或移到了另一个按钮上），过渡会立刻覆盖它 —— 读到的是过渡色。
+
+**纪律**：用颜色断言 UI 状态时，**必须显式制造状态变化**（先 `mouse.move` 到棋盘中央，再
+`mouse.move` 到目标按钮，等 ~300ms 再读），否则你的断言只是在测"鼠标恰好在哪"。
+本轮"锁定技能按钮的琥珀色被悬停冲掉"这个真实缺陷，就是靠这个动作才稳定复现的
+（见 `docs/plans/2026-10-18-tiny-vanguard-fixes.md` §4）。
+
+**推论**：凡是用 Button 过渡色表达的"状态指示"，都要检查**每个过渡态**是否都写对了 ——
+只在 `normalColor` 上做标记，桌面预览里鼠标一碰就消失；微信触屏没有 hover 才不会暴露。
+
 ---
 
 ## 8. 面板显隐被 `_showCalled` 拦截（易踩的模式）

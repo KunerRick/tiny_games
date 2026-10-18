@@ -12,6 +12,8 @@
 | 写 Cocos 代码，担心崩溃 | [`cocos-best-practices.md`](./cocos-best-practices.md) |
 | 修改场景/节点/MCP 操作 | [`../AGENTS.md`](../AGENTS.md) 的 **MCP 使用守则** |
 | 要验证真实交互（点击/流程/报错） | [`tech/browser-verify-cocos-preview.md`](./tech/browser-verify-cocos-preview.md) |
+| 写"等一会儿再做下一拍"的回合/动画链路 | [`tech/cocos-scheduler-and-tween-pitfalls.md`](./tech/cocos-scheduler-and-tween-pitfalls.md) |
+| 显示 emoji/符号图标（尤其要在微信上跑） | [`tech/wechat-text-rendering.md`](./tech/wechat-text-rendering.md) |
 | 新增游戏或场景 | [`../AGENTS.md`](../AGENTS.md) 的 **项目结构 + 游戏注册** |
 | 查某游戏的设计/计划/场景配置 | 下文的 **按游戏分类** |
 
@@ -23,6 +25,8 @@
 - [`cocos-best-practices.md`](./cocos-best-practices.md) — Cocos Creator 3.x 防崩溃详解与代码模式
 - [`tech/browser-verify-cocos-preview.md`](./tech/browser-verify-cocos-preview.md) — 浏览器操作验证预览：刷新资产库、设备像素坐标、页内探针与日志取证
 - [`tech/mcp-scene-authoring-pitfalls.md`](./tech/mcp-scene-authoring-pitfalls.md) — MCP 操作场景/预制体：按钮绑定类型、Button 组件、渲染组件冲突
+- [`tech/cocos-scheduler-and-tween-pitfalls.md`](./tech/cocos-scheduler-and-tween-pitfalls.md) — 排期/补间陷阱：自排期回调被引擎静默丢弃、`update()` 泵 + 看门狗范式
+- [`tech/wechat-text-rendering.md`](./tech/wechat-text-rendering.md) — 微信文本渲染：变体选择符 VS16 导致图标方框、图标单一来源规约
 - [`tech/dev-toolchain-notes.md`](./tech/dev-toolchain-notes.md) — 文本编码（PowerShell 陷阱）、`tsc` 版本注意事项、提交前检查
 
 ---
@@ -59,6 +63,7 @@
 | 修复计划 | [`plans/2026-07-15-tiny-vanguard-fix-all.md`](./plans/2026-07-15-tiny-vanguard-fix-all.md) | 综合修复 |
 | 修复计划 | [`plans/2026-07-16-tiny-vanguard-ux-improvements.md`](./plans/2026-07-16-tiny-vanguard-ux-improvements.md) | 最新 UX 改进 |
 | 手感方案 | [`plans/2026-10-18-tiny-vanguard-combat-feel.md`](./plans/2026-10-18-tiny-vanguard-combat-feel.md) | 布阵拖拽修复 + 移动/攻击/技能动画层（含逐帧实测与后续打磨项） |
+| 修复计划 | [`plans/2026-10-18-tiny-vanguard-fixes.md`](./plans/2026-10-18-tiny-vanguard-fixes.md) | 四项缺陷：敌方回合卡死 / 微信图标方框 / 点自身秒结束 / 技能不可切换（含实测验收） |
 
 ### 贪吃蛇（Snake）
 
