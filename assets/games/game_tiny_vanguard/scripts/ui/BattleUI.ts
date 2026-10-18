@@ -1,6 +1,6 @@
 import { _decorator, Component, Node, Label, Button, Sprite, SpriteFrame, UIOpacity, Vec2, Vec3, tween, instantiate, Prefab, UITransform, EventTouch } from 'cc';
 import {
-  ALPHA, CLASS_COLOR, COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_ICON, FONT_TITLE, FONT_TINY,
+  ALPHA, CANVAS, CLASS_COLOR, COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_ICON, FONT_TITLE, FONT_TINY,
   applyButtonTheme, applyFont, applyFontAndColor, hex,
 } from '../config/Theme';
 const { ccclass, property } = _decorator;
@@ -44,6 +44,15 @@ const DRAG_GHOST_SIZE = 72;
 const DRAG_GHOST_BORDER = 2;
 /** 徽章内图标块边长（避开四周边框，各留 1px 间隙，避免审计判为重叠） */
 const DRAG_GHOST_ICON_SIZE = DRAG_GHOST_SIZE - 2 * DRAG_GHOST_BORDER - 2;
+
+/**
+ * 技能按钮尺寸：与行动栏按钮（132×48）统一。
+ * 原先按钮预制体是 90×50，与同屏的行动栏两套尺寸；且布局按 120 排版、按钮实际 90 宽，
+ * 间距对不上。宽高都取令牌值，布局与实体尺寸同源。
+ */
+const SKILL_BTN_WIDTH = 132;
+/** 技能按钮间距（= SPACE.MD） */
+const SKILL_BTN_GAP = 16;
 
 /** 棋盘坐标（与 GridController.GridPosition 结构一致；此处只做结构约束，避免 ui→battle 的类型依赖） */
 export interface DeployDropPos {
@@ -262,6 +271,11 @@ export class BattleUI extends Component {
 
   /** 行动栏/布阵按钮的过渡色统一走令牌（P5） */
   private applyButtonThemes(): void {
+    // 先补"能画出来的底"：AttackButton/WaitButton 的 Sprite 有 color 但 spriteFrame 为空
+    // （同栏的 EndTurnButton 有贴图），不补的话两个按钮只显示裸文字、与结束回合并排时观感割裂。
+    this.ensureSolidBackground(this.attackButton);
+    this.ensureSolidBackground(this.waitButton);
+    this.ensureSolidBackground(this.endTurnButton, COLOR.PRIMARY);
     applyButtonTheme(this.attackButton?.getComponent(Button) ?? null, 'secondary');
     applyButtonTheme(this.waitButton?.getComponent(Button) ?? null, 'secondary');
     applyButtonTheme(this.endTurnButton?.getComponent(Button) ?? null, 'primary');
@@ -269,6 +283,40 @@ export class BattleUI extends Component {
     // 单场胜利面板的“继续”按钮（场景节点，P2 建的）
     const continueBtn = this.victoryPanel?.getChildByName('ContinueBtn');
     applyButtonTheme(continueBtn?.getComponent(Button) ?? null, 'primary');
+  }
+
+  /**
+   * 补上"能画出来的实心底"。`spriteFrame = null` 时 Sprite **什么都不绘制**，
+   * 只设 color 等于没有背景（AGENTS 教训 C）。幂等：已有贴图则不动。
+   * Sprite 的 `@requireComponent(UITransform)` 会自动补 UITransform —— 不可重复 addComponent。
+   *
+   * ⚠️ 顺序陷阱（教训 C）：赋 `spriteFrame` 时若 `sizeMode` 仍是默认的 TRIMMED，
+   * 引擎会**立刻把节点尺寸改成贴图的原始尺寸**（本项目的 `default_sprite_splash` 是 2×2）
+   * —— 实测把 132×48 的"等待/攻击"按钮缩成了 2×2（几乎点不到）。
+   * 因此这里先记下原尺寸，最后回写：spriteFrame → sizeMode → contentSize。
+   */
+  private ensureSolidBackground(node: Node | null, colorHex: string = COLOR.SURFACE): void {
+    if (!node?.isValid) return;
+    const ui = node.getComponent(UITransform);
+    const keepW = ui?.width ?? 0;
+    const keepH = ui?.height ?? 0;
+
+    let sp = node.getComponent(Sprite);
+    const isNew = !sp;
+    if (!sp) sp = node.addComponent(Sprite);
+    if (!sp) return;
+    if (!sp.spriteFrame) {
+      const frame = this.getSolidSpriteFrame();
+      if (frame) sp.spriteFrame = frame;
+    }
+    sp.sizeMode = Sprite.SizeMode.CUSTOM;
+    sp.type = Sprite.Type.SIMPLE;
+    // 新加的 Sprite 若不显式给色，会停在引擎默认白（255,255,255）；
+    // Button 的 COLOR 过渡要等下一次状态变化才写入，故这里先给上常态色。
+    if (isNew) sp.color = hex(colorHex);
+
+    // 最后回写尺寸（放在 spriteFrame/sizeMode 之后，见上面的顺序陷阱）
+    if (ui && keepW > 0 && keepH > 0) ui.setContentSize(keepW, keepH);
   }
 
   hide(): void {
@@ -379,6 +427,10 @@ export class BattleUI extends Component {
   hideDeployPhase(): void {
     if (this.confirmDeployButton) this.confirmDeployButton.active = false;
     if (this.waitButton) this.waitButton.active = true;
+    // 场景里 UnitNameLabel/HpLabel/EnergyLabel 带着占位文本（"你好" / "HP: 0/0" / "⚡ 0/5"），
+    // 而本方法会立刻把状态面板显示出来，首个单位的真实数据要等战斗开始动画（约 1.6s）结束才写入
+    // —— 中间这段会闪出占位文本。先清空再显示。
+    this.clearUnitInfo();
     // 恢复状态栏面板
     this.setStatPanelVisible(true);
     // 离开布阵：收起站台槽位（容器内的槽位随之不可见）
@@ -1078,15 +1130,15 @@ export class BattleUI extends Component {
   showSkillButtons(skillNames: string[], canUse: boolean[], callback: (index: number) => void): void {
     if (!this.skillButtonContainer) return;
     
-    const btnWidth = 120;
-    const gap = 15;
+    const btnWidth = SKILL_BTN_WIDTH;
+    const gap = SKILL_BTN_GAP;
     const count = skillNames.length;
     const totalWidth = count * btnWidth + (count - 1) * gap;
     const startX = -totalWidth / 2 + btnWidth / 2;
     
     const containerTransform = this.skillButtonContainer.getComponent(UITransform);
     if (containerTransform) {
-      containerTransform.setContentSize(Math.max(totalWidth, 100), btnWidth + 20);
+      containerTransform.setContentSize(Math.max(totalWidth, btnWidth), CONTROL.BTN_HEIGHT + 22);
     }
     
     while (this.skillButtonContainer.children.length > count) {
@@ -1104,15 +1156,29 @@ export class BattleUI extends Component {
     
     for (let i = 0; i < count; i++) {
       const btnNode = this.skillButtonContainer.children[i];
+      // 技能按钮预制体**连 Sprite 都没有** → 原先等于一排裸文字，悬停/按下/禁用一律无反馈。
+      // 运行时补实心底 + 令牌尺寸，并改用 COLOR 过渡（禁用态才会显示成 PRIMARY_DISABLED）。
+      this.ensureSolidBackground(btnNode);
+      const skillBtnUi = btnNode.getComponent(UITransform);
+      if (skillBtnUi) skillBtnUi.setContentSize(btnWidth, CONTROL.BTN_HEIGHT);
       const label = btnNode.getComponentInChildren(Label);
       if (label) {
         label.string = skillNames[i];
-        label.fontSize = 20;
+        applyFont(label, FONT_BODY);
+        // 技能名长短不一（"猛击 [2⚡]" vs "奥术护盾 [2⚡]"），SHRINK 让长名缩字而不是被裁掉
+        label.overflow = Label.Overflow.SHRINK;
+        const skillLabelUi = label.node.getComponent(UITransform);
+        if (skillLabelUi) skillLabelUi.setContentSize(btnWidth - 8, FONT_BODY.lineHeight);
       }
       const btn = btnNode.getComponent(Button);
       if (btn) {
-        btn.transition = Button.Transition.SCALE;
+        applyButtonTheme(btn, 'primary');
         btn.interactable = canUse[i];
+        // 显式写当前状态色：Button 的 COLOR 过渡只在**状态变化**时把 normalColor/
+        // disabledColor 写进 Sprite，新创建（或从池里复用）的按钮会停在上一次的颜色上。
+        // 不写这一句的话，可用与不可用都显示成同一档深灰（实测 38,48,65 vs 55,65,81，几乎看不出）。
+        const btnSprite = btnNode.getComponent(Sprite);
+        if (btnSprite) btnSprite.color = hex(canUse[i] ? COLOR.PRIMARY : COLOR.PRIMARY_DISABLED);
         btnNode['_skillBtnIndex'] = i;
         btnNode['_skillBtnCallback'] = callback;
         btn.node.off(Button.EventType.CLICK, this.onSkillBtnClicked, this);
@@ -1283,9 +1349,11 @@ export class BattleUI extends Component {
     this.setPhaseBar(phase, actionHint);
     if (this.unitTurnLabel) {
       if (unitName && unitIndex !== undefined && totalUnits !== undefined) {
-        this.unitTurnLabel.string = `${unitName} (${unitIndex}/${totalUnits})`;
+        // 只写位次：单位名已由 UnitNameLabel 显示（同一面板里再拼一次名字 = 信息重复，
+        // 实测面板里并排出现"战士"与"战士 (1/3)"）
+        this.unitTurnLabel.string = `(${unitIndex}/${totalUnits})`;
       } else {
-        this.unitTurnLabel.string = unitName ?? '';
+        this.unitTurnLabel.string = '';
       }
     }
 
@@ -1373,6 +1441,13 @@ export class BattleUI extends Component {
       if (onComplete) onComplete();
       return;
     }
+
+    // 遮罩必须有贴图：场景里这个 Sprite 的 spriteFrame 为空，而本动画**只 tween color** ——
+    // 没有贴图就等于什么都没画（实测"战斗开始！"小字直接叠在棋盘与单位上、全程无压暗）。
+    // 顺带把 750×1330 的超画布尺寸收进画布（遮罩本就该铺满 720×1280）。
+    this.ensureSolidBackground(this._battleStartOverlay, COLOR.BG_OVERLAY);
+    const overlayUi = this._battleStartOverlay.getComponent(UITransform);
+    if (overlayUi) overlayUi.setContentSize(CANVAS.width, CANVAS.height);
 
     // 步骤1: 遮罩渐暗 (0.3s)
     tween(overlaySprite)
