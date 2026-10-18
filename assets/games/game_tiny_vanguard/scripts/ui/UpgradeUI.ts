@@ -24,9 +24,10 @@ export interface UpgradeOption {
 type OptionCategory = 'active' | 'passive' | 'attribute';
 
 const CATEGORY_STYLE: Record<OptionCategory, { badge: string; color: string }> = {
-  // 分类色沿用 §3.1 语义色板：主色=主动技能、INFO=被动、SUCCESS=属性增益
+  // 分类色沿用 §3.1 语义色板 + 方案 §4 问题 4 的映射：主色=主动技能、紫=被动、SUCCESS=属性增益。
+  // 被动原先用 INFO 青，与主动的 PRIMARY 蓝色相相邻、一眼分不出类别，故改用 COLOR.PASSIVE。
   active: { badge: '\u6280\u80FD', color: COLOR.PRIMARY },
-  passive: { badge: '\u88AB\u52A8', color: COLOR.INFO },
+  passive: { badge: '\u88AB\u52A8', color: COLOR.PASSIVE },
   attribute: { badge: '\u5C5E\u6027', color: COLOR.SUCCESS },
 };
 

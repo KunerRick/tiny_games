@@ -221,7 +221,9 @@ export class RouteMapUI extends Component {
   /** 顶部进度：已通关节点数 / 总节点数 */
   private updateProgressLabel(): void {
     if (!this.progressLabel) return;
-    const total = this._nodes.length;
+    // 分母不能用节点总数：分支互斥（见 isReachable）后一局最多"每层走一个"，
+    // 10 个节点最多走 7 个 —— 用总数会让进度条永远填不满。
+    const total = new Set(this._nodes.map(n => n.row)).size;
     const done = this._nodes.filter(n => n.completed).length;
     this.progressLabel.string = `\u5DF2\u901A\u5173 ${done}/${total}`;
   }
@@ -257,13 +259,27 @@ export class RouteMapUI extends Component {
     }
   }
 
+  /**
+   * 该节点现在是否可点。
+   *
+   * 两条规则：
+   * 1. 有**已完成**的节点连向它（`connections` 存的是正向边，见 `generateRoute`）；
+   * 2. **同一层（row）的兄弟节点尚未走过** —— 否则一局能把两个分支都打完
+   *    （原实现只有规则 1：实测完成节点 2 之后节点 1 仍然可达，一局可清空全部 10 个节点），
+   *    "选路"形同虚设、资源被刷满，削弱肉鸽取舍（设计 §4.1 是树形选路）。
+   */
   private isReachable(nodeId: number): boolean {
     if (nodeId === 0) return true;
-    // connections 存的是"从本节点能去往的节点ID"（正向边）
-    // 检查是否有某个节点的 connections 包含 nodeId 且该节点已完成
-    return this._nodes.some(n =>
+    const me = this._nodes.find(n => n.id === nodeId);
+    if (!me) return false;
+    const hasCompletedParent = this._nodes.some(n =>
       n.connections.includes(nodeId) && n.completed
     );
+    if (!hasCompletedParent) return false;
+    const siblingTaken = this._nodes.some(n =>
+      n.row === me.row && n.id !== me.id && n.completed
+    );
+    return !siblingTaken;
   }
 
   private onNodeTapped(nodeId: number): void {

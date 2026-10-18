@@ -112,6 +112,9 @@ export const SKILLS: Record<string, SkillConfig> = {
   counter: {
     id: 'counter', name: '反击', type: 'passive', energyCost: 0, targetType: 'self',
     description: '被攻击时回击50%伤害',
+    // ⚠️ 例外：本 effect 类型**不被代码读取**。反击按技能 id 硬编码在
+    // UnitController.takeDamage()（`hasPassive('counter')`）里，`passive_counter`
+    // 只是为了数据自描述而保留。改数值请同时看那两处，别只改这里。
     triggerCondition: 'on_hit', effects: [{ type: 'passive_counter', params: { multiplier: 0.5 } }]
   },
   toughness: {
@@ -153,6 +156,8 @@ export const SKILLS: Record<string, SkillConfig> = {
   poison_arrows: {
     id: 'poison_arrows', name: '淬毒箭', type: 'passive', energyCost: 0, targetType: 'self',
     description: '攻击附带中毒2回合（每回合1伤害）',
+    // ⚠️ 例外：同 `counter`，本 effect 类型不被读取 —— 中毒按技能 id 硬编码在
+    // BattleManager.executeAttack / executeSkillEffects（`hasPassive('poison_arrows')`）。
     triggerCondition: 'on_attack', effects: [{ type: 'passive_poison', params: { damage: 1, duration: 2 } }]
   },
 
