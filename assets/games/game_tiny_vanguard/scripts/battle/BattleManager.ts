@@ -51,6 +51,15 @@ export class BattleManager extends Component {
   private _selectedUnit: UnitController | null = null;  private _pendingSkill: import('../config/GameData').SkillConfig | null = null;
   private _skillTargets: GridPosition[] = [];
   private _skillPreviewPos: GridPosition | null = null;
+  /** 当前锁定的技能下标（-1 = 没有）。与 `_pendingSkill` 并用：技能对象本身不带下标。 */
+  private _pendingSkillIndex: number = -1;
+  /**
+   * 进入 `skill_target` **之前**的子阶段。取消技能时要原样退回去 ——
+   * 玩家可能是从 `move`（还没移动就点技能）进来的，一律退回 `action` 是错的。
+   * 必须在翻转 `_phase` 之前捕获，否则永远是 `action`。
+   */
+  private _skillReturnPhase: UnitActionPhase = 'action';
+  private _onSkillRejectedCallback: ((message: string) => void) | null = null;
   private _totalDamageDealt: number = 0;
   private _currentBattleType: 'normal' | 'elite' | 'boss' = 'normal';
   /** 本场难度（0 起，= 已完成的战斗场次）：Boss 召唤物按同一曲线缩放 */
@@ -141,6 +150,12 @@ export class BattleManager extends Component {
     this._battleOver = false;
     this._actionLocked = false;
     this._stoodStill = false;
+    // 上一场若停在技能选择中途，残留的锁定会把新一场第一次点技能当成"取消"
+    this._pendingSkill = null;
+    this._pendingSkillIndex = -1;
+    this._skillReturnPhase = 'action';
+    this._skillTargets = [];
+    this._skillPreviewPos = null;
     // 上一场可能留下未结算的排期（例如结束回合时的 AI 队列）
     this.unscheduleAllCallbacks();
     // AI 拍点泵不是 scheduler 条目、也不是补间：清这两个数字就是"取消"（见 _aiNextStepAt 注释）
@@ -396,6 +411,16 @@ export class BattleManager extends Component {
   /** 自动跳过被玩家输入取消时回调 —— UI 据此立刻收掉"即将跳过"横幅 */
   setAutoSkipCancelledCallback(callback: () => void): void {
     this._onAutoSkipCancelledCallback = callback;
+  }
+
+  /** 点了一个当前用不了的技能时回调 —— UI 据此把**原因**告诉玩家（而不是静默无反应） */
+  setSkillRejectedCallback(callback: (message: string) => void): void {
+    this._onSkillRejectedCallback = callback;
+  }
+
+  /** 当前锁定的技能下标（-1 = 未锁定）。UI 用它把"正在选的技能"高亮出来，让"再点一次取消"可被发现 */
+  get pendingSkillIndex(): number {
+    return this._pendingSkillIndex;
   }
 
   confirmDeploy(): boolean {
@@ -731,6 +756,7 @@ export class BattleManager extends Component {
   private selectNextPlayerUnit(): void {
     // 取消任何未完成的自动跳过延迟，防止用户切换单位后回调冲突
     this._cancelAutoSkip();
+    this._clearPendingSkill();   // 防御：换单位时绝不能带着上一个单位的技能锁定
     this._movePreviewPos = null;
     this._stoodStill = false;
     this.gridController.clearPreview();
@@ -946,6 +972,10 @@ export class BattleManager extends Component {
   }
 
   private finishUnitTurn(): void {
+    // 单位回合结束：技能选择模式必须一起收掉。
+    // 原先漏了这一步 —— 在 `skill_target` 下点「结束回合」会留下 `_phase==='skill_target'`
+    // 而 `_selectedUnit===null` 的脏状态，后续点格全被路由进 `handleSkillTargetClick`。
+    this._clearPendingSkill();
     // 先清除选中状态和高亮：即使战斗结束（victory/defeat）也要清理残留高亮
     if (this._selectedUnit) {
       this._selectedUnit.setSelected(false);
@@ -963,6 +993,7 @@ export class BattleManager extends Component {
 
   waitCurrentUnit(): void {
     if (this._actionLocked) return;
+    if (this._phase === 'skill_target') this._clearPendingSkill();
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive) return;
     unit.data.hasActed = true;
@@ -970,14 +1001,67 @@ export class BattleManager extends Component {
     this.finishUnitTurn();
   }
 
-  canUseSkillWithTargets(unit: UnitController, skillIndex: number): boolean {
-    if (!unit.data || !unit.data.isAlive || unit.data.hasActed) return false;
-    if (!unit.canUseSkill(skillIndex)) return false;
+  /**
+   * 退出技能选择模式，恢复进入前的子阶段。**所有取消/结束路径都走这里** ——
+   * 原先各处手写「`_pendingSkill = null` + `_phase = 'player_turn'` + 硬编码回 `action`」，
+   * 于是从 `move` 进的技能一取消就跳到 `action`（还顺手把行动化了）。
+   *
+   * 没有待选技能时是**纯 no-op**（不碰 `_phase`/`_unitPhase`）—— 因此可以在任何
+   * 收口处无脑调用，不会把正常状态改坏。
+   */
+  private _clearPendingSkill(): void {
+    const hadPending = this._pendingSkillIndex >= 0 || this._phase === 'skill_target';
+    this._pendingSkill = null;
+    this._pendingSkillIndex = -1;
+    this._skillTargets = [];
+    this._skillPreviewPos = null;
+    if (!hadPending) return;
+
+    if (this._phase === 'skill_target') this._phase = 'player_turn';
+    const unit = this._selectedUnit;
+    const back = this._skillReturnPhase;
+    this._skillReturnPhase = 'action';
+    if (!unit?.data?.isAlive) return;
+    this._unitPhase = back;
+    this.gridController.clearHighlights();
+    if (back === 'move') {
+      this.highlightMoveRange(unit);
+    } else {
+      this.highlightAttackRange(unit);
+    }
+    if (this._onUnitPhaseChanged) {
+      this._onUnitPhaseChanged('player_turn', unit, back);
+    }
+  }
+
+  /** 外部（UI 的"取消"入口）请求取消技能选择。不在技能选择模式时无副作用 */
+  cancelPendingSkill(): void {
+    if (this._phase === 'skill_target') this._clearPendingSkill();
+  }
+
+  /**
+   * 技能此刻用不了的**原因**；可用则 null。
+   *
+   * 抽出来是因为原先只有布尔 `canUseSkillWithTargets`：按钮置灰但不点不动，
+   * 玩家永远不知道是能量不够、还是射程内没人（"选了之后只能点敌方单位"的迷惑源头）。
+   * 现在"按钮是否点亮"和"点了之后提示什么"共用同一份判断，不会两处口径不一致。
+   */
+  getSkillUnusableReason(unit: UnitController, skillIndex: number): string | null {
+    if (!unit.data || !unit.data.isAlive) return '单位已阵亡';
     const skill = unit.data.skills[skillIndex];
-    if (skill.preMove && unit.data.preMoveSkillUsed) return false;
-    if (skill.targetType === 'self') return true;
-    const targets = this.getValidSkillTargets(unit, skill);
-    return targets.length > 0;
+    if (!skill) return '技能不存在';
+    if (skill.type === 'passive') return '被动技能无需释放';
+    // 「已行动」要在「能量不足」之前判：回合已结束的单位再说能量不足会误导
+    if (unit.data.hasActed) return '本回合已行动';
+    if (!unit.canUseSkill(skillIndex)) return '能量不足';
+    if (skill.preMove && unit.data.preMoveSkillUsed) return '本回合已使用';
+    if (skill.targetType === 'self') return null;
+    if (this.getValidSkillTargets(unit, skill).length === 0) return '射程内无目标，可先移动';
+    return null;
+  }
+
+  canUseSkillWithTargets(unit: UnitController, skillIndex: number): boolean {
+    return this.getSkillUnusableReason(unit, skillIndex) === null;
   }
 
   onAttackSelected(): void {
@@ -1173,15 +1257,10 @@ export class BattleManager extends Component {
     const skillIndex = this._pendingSkill['_skillIndex'] as number;
     const usedSkill = unit.useSkill(skillIndex);
     if (!usedSkill) {
-      // 能量不足等导致使用失败：取消技能目标模式并切回玩家回合
-      this._pendingSkill = null;
-      this._skillTargets = [];
-      this._skillPreviewPos = null;
-      this._phase = 'player_turn';
-      this.highlightAttackRange(unit);
-      if (this._onUnitPhaseChanged) {
-        this._onUnitPhaseChanged('player_turn', unit, 'action');
-      }
+      // 能量不足等导致使用失败：干净退出技能模式（回到进入前的子阶段），并说明原因
+      const reason = this.getSkillUnusableReason(unit, skillIndex) ?? '技能无法释放';
+      this._clearPendingSkill();
+      if (this._onSkillRejectedCallback) this._onSkillRejectedCallback(reason);
       return;
     }
 
@@ -1191,9 +1270,13 @@ export class BattleManager extends Component {
 
     this.executeSkillEffects(unit, targetUnit, gridPos, usedSkill.effects);
 
+    // 技能已消耗 → 这里**不**走 `_clearPendingSkill()`：不需要（也不该）恢复高亮，
+    // 单位随后就结束回合，恢复一次只是白闪
     this._pendingSkill = null;
+    this._pendingSkillIndex = -1;
     this._skillTargets = [];
     this._skillPreviewPos = null;
+    this._skillReturnPhase = 'action';
 
     // 如果技能已导致战斗结束（victory/defeat），不要覆盖 phase
     if (this._phase === 'skill_target') {
@@ -1206,17 +1289,10 @@ export class BattleManager extends Component {
   private handleSkillTargetClick(gridPos: GridPosition): void {
     const isTarget = this._skillTargets.some(t => t.row === gridPos.row && t.col === gridPos.col);
     if (!isTarget) {
-      this._pendingSkill = null;
-      this._skillTargets = [];
-      this._skillPreviewPos = null;
-      this._phase = 'player_turn';
-      const unit = this._selectedUnit;
-      if (unit?.data) {
-        this.highlightAttackRange(unit);
-        if (this._onUnitPhaseChanged) {
-          this._onUnitPhaseChanged('player_turn', unit, 'action');
-        }
-      }
+      // 点了非法目标（含"点自己"这种最常见的反悔动作）→ 取消技能选择。
+      // AOE 可以以自己为中心，那时自己的格子**在** `_skillTargets` 里，走下面的预览/确认分支，
+      // 两个分支天然互斥，不需要额外判断是不是自己。
+      this._clearPendingSkill();
       return;
     }
 
@@ -1650,18 +1726,33 @@ export class BattleManager extends Component {
 
   onSkillUsed(skillIndex: number): void {
     if (this._actionLocked) return;
-    if (this._phase !== 'player_turn') return;
+    // 技能选择中也能再点技能按钮 —— 这正是"切换技能"的入口。
+    // 原先这里卡死 `!== 'player_turn'`，进了 skill_target 技能按钮就全成死键。
+    if (this._phase !== 'player_turn' && this._phase !== 'skill_target') return;
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive) return;
     // 点技能 = 玩家要行动了，撤销待执行的自动跳过
     this._cancelAutoSkip();
     const skill = unit.peekSkill(skillIndex);
     if (!skill) return;
-    
-    if (skill.preMove && unit.data.preMoveSkillUsed) {
+
+    // 不可用就**说明原因**（能量不足 / 射程内无目标 / 本回合已行动…）而不是静默返回
+    const reason = this.getSkillUnusableReason(unit, skillIndex);
+    if (reason) {
+      if (this._onSkillRejectedCallback) this._onSkillRejectedCallback(`${skill.name}：${reason}`);
       return;
     }
-    
+
+    // 已在选这个技能 → 再点一次 = 取消
+    if (this._phase === 'skill_target' && this._pendingSkillIndex === skillIndex) {
+      this._clearPendingSkill();
+      return;
+    }
+    // 换技能：先干净退出（把高亮与返回子阶段都还原），再按新技能重新进入
+    if (this._phase === 'skill_target') {
+      this._clearPendingSkill();
+    }
+
     if (skill.targetType === 'self') {
       // pre-move 技能不消耗行动次数（仅消耗能量），后续仍可攻击
       const usedSkill = unit.useSkill(skillIndex, !skill.preMove);
@@ -1683,7 +1774,11 @@ export class BattleManager extends Component {
         this.finishUnitTurn();
       }
     } else {
+      // 顺序要紧：`_skillReturnPhase` 必须在翻转 `_phase` **之前**取，
+      // 否则取消时永远退到 `'action'`（从 `move` 进的技能就退错阶段了）
+      this._skillReturnPhase = this._unitPhase;
       this._pendingSkill = skill;
+      this._pendingSkillIndex = skillIndex;
       this._pendingSkill['_skillIndex'] = skillIndex;
       this._phase = 'skill_target';
       this._skillPreviewPos = null;
@@ -1751,6 +1846,7 @@ export class BattleManager extends Component {
 
   endCurrentUnitTurn(): void {
     if (this._actionLocked) return;
+    if (this._phase === 'skill_target') this._clearPendingSkill();
     const unit = this._selectedUnit;
     if (!unit?.data?.isAlive) return;
     unit.data.hasActed = true;
@@ -1760,6 +1856,9 @@ export class BattleManager extends Component {
 
   private endPlayerTurn(): void {
     if (this._actionLocked) return;
+    // 先退出技能选择模式，否则下面的 `_phase !== 'player_turn'` 守卫会早退，
+    // 留下「还在选技能」的脏相位挂到敌方回合上
+    if (this._phase === 'skill_target') this._clearPendingSkill();
     if (this._phase !== 'player_turn') return;
     this._phase = 'enemy_turn';
     this._stoodStill = false;
@@ -1961,6 +2060,12 @@ export class BattleManager extends Component {
   private onBattleEnd(victory: boolean): void {
     this.unscheduleAllCallbacks();
     this._aiQueue = [];
+    // 战斗在技能选择途中结束（最后一击）时，锁定状态不能留到结算画面
+    this._pendingSkill = null;
+    this._pendingSkillIndex = -1;
+    this._skillReturnPhase = 'action';
+    this._skillTargets = [];
+    this._skillPreviewPos = null;
     // 泵不是 scheduler 条目、也不是补间 —— `unscheduleAllCallbacks()` 停不掉它，
     // 「清这两个数字」才是取消（比存一个 tween 句柄更彻底：句柄还可能被别的 bug 弄丢）
     this._aiNextStepAt = 0;

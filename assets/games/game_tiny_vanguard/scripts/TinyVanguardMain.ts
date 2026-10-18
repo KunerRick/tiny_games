@@ -628,6 +628,10 @@ export class TinyVanguardMain extends Component {
       this.battleManager.setAutoSkipCancelledCallback(() => {
         this.battleUI.clearAutoSkipNotice();
       });
+      // 技能按钮现在**不再靠置灰吞点击**：用不了的技能点下去也要给出原因
+      this.battleManager.setSkillRejectedCallback((message) => {
+        this.battleUI.showAutoSkipNotice(message);
+      });
     }
 
     this.updateGoldDisplay();
@@ -833,10 +837,13 @@ export class TinyVanguardMain extends Component {
       const canUse = skillIndices.map(i =>
         this.battleManager.canUseSkillWithTargets(selected, i)
       );
+      // 把"当前锁定技能"的**显示下标**告诉 UI（-1 = 没锁定），让它用异色标出来，
+      // 玩家才知道"再点一次就是取消"
+      const activeDisplayIndex = skillIndices.indexOf(this.battleManager.pendingSkillIndex);
       this.battleUI.showSkillButtons(skillNames, canUse, (index) => {
         this.battleManager.onSkillUsed(skillIndices[index]);
         this.updateBattleUI();
-      });
+      }, activeDisplayIndex);
     } else {
       this.battleUI.clearUnitInfo();
       this.battleUI.clearSkillButtons();

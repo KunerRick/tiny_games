@@ -1,6 +1,6 @@
 import { _decorator, Component, Node, Label, Button, Sprite, SpriteFrame, UIOpacity, Vec2, Vec3, tween, instantiate, Prefab, UITransform, EventTouch } from 'cc';
 import {
-  ALPHA, BATTLE_LAYOUT, CANVAS, CLASS_COLOR, COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_ICON, FONT_TITLE, FONT_TINY,
+  ALPHA, BATTLE_LAYOUT, BUTTON_THEME, CANVAS, CLASS_COLOR, COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_ICON, FONT_TITLE, FONT_TINY,
   applyButtonTheme, applyFont, applyFontAndColor, hex, stripVariationSelectors,
 } from '../config/Theme';
 const { ccclass, property } = _decorator;
@@ -1139,7 +1139,19 @@ export class BattleUI extends Component {
     if (this.energyLabel) this.energyLabel.string = '';
   }
 
-  showSkillButtons(skillNames: string[], canUse: boolean[], callback: (index: number) => void): void {
+  /**
+   * 渲染技能按钮行。
+   *
+   * `activeIndex` = **显示下标**（调用方已过滤掉被动技能），指向"当前正在选目标的技能"，
+   * 用 WARNING 底色区分 —— 这是「再点一次就取消」唯一可被发现的线索。
+   *
+   * ⚠️ 不可用的技能**仍然 `interactable = true`**：置 `false` 会让 Button 吞掉 CLICK，
+   * 玩家点了毫无反应，也就永远听不到"为什么不能用"（能量不足 / 射程内无目标）。
+   * 禁用观感改用**颜色**表达（PRIMARY_DISABLED），而不是靠吞事件。
+   * 代价是不能再用 `applyButtonTheme`（它把禁用态绑在 interactable 上），
+   * 故四个状态色在这里显式写全，防止 COLOR 过渡把设计色冲掉。
+   */
+  showSkillButtons(skillNames: string[], canUse: boolean[], callback: (index: number) => void, activeIndex: number = -1): void {
     if (!this.skillButtonContainer) return;
     
     const btnWidth = SKILL_BTN_WIDTH;
@@ -1184,13 +1196,25 @@ export class BattleUI extends Component {
       }
       const btn = btnNode.getComponent(Button);
       if (btn) {
-        applyButtonTheme(btn, 'primary');
-        btn.interactable = canUse[i];
+        const locked = i === activeIndex;
+        // 底色：正在选目标 → WARNING；可用 → PRIMARY；不可用 → PRIMARY_DISABLED（灰，但**依然可点**）
+        const base = locked ? COLOR.WARNING : (canUse[i] ? COLOR.PRIMARY : COLOR.PRIMARY_DISABLED);
+        btn.transition = Button.Transition.COLOR;
+        btn.normalColor = hex(base);
+        // 锁定态三个过渡色一律用 WARNING：Button 的 COLOR 过渡在**状态切换时**会把
+        // hoverColor/pressedColor 写进 Sprite，鼠标一悬停就把琥珀色冲回常规蓝 ——
+        // 而"悬停后点击"正是「再点一次取消」的必经路径。桌面预览有这个鼠标态，
+        // 微信触屏没有，所以只在预览里能看出这个缺陷。
+        btn.hoverColor = hex(locked ? COLOR.WARNING : (canUse[i] ? BUTTON_THEME.primary.hover : base));
+        btn.pressedColor = hex(locked ? COLOR.WARNING : COLOR.PRIMARY_DARK);
+        btn.disabledColor = hex(base);
+        // 见方法注释：不能用 interactable=false 表达禁用，否则点击被吞、原因无从提示
+        btn.interactable = true;
         // 显式写当前状态色：Button 的 COLOR 过渡只在**状态变化**时把 normalColor/
         // disabledColor 写进 Sprite，新创建（或从池里复用）的按钮会停在上一次的颜色上。
         // 不写这一句的话，可用与不可用都显示成同一档深灰（实测 38,48,65 vs 55,65,81，几乎看不出）。
         const btnSprite = btnNode.getComponent(Sprite);
-        if (btnSprite) btnSprite.color = hex(canUse[i] ? COLOR.PRIMARY : COLOR.PRIMARY_DISABLED);
+        if (btnSprite) btnSprite.color = hex(base);
         btnNode['_skillBtnIndex'] = i;
         btnNode['_skillBtnCallback'] = callback;
         btn.node.off(Button.EventType.CLICK, this.onSkillBtnClicked, this);
