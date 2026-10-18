@@ -1,7 +1,7 @@
 import { _decorator, Component, Node, Label, Button, Sprite, SpriteFrame, UIOpacity, Vec2, Vec3, tween, instantiate, Prefab, UITransform, EventTouch } from 'cc';
 import {
   ALPHA, BATTLE_LAYOUT, CANVAS, CLASS_COLOR, COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_ICON, FONT_TITLE, FONT_TINY,
-  applyButtonTheme, applyFont, applyFontAndColor, hex,
+  applyButtonTheme, applyFont, applyFontAndColor, hex, stripVariationSelectors,
 } from '../config/Theme';
 const { ccclass, property } = _decorator;
 
@@ -299,7 +299,7 @@ export class BattleUI extends Component {
    * 只设 color 等于没有背景（AGENTS 教训 C）。幂等：已有贴图则不动。
    * Sprite 的 `@requireComponent(UITransform)` 会自动补 UITransform —— 不可重复 addComponent。
    *
-   * ⚠️ 顺序陷阱（教训 C）：赋 `spriteFrame` 时若 `sizeMode` 仍是默认的 TRIMMED，
+   * ⚠ 顺序陷阱（教训 C）：赋 `spriteFrame` 时若 `sizeMode` 仍是默认的 TRIMMED，
    * 引擎会**立刻把节点尺寸改成贴图的原始尺寸**（本项目的 `default_sprite_splash` 是 2×2）
    * —— 实测把 132×48 的"等待/攻击"按钮缩成了 2×2（几乎点不到）。
    * 因此这里先记下原尺寸，最后回写：spriteFrame → sizeMode → contentSize。
@@ -836,7 +836,7 @@ export class BattleUI extends Component {
       const iconUi = iconNode.addComponent(UITransform);
       iconUi.setContentSize(DRAG_GHOST_ICON_SIZE, DRAG_GHOST_ICON_SIZE);
       const l = iconNode.addComponent(Label);
-      l.string = icon;
+      l.string = stripVariationSelectors(icon);
       applyFontAndColor(l, FONT_ICON, COLOR.TEXT_PRIMARY);
       l.horizontalAlign = Label.HorizontalAlign.CENTER;
       l.verticalAlign = Label.VerticalAlign.CENTER;
@@ -953,7 +953,7 @@ export class BattleUI extends Component {
       const iconUi = iconNode.addComponent(UITransform);
       iconUi.setContentSize(SLOT_LABEL_WIDTH, SLOT_ICON_HEIGHT);
       const iconLabel = iconNode.addComponent(Label);
-      iconLabel.string = unitIcons[i] || '';
+      iconLabel.string = stripVariationSelectors(unitIcons[i] || '');
       applyFontAndColor(iconLabel, FONT_BODY, COLOR.TEXT_PRIMARY);
       iconLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
       iconLabel.verticalAlign = Label.VerticalAlign.CENTER;

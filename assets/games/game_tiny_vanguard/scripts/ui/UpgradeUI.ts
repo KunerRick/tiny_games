@@ -1,7 +1,7 @@
 import { _decorator, Component, Node, instantiate, Prefab, Button, Label, UITransform, Sprite, SpriteFrame } from 'cc';
 import {
   COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, SPACE,
-  applyButtonTheme, applyFontAndColor, hex,
+  applyButtonTheme, applyFontAndColor, hex, stripVariationSelectors,
 } from '../config/Theme';
 const { ccclass, property } = _decorator;
 
@@ -234,7 +234,7 @@ export class UpgradeUI extends Component {
       const iconUi = iconNode.getComponent(UITransform);
       if (iconUi) iconUi.setContentSize(w - SPACE.LG, 56);
       if (iconLabel) {
-        iconLabel.string = option.icon ?? '\u2694\uFE0F';
+        iconLabel.string = stripVariationSelectors(option.icon ?? '\u2694');
         applyFontAndColor(iconLabel, FONT_DISPLAY, owned ? COLOR.TEXT_DISABLED : COLOR.TEXT_PRIMARY);
         iconLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
         iconLabel.verticalAlign = Label.VerticalAlign.CENTER;

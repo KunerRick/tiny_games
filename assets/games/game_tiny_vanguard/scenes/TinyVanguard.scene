@@ -5626,7 +5626,7 @@
       "b": 175,
       "a": 255
     },
-    "_string": "⚔️战斗  🔥精英  🏪商店  💤休息  🧪事件  🏆Boss",
+    "_string": "⚔战斗  🔥精英  🏪商店  💤休息  🧪事件  🏆Boss",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
     "_actualFontSize": 0,
@@ -7993,7 +7993,7 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 67.556640625,
+      "width": 57.59765625,
       "height": 35.28
     },
     "_anchorPoint": {
@@ -8023,7 +8023,7 @@
       "b": 246,
       "a": 255
     },
-    "_string": "⚔️ 战士",
+    "_string": "⚔ 战士",
     "_horizontalAlign": 0,
     "_verticalAlign": 1,
     "_actualFontSize": 20,
@@ -9926,7 +9926,7 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 67.556640625,
+      "width": 55.439453125,
       "height": 35.28
     },
     "_anchorPoint": {
@@ -9956,7 +9956,7 @@
       "b": 246,
       "a": 255
     },
-    "_string": "💚 牧师",
+    "_string": "✝ 牧师",
     "_horizontalAlign": 0,
     "_verticalAlign": 1,
     "_actualFontSize": 20,

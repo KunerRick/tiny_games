@@ -1,7 +1,7 @@
 import { _decorator, Component, Node, Sprite, Color, tween, Vec3, Label, Tween, UITransform, UIOpacity } from 'cc';
 import { GridPosition, GridController } from './GridController';
 import { SkillConfig, getClassById, EnemyConfig, AIType, getEnemyAbilityById } from '../config/GameData';
-import { ALPHA, CLASS_COLOR, COLOR, FACTION, FONT_ICON, applyFontAndColor, hex, hpBarColor } from '../config/Theme';
+import { ALPHA, CLASS_COLOR, COLOR, FACTION, FONT_ICON, applyFontAndColor, hex, hpBarColor, stripVariationSelectors } from '../config/Theme';
 
 const { ccclass, property } = _decorator;
 
@@ -139,13 +139,6 @@ export class UnitController extends Component {
     archer:  hex(CLASS_COLOR.archer),
     mage:    hex(CLASS_COLOR.mage),
     cleric:  hex(CLASS_COLOR.cleric),
-  };
-
-  private static readonly CLASS_ICONS: Record<string, string> = {
-    warrior: '\u2694',   // ⚔
-    archer:  '\uD83C\uDFF9', // 🏹
-    mage:    '\uD83D\uDD2E', // 🔮
-    cleric:  '\u271D',   // ✝
   };
 
   initFromEnemyConfig(config: EnemyConfig, gridPos: GridPosition): void {
@@ -380,7 +373,10 @@ export class UnitController extends Component {
     if (!this.unitSprite) return;
     const classId = this._data?.classId;
     if (!classId) return;
-    const icon = UnitController.CLASS_ICONS[classId];
+    // 图标单一来源 = GameData。原先是本地另存的一张表，与配置**分叉**成两套：
+    // 配置里的战士图标带变体选择符 VS16、这张表不带，于是"部署卡片显示方框、
+    // 地图上却正常"。敌人 id（swordsman/elite_*/war_lord）在这里查不到 → 依旧不出图标。
+    const icon = getClassById(classId)?.icon;
     if (!icon) return;
 
     // 复用已有图标节点，避免重复创建
@@ -397,7 +393,7 @@ export class UnitController extends Component {
     }
     const iconLabel = iconNode.getComponent(Label);
     if (iconLabel) {
-      iconLabel.string = icon;
+      iconLabel.string = stripVariationSelectors(icon);
     }
   }
 

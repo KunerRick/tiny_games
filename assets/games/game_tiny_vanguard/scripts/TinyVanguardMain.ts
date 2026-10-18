@@ -1,5 +1,5 @@
 import { _decorator, Component, Node, Label, Button, Sprite, SpriteFrame, UITransform, Vec3 } from 'cc';
-import { COLOR, CONTROL, FONT_BODY, applyFont, applyFontAndColor, hex, applyButtonTheme, ButtonVariant } from './config/Theme';
+import { COLOR, CONTROL, FONT_BODY, applyFont, applyFontAndColor, hex, applyButtonTheme, ButtonVariant, stripVariationSelectors } from './config/Theme';
 import { RouteMapUI, RouteNode } from './ui/RouteMapUI';
 import { BattleManager, BattleResult, UnitActionPhase } from './battle/BattleManager';
 import { UpgradeUI, UpgradeOption } from './ui/UpgradeUI';
@@ -27,20 +27,20 @@ const SQUAD_SIZE = 3;
 
 /** 技能卡图标：按目标类型/主动被动推导（SkillConfig 无 icon 字段） */
 function skillIconOf(skill: SkillConfig): string {
-  if (skill.type === 'passive') return '\uD83D\uDEE1\uFE0F';        // 🛡️
+  if (skill.type === 'passive') return '\uD83D\uDEE1';        // 🛡
   switch (skill.targetType) {
     case 'aoe': return '\uD83D\uDCA5';                              // 💥
-    case 'ally': return '\u2764\uFE0F';                             // ❤️
+    case 'ally': return '\u2764';                             // ❤
     case 'tile': return '\uD83C\uDF00';                             // 🌀
     case 'self': return '\u2728';                                   // ✨
-    default: return '\u2694\uFE0F';                                 // ⚔️
+    default: return '\u2694';                                 // ⚔
   }
 }
 
 /** 属性增益卡图标 */
 const BUFF_ICON: Record<string, string> = {
-  hp: '\u2764\uFE0F',      // ❤️
-  attack: '\u2694\uFE0F',  // ⚔️
+  hp: '\u2764',      // ❤
+  attack: '\u2694',  // ⚔
   energy: '\u26A1',        // ⚡
 };
 
@@ -677,7 +677,7 @@ export class TinyVanguardMain extends Component {
     });
     const unitIcons = this._runData.playerClasses.map(c => {
       const config = getClassById(c);
-      return config ? config.icon : '';
+      return config ? stripVariationSelectors(config.icon) : '';
     });
     this.battleUI.setupDeploySlots(unitNames, unitIcons, [...this._runData.playerClasses], (index) => {
       this.battleManager.selectDeployUnit(index);
@@ -941,8 +941,8 @@ export class TinyVanguardMain extends Component {
 
       // 可学技能不足 3 项时用属性增益补位，保证始终是「三选一」
       const buffVariants = [
-        { name: '\u2764\uFE0F +1 \u6700\u5927\u8840\u91CF', buffType: 'hp', buffAmount: 1 },
-        { name: '\u2694\uFE0F +1 \u653B\u51FB\u529B', buffType: 'attack', buffAmount: 1 },
+        { name: '\u2764 +1 \u6700\u5927\u8840\u91CF', buffType: 'hp', buffAmount: 1 },
+        { name: '\u2694 +1 \u653B\u51FB\u529B', buffType: 'attack', buffAmount: 1 },
         { name: '\u26A1 +1 \u80FD\u91CF\u4E0A\u9650', buffType: 'energy', buffAmount: 1 },
       ];
       while (unitOptions.length < 3 && buffVariants.length > 0) {

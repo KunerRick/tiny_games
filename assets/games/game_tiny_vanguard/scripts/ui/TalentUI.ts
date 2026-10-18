@@ -168,7 +168,7 @@ export class TalentUI {
 
   /**
    * 统一设置纯色块的 Sprite。
-   * ⚠️ **先 `sizeMode = CUSTOM` 再赋贴图**：赋贴图时若仍是默认 TRIMMED，引擎会立刻把
+   * ⚠ **先 `sizeMode = CUSTOM` 再赋贴图**：赋贴图时若仍是默认 TRIMMED，引擎会立刻把
    * 节点尺寸改成贴图原始尺寸（AGENTS 教训 C）—— 实测把 620×900 的面板与 560×62 的行
    * 全部撑成了贴图尺寸，点击热区跟着错位、行点不动。
    */

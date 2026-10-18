@@ -1,5 +1,5 @@
 import { _decorator, Component, Node, ScrollView, instantiate, Prefab, Button, Label, Color, Sprite, UITransform, Graphics, Vec3, tween, Tween, Event } from 'cc';
-import { ALPHA, COLOR, FONT_CAPTION, FONT_TITLE, applyFontAndColor, hex } from '../config/Theme';
+import { ALPHA, COLOR, FONT_CAPTION, FONT_TITLE, applyFontAndColor, hex, stripVariationSelectors } from '../config/Theme';
 const { ccclass, property } = _decorator;
 
 // ---------------------------------------------------------------------------
@@ -177,7 +177,7 @@ export class RouteMapUI extends Component {
 
     this.nodesContainer.removeAllChildren();
     const typeIcons: Record<string, string> = {
-      battle: '\u2694\uFE0F', elite: '\uD83D\uDD25', shop: '\uD83C\uDFEA',
+      battle: '\u2694', elite: '\uD83D\uDD25', shop: '\uD83C\uDFEA',
       rest: '\uD83D\uDCA4', event: '\uD83E\uDDEA', boss: '\uD83C\uDFC6'
     };
 
@@ -194,7 +194,7 @@ export class RouteMapUI extends Component {
 
       const label = btnNode.getComponentInChildren(Label);
       if (label) {
-        label.string = typeIcons[node.type] || '?';
+        label.string = stripVariationSelectors(typeIcons[node.type] || '?');
         applyFontAndColor(label, FONT_TITLE, COLOR.TEXT_PRIMARY);
         const labelUi = label.node.getComponent(UITransform);
         if (labelUi) labelUi.setContentSize(NODE_SIZE, FONT_TITLE.lineHeight);
