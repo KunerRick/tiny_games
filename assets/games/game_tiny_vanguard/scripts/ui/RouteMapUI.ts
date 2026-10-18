@@ -71,18 +71,34 @@ export class RouteMapUI extends Component {
     this._onNodeClickCallback = callback;
   }
 
+  /**
+   * 生成路线图（12 节点 / 7 层，与设计 §4.1 的构成一致：
+   * 6 战斗 + 2 精英 + 商店 + 休息 + 事件 + Boss）。
+   *
+   * id 必须**按层递增**：续档时用 `id < currentNodeId` 推断已通关节点/战斗场次。
+   * 每层 2 个节点 = 一次"选路"，配合 `isReachable` 的同层互斥，一局每层只能走一个。
+   */
   generateRoute(): RouteNode[] {
     const nodes: RouteNode[] = [
       { id: 0, type: 'battle', row: 0, col: 0, connections: [1, 2], completed: false },
-      { id: 1, type: 'battle', row: 1, col: 0, connections: [3], completed: false },
-      { id: 2, type: 'battle', row: 1, col: 1, connections: [3], completed: false },
-      { id: 3, type: 'shop', row: 2, col: 0, connections: [4, 5], completed: false },
-      { id: 4, type: 'elite', row: 3, col: 0, connections: [6], completed: false },
-      { id: 5, type: 'event', row: 3, col: 1, connections: [6], completed: false },
-      { id: 6, type: 'battle', row: 4, col: 0, connections: [7, 8], completed: false },
-      { id: 7, type: 'rest', row: 5, col: 0, connections: [9], completed: false },
-      { id: 8, type: 'elite', row: 5, col: 1, connections: [9], completed: false },
-      { id: 9, type: 'boss', row: 6, col: 0, connections: [], completed: false },
+
+      { id: 1, type: 'battle', row: 1, col: 0, connections: [3, 4], completed: false },
+      { id: 2, type: 'battle', row: 1, col: 1, connections: [3, 4], completed: false },
+
+      // 第 3 层：商店 / 战斗 —— 要钱还是要升级
+      { id: 3, type: 'shop', row: 2, col: 0, connections: [5, 6], completed: false },
+      { id: 4, type: 'battle', row: 2, col: 1, connections: [5, 6], completed: false },
+
+      { id: 5, type: 'elite', row: 3, col: 0, connections: [7, 8], completed: false },
+      { id: 6, type: 'event', row: 3, col: 1, connections: [7, 8], completed: false },
+
+      { id: 7, type: 'battle', row: 4, col: 0, connections: [9, 10], completed: false },
+      { id: 8, type: 'battle', row: 4, col: 1, connections: [9, 10], completed: false },
+
+      { id: 9, type: 'rest', row: 5, col: 0, connections: [11], completed: false },
+      { id: 10, type: 'elite', row: 5, col: 1, connections: [11], completed: false },
+
+      { id: 11, type: 'boss', row: 6, col: 0, connections: [], completed: false },
     ];
     return nodes;
   }

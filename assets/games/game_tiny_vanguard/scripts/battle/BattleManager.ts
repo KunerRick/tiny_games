@@ -2,7 +2,7 @@ import { _decorator, Component, Node, Color, Vec3, UITransform, UIOpacity, insta
 import { GridController, GridPosition } from './GridController';
 import { UnitController } from './UnitController';
 import { AIController, AIAction } from './AIController';
-import { EnemyConfig, SkillEffect, ENEMIES, ELITE_ENEMIES, BOSS_CONFIG, getClassById, getRandomSkillsFromPool } from '../config/GameData';
+import { EnemyConfig, SkillEffect, ENEMIES, ELITE_ENEMIES, BOSS_CONFIG, getClassById, getEnemyAbilityById, getRandomSkillsFromPool } from '../config/GameData';
 import { GRID } from '../config/Theme';
 
 const { ccclass, property } = _decorator;
@@ -48,12 +48,13 @@ export class BattleManager extends Component {
    * （实测：从 (0,0) 拖到 (1,0)，(0,0) 仍是实心预览绿，直到释放才被全量重绘抹掉）。
    */
   private _dropPreviewPos: GridPosition | null = null;
-  private _selectedUnit: UnitController | null = null;
-  private _pendingSkill: import('../config/GameData').SkillConfig | null = null;
+  private _selectedUnit: UnitController | null = null;  private _pendingSkill: import('../config/GameData').SkillConfig | null = null;
   private _skillTargets: GridPosition[] = [];
   private _skillPreviewPos: GridPosition | null = null;
   private _totalDamageDealt: number = 0;
   private _currentBattleType: 'normal' | 'elite' | 'boss' = 'normal';
+  /** 本场难度（0 起，= 已完成的战斗场次）：Boss 召唤物按同一曲线缩放 */
+  private _difficulty: number = 0;
   private _autoSkipUnitRef: UnitController | null = null;
 
   get phase(): BattlePhase { return this._phase; }
@@ -79,6 +80,8 @@ export class BattleManager extends Component {
     this._phase = 'deploy';
     this._turnCount = 0;
     this._deployedPositions = [];
+    // 本场难度（0 起）：Boss 集结的召唤物要按同一曲线缩放，故存一份
+    this._difficulty = difficulty;
     // 上一场可能留下未清除的落点预览引用（跨场脏状态）
     this._dropPreviewPos = null;
     
@@ -122,6 +125,8 @@ export class BattleManager extends Component {
         const classConfig = getClassById(playerClasses[i]);
         const startingPos = { row: i, col: -1 };
         unitCtrl.init(playerClasses[i], true, startingPos);
+        // 光环类被动（盾墙）需要查同阵营单位
+        unitCtrl.setAllyProvider(() => this._playerUnits);
         if (classConfig) {
           const startingSkill = getRandomSkillsFromPool([classConfig.startingSkillId], 1);
           if (startingSkill.length > 0) {
@@ -199,6 +204,7 @@ export class BattleManager extends Component {
     const unitCtrl = unitNode.getComponent(UnitController);
     if (unitCtrl) {
       unitCtrl.initFromEnemyConfig(config, pos);
+      unitCtrl.setAllyProvider(() => this._enemyUnits);
       this._enemyUnits.push(unitCtrl);
       return unitCtrl;
     }
@@ -728,12 +734,22 @@ export class BattleManager extends Component {
     const range = unit.data.stats.range;
     const targets = this._enemyUnits.filter(u => u.data?.isAlive);
 
-    return targets
-      .filter(t => {
-        const dist = Math.abs(t.data!.gridPos.row - pos.row) + Math.abs(t.data!.gridPos.col - pos.col);
-        return dist <= range;
-      })
-      .map(t => t.data!.gridPos);
+    const inRange = targets.filter(t => {
+      const dist = Math.abs(t.data!.gridPos.row - pos.row) + Math.abs(t.data!.gridPos.col - pos.col);
+      return dist <= range;
+    });
+
+    // 嘲讽（精英盾兵）：强制普通攻击该单位。只在它**仍在射程内**时生效 ——
+    // 否则玩家会被卡在无法攻击任何人的状态（可以先走开再打别处）。
+    const taunt = unit.data.buffs.find(b => b.type === 'taunt');
+    if (taunt) {
+      const forced = inRange.find(t =>
+        t.data!.gridPos.row === taunt.params.row && t.data!.gridPos.col === taunt.params.col
+      );
+      if (forced) return [forced.data!.gridPos];
+    }
+
+    return inRange.map(t => t.data!.gridPos);
   }
 
   private isOccupied(pos: GridPosition): boolean {
@@ -1325,6 +1341,75 @@ export class BattleManager extends Component {
           break;
         }
 
+        case 'line_aoe': {
+          // 直线 AOE（剑气斩 / Boss 横扫）：从施法者朝目标方向的第 1..length 格
+          if (!caster.data) break;
+          const length = effect.params.length ?? 2;
+          const multLine = effect.params.multiplier ?? 1.2;
+          const tPos = target?.data?.gridPos ?? targetPos;
+          if (!tPos) break;
+          const dr = Math.sign(tPos.row - caster.data.gridPos.row);
+          const dc = Math.sign(tPos.col - caster.data.gridPos.col);
+          if (dr === 0 && dc === 0) break;
+          // 斜向时取主轴（未对齐的目标不扫出对角线，保持"直线"语义可读）
+          const step = (dr !== 0 && dc !== 0) ? { row: dr, col: 0 } : { row: dr, col: dc };
+          const lineDmg = Math.floor(caster.data.stats.attack * multLine * skillMultiplier);
+          const foes = caster.data.isPlayer ? this._enemyUnits : this._playerUnits;
+          for (let i = 1; i <= length; i++) {
+            const row = caster.data.gridPos.row + step.row * i;
+            const col = caster.data.gridPos.col + step.col * i;
+            for (const foe of foes) {
+              if (!foe.data?.isAlive) continue;
+              if (foe.data.gridPos.row !== row || foe.data.gridPos.col !== col) continue;
+              const markBonus = this._getMarkBonus(foe);
+              const dmg = foe.takeDamage(lineDmg + markBonus, ignoreDefense, caster);
+              this._totalDamageDealt += dmg;
+              if (dmg > 0 && this._onDamageDealtCallback && foe.node?.isValid) {
+                this._onDamageDealtCallback(foe.node, dmg);
+              }
+            }
+          }
+          break;
+        }
+
+        case 'teleport_behind': {
+          // 暗影步：瞬移到目标**背后**（沿施法者→目标方向再外推一格）；被占/越界则原地出手
+          if (!caster.data || !target?.data) break;
+          const tPos = target.data.gridPos;
+          const dr = Math.sign(tPos.row - caster.data.gridPos.row);
+          const dc = Math.sign(tPos.col - caster.data.gridPos.col);
+          const row = tPos.row + dr;
+          const col = tPos.col + dc;
+          if (row < 0 || row >= GridController.GRID_SIZE) break;
+          if (col < 0 || col >= GridController.GRID_SIZE) break;
+          if (this.isOccupied({ row, col })) break;
+          caster.setGridPosition({ row, col });
+          break;
+        }
+
+        case 'taunt': {
+          // 精英盾兵嘲讽：给相邻玩家挂 taunt buff，记下施法者站位。
+          // duration +1：buff 在玩家**回合开始时**先扣一层，不 +1 会当天就失效。
+          if (!caster.data) break;
+          const radius = effect.params.radius ?? 1;
+          const duration = (effect.params.duration ?? 1) + 1;
+          const cpos = caster.data.gridPos;
+          for (const p of this._playerUnits) {
+            if (!p.data?.isAlive) continue;
+            const dist = Math.abs(p.data.gridPos.row - cpos.row) +
+              Math.abs(p.data.gridPos.col - cpos.col);
+            if (dist <= radius) {
+              p.addBuff('taunt', duration, { row: cpos.row, col: cpos.col });
+            }
+          }
+          break;
+        }
+
+        case 'shield_wall':
+        case 'summon':
+          // 被动：盾墙在 UnitController.takeDamage 里生效；集结在敌方回合开始时结算
+          break;
+
         case 'shield': {
           const targetUnit = target ?? caster;
           if (targetUnit?.data) {
@@ -1513,6 +1598,9 @@ export class BattleManager extends Component {
       this._onUnitPhaseChanged('enemy_turn', null, null);
     }
 
+    // Boss「集结」：在敌方回合开始时召唤增援（设计 §5.3）
+    this._processSummons();
+
     const aliveEnemies = this._enemyUnits.filter(u => u.data?.isAlive);
     for (const enemy of aliveEnemies) {
       enemy.onTurnStart();
@@ -1545,7 +1633,8 @@ export class BattleManager extends Component {
     const moveDuration = 0.25;
     const moveTarget = action.moveTo ?? enemy.data.gridPos;
     enemy.moveToPositionAnimated(moveTarget, moveDuration, () => {
-      if (action.attackTarget?.data?.isAlive) {
+      // 有可用技能就用技能（冷却在释放时开始计）；否则普通攻击
+      if (!this._tryEnemyAbility(enemy, action) && action.attackTarget?.data?.isAlive) {
         const dist = Math.abs(action.attackTarget.data.gridPos.row - enemy.data.gridPos.row) +
           Math.abs(action.attackTarget.data.gridPos.col - enemy.data.gridPos.col);
         if (dist <= enemy.data.stats.range) {
@@ -1556,6 +1645,72 @@ export class BattleManager extends Component {
         this._processNextAIUnit();
       }, 0.5);
     });
+  }
+
+  /**
+   * 执行本回合的敌人技能；返回 true 表示这次行动已被技能消耗。
+   * 目标可能因前面单位行动而死亡/走远 → 用**移动后的当前位置**重新校验射程，
+   * 不满足就返回 false，退回普通攻击（不会白放一次技能）。
+   */
+  private _tryEnemyAbility(enemy: UnitController, action: AIAction): boolean {
+    const id = action.abilityId;
+    if (!id || !enemy.data?.isAlive) return false;
+    const ability = getEnemyAbilityById(id);
+    if (!ability) return false;
+
+    const target = action.attackTarget ?? null;
+    const targetPos = target?.data?.gridPos ?? null;
+    const range = ability.range ?? enemy.data.stats.range;
+    const inRange = !!target?.data?.isAlive && !!targetPos &&
+      Math.abs(targetPos.row - enemy.data.gridPos.row) +
+      Math.abs(targetPos.col - enemy.data.gridPos.col) <= range;
+    // 自身技能（嘲讽）只需身边有人，不需要攻击目标
+    if (ability.targetType !== 'self' && !inRange) return false;
+
+    enemy.startAbilityCooldown(ability.id, ability.cooldown ?? 1);
+    this.executeSkillEffects(enemy, target, targetPos, ability.effects);
+    return true;
+  }
+
+  /**
+   * Boss「集结」（设计 §5.3）：每 `interval` 回合召唤 1 个剑兵增援。
+   * 在敌方回合开始时结算，召唤物当回合即可行动；存活敌人数上限 6，避免无限滚雪球。
+   */
+  private _processSummons(): void {
+    const bosses = this._enemyUnits.filter(e => e.data?.isAlive && e.hasAbility('boss_summon'));
+    if (bosses.length === 0) return;
+    const cfg = getEnemyAbilityById('boss_summon');
+    const interval = cfg?.effects.find(e => e.type === 'summon')?.params.interval ?? 2;
+    if (interval <= 0 || this._turnCount % interval !== 0) return;
+
+    for (const boss of bosses) {
+      const aliveCount = this._enemyUnits.filter(e => e.data?.isAlive).length;
+      if (aliveCount >= 6) break;
+      const spot = this._findFreeCellNear(boss.data!.gridPos);
+      if (!spot) continue;
+      this.spawnEnemy(
+        { ...ENEMIES[0], stats: this.scaleEnemyStats(ENEMIES[0].stats, this._difficulty) },
+        spot
+      );
+    }
+  }
+
+  /** 在给定格周围沿曼哈顿环找最近的空格（召唤用） */
+  private _findFreeCellNear(center: GridPosition): GridPosition | null {
+    for (let radius = 1; radius < GridController.GRID_SIZE; radius++) {
+      for (let dr = -radius; dr <= radius; dr++) {
+        for (let dc = -radius; dc <= radius; dc++) {
+          if (Math.abs(dr) + Math.abs(dc) !== radius) continue;
+          const row = center.row + dr;
+          const col = center.col + dc;
+          if (row < 0 || row >= GridController.GRID_SIZE) continue;
+          if (col < 0 || col >= GridController.GRID_SIZE) continue;
+          if (this.isOccupied({ row, col })) continue;
+          return { row, col };
+        }
+      }
+    }
+    return null;
   }
 
   private finishAITurn(): void {

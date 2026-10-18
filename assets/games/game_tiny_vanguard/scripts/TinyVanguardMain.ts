@@ -1,14 +1,15 @@
-import { _decorator, Component, Node, Label, Button, Sprite, UITransform } from 'cc';
-import { COLOR, CONTROL, FONT_BODY, applyFont, hex, applyButtonTheme, ButtonVariant } from './config/Theme';
+import { _decorator, Component, Node, Label, Button, Sprite, SpriteFrame, UITransform, Vec3 } from 'cc';
+import { COLOR, CONTROL, FONT_BODY, applyFont, applyFontAndColor, hex, applyButtonTheme, ButtonVariant } from './config/Theme';
 import { RouteMapUI, RouteNode } from './ui/RouteMapUI';
 import { BattleManager, BattleResult, UnitActionPhase } from './battle/BattleManager';
 import { UpgradeUI, UpgradeOption } from './ui/UpgradeUI';
 import { EventUI } from './ui/EventUI';
 import { BattleUI } from './ui/BattleUI';
+import { TalentUI, TalentUiHost } from './ui/TalentUI';
 import { SaveManager, RunData } from './ui/SaveManager';
 import {
   CLASSES, EVENTS, getClassById, getSkillById, getRandomSkillsFromPool,
-  SkillConfig, SKILLS
+  SkillConfig, SKILLS, TALENTS
 } from './config/GameData';
 import { UnitController } from './battle/UnitController';
 import { SceneManager } from '../../../common/managers/SceneManager';
@@ -99,6 +100,7 @@ export class TinyVanguardMain extends Component {
     unitSkills: {},
     gold: 0,
     honor: 0,
+    honorSpent: 0,
     talents: [],
     difficulty: 'normal',
     unlockedClasses: ['warrior', 'archer', 'mage', 'cleric'],
@@ -113,6 +115,8 @@ export class TinyVanguardMain extends Component {
    * `honor` 是**跨局累积**的（存在 meta 里），所以结算面板不能拿绝对值当"本局收益"。
    */
   private _honorAtRunStart: number = 0;
+  /** 荣誉天赋面板（运行时构建，见 TalentUI） */
+  private _talentUI: TalentUI | null = null;
 
   onLoad(): void {
     if (this.gameOverPanel) this.gameOverPanel.active = false;
@@ -135,6 +139,7 @@ export class TinyVanguardMain extends Component {
     const meta = SaveManager.loadMeta();
     if (meta) {
       this._runData.honor = meta.honor;
+      this._runData.honorSpent = meta.honorSpent ?? 0;
       this._runData.talents = meta.talents;
       this._runData.unlockedClasses = meta.unlockedClasses;
       this._runData.unlockedSkills = meta.unlockedSkills;
@@ -171,6 +176,13 @@ export class TinyVanguardMain extends Component {
     this.bindRestPanelEvents();
     this.bindRunVictoryPanel();
     this.applyPanelButtonThemes();
+    // 荣誉天赋入口（设计 §6.2）：跨局消费荣誉，放在职业选择页
+    this.ensureTalentEntry();
+    // B5⑤：底板对齐内容包围盒 —— 必须放在按钮规格统一与天赋入口**之后**，
+    // 否则按钮变高、或天赋按钮后加进来时会超出已算好的底板
+    this.fitPanelBackground(this.classSelectPanel);
+    this.fitPanelBackground(this.shopPanel);
+    this.fitPanelBackground(this.restPanel);
   }
 
   /**
@@ -212,19 +224,88 @@ export class TinyVanguardMain extends Component {
     this.normalizeSmallPanelButtons();
   }
 
-  /** 商店/休息面板的小按钮统一到设计令牌（幂等） */
+  /**
+   * 商店/休息面板的小按钮统一到设计令牌（幂等）。
+   *
+   * **宽高都要统一**：场景里这些按钮底色只有 100/80/60 宽，而标签是 `overflow=NONE`
+   * —— 引擎会按文案把标签节点撑到 140/109/80，于是"买技能 - 10金币"这种文案直接戳到
+   * 按钮底色外面（放大截图可见文字两侧露在蓝色底之外）。这里按本面板最宽的文案 +32 内边距
+   * 给同面板的按钮取**统一宽度**。
+   */
   private normalizeSmallPanelButtons(): void {
-    const norm = (node: Node | null): void => {
-      if (!node?.isValid) return;
-      const ui = node.getComponent(UITransform);
-      if (ui) ui.setContentSize(ui.width, CONTROL.BTN_HEIGHT);
-      applyFont(node.getComponentInChildren(Label), FONT_BODY);
-    };
-    for (const name of ['BuySkillBtn', 'HealBtn', 'CloseBtn']) {
-      norm(this.shopPanel?.getChildByName(name) ?? null);
+    const groups: [Node | null, string[]][] = [
+      [this.shopPanel, ['BuySkillBtn', 'HealBtn', 'CloseBtn']],
+      [this.restPanel, ['ConfirmRestBtn', 'SkipBtn']],
+    ];
+    for (const [panel, names] of groups) {
+      if (!panel?.isValid) continue;
+      const btns: Node[] = [];
+      let widest = 0;
+      for (const name of names) {
+        const node = panel.getChildByName(name);
+        if (!node?.isValid) continue;
+        btns.push(node);
+        const label = node.getComponentInChildren(Label);
+        const labelUi = label?.node.getComponent(UITransform);
+        if (!label || !labelUi) continue;
+        // Label 是 overflow=NONE：节点宽度由引擎按文案自动撑开，而这一步发生在
+        // 字号改动之前，所以按字号比例把旧宽度折算到 FONT_BODY 下
+        const before = label.fontSize;
+        applyFont(label, FONT_BODY);
+        const scaled = before > 0 ? labelUi.contentSize.width * (FONT_BODY.fontSize / before) : labelUi.contentSize.width;
+        widest = Math.max(widest, scaled);
+      }
+      const width = Math.max(widest + 32, 160);
+      for (const node of btns) {
+        const ui = node.getComponent(UITransform);
+        if (ui) ui.setContentSize(width, CONTROL.BTN_HEIGHT);
+      }
     }
-    for (const name of ['ConfirmRestBtn', 'SkipBtn']) {
-      norm(this.restPanel?.getChildByName(name) ?? null);
+  }
+
+  /**
+   * 把面板底色的尺寸/位置对齐到它的内容包围盒（B5⑤）。
+   *
+   * 这三个面板的场景数据是"一块小底板 + 一堆绝对坐标子节点"：
+   * 例如 `ShopPanel` 底板只有 300×280 且锚点在中心，而标题 `ShopTitle` 宽 480、
+   * 位于 y=300 —— 标题和第一个按钮**整个在底板之外**，深色底板只盖住了下半截，
+   * 看起来就是"内容偏上、下半空"。
+   *
+   * 不在场景里改：那要挪几十个节点的坐标，而且会切走编辑器当前场景。
+   * 这里运行时按子节点包围盒重算底板；子节点会随父节点一起位移，
+   * 所以再按包围盒中心反向补偿，保证**内容的屏幕位置一点不动**，只是把底色撑开。
+   *
+   * 幂等：执行后内容已关于面板原点居中，再调用时包围盒中心为 0，尺寸不再变化。
+   */
+  private fitPanelBackground(panel: Node | null, pad: number = 40): void {
+    if (!panel?.isValid) return;
+    const panelUi = panel.getComponent(UITransform);
+    if (!panelUi) return;
+
+    // 子节点坐标是相对面板**原点**的（锚点位置），这里就是画布坐标
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const child of panel.children) {
+      const ui = child.getComponent(UITransform);
+      if (!ui) continue;
+      const p = child.position;
+      minX = Math.min(minX, p.x - ui.contentSize.width * ui.anchorPoint.x);
+      maxX = Math.max(maxX, p.x + ui.contentSize.width * (1 - ui.anchorPoint.x));
+      minY = Math.min(minY, p.y - ui.contentSize.height * ui.anchorPoint.y);
+      maxY = Math.max(maxY, p.y + ui.contentSize.height * (1 - ui.anchorPoint.y));
+    }
+    if (!isFinite(minX) || !isFinite(minY)) return;
+
+    const width = maxX - minX + pad * 2;
+    const height = maxY - minY + pad * 2;
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    if (Math.abs(width - panelUi.width) < 1 && Math.abs(height - panelUi.height) < 1) return;
+
+    panelUi.setContentSize(width, height);
+    // 底板本身按包围盒居中，子节点反向平移，二者相对位置因此保持原样
+    panel.setPosition(panel.position.x + centerX, panel.position.y + centerY, panel.position.z);
+    for (const child of panel.children) {
+      child.setPosition(child.position.x - centerX, child.position.y - centerY, child.position.z);
     }
   }
 
@@ -234,15 +315,25 @@ export class TinyVanguardMain extends Component {
    * 点"买技能 - 10金币"毫无反应）。与事件面板的金币不足置灰保持一致。
    */
   private updateShopButtons(): void {
+    const buy = this.shopPanel?.getChildByName('BuySkillBtn') ?? null;
+    const heal = this.shopPanel?.getChildByName('HealBtn') ?? null;
+    const buyPrice = this.shopPrice(10);
+    const healPrice = this.shopPrice(5);
+
     const setEnabled = (node: Node | null, enabled: boolean): void => {
       const btn = node?.getComponent(Button);
       if (btn) btn.interactable = enabled;
     };
-    setEnabled(
-      this.shopPanel?.getChildByName('BuySkillBtn') ?? null,
-      this._runData.gold >= 10 && this.hasAnyFreeSkillSlot()
-    );
-    setEnabled(this.shopPanel?.getChildByName('HealBtn') ?? null, this._runData.gold >= 5);
+    setEnabled(buy, this._runData.gold >= buyPrice && this.hasAnyFreeSkillSlot());
+    setEnabled(heal, this._runData.gold >= healPrice);
+
+    // 价格文案随天赋「议价」变化，不能沿用场景里写死的 10 / 5
+    const setLabel = (node: Node | null, text: string): void => {
+      const lb = node?.getComponentInChildren(Label);
+      if (lb) lb.string = text;
+    };
+    setLabel(buy, `买技能 - ${buyPrice}金币`);
+    setLabel(heal, `回血 - ${healPrice}金币`);
   }
 
   /**
@@ -456,6 +547,8 @@ export class TinyVanguardMain extends Component {
 
     this._runData.playerClasses = [...this._selectedClasses];
     this._runData.gold = 0;
+    // 天赋「启动资金」：开局 +5 金币/次。只在**真正开新局**时发（续档走 onContinueRun，不重复发）
+    this._runData.gold += this._runData.talents.filter(t => t === 'start_gold').length * 5;
     this._runData.currentRouteNode = 0;
     // 新开局：丢弃上一局的布阵（职业组合已变，旧阵型无意义）
     this._runData.deployLayout = undefined;
@@ -467,6 +560,13 @@ export class TinyVanguardMain extends Component {
     const saved = SaveManager.loadRun();
     if (saved) {
       this._runData = saved;
+      // 天赋/已消费荣誉属于**跨局永久**进度：以 meta 为准。
+      // 存档里的快照可能落后于本次在职业选择页刚买的天赋。
+      const meta = SaveManager.loadMeta();
+      if (meta) {
+        this._runData.honorSpent = meta.honorSpent ?? 0;
+        this._runData.talents = meta.talents;
+      }
       if (this.classSelectPanel) this.classSelectPanel.active = false;
       if (this.continueButton) this.continueButton.node.active = false;
       this.startNewRun();
@@ -481,6 +581,7 @@ export class TinyVanguardMain extends Component {
 
     // 路线图：金币可见（局内资源）、回合隐藏（仅战斗有意义）
     this.setHudVisible(true, false);
+    this.updateGoldDisplay();
 
     if (this.routeMapUI) {
       this.routeMapUI.show();
@@ -616,6 +717,9 @@ export class TinyVanguardMain extends Component {
       (result) => this.onBattleEnd(result),
       this._runData.deployLayout ?? null
     );
+
+    // 荣誉天赋加成（设计 §6.2）：单位每场战斗都会重建，故在本场生成后应用一次
+    this.applyTalentsToParty();
 
     // 恢复存档中的技能（按 id 去重：创建单位时已自动添加起始技能，避免重复）
     if (Object.keys(this._runData.unitSkills).length > 0) {
@@ -969,7 +1073,8 @@ export class TinyVanguardMain extends Component {
   }
 
   private onShopBuySkill(): void {
-    if (this._runData.gold < 10) return;
+    const price = this.shopPrice(10);
+    if (this._runData.gold < price) return;
 
     // 先尝试学习，成功才扣费：原先无条件扣 10 金币，而技能位已满或随机到
     // 已学技能时 addSkill 会被拒绝 → 玩家花了钱却没得到任何东西
@@ -985,15 +1090,16 @@ export class TinyVanguardMain extends Component {
       return;
     }
 
-    this._runData.gold -= 10;
+    this._runData.gold -= price;
     this._syncUnitSkillsToRunData();
     this.updateGoldDisplay();
     this.updateShopButtons();
   }
 
   private onShopHeal(): void {
-    if (this._runData.gold < 5) return;
-    this._runData.gold -= 5;
+    const price = this.shopPrice(5);
+    if (this._runData.gold < price) return;
+    this._runData.gold -= price;
 
     for (const unit of this.battleManager.playerUnits) {
       if (unit.data?.isAlive) {
@@ -1052,7 +1158,12 @@ export class TinyVanguardMain extends Component {
       this.applyEventEffects(event, choiceIndex);
       this.eventUI.hide();
       this.completeNonBattleNode();
-    }, this._runData.gold, this.hasAnyFreeSkillSlot());
+    }, this._runData.gold, this.hasAnyFreeSkillSlot(), this.luckPercent());
+  }
+
+  /** 天赋「幸运儿」：随机事件好结果概率 +20%/次 */
+  private luckPercent(): number {
+    return this._runData.talents.filter(t => t === 'lucky').length * 20;
   }
 
   /**
@@ -1241,25 +1352,181 @@ export class TinyVanguardMain extends Component {
       this.fillPanelSummary(this.gameOverPanel, 2, `\u83B7\u5F97 +${honorGain} \u8363\u8A89`);
     }
 
-    SaveManager.saveMeta({
-      honor: this._runData.honor,
-      talents: this._runData.talents,
-      unlockedClasses: this._runData.unlockedClasses,
-      unlockedSkills: this._runData.unlockedSkills,
-    });
+    SaveManager.saveMeta(this.buildMeta());
 
     if (victory) {
       this.checkAchievements();
       // checkAchievements 可能修改了 unlockedClasses，重新保存 meta
-      SaveManager.saveMeta({
-        honor: this._runData.honor,
-        talents: this._runData.talents,
-        unlockedClasses: this._runData.unlockedClasses,
-        unlockedSkills: this._runData.unlockedSkills,
-      });
+      SaveManager.saveMeta(this.buildMeta());
     }
 
     SaveManager.clearRun();
+  }
+
+  // -------------------------------------------------------------------------
+  // 荣誉天赋树（设计 §6.2）
+  // -------------------------------------------------------------------------
+
+  /** 交给 TalentUI 的宿主接口（余额查询 + 购买落到 meta） */
+  private readonly talentHost: TalentUiHost = {
+    getHonorBalance: () => this.honorBalance(),
+    getPurchases: (talentId: string) => this._runData.talents.filter(t => t === talentId).length,
+    purchaseTalent: (talentId: string) => this.buyTalent(talentId),
+  };
+
+  /** 可用荣誉 = 累计获得 − 已消费（`honor` 仍保留累计值供成就判定） */
+  private honorBalance(): number {
+    return Math.max(0, this._runData.honor - (this._runData.honorSpent ?? 0));
+  }
+
+  /** 购买一次天赋：校验限购/余额 → 扣荣誉 → 写 talents → 存 meta */
+  private buyTalent(talentId: string): boolean {
+    const cfg = TALENTS.find(t => t.id === talentId);
+    if (!cfg) return false;
+    const owned = this._runData.talents.filter(t => t === talentId).length;
+    if (owned >= cfg.maxPurchases) return false;
+    if (this.honorBalance() < cfg.cost) return false;
+
+    this._runData.honorSpent = (this._runData.honorSpent ?? 0) + cfg.cost;
+    this._runData.talents.push(talentId);
+    SaveManager.saveMeta(this.buildMeta());
+    console.info(`[Talent] 购买 ${cfg.name}（${cfg.cost} 荣誉，已购 ${owned + 1}/${cfg.maxPurchases}）`);
+    return true;
+  }
+
+  /** meta 快照（几处存档共用一个口径，避免漏字段） */
+  private buildMeta(): {
+    honor: number; honorSpent: number; talents: string[];
+    unlockedClasses: string[]; unlockedSkills: string[];
+  } {
+    return {
+      honor: this._runData.honor,
+      honorSpent: this._runData.honorSpent ?? 0,
+      talents: this._runData.talents,
+      unlockedClasses: this._runData.unlockedClasses,
+      unlockedSkills: this._runData.unlockedSkills,
+    };
+  }
+
+  /**
+   * 把已购天赋应用到本场新建的单位上（设计 §6.2 的 9 种效果）。
+   *
+   * 写入 `baseStats`：`resetForNewBattle` 会用 baseStats 重算 stats，这样跨战斗不会被清掉。
+   * 「启动资金」不在这里（金币是局级资源，在 startClassSelect 发）；「议价 / 幸运儿」
+   * 在各自的消费/抽取点生效（见 shopPrice / triggerEvent）。
+   */
+  private applyTalentsToParty(): void {
+    const units = this.battleManager?.playerUnits ?? [];
+    if (units.length === 0 || !units[0]?.data) return;
+
+    const count = (id: string) => this._runData.talents.filter(t => t === id).length;
+    const atk = count('power_up');
+    const hp = count('hp_up');
+    const def = count('armor_up');
+    const energyMax = count('energy_up');
+    const energyRegen = count('energy_regen');
+    const masteryAtk = count('class_mastery') * 2;
+    const firstClass = units[0].data.classId;
+
+    for (const u of units) {
+      if (!u.data) continue;
+      const d = u.data;
+      const bonusAtk = atk + (d.classId === firstClass ? masteryAtk : 0);
+      if (bonusAtk > 0) {
+        d.baseStats.attack += bonusAtk;
+        d.stats.attack += bonusAtk;
+      }
+      if (hp > 0) {
+        d.baseStats.hp += hp;
+        d.maxHp += hp;
+        d.currentHp = Math.min(d.currentHp + hp, d.maxHp);
+      }
+      if (def > 0) {
+        d.baseStats.defense += def;
+        d.stats.defense += def;
+      }
+      if (energyMax > 0) {
+        d.baseStats.maxEnergy += energyMax;
+        d.maxEnergy += energyMax;
+        d.energy = Math.min(d.energy + energyMax, d.maxEnergy);
+      }
+      if (energyRegen > 0) {
+        d.energyRegen += energyRegen;
+      }
+      if (hp > 0) u.refreshHealthBarVisual();
+    }
+  }
+
+  /**
+   * 天赋「议价」：商店价格每级 -10%。
+   * 用 floor 而不是 round：5×0.9 = 4.5，四舍五入回 5 等于折扣无效；
+   * 向下取整后 5→4、10→9（两级 5→4、10→8），玩家能看见变化。
+   */
+  private shopPrice(base: number): number {
+    const discount = this._runData.talents.filter(t => t === 'discount').length * 10;
+    return Math.max(1, Math.floor(base * (100 - discount) / 100));
+  }
+
+  /** 借场景里已在用的纯色贴图（运行时创建的节点必须有 spriteFrame 才绘制） */
+  private getSolidFrame(): SpriteFrame | null {
+    const donors = [
+      this.classSelectPanel?.getChildByName('StartBtn'),
+      this.shopPanel?.getChildByName('BuySkillBtn'),
+      this.victoryPanel?.getChildByName('ReturnBtn'),
+    ];
+    for (const d of donors) {
+      const sp = d?.isValid ? d.getComponent(Sprite) : null;
+      if (sp?.spriteFrame) return sp.spriteFrame;
+    }
+    return null;
+  }
+
+  /**
+   * 职业选择页的「荣誉天赋」入口。
+   * 运行时创建而不改场景：面板内容本就由 TALENTS 数据驱动，场景里只多一个按钮没有收益；
+   * 位置放在 StartBtn 下方的空白区（面板 640×720 的下半部分原本是空的）。
+   */
+  private ensureTalentEntry(): void {
+    const panel = this.classSelectPanel;
+    if (!panel?.isValid) return;
+    if (panel.getChildByName('TalentBtn')) return;
+
+    const btnNode = new Node('TalentBtn');
+    const ui = btnNode.addComponent(UITransform);
+    ui.setContentSize(200, CONTROL.BTN_HEIGHT);
+    const sp = btnNode.addComponent(Sprite);
+    // 先 CUSTOM 再赋贴图：否则赋贴图会把尺寸改成贴图原始尺寸（AGENTS 教训 C）
+    sp.sizeMode = Sprite.SizeMode.CUSTOM;
+    sp.type = Sprite.Type.SIMPLE;
+    const frame = this.getSolidFrame();
+    if (frame) sp.spriteFrame = frame;
+    sp.color = hex(COLOR.SURFACE);
+    const btn = btnNode.addComponent(Button);
+    applyButtonTheme(btn, 'secondary');
+    btnNode.on(Node.EventType.TOUCH_END, this.onTalentClicked, this);
+
+    const labelNode = new Node('Label');
+    const labelUi = labelNode.addComponent(UITransform);
+    labelUi.setContentSize(200, FONT_BODY.lineHeight);
+    const lb = labelNode.addComponent(Label);
+    lb.string = '🏅 荣誉天赋';
+    applyFontAndColor(lb, FONT_BODY, COLOR.TEXT_PRIMARY);
+    lb.horizontalAlign = Label.HorizontalAlign.CENTER;
+    lb.verticalAlign = Label.VerticalAlign.CENTER;
+    btnNode.addChild(labelNode);
+
+    const panelUi = panel.getComponent(UITransform);
+    const local = panelUi
+      ? panelUi.convertToNodeSpaceAR(new Vec3(360, 430, 0))
+      : new Vec3(0, -210, 0);
+    btnNode.setPosition(local.x, local.y, 0);
+    panel.addChild(btnNode);
+  }
+
+  private onTalentClicked(): void {
+    const parent = this.classSelectPanel ?? this.node;
+    if (!this._talentUI) this._talentUI = new TalentUI(this.talentHost);
+    this._talentUI.show(parent, this.getSolidFrame());
   }
 
   private checkAchievements(): void {

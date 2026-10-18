@@ -4,6 +4,12 @@ export interface RunData {
   unitSkills: { [unitId: string]: string[] };
   gold: number;
   honor: number;
+  /**
+   * 已消费的荣誉（天赋树，设计 §6.2）。
+   * `honor` 表示**累计获得**（成就判定用它），可用余额 = `honor - honorSpent`。
+   * 可选字段：旧存档没有此项，按 0 处理。
+   */
+  honorSpent?: number;
   talents: string[];
   difficulty: string;
   unlockedClasses: string[];
@@ -47,6 +53,7 @@ export class SaveManager {
 
   static saveMeta(meta: {
     honor: number;
+    honorSpent?: number;
     talents: string[];
     unlockedClasses: string[];
     unlockedSkills: string[];
@@ -60,6 +67,7 @@ export class SaveManager {
 
   static loadMeta(): {
     honor: number;
+    honorSpent?: number;
     talents: string[];
     unlockedClasses: string[];
     unlockedSkills: string[];

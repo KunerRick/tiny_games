@@ -40,8 +40,10 @@ export class EventUI extends Component {
   /**
    * @param anyFreeSkillSlot 队伍里是否还有单位能学新技能（技能位未满）。
    *        为 false 时，含 learn_skill 的选项置灰 —— 否则玩家花钱选了却什么都拿不到。
+   * @param luckPercent 随机事件的好结果概率加成（天赋「幸运儿」，%）。
+   *        约定 `randomOutcomes[0]` 为"好结果"。
    */
-  showEvent(event: EventConfig, onChoice: (index: number) => void, gold: number = 0, anyFreeSkillSlot: boolean = true): void {
+  showEvent(event: EventConfig, onChoice: (index: number) => void, gold: number = 0, anyFreeSkillSlot: boolean = true, luckPercent: number = 0): void {
     // 置位必须先于 node.active = true：节点首次激活会同步触发 onLoad，
     // 若此时 _showCalled 仍为 false，onLoad 会立即把面板关掉，事件永远无法交互
     this._showCalled = true;
@@ -97,11 +99,14 @@ export class EventUI extends Component {
           this.choiceContainer.addChild(btnNode);
         }
       } else if (event.type === 'random' && event.randomOutcomes) {
-        const totalWeight = event.randomOutcomes.reduce((sum, o) => sum + o.weight, 0);
+        // 天赋「幸运儿」：把"好结果"（约定 randomOutcomes[0]）的权重抬高 luck%
+        const luck = Math.max(0, luckPercent);
+        const weights = event.randomOutcomes.map((o, i) => i === 0 ? o.weight * (1 + luck / 100) : o.weight);
+        const totalWeight = weights.reduce((sum, w) => sum + w, 0);
         let roll = Math.random() * totalWeight;
         let selectedIndex = 0;
         for (let i = 0; i < event.randomOutcomes.length; i++) {
-          roll -= event.randomOutcomes[i].weight;
+          roll -= weights[i];
           if (roll <= 0) {
             selectedIndex = i;
             break;

@@ -33,4 +33,9 @@ node_modules/
 #//////////////////////////
 extensions/**/node_modules/
 
+#//////////////////////////
+# 浏览器验证产物（Playwright MCP 截图/快照，本地临时）
+#//////////////////////////
+.playwright-mcp/
+
 .DS_Store

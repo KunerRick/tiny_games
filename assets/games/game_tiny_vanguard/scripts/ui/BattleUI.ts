@@ -1,6 +1,6 @@
 import { _decorator, Component, Node, Label, Button, Sprite, SpriteFrame, UIOpacity, Vec2, Vec3, tween, instantiate, Prefab, UITransform, EventTouch } from 'cc';
 import {
-  ALPHA, CANVAS, CLASS_COLOR, COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_ICON, FONT_TITLE, FONT_TINY,
+  ALPHA, BATTLE_LAYOUT, CANVAS, CLASS_COLOR, COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_ICON, FONT_TITLE, FONT_TINY,
   applyButtonTheme, applyFont, applyFontAndColor, hex,
 } from '../config/Theme';
 const { ccclass, property } = _decorator;
@@ -283,6 +283,28 @@ export class BattleUI extends Component {
     // 单场胜利面板的“继续”按钮（场景节点，P2 建的）
     const continueBtn = this.victoryPanel?.getChildByName('ContinueBtn');
     applyButtonTheme(continueBtn?.getComponent(Button) ?? null, 'primary');
+    this.layoutActionBar();
+  }
+
+  /**
+   * 行动栏布局统一到 `BATTLE_LAYOUT` 令牌。
+   * 场景里容器是 480×72、三按钮间距 24；令牌是 640 宽 / 间距 16 / 按钮 132×48。
+   * 宽度不一致会让行动栏与上方阶段条（640）左右端对不齐（实测 480 vs 640）。
+   */
+  private layoutActionBar(): void {
+    const bar = this.endTurnButton?.parent ?? null;
+    const barUi = bar?.getComponent(UITransform);
+    if (barUi) {
+      barUi.setContentSize(BATTLE_LAYOUT.PHASE_BAR_WIDTH, BATTLE_LAYOUT.ACTION_BAR_HEIGHT);
+    }
+    const buttons = [this.attackButton, this.waitButton, this.endTurnButton];
+    const step = BATTLE_LAYOUT.ACTION_BTN_WIDTH + BATTLE_LAYOUT.ACTION_BTN_GAP;
+    buttons.forEach((n, i) => {
+      if (!n?.isValid) return;
+      const ui = n.getComponent(UITransform);
+      if (ui) ui.setContentSize(BATTLE_LAYOUT.ACTION_BTN_WIDTH, BATTLE_LAYOUT.ACTION_BTN_HEIGHT);
+      n.setPosition((i - 1) * step, n.position.y, 0);
+    });
   }
 
   /**

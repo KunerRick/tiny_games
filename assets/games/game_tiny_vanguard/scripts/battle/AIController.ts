@@ -1,10 +1,12 @@
 import { UnitController } from './UnitController';
 import { GridPosition, GridController } from './GridController';
-import { AIType } from '../config/GameData';
+import { AIType, getEnemyAbilityById } from '../config/GameData';
 
 export interface AIAction {
   moveTo: GridPosition;
   attackTarget: UnitController | null;
+  /** 本回合要释放的敌人技能 id（替换普通攻击）；不填 = 普通攻击 */
+  abilityId?: string | null;
 }
 
 export class AIController {
@@ -51,10 +53,52 @@ export class AIController {
       }
 
       occupied.push(action.moveTo);
-      actions.push(action);
+      actions.push(this.withAbility(enemy, action, alivePlayers));
     }
 
     return actions;
+  }
+
+  /**
+   * 若敌人有**冷却完毕**且目标在射程内的主动技能，就用它替换本回合的普通攻击。
+   *
+   * 目标沿用 `findTarget` 的"血量最低"口径（在技能射程内另选一次，因为技能的射程
+   * 可能与武器射程不同）。被动技能（盾墙/集结）不在这里处理：盾墙在受伤时生效、
+   * 集结在敌方回合开始时由 BattleManager 处理。
+   */
+  private withAbility(
+    enemy: UnitController, action: AIAction, players: UnitController[]
+  ): AIAction {
+    const data = enemy.data;
+    if (!data) return action;
+
+    for (const id of data.abilityIds) {
+      const ability = getEnemyAbilityById(id);
+      if (!ability || ability.type !== 'active') continue;
+      if (!enemy.isAbilityReady(id)) continue;
+
+      // 自身技能（嘲讽）：身边有玩家即可，不必有攻击目标
+      if (ability.targetType === 'self') {
+        const radius = ability.effects.find(e => e.type === 'taunt')?.params.radius ?? 1;
+        const near = players.some(p =>
+          p.data?.isAlive && this.manhattanDist(action.moveTo, p.data.gridPos) <= radius
+        );
+        if (near) return { ...action, abilityId: id };
+        continue;
+      }
+
+      const range = ability.range ?? data.stats.range;
+      const candidates = players.filter(p =>
+        p.data?.isAlive && this.manhattanDist(action.moveTo, p.data.gridPos) <= range
+      );
+      if (candidates.length === 0) continue;
+      // 与普通攻击一致的选目标口径：血量最低
+      const target = candidates.reduce((a, b) =>
+        ((a.data?.currentHp ?? 999) <= (b.data?.currentHp ?? 999)) ? a : b
+      );
+      return { ...action, attackTarget: target, abilityId: id };
+    }
+    return action;
   }
 
   private decideAggressive(
@@ -283,15 +327,36 @@ export class AIController {
     return positions;
   }
 
-  /** 找最低血量目标（通用） */
+  /**
+   * 选攻击目标（设计 §5.4：优先"攻击范围内血量最低"）。
+   *
+   * 原实现只看**全图**血量最低的那一个 → 所有敌人横穿棋盘去追同一个残血：多数回合谁也
+   * 够不着（玩家只挨一个方向的打），且压力全堆在同一人身上。改为两级：
+   * 1. 本回合够得着的（移动 + 射程内）里挑血量最低；
+   * 2. 一个都够不着时走向**最近**的（并列再比血量），避免全员同向。
+   */
   private findTarget(
     enemy: UnitController, players: UnitController[]
   ): UnitController | null {
+    if (!enemy.data) return null;
     const alive = players.filter(u => u.data?.isAlive);
     if (alive.length === 0) return null;
-    return alive.reduce((a: UnitController, b: UnitController) =>
-      ((a.data?.currentHp ?? 999) < (b.data?.currentHp ?? 999)) ? a : b
+
+    const reach = enemy.data.stats.move + enemy.data.stats.range;
+    const reachable = alive.filter(u =>
+      this.manhattanDist(enemy.data!.gridPos, u.data!.gridPos) <= reach
     );
+    if (reachable.length > 0) {
+      return reachable.reduce((a, b) =>
+        ((a.data?.currentHp ?? 999) <= (b.data?.currentHp ?? 999)) ? a : b
+      );
+    }
+    return alive.reduce((a, b) => {
+      const da = this.manhattanDist(enemy.data!.gridPos, a.data!.gridPos);
+      const db = this.manhattanDist(enemy.data!.gridPos, b.data!.gridPos);
+      if (da !== db) return da < db ? a : b;
+      return ((a.data?.currentHp ?? 999) <= (b.data?.currentHp ?? 999)) ? a : b;
+    });
   }
 
   /** 找最近目标 */

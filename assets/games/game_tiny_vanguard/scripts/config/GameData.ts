@@ -11,7 +11,7 @@ export interface EnergyConfig {
   regen: number;
 }
 
-export type TargetType = 'self' | 'ally' | 'enemy' | 'tile' | 'aoe';
+export type TargetType = 'self' | 'ally' | 'enemy' | 'tile' | 'aoe' | 'line';
 export type SkillType = 'active' | 'passive';
 export type TriggerCondition = 'on_attack' | 'on_hit' | 'on_turn_start' | 'on_kill';
 export type EventType = 'choice' | 'random';
@@ -33,6 +33,11 @@ export interface SkillConfig {
   effects: SkillEffect[];
   preMove?: boolean;
   range?: number;
+  /**
+   * 敌人技能的**冷却回合数**（设计 §5.6：敌人不用能量，精英/Boss 技能走固定冷却）。
+   * 玩家技能不填（玩家用能量）。
+   */
+  cooldown?: number;
 }
 
 export interface ClassConfig {
@@ -234,6 +239,80 @@ export const SKILLS: Record<string, SkillConfig> = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// 敌人技能（设计 §5.1 普通 / §5.2 精英 / §5.3 Boss）
+//
+// 敌人**不使用能量**（§5.6），改用 `cooldown`（释放后需等待的回合数）。
+// id 一律 `enemy_` / `elite_` / `boss_` 前缀，确保不会混进任何职业的 skillPool，
+// 也不会被玩家"学技能"类奖励抽到。
+// ---------------------------------------------------------------------------
+export const ENEMY_ABILITIES: Record<string, SkillConfig> = {
+  // --- 普通敌人 ---
+  enemy_armor_break: {
+    id: 'enemy_armor_break', name: '破甲斩', type: 'active', energyCost: 0, targetType: 'enemy', cooldown: 3,
+    description: '1.5倍伤害',
+    effects: [{ type: 'damage_multiplier', params: { multiplier: 1.5 } }]
+  },
+  enemy_rapid_fire: {
+    id: 'enemy_rapid_fire', name: '速射', type: 'active', energyCost: 0, targetType: 'enemy', cooldown: 3, range: 2,
+    description: '连射两箭（各70%）',
+    effects: [{ type: 'multi_attack', params: { count: 2, multiplier: 0.7 } }]
+  },
+  enemy_shield_wall: {
+    id: 'enemy_shield_wall', name: '盾墙', type: 'passive', energyCost: 0, targetType: 'self',
+    description: '相邻友方受伤-1',
+    effects: [{ type: 'shield_wall', params: { amount: 1 } }]
+  },
+  enemy_shadow_step: {
+    id: 'enemy_shadow_step', name: '暗影步', type: 'active', energyCost: 0, targetType: 'enemy', cooldown: 4, range: 4,
+    description: '瞬移到目标背后并攻击',
+    effects: [
+      { type: 'teleport_behind', params: { multiplier: 1.2 } },
+      { type: 'damage_multiplier', params: { multiplier: 1.2 } }
+    ]
+  },
+
+  // --- 精英（§5.2）---
+  elite_sword_wave: {
+    id: 'elite_sword_wave', name: '剑气斩', type: 'active', energyCost: 0, targetType: 'line', cooldown: 3, range: 2,
+    description: '直线2格AOE',
+    effects: [{ type: 'line_aoe', params: { length: 2, multiplier: 1.2 } }]
+  },
+  elite_snipe: {
+    id: 'elite_snipe', name: '狙击', type: 'active', energyCost: 0, targetType: 'enemy', cooldown: 3, range: 3,
+    description: '2倍伤害，无视防御',
+    effects: [{ type: 'damage_multiplier', params: { multiplier: 2.0 } }, { type: 'ignore_defense', params: { value: 1 } }]
+  },
+  elite_taunt: {
+    id: 'elite_taunt', name: '嘲讽', type: 'active', energyCost: 0, targetType: 'self', cooldown: 3,
+    description: '强制相邻玩家单位攻击自己',
+    effects: [{ type: 'taunt', params: { radius: 1, duration: 1 } }]
+  },
+  elite_double_stab: {
+    id: 'elite_double_stab', name: '连刺', type: 'active', energyCost: 0, targetType: 'enemy', cooldown: 3,
+    description: '攻击两次',
+    effects: [{ type: 'multi_attack', params: { count: 2, multiplier: 1.0 } }]
+  },
+
+  // --- Boss（§5.3）---
+  boss_sweep: {
+    id: 'boss_sweep', name: '横扫', type: 'active', energyCost: 0, targetType: 'line', cooldown: 3, range: 3,
+    description: '前方3格直线AOE',
+    effects: [{ type: 'line_aoe', params: { length: 3, multiplier: 1.5 } }]
+  },
+  boss_summon: {
+    id: 'boss_summon', name: '集结', type: 'passive', energyCost: 0, targetType: 'self',
+    description: '每2回合召唤1个剑兵增援',
+    // 被动：由 BattleManager 在敌方回合开始时处理（不在 executeSkillEffects 里）
+    effects: [{ type: 'summon', params: { interval: 2, count: 1 } }]
+  },
+};
+
+/** 敌人技能查询（含普通技能表，便于复用同一套效果执行） */
+export function getEnemyAbilityById(id: string): SkillConfig | undefined {
+  return ENEMY_ABILITIES[id];
+}
+
 export const CLASSES: ClassConfig[] = [
   {
     id: 'warrior', name: '战士', icon: '\u2694\uFE0F',
@@ -269,22 +348,22 @@ export const ENEMIES: EnemyConfig[] = [
   {
     id: 'swordsman', name: '剑兵',
     stats: { hp: 6, attack: 3, defense: 1, move: 3, range: 1 },
-    abilityIds: [], aiBehavior: 'aggressive'
+    abilityIds: ['enemy_armor_break'], aiBehavior: 'aggressive'
   },
   {
     id: 'crossbowman', name: '弩手',
     stats: { hp: 4, attack: 3, defense: 0, move: 3, range: 2 },
-    abilityIds: [], aiBehavior: 'ranged'
+    abilityIds: ['enemy_rapid_fire'], aiBehavior: 'ranged'
   },
   {
     id: 'shieldbearer', name: '盾兵',
     stats: { hp: 10, attack: 2, defense: 3, move: 2, range: 1 },
-    abilityIds: [], aiBehavior: 'defensive'
+    abilityIds: ['enemy_shield_wall'], aiBehavior: 'defensive'
   },
   {
     id: 'shadowblade', name: '影刺',
     stats: { hp: 4, attack: 4, defense: 0, move: 4, range: 1 },
-    abilityIds: [], aiBehavior: 'flanking'
+    abilityIds: ['enemy_shadow_step'], aiBehavior: 'flanking'
   },
 ];
 
@@ -292,22 +371,22 @@ export const ELITE_ENEMIES: EnemyConfig[] = [
   {
     id: 'elite_swordsman', name: '精英剑兵',
     stats: { hp: 10, attack: 5, defense: 2, move: 3, range: 1 },
-    abilityIds: [], aiBehavior: 'aggressive'
+    abilityIds: ['elite_sword_wave'], aiBehavior: 'aggressive'
   },
   {
     id: 'elite_crossbowman', name: '精英弩手',
     stats: { hp: 7, attack: 5, defense: 1, move: 3, range: 2 },
-    abilityIds: [], aiBehavior: 'ranged'
+    abilityIds: ['elite_snipe'], aiBehavior: 'ranged'
   },
   {
     id: 'elite_shieldbearer', name: '精英盾兵',
     stats: { hp: 16, attack: 3, defense: 4, move: 2, range: 1 },
-    abilityIds: [], aiBehavior: 'defensive'
+    abilityIds: ['enemy_shield_wall', 'elite_taunt'], aiBehavior: 'defensive'
   },
   {
     id: 'elite_shadowblade', name: '精英影刺',
     stats: { hp: 7, attack: 6, defense: 0, move: 4, range: 1 },
-    abilityIds: [], aiBehavior: 'flanking'
+    abilityIds: ['elite_double_stab'], aiBehavior: 'flanking'
   },
 ];
 
@@ -364,7 +443,7 @@ export const EVENTS: EventConfig[] = [
 export const TALENTS: TalentConfig[] = [
   { id: 'power_up', name: '力量强化', category: 'attack', description: '开局全员+1攻击力', maxPurchases: 1, cost: 50, effect: { type: 'bonus_attack', params: { amount: 1 } } },
   { id: 'energy_up', name: '能量充盈', category: 'attack', description: '开局全员+1能量上限', maxPurchases: 2, cost: 50, effect: { type: 'bonus_energy_max', params: { amount: 1 } } },
-  { id: 'class_mastery', name: '职业精通', category: 'attack', description: '某职业+2初始攻击', maxPurchases: 1, cost: 50, effect: { type: 'bonus_class_attack', params: { amount: 2 } } },
+  { id: 'class_mastery', name: '职业精通', category: 'attack', description: '首位职业+2初始攻击', maxPurchases: 1, cost: 50, effect: { type: 'bonus_class_attack', params: { amount: 2 } } },
   { id: 'hp_up', name: '生命强化', category: 'defense', description: '开局全员+1血量', maxPurchases: 3, cost: 50, effect: { type: 'bonus_hp', params: { amount: 1 } } },
   { id: 'armor_up', name: '铁甲', category: 'defense', description: '开局全员+1防御', maxPurchases: 1, cost: 50, effect: { type: 'bonus_defense', params: { amount: 1 } } },
   { id: 'energy_regen', name: '能量再生', category: 'defense', description: '每回合能量回复+1', maxPurchases: 1, cost: 50, effect: { type: 'bonus_energy_regen', params: { amount: 1 } } },

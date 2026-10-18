@@ -1,6 +1,6 @@
 import { _decorator, Component, Node, Sprite, Color, tween, Vec3, Label, Tween, UITransform } from 'cc';
 import { GridPosition, GridController } from './GridController';
-import { SkillConfig, getClassById, EnemyConfig, AIType } from '../config/GameData';
+import { SkillConfig, getClassById, EnemyConfig, AIType, getEnemyAbilityById } from '../config/GameData';
 import { ALPHA, CLASS_COLOR, COLOR, FACTION, FONT_ICON, applyFontAndColor, hex, hpBarColor } from '../config/Theme';
 
 const { ccclass, property } = _decorator;
@@ -30,6 +30,10 @@ export interface UnitData {
   passiveApplied: string[];
   aiBehavior: AIType;
   preMoveSkillUsed: boolean;
+  /** 敌人技能 id 列表（玩家单位为空；来自 EnemyConfig.abilityIds） */
+  abilityIds: string[];
+  /** 敌人技能冷却：id → 还需等待的回合数（0/缺省 = 可用；设计 §5.6 用冷却替代能量） */
+  abilityCooldowns: { [id: string]: number };
 }
 
 export interface BuffEntry {
@@ -63,6 +67,12 @@ export class UnitController extends Component {
   private _hpFill: Sprite | null = null;
   private _hpFillUi: UITransform | null = null;
   private _hpFillFullWidth: number = 50;
+  /**
+   * 同阵营单位列表的提供者（由 BattleManager 注入）。
+   * 仅用于**光环类被动**（如盾兵的"盾墙：相邻友方受伤 -1"）—— `takeDamage`
+   * 需要查相邻友军，而它拿不到战场数组。
+   */
+  private _allyProvider: (() => UnitController[]) | null = null;
 
   onDestroy(): void {
     if (this._selectTween) {
@@ -108,6 +118,8 @@ export class UnitController extends Component {
       passiveApplied: [],
       aiBehavior: config.aiBehavior,
       preMoveSkillUsed: false,
+      abilityIds: [...(config.abilityIds ?? [])],
+      abilityCooldowns: {},
     };
 
     this.updatePosition();
@@ -150,6 +162,8 @@ export class UnitController extends Component {
       passiveApplied: [],
       aiBehavior: 'aggressive',
       preMoveSkillUsed: false,
+      abilityIds: [],
+      abilityCooldowns: {},
     };
 
     this.updatePosition();
@@ -287,6 +301,11 @@ export class UnitController extends Component {
   }
 
   /** 按 currentHp/maxHp 刷新血条宽度与颜色（左端锚定：左缘恒定、右端后退） */
+  /** 外部改动 maxHp 后刷新血条（如天赋加成，见 TinyVanguardMain.applyTalentsToParty） */
+  refreshHealthBarVisual(): void {
+    this.updateHealthBar();
+  }
+
   private updateHealthBar(): void {
     if (!this._data || !this._hpFill || !this._hpFillUi) return;
     const ratio = this._data.maxHp > 0
@@ -369,6 +388,12 @@ export class UnitController extends Component {
       actualDamage = Math.max(1, rawAmount - this._data.stats.defense);
     }
 
+    // 盾墙光环（盾兵被动）：相邻友方少受伤害（允许减到 0 = 完全挡下）
+    const wallGuard = this.shieldWallGuard();
+    if (wallGuard > 0) {
+      actualDamage = Math.max(0, actualDamage - wallGuard);
+    }
+
     if (this._data.shieldAmount > 0) {
       const absorbed = Math.min(this._data.shieldAmount, actualDamage);
       this._data.shieldAmount -= absorbed;
@@ -409,6 +434,52 @@ export class UnitController extends Component {
 
   hasSkill(skillId: string): boolean {
     return this._data?.skills.some(s => s.id === skillId) ?? false;
+  }
+
+  /** 注入同阵营单位列表（光环类被动查相邻友军用；由 BattleManager 接线） */
+  setAllyProvider(provider: (() => UnitController[]) | null): void {
+    this._allyProvider = provider;
+  }
+
+  /** 是否拥有某个敌人技能（敌人技能存在 abilityIds，不进 skills，避免被玩家学习/显示） */
+  hasAbility(abilityId: string): boolean {
+    return this._data?.abilityIds.includes(abilityId) ?? false;
+  }
+
+  /** 该敌人技能是否已冷却完毕 */
+  isAbilityReady(abilityId: string): boolean {
+    return (this._data?.abilityCooldowns[abilityId] ?? 0) <= 0;
+  }
+
+  /** 释放后进入冷却（设计 §5.6：敌人不用能量，精英/Boss 技能走固定冷却） */
+  startAbilityCooldown(abilityId: string, cooldown: number): void {
+    if (!this._data) return;
+    this._data.abilityCooldowns[abilityId] = Math.max(1, cooldown);
+  }
+
+  /** 回合开始时递减技能冷却 */
+  private tickAbilityCooldowns(): void {
+    if (!this._data) return;
+    for (const id of Object.keys(this._data.abilityCooldowns)) {
+      this._data.abilityCooldowns[id] = Math.max(0, this._data.abilityCooldowns[id] - 1);
+    }
+  }
+
+  /**
+   * 盾墙光环的减伤值：若存在**相邻**且带 `enemy_shield_wall` 的友军，取其 amount（只减一次）。
+   * 语义按设计 §5.1"相邻友方受伤 -1" —— 提供者本人不享受自己的光环。
+   */
+  private shieldWallGuard(): number {
+    if (!this._data || !this._allyProvider) return 0;
+    const cfg = getEnemyAbilityById('enemy_shield_wall');
+    const amount = cfg?.effects.find(e => e.type === 'shield_wall')?.params.amount ?? 1;
+    for (const ally of this._allyProvider()) {
+      if (!ally || ally === this || !ally.data?.isAlive || !ally.hasAbility('enemy_shield_wall')) continue;
+      const dist = Math.abs(ally.data.gridPos.row - this._data.gridPos.row) +
+        Math.abs(ally.data.gridPos.col - this._data.gridPos.col);
+      if (dist <= 1) return amount;
+    }
+    return 0;
   }
 
   private _onDeath(): void {
@@ -581,6 +652,8 @@ export class UnitController extends Component {
 
     this._data.energy = Math.min(this._data.maxEnergy, this._data.energy + this._data.energyRegen);
     this._data.hasMoved = false;
+    // 敌人技能冷却递减（玩家单位没有 abilityIds，空转无副作用）
+    this.tickAbilityCooldowns();
     this._data.hasActed = false;
     this._data.preMoveSkillUsed = false;
 
