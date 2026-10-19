@@ -38,4 +38,11 @@ extensions/**/node_modules/
 #//////////////////////////
 .playwright-mcp/
 
+#//////////////////////////
+# 微信开发者工具（只应打开 build/wechatgame/；根目录这两份是误开产生的本地文件）
+# 用前导 / 锚定仓库根，避免误伤 build/wechatgame/ 下的同名配置
+#//////////////////////////
+/project.config.json
+/project.private.config.json
+
 .DS_Store
