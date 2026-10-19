@@ -10,11 +10,21 @@ export interface AIAction {
 }
 
 export class AIController {
+  /**
+   * 本回合**已经选定**的攻击目标计数（每回合 `decideAll` 开头清空）。
+   * 用于让"后来决策的敌人"避开已被同伴盯上的目标 —— 见 `scoreTarget`。
+   */
+  private _focusCount: Map<UnitController, number> = new Map();
+  /** 每回合自增的抖动种子，让同一局面下不同回合的选目标略有变化（可复现，不用 Math.random） */
+  private _turnSeed: number = 0;
+
   decideAll(enemies: UnitController[], players: UnitController[]): AIAction[] {
     const aliveEnemies = enemies.filter(u => u.data?.isAlive);
     const alivePlayers = players.filter(u => u.data?.isAlive);
     const occupied = this.getAllOccupiedPositions(enemies, players);
     const actions: AIAction[] = [];
+    this._focusCount.clear();
+    this._turnSeed++;
 
     for (const enemy of enemies) {
       if (!enemy.data?.isAlive || enemy.data.hasActed) {
@@ -53,7 +63,13 @@ export class AIController {
       }
 
       occupied.push(action.moveTo);
-      actions.push(this.withAbility(enemy, action, alivePlayers));
+      const finalAction = this.withAbility(enemy, action, alivePlayers);
+      // 记账：被选中的目标本回合已被 N 个敌人盯上，后续敌人会倾向换目标
+      if (finalAction.attackTarget) {
+        const t = finalAction.attackTarget;
+        this._focusCount.set(t, (this._focusCount.get(t) ?? 0) + 1);
+      }
+      actions.push(finalAction);
     }
 
     return actions;
@@ -92,10 +108,8 @@ export class AIController {
         p.data?.isAlive && this.manhattanDist(action.moveTo, p.data.gridPos) <= range
       );
       if (candidates.length === 0) continue;
-      // 与普通攻击一致的选目标口径：血量最低
-      const target = candidates.reduce((a, b) =>
-        ((a.data?.currentHp ?? 999) <= (b.data?.currentHp ?? 999)) ? a : b
-      );
+      // 与普通攻击共用同一套打分（距离 + 残血 + 集火惩罚），不再单独"挑血量最低"
+      const target = this.pickBestTarget(enemy, candidates) ?? candidates[0];
       return { ...action, attackTarget: target, abilityId: id };
     }
     return action;
@@ -328,12 +342,20 @@ export class AIController {
   }
 
   /**
-   * 选攻击目标（设计 §5.4：优先"攻击范围内血量最低"）。
+   * 选攻击目标。
    *
-   * 原实现只看**全图**血量最低的那一个 → 所有敌人横穿棋盘去追同一个残血：多数回合谁也
-   * 够不着（玩家只挨一个方向的打），且压力全堆在同一人身上。改为两级：
-   * 1. 本回合够得着的（移动 + 射程内）里挑血量最低；
-   * 2. 一个都够不着时走向**最近**的（并列再比血量），避免全员同向。
+   * 历史实现有两个极端，都让玩家难受：
+   * ① 只看**全图**血量最低 → 全员横穿棋盘追同一个残血；
+   * ② 改成"够得着的里面挑血量最低"之后，仍然是**所有**敌人在同一回合里
+   *    无条件选同一个人 → 后排脆皮（法师/牧师）每场开局即被集火秒杀。
+   *
+   * 现在改为**加权打分**（§5.4 的"血量最低"降级为一个次要项），三项：
+   * - 距离（权重 5，主导）：优先打够得着的，天然保护后排；
+   * - 血量比（权重 2，次要）：同等距离下先收残血，保留"斩杀"手感；
+   * - 集火惩罚（权重 8/人）：本回合已被同伴盯上的目标大幅降权，
+   *   于是最多约两人打同一个 —— 挨打面分散，不再"逮着脆皮切"；
+   * 另加 ±2 的确定性抖动（同一局面同回合结果可复现），避免满盘同分时
+   * 全部落到数组第一个。
    */
   private findTarget(
     enemy: UnitController, players: UnitController[]
@@ -346,17 +368,49 @@ export class AIController {
     const reachable = alive.filter(u =>
       this.manhattanDist(enemy.data!.gridPos, u.data!.gridPos) <= reach
     );
-    if (reachable.length > 0) {
-      return reachable.reduce((a, b) =>
-        ((a.data?.currentHp ?? 999) <= (b.data?.currentHp ?? 999)) ? a : b
-      );
+    const pool = reachable.length > 0 ? reachable : alive;
+    return this.pickBestTarget(enemy, pool);
+  }
+
+  /**
+   * 打分选目标（`pool` 为候选集合，调用方决定是"够得着的"还是"全部"）。
+   * 分数越大越好；各项权重见 `findTarget` 注释。
+   */
+  private pickBestTarget(
+    enemy: UnitController, pool: UnitController[]
+  ): UnitController | null {
+    if (!enemy.data || pool.length === 0) return null;
+    let best: UnitController | null = null;
+    let bestScore = -Infinity;
+
+    for (const u of pool) {
+      if (!u.data) continue;
+      const dist = this.manhattanDist(enemy.data.gridPos, u.data.gridPos);
+      const hpRatio = u.data.maxHp > 0 ? u.data.currentHp / u.data.maxHp : 1;
+      const focus = this._focusCount.get(u) ?? 0;
+
+      let score = -dist * 5;
+      score -= (1 - hpRatio) * 2;
+      score -= focus * 8;
+      score += (this.hashNoise(enemy, u) - 0.5) * 4;
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = u;
+      }
     }
-    return alive.reduce((a, b) => {
-      const da = this.manhattanDist(enemy.data!.gridPos, a.data!.gridPos);
-      const db = this.manhattanDist(enemy.data!.gridPos, b.data!.gridPos);
-      if (da !== db) return da < db ? a : b;
-      return ((a.data?.currentHp ?? 999) <= (b.data?.currentHp ?? 999)) ? a : b;
-    });
+    return best;
+  }
+
+  /** 确定性的 [0,1) 噪声：同一敌人×目标×回合恒定，便于复现与排查 */
+  private hashNoise(enemy: UnitController, target: UnitController): number {
+    const s = `${enemy.data?.id ?? '?'}|${target.data?.id ?? '?'}|${this._turnSeed}`;
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return ((h >>> 0) % 1000) / 1000;
   }
 
   /** 找最近目标 */
@@ -372,21 +426,42 @@ export class AIController {
     }, null as UnitController | null);
   }
 
-  /** 找最低防御目标（影刺用），优先法师→牧师→弓手→战士 */
+  /**
+   * 找"好切"的目标（影刺/绕后单位用）。
+   *
+   * 原实现用一张写死的职业优先级表 `{mage:0, archer:1, cleric:1, warrior:2}`
+   * 且**完全不看距离** → 场上只要有法师，所有影刺从第一回合起就认定它，
+   * 哪怕隔着整个棋盘。现在同样改为打分：职业脆皮只是加分项，
+   * 距离与集火惩罚仍然是主导，影刺会切**够得着的**软目标而不是认死法师。
+   */
   private findWeakestTarget(
     enemy: UnitController, players: UnitController[]
   ): UnitController | null {
     const alive = players.filter(u => u.data?.isAlive);
-    if (alive.length === 0) return null;
+    if (alive.length === 0 || !enemy.data) return null;
 
-    const defOrder: Record<string, number> = { mage: 0, archer: 1, cleric: 1, warrior: 2 };
+    const squishiness: Record<string, number> = { mage: 3, archer: 2, cleric: 2, warrior: 0 };
 
-    return alive.sort((a, b) => {
-      const aDef = a.data ? (defOrder[a.data.classId] ?? a.data.stats.defense) : 99;
-      const bDef = b.data ? (defOrder[b.data.classId] ?? b.data.stats.defense) : 99;
-      if (aDef !== bDef) return aDef - bDef;
-      return (a.data?.currentHp ?? 999) - (b.data?.currentHp ?? 999);
-    })[0];
+    let best: UnitController | null = null;
+    let bestScore = -Infinity;
+    for (const u of alive) {
+      if (!u.data) continue;
+      const dist = this.manhattanDist(enemy.data.gridPos, u.data.gridPos);
+      const hpRatio = u.data.maxHp > 0 ? u.data.currentHp / u.data.maxHp : 1;
+      const focus = this._focusCount.get(u) ?? 0;
+
+      let score = -dist * 4;
+      score -= (1 - hpRatio) * 2;
+      score += squishiness[u.data.classId] ?? 0;
+      score -= focus * 6;
+      score += (this.hashNoise(enemy, u) - 0.5) * 3;
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = u;
+      }
+    }
+    return best;
   }
 
   /** 找被玩家单位相邻威胁的友军（盾兵用） */

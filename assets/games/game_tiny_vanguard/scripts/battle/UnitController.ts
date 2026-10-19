@@ -30,6 +30,20 @@ export interface UnitData {
   passiveApplied: string[];
   aiBehavior: AIType;
   preMoveSkillUsed: boolean;
+  /**
+   * 本场战斗**该单位造成**的有效伤害总量与击杀数（每次战斗重建时归零）。
+   * 战后经验结算按这两个数分配，所以必须记在**攻击方**身上 —— 原先只在
+   * BattleManager 里累加一个队伍总量 `_totalDamageDealt`，无法区分是谁打的，
+   * 于是"每人每场都升级"成了唯一可行方案。
+   */
+  damageDealt: number;
+  kills: number;
+  /**
+   * 额外的技能栏位（默认 0 = 上限 MAX_SKILLS）。
+   * 由商店/圣泉的「技能栏 +1」写入，跨战斗持久（走 RunData.unitProgress），
+   * 因此必须在**恢复技能之前**赋值，否则第 4 个技能会被 addSkill 拒绝。
+   */
+  skillSlotBonus: number;
   /** 敌人技能 id 列表（玩家单位为空；来自 EnemyConfig.abilityIds） */
   abilityIds: string[];
   /** 敌人技能冷却：id → 还需等待的回合数（0/缺省 = 可用；设计 §5.6 用冷却替代能量） */
@@ -164,6 +178,9 @@ export class UnitController extends Component {
       passiveApplied: [],
       aiBehavior: config.aiBehavior,
       preMoveSkillUsed: false,
+      damageDealt: 0,
+      kills: 0,
+      skillSlotBonus: 0,
       abilityIds: [...(config.abilityIds ?? [])],
       abilityCooldowns: {},
     };
@@ -208,6 +225,9 @@ export class UnitController extends Component {
       passiveApplied: [],
       aiBehavior: 'aggressive',
       preMoveSkillUsed: false,
+      damageDealt: 0,
+      kills: 0,
+      skillSlotBonus: 0,
       abilityIds: [],
       abilityCooldowns: {},
     };
@@ -760,6 +780,14 @@ export class UnitController extends Component {
       this._data.hasActed = true;
     }
 
+    // 战绩记账（战后经验结算的依据）：全部走 takeDamage 这条唯一通路，
+    // 普攻/技能/AOE/毒伤都能被统计到，且不必改动任何调用点。
+    // 只记在玩家单位身上；`attacker !== this` 排除反伤/自伤。
+    if (attacker && attacker !== this && attacker.data?.isPlayer) {
+      attacker.data.damageDealt += actualDamage;
+      if (isDead) attacker.data.kills += 1;
+    }
+
     // 设计意图：即使本次伤害导致死亡，也允许触发一次反击（同归于尽/濒死反扑）
     // 反击在 _onDeath 之前执行，确保 buff 仍生效
     if (attacker && !this._countering && !ignoreDefense && this.hasPassive('counter')) {
@@ -859,12 +887,6 @@ export class UnitController extends Component {
     this.updateHealthBar();
   }
 
-  healFull(): void {
-    if (!this._data || !this._data.isAlive) return;
-    this._data.currentHp = this._data.maxHp;
-    this.updateHealthBar();
-  }
-
   canUseSkill(skillIndex: number): boolean {
     if (!this._data) return false;
     if (skillIndex < 0 || skillIndex >= this._data.skills.length) return false;
@@ -895,7 +917,7 @@ export class UnitController extends Component {
   addSkill(skill: SkillConfig): boolean {
     if (!this._data || !skill) return false;
     if (this.hasSkill(skill.id)) return false;
-    if (this._data.skills.length >= MAX_SKILLS) return false;
+    if (this._data.skills.length >= this.maxSkillSlots) return false;
 
     this._data.skills.push(skill);
 
@@ -905,9 +927,14 @@ export class UnitController extends Component {
     return true;
   }
 
+  /** 技能位上限 = 基础 3 + 圣泉「精进」给的额外栏位 */
+  get maxSkillSlots(): number {
+    return MAX_SKILLS + (this._data?.skillSlotBonus ?? 0);
+  }
+
   /** 技能位是否还有空位（升级/商店/事件在选择落点前先问这里） */
   get hasFreeSkillSlot(): boolean {
-    return (this._data?.skills.length ?? MAX_SKILLS) < MAX_SKILLS;
+    return (this._data?.skills.length ?? this.maxSkillSlots) < this.maxSkillSlots;
   }
 
   /** 已学技能数 */
@@ -1109,6 +1136,9 @@ export class UnitController extends Component {
     this._data.hasMoved = false;
     this._data.hasActed = false;
     this._data.preMoveSkillUsed = false;
+    // 战绩每场清零（skillSlotBonus 不清：那是圣泉给的永久栏位）
+    this._data.damageDealt = 0;
+    this._data.kills = 0;
     this._data.stats = { ...this._data.baseStats };
     // 不清空 passiveApplied — 永久被动（铁壁/鹰眼/魔力涌动）已写入 baseStats
     // 每次战斗开始时 onTurnStart 会通过 passiveApplied 检查避免重复应用
