@@ -58,7 +58,8 @@ tiny_games/
 │   │   ├── game_2048/          # 场景: Game2048
 │   │   ├── game_snake/         # 场景: Snake
 │   │   ├── game_war_evolution/ # 场景: WarEvo
-│   │   └── game_tiny_vanguard/ # 场景: TinyVanguard
+│   │   ├── game_tiny_vanguard/ # 场景: TinyVanguard
+│   │   └── game_tetris/        # 场景: Tetris
 │   ├── common/            # 公共模块
 │   │   ├── managers/      # SceneManager, StorageManager, GameConfig
 │   │   └── components/    # BackButton, SafeAreaAdapter
@@ -72,7 +73,7 @@ tiny_games/
 │   ├── assets/            # 文档配图
 │   ├── tech/              # 技术决策与踩坑详情（AGENTS.md 教训的展开）
 │   └── cocos-best-practices.md
-├── tools/                 # 本地校验脚本（verify-battle-fixes.js、check-wechat-build.js、replay-wechat-bundle.js）
+├── tools/                 # 本地校验脚本（verify-battle-fixes.js、verify-tetris-core.js、check-wechat-build.js、replay-wechat-bundle.js）
 ├── settings/              # Cocos 编辑器设置
 ├── extensions/            # 编辑器插件（tsconfig 排除；node_modules 已 gitignore）
 └── build/                 # 构建输出（gitignored）
@@ -87,6 +88,7 @@ tiny_games/
 { id: 'war_evo',      name: '战争进化', icon: 'default', sceneName: 'WarEvo',       description: '时代进化对推' }
 { id: 'snake',        name: '贪吃蛇',   icon: 'default', sceneName: 'Snake',        description: '大作战风格贪吃蛇' }
 { id: 'tiny_vanguard', name: '小小先锋', icon: 'default', sceneName: 'TinyVanguard', description: 'Roguelike 回合制战棋' }
+{ id: 'tetris',       name: '方块坠落', icon: 'default', sceneName: 'Tetris',       description: '经典方块消除' }
 ```
 
 **添加新游戏三步骤**：① `GameConfig.ts` 注册 ② 创建 `assets/games/game_xxx/scenes/Xxx.scene` ③ 场景名与 `sceneName` 一致。
@@ -172,6 +174,13 @@ node tools/verify-battle-fixes.js
 # 注意：脚本内 ROOT 硬编码为作者的 Windows 路径，跨机运行前需先改成本机绝对路径
 ```
 
+方块坠落纯逻辑自检（不启动编辑器，覆盖 SRS 四态与踢墙、7-bag、出生位置、消行、Ghost、计分与重力表）：
+
+```bash
+node tools/verify-tetris-core.js
+# 需要 tsc：优先 $TSC，其次 node_modules，最后回落 Cocos Creator 自带版本
+```
+
 微信小游戏构建产物预检（**把 `build/wechatgame/` 交给微信开发者工具之前跑**，退出码 0 = 可开）：
 
 ```bash
@@ -251,3 +260,5 @@ node tools/replay-wechat-bundle.js               # 复现/反证：产物在「�
 - [贪吃蛇设计](./docs/specs/2026-05-26-game-snake-design.md)
 - [战争进化设计](./docs/specs/2026-05-18-game-war-evolution-design.md)
 - [Tiny Vanguard 设计](./docs/specs/2026-05-28-tiny-vanguard-design.md)
+- [方块坠落设计](./docs/specs/2026-10-25-game-tetris-design.md)
+- [方块坠落验收报告（含界面美化记录）](./docs/plans/2026-10-25-game-tetris-acceptance.md)

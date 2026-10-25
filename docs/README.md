@@ -85,6 +85,13 @@
 | 场景配置 | [`design/2025-05-14-2048-ui-setup-guide.md`](./design/2025-05-14-2048-ui-setup-guide.md) | UI 搭建指南 |
 | 场景配置 | [`design/2025-05-14-2048-ui-redesign.md`](./design/2025-05-14-2048-ui-redesign.md) | UI 重设计 |
 
+### 方块坠落（Tetris）
+
+| 类型 | 文件 | 说明 |
+|------|------|------|
+| 游戏设计 | [`specs/2026-10-25-game-tetris-design.md`](./specs/2026-10-25-game-tetris-design.md) | 双操作模式（全屏手势 / 虚拟按键）+ 引导与提示条设计 |
+| 验收报告 | [`plans/2026-10-25-game-tetris-acceptance.md`](./plans/2026-10-25-game-tetris-acceptance.md) | M8 逐项验收结论 + 微信构建预检（含阻塞项） |
+
 ### 大厅与整体
 
 | 类型 | 文件 | 说明 |
