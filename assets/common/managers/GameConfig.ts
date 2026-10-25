@@ -13,6 +13,7 @@ export const GAME_LIST: GameConfig[] = [
     { id: 'war_evo', name: '战争进化', icon: 'default', sceneName: 'WarEvo', description: '时代进化对推' },
     { id: 'snake', name: '贪吃蛇', icon: 'default', sceneName: 'Snake', description: '大作战风格贪吃蛇' },
     { id: 'tiny_vanguard', name: '小小先锋', icon: 'default', sceneName: 'TinyVanguard', description: 'Roguelike 回合制战棋' },
+    { id: 'tetris', name: '方块坠落', icon: 'default', sceneName: 'Tetris', description: '经典方块消除' },
 ];
 
 export function getGameById(id: string): GameConfig | undefined {
