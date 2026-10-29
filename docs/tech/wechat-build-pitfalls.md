@@ -280,7 +280,52 @@ build/wechatgame/web-adapter.js: mtimeMs = 1792326980215.52   ← 逐位相同�
 
 ---
 
-## 9. 相关
+## 9. 构建场景清单：为什么不用手动勾选
+
+新增一个小游戏后，`.scene` 不会自动进入构建场景清单 —— 漏勾 = 运行时 `director.loadScene('Xxx')` 找不到场景。
+清单不是「视图」而是「快照」，一共存在三处（Cocos Creator 3.8.8 实测）：
+
+| 位置 | 作用 |
+|------|------|
+| `profiles/v2/packages/builder.json` → `common.scenes` | 构建面板里那份勾选列表（所有平台共用） |
+| `profiles/v2/packages/builder.json` → `BuildTaskManager.taskMap[<任务号>].options.scenes` | 「重新构建上次任务」用的完整快照，**最容易过期** |
+| `profiles/v2/packages/<平台>.json` → `builder.common.scenes` | 部分平台的副本（`wechatgame.json` 有，`web-desktop.json` 没有） |
+
+用脚本做等价同步，避免人肉勾选：
+
+```bash
+node tools/sync-build-scenes.js            # 同步微信小游戏的清单
+node tools/sync-build-scenes.js --check    # 只检查，有差异退出码 1
+node tools/sync-build-scenes.js --all      # 顺带修其它平台（web-desktop 的任务快照曾经漏了 Tetris、startScene 还指着模板场景）
+```
+
+脚本按 `GameConfig.ts` 的 `GAME_LIST` 顺序生成清单，`assets/game_placeholder/`（新游戏模板）不进包，
+并会报告「注册了但找不到 .scene」「有 .scene 但没注册」两类不一致。
+
+**写入时机**（实测）：编辑器**不会**因为打开构建面板就改写这些文件，但面板里那份勾选是打开那一刻读进内存的。
+所以顺序必须是「跑脚本 → 关掉构建面板再重新打开（或重启编辑器）→ 点构建」；面板开着时点构建会把内存里的旧清单写回去。
+`profiles/` 在 `.gitignore` 里，脚本落盘前会留一份 `.bak`。
+
+**MCP 帮不上忙**：`project_get_build_settings` 自己返回的说明是
+`Full build configuration requires direct Editor UI access`；
+`project_build_project` 的 `platform` 枚举只有 web-mobile / web-desktop / ios / android / windows / mac，**没有 wechatgame**，
+`preferences_get_all_preferences` 也只暴露 `preview` / `console` / `builder.__version__`，读不到 `taskMap`。
+MCP 能做的只有「打开构建面板」「查构建器状态」「开关预览服务器」。
+
+**命令行构建**（不想开编辑器时）：入口确实存在 —— `launch/source/launch.ts` 里把 `--build "k=v;k=v"` 解析成 options
+后调 `Editor.Startup.__protected__.build()`，解析完直接 `app.exit(code)`，全程不开窗口：
+
+```bash
+"/Applications/Cocos/Creator/3.8.8/CocosCreator.app/Contents/MacOS/CocosCreator" \
+  --project "$(pwd)" --build "platform=wechatgame"
+```
+
+前提是**编辑器没在跑**（同一项目会触发「已打开」拒绝）。本项目尚未实测整条链路，首次跑完请接
+`node tools/check-wechat-build.js` 确认产物合格。
+
+---
+
+## 10. 相关
 
 - 预检脚本（9 项）：[`../../tools/check-wechat-build.js`](../../tools/check-wechat-build.js)
 - 包装器复现器：[`../../tools/replay-wechat-bundle.js`](../../tools/replay-wechat-bundle.js)

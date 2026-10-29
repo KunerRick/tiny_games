@@ -73,7 +73,7 @@ tiny_games/
 │   ├── assets/            # 文档配图
 │   ├── tech/              # 技术决策与踩坑详情（AGENTS.md 教训的展开）
 │   └── cocos-best-practices.md
-├── tools/                 # 本地校验脚本（verify-battle-fixes.js、verify-tetris-core.js、check-wechat-build.js、replay-wechat-bundle.js）
+├── tools/                 # 本地校验/同步脚本（verify-battle-fixes.js、verify-tetris-core.js、check-wechat-build.js、replay-wechat-bundle.js、sync-build-scenes.js）
 ├── settings/              # Cocos 编辑器设置
 ├── extensions/            # 编辑器插件（tsconfig 排除；node_modules 已 gitignore）
 └── build/                 # 构建输出（gitignored）
@@ -189,6 +189,18 @@ node tools/check-wechat-build.js <构建目录>       # 检查其它构建输出
 
 node tools/replay-wechat-bundle.js               # 复现/反证：产物在「小游戏包装」下能否加载
 ```
+
+构建场景清单同步（**新增游戏后、构建之前跑**，省掉在构建面板里手动勾选场景）：
+
+```bash
+node tools/sync-build-scenes.js                  # 同步微信小游戏的 scenes（按 GameConfig 的 GAME_LIST 生成）
+node tools/sync-build-scenes.js --check          # 只检查，有差异退出码 1
+node tools/sync-build-scenes.js --all            # 顺带修其它平台的构建任务快照
+# 跑完要关掉「构建发布」面板再重新打开（面板开着时构建会把内存里的旧清单写回去）
+```
+
+> MCP 的构建能力有限：`project_build_project` 没有 `wechatgame` 平台，`preferences_*` 读不到 `taskMap`，
+> 详见 [`docs/tech/wechat-build-pitfalls.md`](./docs/tech/wechat-build-pitfalls.md) §9。
 
 9 项检查：必需文件齐全且非空 / `game.json`·`project.config.json` 可解析无 BOM / 构建是否已落盘稳定 /
 产物 `.js` 能否按 ES2015 与 ES5 解析 / 主包 ≤ 4 MB / 无变体选择符 / **开发者工具是否停在过期构建** /
