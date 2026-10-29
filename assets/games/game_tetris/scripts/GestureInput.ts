@@ -5,6 +5,15 @@
  * 手指可以放在棋盘下方的空白区，落点永远不被手挡住；
  * `列 = 基准列 + round(dx / 格宽)` 由逻辑层吸附，半格误差看不出来。
  *
+ * 横移与加速**互斥**（两个轴不共用一段手势）：
+ * - 下拖 ≥ {@link SOFT_DROP_ENGAGE_ROWS} 格 → 进入软降，**列锁定**，期间横移不生效
+ * - 回抬 ≥ {@link SOFT_DROP_RELEASE_ROWS} 格 → 退出软降，横移恢复
+ * - 两个阈值之间是迟滞带，手指停在附近不会来回开关
+ *
+ * 为什么锁列：下拉时拇指会滚动，指腹横向自然漂 10–20 设计像素，而换列门槛是半个格宽（约 20px）。
+ * 不锁的话「长按下坠」每次都被横向噪声带偏一列 —— 这正是玩家反馈的「迅速落下时偏离了预期位置」。
+ * 想在下坠途中横移，就回抬手指停降、移完再下拖，一次按住可以反复切换。
+ *
  * 边界规则（设计文档 §3.2）：
  * - `TOUCH_CANCEL` 只结束手势，**不旋转、不硬降**（桌面拖拽结束派发的就是它）
  * - 进入拖拽却一格没动、时长 < 400ms → 回退成轻点旋转（否则「拖了个空」像点了没反应）
@@ -19,6 +28,8 @@ import {
     DRAG_FALLBACK_MAX_SEC,
     HARD_DROP_MIN_ROWS,
     HARD_DROP_MIN_SPEED,
+    SOFT_DROP_ENGAGE_ROWS,
+    SOFT_DROP_RELEASE_ROWS,
     TAP_MAX_MOVE,
     TAP_MAX_SEC,
 } from './TetrisConfig';
@@ -55,6 +66,11 @@ export class GestureInput implements ITetrisInput {
     private _dy = 0;
 
     private _softDropOn = false;
+    /**
+     * 软降状态切换那一刻的手指 y（UI 坐标）。进入/退出阈值都从这里量：
+     * 往下过 0.8 格进入、往回抬 0.4 格退出，两个阈值不对称就是迟滞带。
+     */
+    private _softAnchorY = 0;
     /** 已消费：双指逆时针后，抬手不再触发旋转/硬降 */
     private _consumed = false;
 
@@ -100,6 +116,7 @@ export class GestureInput implements ITetrisInput {
         this._state = GestureState.Idle;
         this._touchId = null;
         this._softDropOn = false;
+        this._softAnchorY = 0;
         this._consumed = false;
         this._trace.length = 0;
     }
@@ -130,6 +147,7 @@ export class GestureInput implements ITetrisInput {
         this._dy = 0;
         this._consumed = false;
         this._softDropOn = false;
+        this._softAnchorY = p.y;
 
         const column = this._host.getPieceColumn();
         this._baseColumn = column === null ? 0 : column;
@@ -156,11 +174,7 @@ export class GestureInput implements ITetrisInput {
 
         // 拖拽中方块锁定换了新块：重新取基准，旧列位移不带入
         if (this._state === GestureState.Drag && this._host.getPieceToken() !== this._baseToken) {
-            const column = this._host.getPieceColumn();
-            this._baseColumn = column === null ? 0 : column;
-            this._baseToken = this._host.getPieceToken();
-            this._startX = p.x;
-            this._dx = 0;
+            this._rebase(p.x);
         }
 
         if (this._state === GestureState.Pending) {
@@ -168,14 +182,20 @@ export class GestureInput implements ITetrisInput {
             this._state = GestureState.Drag;
         }
 
+        if (this._softDropOn) {
+            // 加速期间列锁定：除了「回抬够多」之外一概不处理，横向噪声不再带动方块
+            if (this._softAnchorY - p.y <= -SOFT_DROP_RELEASE_ROWS * cell) {
+                this._endSoftDrop(p.x, p.y);
+            }
+            return;
+        }
+
         // 列吸附：目标列 = 基准列 + round(位移 / 格宽)，撞墙自动停
         this._host.snapPieceToColumn(this._baseColumn + Math.round(this._dx / cell));
 
-        // 下移过半格开始软降；回抬过半格就停
-        const wantSoft = this._dy >= cell / 2;
-        if (wantSoft !== this._softDropOn) {
-            this._softDropOn = wantSoft;
-            this._host.applyAction(wantSoft ? TetrisAction.SoftDropStart : TetrisAction.SoftDropEnd);
+        // 下拖够深才加速：锁定此刻的列，之后的横移一律不认
+        if (this._softAnchorY - p.y >= SOFT_DROP_ENGAGE_ROWS * cell) {
+            this._beginSoftDrop(p.x, p.y);
         }
     }
 
@@ -220,6 +240,30 @@ export class GestureInput implements ITetrisInput {
 
     // ==================== 内部 ====================
 
+    /** 重取横移基准：换块、进入/退出软降都要做，旧位移不能带到新局面里 */
+    private _rebase(x: number): void {
+        const column = this._host.getPieceColumn();
+        this._baseColumn = column === null ? 0 : column;
+        this._baseToken = this._host.getPieceToken();
+        this._startX = x;
+        this._dx = 0;
+    }
+
+    /** 进入软降：把当前列锁住，迟滞锚点挪到此刻（退出要再回抬 RELEASE 格） */
+    private _beginSoftDrop(x: number, y: number): void {
+        this._softDropOn = true;
+        this._softAnchorY = y;
+        this._rebase(x);
+        this._host.applyAction(TetrisAction.SoftDropStart);
+    }
+
+    private _endSoftDrop(x: number, y: number): void {
+        this._softDropOn = false;
+        this._softAnchorY = y;
+        this._rebase(x);
+        this._host.applyAction(TetrisAction.SoftDropEnd);
+    }
+
     /** 竖向速度（设计像素/毫秒），向下为正；采样不足时返回 0 */
     private _verticalSpeed(): number {
         const trace = this._trace;
@@ -242,6 +286,7 @@ export class GestureInput implements ITetrisInput {
         this._consumed = false;
         this._dx = 0;
         this._dy = 0;
+        this._softAnchorY = 0;
         this._trace.length = 0;
     }
 }

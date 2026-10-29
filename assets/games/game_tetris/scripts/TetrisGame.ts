@@ -429,6 +429,14 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
 
     /** 输入层统一入口 */
     applyAction(action: TetrisAction): void {
+        // 软降是输入层的开关状态，不受棋盘状态限制：消行那 120ms 里松手，
+        // 这条 SoftDropEnd 若被下面的 Playing 判断吞掉，下一块会在手指已经抬起的
+        // 情况下继续加速下落（输入层以为已经关了，不会重发）。
+        if (action === TetrisAction.SoftDropEnd) {
+            this._setSoftDrop(false);
+            return;
+        }
+
         if (this._state !== GameState.Playing) return;
         const piece = this._piece;
         if (!piece) return;
@@ -447,11 +455,8 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
                 this._tryRotate(piece, -1);
                 break;
             case TetrisAction.SoftDropStart:
-                this._softDrop = true;
+                this._setSoftDrop(true);
                 this._markHint('drop');
-                break;
-            case TetrisAction.SoftDropEnd:
-                this._softDrop = false;
                 break;
             case TetrisAction.HardDrop:
                 this._hardDrop(piece);
@@ -460,6 +465,22 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
                 this._doHold(piece);
                 break;
         }
+    }
+
+    /**
+     * 软降开关（两种操作模式共用）。
+     *
+     * **切换时必须清零 `_gravityAcc`**：累加器是按「当前间隔」结算的，攒了 0.65s 再切到
+     * 软降间隔，那 0.65s 会在同一帧一次性兑现成十几行 —— 软降按下瞬间直接瞬移，与硬降无异
+     * （实测原 0.04s/行时一帧掉 16 行）。松开同理：不清零的话残留累加值还会立刻再掉一行，
+     * 「停」就停不准。
+     */
+    private _setSoftDrop(on: boolean): void {
+        if (this._softDrop === on) return;
+        this._softDrop = on;
+        this._gravityAcc = 0;
+        // 列光带的加亮态跟着 _softDrop 走（提示「加速期间这一列已锁定」）
+        this._renderHighlight(this._piece);
     }
 
     // ==================== 操作模式 ====================
@@ -508,7 +529,8 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
         if (this._state !== GameState.Playing && this._state !== GameState.Clearing) return;
         this._resumeState = this._state;
         this._state = GameState.Paused;
-        this._softDrop = false;
+        // 暂停要停掉加速（顺带把锁列的高亮恢复常态）；继续游戏后手指并不会自己回到按下态
+        this._setSoftDrop(false);
         this._syncInputEnabled();
         this.pausePanel?.show(this._controlMode, this._vibrate);
     }
@@ -992,7 +1014,8 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
         const bandWidth = cols * cell;
         const bandHeight = VISIBLE_ROWS * cell;
         this._setSize(highlight, bandWidth, bandHeight);
-        skinBand(highlight, bandWidth, bandHeight);
+        // 软降期间光带加亮：此时手势模式锁了列，这是「这一列已经定了」的唯一提示
+        skinBand(highlight, bandWidth, bandHeight, this._softDrop);
         highlight.setPosition((minX - 4.5) * cell + ((cols - 1) * cell) / 2, 0, 0);
     }
 

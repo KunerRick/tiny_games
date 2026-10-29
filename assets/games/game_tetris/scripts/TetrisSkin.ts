@@ -521,15 +521,18 @@ function paintToggle(graphics: Graphics, width: number, on: boolean): void {
 /**
  * 落点所在的竖条光带：圆角 + 极低不透明度。
  * 原来是一块纯色 Sprite（直角、硬边），在圆角棋盘里看着像没清理干净的贴图。
+ *
+ * `emphasis`：软降加速期间加亮。此时横移被锁住、方块只受重力以外的「加速」驱动，
+ * 光带变亮是唯一能告诉玩家「这一列已经定了」的反馈（两种操作模式共用）。
  */
-export function skinBand(node: Node | null, width: number, height: number): void {
+export function skinBand(node: Node | null, width: number, height: number, emphasis = false): void {
     if (!node || !node.isValid) return;
     const graphics = ensureGraphics(node);
     hideSprite(node);
     graphics.clear();
     if (width <= 0 || height <= 0) return;
 
-    graphics.fillColor = new Color(255, 255, 255, 12);
+    graphics.fillColor = new Color(255, 255, 255, emphasis ? 34 : 12);
     graphics.roundRect(-width / 2, -height / 2, width, height, Math.min(18, width / 2));
     graphics.fill();
 }

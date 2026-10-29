@@ -25,8 +25,14 @@ export const LOCK_DELAY_SEC = 0.5;
 /** 锁延迟最多被移动/旋转重置的次数 */
 export const MAX_LOCK_RESETS = 15;
 
-/** 软降每行间隔 */
-export const SOFT_DROP_INTERVAL_SEC = 0.04;
+/**
+ * 软降每行间隔（约 10 行/秒）。
+ *
+ * 原值 0.04s/行 = 25 行/秒，整屏 20 行 0.78 秒落到底 —— 比人眼反应（约 200ms≈5 行）还快，
+ * 等于「加速」这件事没有中途停下的可能，看起来和硬降一个样。放到 0.1 后整屏约 2 秒，
+ * 中途停下的位置误差 1–2 行，才谈得上「掉到某个高度再横移」。
+ */
+export const SOFT_DROP_INTERVAL_SEC = 0.1;
 
 /** 消行闪白时长 */
 export const LINE_CLEAR_SEC = 0.12;
@@ -78,6 +84,22 @@ export const HARD_DROP_MIN_SPEED = 1.5;
 
 /** 硬降判定：最小下移格数 */
 export const HARD_DROP_MIN_ROWS = 2;
+
+/**
+ * 手势软降：下拖超过这么多格开始加速。
+ *
+ * 比原来的「半格」深一倍：下拉时拇指会滚动，指腹横向会漂 10–20 设计像素，
+ * 半个格宽（约 20px）太浅，一次下拉就顺手换了列。要 0.8 格才算「故意往下拉」。
+ */
+export const SOFT_DROP_ENGAGE_ROWS = 0.8;
+
+/**
+ * 手势软降：回抬超过这么多格停止加速。
+ *
+ * 与 {@link SOFT_DROP_ENGAGE_ROWS} 之间的 0.4 格是迟滞带：手指停在阈值附近时
+ * 不会反复开关软降（否则每一帧都在 SoftDropStart/End 之间跳）。
+ */
+export const SOFT_DROP_RELEASE_ROWS = 0.4;
 
 /** 按键长按后开始连发的延迟 */
 export const DAS_SEC = 0.16;
