@@ -196,7 +196,7 @@ node tools/replay-wechat-bundle.js               # 复现/反证：产物在「�
 node tools/sync-build-scenes.js                  # 同步微信小游戏的 scenes（按 GameConfig 的 GAME_LIST 生成）
 node tools/sync-build-scenes.js --check          # 只检查，有差异退出码 1
 node tools/sync-build-scenes.js --all            # 顺带修其它平台的构建任务快照
-# 跑完要关掉「构建发布」面板再重新打开（面板开着时构建会把内存里的旧清单写回去）
+# 必须先退出编辑器（它会把内存里的旧配置刷回磁盘，覆盖改动）；脚本检测到编辑器在跑会拒绝写入
 ```
 
 > MCP 的构建能力有限：`project_build_project` 没有 `wechatgame` 平台，`preferences_*` 读不到 `taskMap`，

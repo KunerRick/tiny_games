@@ -21,10 +21,11 @@
  *   新建的 .scene 不会自动出现在任何一份里，于是漏勾 = 运行时 director.loadScene 找不到场景。
  *   面板只能人点，所以这里做等价的文件级同步。
  *
- * 写入时机：编辑器**不会**在打开构建面板时改写这两个文件（实测），
- *   但面板里那份勾选是打开那一刻读进内存的。所以顺序是：
- *     跑脚本 → 关掉「构建发布」面板再重新打开（或重启编辑器）→ 点构建。
- *   面板开着时点构建，会把内存里的旧清单写回去，把本脚本的改动覆盖掉。
+ * 写入时机（实测，别踩）：编辑器会**周期性地把它内存里的构建配置整批刷回磁盘**。
+ *   2026-10-29 实测：手工把 wechatgame.json 的 appid 改成新值，2 分半后编辑器把
+ *   profiles/v2/packages 下 7 个文件整批重写，appid 退回旧值 —— 文件级改动被静默覆盖。
+ *   所以顺序必须是：**退出编辑器 → 跑脚本 → 打开编辑器 → 构建**。
+ *   编辑器在跑时本脚本默认拒绝写入（--check / --dry-run 不受影响，--force 可强行越过）。
  *
  * 本脚本不依赖任何第三方包。
  */
@@ -33,6 +34,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const PROFILES_DIR = path.join(PROJECT_ROOT, 'profiles', 'v2', 'packages');
@@ -56,6 +58,7 @@ const opt = {
     dryRun: argv.includes('--dry-run'),
     check: argv.includes('--check'),
     all: argv.includes('--all'),
+    force: argv.includes('--force'),
     platform: 'wechatgame',
 };
 
@@ -344,6 +347,13 @@ function main() {
         return 0;
     }
 
+    // ④ 编辑器在上：它会把自己的内存副本整批刷回磁盘，覆盖掉这里的改动
+    if (!opt.force && editorRunning()) {
+        console.error('\n❌ 编辑器正在打开这个项目，它会把内存里的旧配置刷回磁盘，覆盖本次改动。');
+        console.error('   请先退出 Cocos Creator，再重新运行本脚本（或加 --force 自行承担后果）。');
+        return 1;
+    }
+
     // ⑤ 落盘：同一文件只写一次，先备份（profiles/ 在 .gitignore 里，没有版本控制兜底）
     const byFile = new Map();
     for (const change of changes) {
@@ -360,8 +370,7 @@ function main() {
         console.log(`  ✏ 已写入 ${rel(file)}（备份 ${rel(backup)}）`);
     }
 
-    console.log('\n✅ 完成。请**关掉「构建发布」面板再重新打开**（或重启编辑器）后再构建：');
-    console.log('   面板里的勾选是打开那一刻读进内存的，面板开着时点构建会把旧清单写回去。');
+    console.log('\n✅ 完成。现在打开编辑器，进「构建发布」确认勾选无误后点构建。');
     return 0;
 }
 
@@ -369,6 +378,22 @@ function main() {
 
 function rel(absPath) {
     return path.relative(PROJECT_ROOT, absPath);
+}
+
+/**
+ * 编辑器是否正打开着这个项目。
+ * 判据：进程命令里同时出现 CocosCreator 与项目路径，且不是 Helper / 渲染进程。
+ * 取不到进程列表时按「没开」处理，不让这项检查挡住正常使用。
+ */
+function editorRunning() {
+    try {
+        const out = execSync('ps -A -o command', { encoding: 'utf8', timeout: 5000 });
+        return out.split('\n').some((line) =>
+            /CocosCreator\b/.test(line) && !/Helper/.test(line) && line.includes(PROJECT_ROOT),
+        );
+    } catch (e) {
+        return false;
+    }
 }
 
 function fail(message) {

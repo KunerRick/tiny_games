@@ -302,8 +302,14 @@ node tools/sync-build-scenes.js --all      # 顺带修其它平台（web-desktop
 脚本按 `GameConfig.ts` 的 `GAME_LIST` 顺序生成清单，`assets/game_placeholder/`（新游戏模板）不进包，
 并会报告「注册了但找不到 .scene」「有 .scene 但没注册」两类不一致。
 
-**写入时机**（实测）：编辑器**不会**因为打开构建面板就改写这些文件，但面板里那份勾选是打开那一刻读进内存的。
-所以顺序必须是「跑脚本 → 关掉构建面板再重新打开（或重启编辑器）→ 点构建」；面板开着时点构建会把内存里的旧清单写回去。
+**写入时机（实测，这条最容易翻车）**：编辑器会**周期性地把它内存里的构建配置整批刷回磁盘**。
+
+2026-10-29 实测时间线：20:55 手工把 `wechatgame.json` 的 appid 改成新值 → 20:57:44 编辑器把
+`profiles/v2/packages/` 下 7 个文件整批重写，**appid 退回旧值** → 只有在编辑器 UI 里改才是持久的
+（编辑器随后写出的格式还多了一段 `builder.options.wechatgame`，与 `taskOptionsMap` 并存）。
+
+所以顺序是：**退出 Cocos Creator → 跑脚本 → 打开编辑器 → 构建**。
+脚本检测到编辑器正在跑这个项目时会直接拒绝写入（`--check` / `--dry-run` 不受影响，`--force` 可强行越过）。
 `profiles/` 在 `.gitignore` 里，脚本落盘前会留一份 `.bak`。
 
 **MCP 帮不上忙**：`project_get_build_settings` 自己返回的说明是
