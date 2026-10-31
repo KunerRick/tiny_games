@@ -92,6 +92,13 @@
 | 游戏设计 | [`specs/2026-10-25-game-tetris-design.md`](./specs/2026-10-25-game-tetris-design.md) | 双操作模式（全屏手势 / 虚拟按键）+ 引导与提示条设计 |
 | 验收报告 | [`plans/2026-10-25-game-tetris-acceptance.md`](./plans/2026-10-25-game-tetris-acceptance.md) | M8 逐项验收结论 + 微信构建预检（含阻塞项） |
 
+### 砖块远征（Brick Breaker / brick）
+
+| 类型 | 文件 | 说明 |
+|------|------|------|
+| 游戏设计 | [`specs/2026-10-31-game-brick-breaker-design.md`](./specs/2026-10-31-game-brick-breaker-design.md) | 玩法、数值、12 项升级、场景节点契约（含 MCP 搭建清单） |
+| 回归自检 | [`../tools/verify-brick-core.js`](../tools/verify-brick-core.js) | 纯逻辑单测（50 项：碰撞/反射/炸弹/升级/激光/120 秒自动游玩） |
+
 ### 大厅与整体
 
 | 类型 | 文件 | 说明 |
@@ -99,6 +106,9 @@
 | 整体设计 | [`specs/2026-05-12-tiny-games-design.md`](./specs/2026-05-12-tiny-games-design.md) | 小游戏集合整体设计 |
 | 大厅设计 | [`specs/2026-05-12-phase1-lobby-design.md`](./specs/2026-05-12-phase1-lobby-design.md) | 第一阶段大厅设计 |
 | 大厅计划 | [`plans/2026-05-12-phase1-lobby-plan.md`](./plans/2026-05-12-phase1-lobby-plan.md) | 大厅实现计划 |
+| 路线图 | [`plans/2026-10-31-next-games-roadmap.md`](./plans/2026-10-31-next-games-roadmap.md) | 第 6–8 款：砖块远征 → 合成大西瓜 → 数值门跑酷 |
+| 物理方案评估 | [`plans/2026-10-31-merge-physics-evaluation.md`](./plans/2026-10-31-merge-physics-evaluation.md) | 合成大西瓜：自研圆形求解 vs Box2D，含求解器设计与 12 项验收 |
+| 设计草案 | [`plans/2026-10-31-gate-runner-design-draft.md`](./plans/2026-10-31-gate-runner-design-draft.md) | 数值门跑酷：单资源数值、门模板、敌人曲线与平衡验收 |
 
 ---
 
