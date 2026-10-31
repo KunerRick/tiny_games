@@ -144,12 +144,17 @@ Merge (Scene)
 
 ---
 
-## 7. 当前阻塞（2026-10-31 19:32 起）
+## 7. 当前阻塞（2026-10-31 晚，连续两次）
 
-- 触发点：`scene_save_scene_as`（想复制 BrickBreaker 当骨架）超时两次之后，编辑器主窗口消失
-- 症状：`CocosCreator` 进程仍在（pid 38825）但 `System Events` 报 **0 个窗口**、`visible=false`；
-  所有走场景面板的 MCP 调用（`scene_get_current_scene` / `node_*` / `scene_open_scene` / `soft_reload_scene`）全部超时，
-  而走资产库的调用（`scene_get_scene_list` / `scene_create_scene` / `project_*`）正常
-- 日志：`temp/logs/project.log` 最后一行停在 19:32:49，之后再无输出
-- 结论：**场景编辑面板已随窗口一起消失**，必须重启 Cocos Creator 才能继续搭建
-- 备注：`Merge.scene` 已由 `scene_create_scene` 落盘（2718 字节的默认空场景），没有丢东西
+第一次（19:32）：`scene_save_scene_as` 超时后**主窗口消失**（进程在、`System Events` 报 0 窗口、`visible=false`），
+日志 `temp/logs/project.log` 停在 19:32:49。重启编辑器后恢复正常。
+
+第二次（22:09）：`scene_open_scene`（在有未保存修改的场景里切走）超时后，窗口**还在**但场景模块整块失联——
+同样的判据：资产库调用正常、场景调用全超时、`debug_get_node_tree` 报 `Message does not exist: scene - query-hierarchy`。
+模态对话框把渲染进程堵住后，`open -a` / `set frontmost` / Esc / Return 全部无效（app 无法被切到前台）。
+
+两次的共同点是「**场景模块弹了需要人点的模态框**」。规避纪律见
+[`../tech/mcp-scene-authoring-pitfalls.md`](../tech/mcp-scene-authoring-pitfalls.md) §5.5：
+一次只开一个场景、改完立刻 `save_scene`、不用 `save_scene_as`、不跨场景复制节点。
+
+状态：`Merge.scene` 仍是 2718 字节的默认空场景（没有丢东西，也没有已完成的节点）。
