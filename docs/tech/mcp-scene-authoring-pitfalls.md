@@ -251,6 +251,25 @@ const sp = node.getComponent('cc.Sprite');
 
 > 顺带：给运行时新建的节点设尺寸时，**顺序仍是 `spriteFrame → sizeMode=CUSTOM → setContentSize`**。血条首次实现按"先 `setContentSize` 后设 `spriteFrame`"写，实测被贴图原始尺寸覆盖成 `2×2`（正是 §3 那条坑的复发）。
 
+### ⑨ 工具级怪癖：脚本组件要传 **cid**，`attach_script` 的"失败"是假失败
+
+搭「砖块远征」时逐个踩到（2026-10-31）：
+
+| 工具 | 现象 | 处置 |
+|------|------|------|
+| `component_set_component_property` | 传类名 `'BrickGame'` → `Component 'BrickGame' not found` | 传**压缩 cid**（`0d70fCtCatNTozrMumC1P6x` 这种），可在 `component_get_available_components` 结果里查 |
+| `component_attach_script` | 返回 “Script 'X' was not found on node after addition”，**其实已经挂上了** | 以 `component_get_components` 里出现的 cid 为准；别重复挂，否则会挂两份 |
+| `component_remove_component` | 对脚本组件**三种入参（类名 / cid / 完整 UUID）全部失败** | 放弃移除：用 cid 把 `enabled` 设 `false`，并在代码里对 `onLoad` 判空（本次 `GamePlaceholder` 即如此处理） |
+| `node_duplicate_node` | 不返回新节点 uuid，副本命名 `X-001` | 先 `scene_get_scene_hierarchy` 找 uuid，再 `node_move_node` + `node_set_node_property` 改名 |
+| `debug_validate_scene` | 报 `Message does not exist: scene - check-missing-assets` | 改用 `assetAdvanced_validate_asset_references` 验引用完整性 |
+
+判断"脚本到底挂没挂上"，最快的是页内读原型方法：
+
+```js
+const comps = node.components.map(c => cc.js.getClassName(c));
+comps.includes('BrickGame');        // true 才算挂上
+```
+
 ---
 
 ## 4. 同一节点只能有一个渲染组件
