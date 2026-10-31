@@ -144,17 +144,17 @@ Merge (Scene)
 
 ---
 
-## 7. 当前阻塞（2026-10-31 晚，连续两次）
+## 7. 场景搭建阻塞与定位（2026-10-31 19:32 → 11-01 00:25）
 
-第一次（19:32）：`scene_save_scene_as` 超时后**主窗口消失**（进程在、`System Events` 报 0 窗口、`visible=false`），
-日志 `temp/logs/project.log` 停在 19:32:49。重启编辑器后恢复正常。
+现象：走场景面板的 MCP 调用（`scene_get_current_scene` / `scene_open_scene` / `node_*`）全部永久超时，
+而资产库调用（`scene_get_scene_list` / `scene_create_scene` / `project_*`）正常。
 
-第二次（22:09）：`scene_open_scene`（在有未保存修改的场景里切走）超时后，窗口**还在**但场景模块整块失联——
-同样的判据：资产库调用正常、场景调用全超时、`debug_get_node_tree` 报 `Message does not exist: scene - query-hierarchy`。
-模态对话框把渲染进程堵住后，`open -a` / `set frontmost` / Esc / Return 全部无效（app 无法被切到前台）。
+**最终定位（第三次复现时确认）**：macOS 会话**已锁屏**
+（`ioreg -n Root -d1 | grep CGSSessionScreenIsLocked` → `Yes`；`screencapture` 拍到的是登录界面）。
+锁屏/显示器睡眠后渲染进程被节流、WebGL 上下文失效，场景面板不再处理消息；MCP 与资产库跑在主进程里所以照常应答。
+前两次（`scene_save_scene_as` 后、切场景后）只是**时序巧合**：当时机器也在闲置待锁。
 
-两次的共同点是「**场景模块弹了需要人点的模态框**」。规避纪律见
-[`../tech/mcp-scene-authoring-pitfalls.md`](../tech/mcp-scene-authoring-pitfalls.md) §5.5：
-一次只开一个场景、改完立刻 `save_scene`、不用 `save_scene_as`、不跨场景复制节点。
+处置：`caffeinate -di &` 保持不睡眠 + 请人解锁；解锁后若场景调用仍超时再重启编辑器。
+详见 [`../tech/mcp-scene-authoring-pitfalls.md`](../tech/mcp-scene-authoring-pitfalls.md) §5.5。
 
 状态：`Merge.scene` 仍是 2718 字节的默认空场景（没有丢东西，也没有已完成的节点）。

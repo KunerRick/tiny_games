@@ -332,31 +332,45 @@ end_undo_recording
 
 ---
 
-## 5.5 ⚠️ 三个会把场景模块「整块搞死」的操作（2026-10-31 实测两次）
+## 5.5 ⚠️ 锁屏 / 显示器睡眠 → 场景模块整块失联（2026-10-31～11-01 踩了三次，第三次才定位）
 
-**症状**（两次一模一样）：某次调用超时之后，**所有**走场景面板的 MCP 调用永久超时——
-`scene_get_current_scene`、`node_get_all_nodes`、`scene_open_scene`、`sceneView_*`、`sceneAdvanced_query_scene_dirty` 全挂；
-而走资产库/主进程的调用（`scene_get_scene_list`、`scene_create_scene`、`project_*`、`server_*`）全部正常，`sceneAdvanced_query_scene_ready` 还报 `ready: true`。
-判据：`debug_get_node_tree` 返回 `Message does not exist: scene - query-hierarchy`（消息处理器已不在渲染进程里）。
+**症状**：**所有**走场景面板的 MCP 调用永久超时——`scene_get_current_scene`、`node_get_all_nodes`、
+`scene_open_scene`、`sceneView_*`、`sceneAdvanced_query_scene_dirty` 全挂；
+而走资产库/主进程的调用（`scene_get_scene_list`、`scene_create_scene`、`project_*`、`server_*`）完全正常，
+`sceneAdvanced_query_scene_ready` 还报 `ready: true`。**编辑器窗口本身还在、也没有任何对话框**。
 
-**触发点**
+**两条判据（30 秒分诊）**
 
-| # | 操作 | 机制 |
-|---|------|------|
-| 1 | `scene_save_scene_as` | 会弹**保存对话框**。模态框阻塞渲染进程主线程，MCP 请求永远等不到回复 |
-| 2 | 场景**有未保存修改**时 `scene_open_scene` 切走 | 弹「是否保存修改」确认框，同上 |
-| 3 | 跨场景 `sceneAdvanced_copy_node` → 切场景 → `paste_node` | 粘贴**只得到空节点**（`New Node`，无子节点、无组件）；即使没崩也是白干 |
+```bash
+# 1) 是不是锁屏了 —— Yes 就是元凶，去解锁，别再重试 MCP
+ioreg -n Root -d1 | grep -o 'CGSSessionScreenIsLocked"=[A-Za-z]*'
+# 2) 场景消息处理器是否还在（锁屏过之后通常报 does not exist）
+#    debug_get_node_tree → "Message does not exist: scene - query-hierarchy"
+```
 
-**后果的次生现象**：模态框一出现，`open -a`、`osascript ... set frontmost`、Esc/Return 都无效——
-app 无法被激活到前台（`System Events` 报的 frontmost 仍是 Terminal），所以**键盘发不进去**，只能靠人点掉对话框或重启编辑器。
+**根因**：屏幕锁定/显示器睡眠后 macOS 会节流后台进程，编辑器渲染进程的 WebGL 上下文失效，
+场景面板不再处理消息；而 MCP 服务与资产库跑在**主进程**里，所以照样应答。
+`open -a` / `osascript set frontmost` / Esc / Return 全部无效也是同一原因——锁屏界面挡住了 app，键盘事件进不去。
 
-**纪律（照做可完全避免）**
+**规避（做长时段的场景搭建前先做）**
 
-1. **一次只开一个场景**：干活前 `scene_open_scene` 一次，中途绝不切走
-2. **改完立刻 `scene_save_scene`**：任何结构变更后马上落盘，让场景始终保持「不脏」，这样即使误触切换也不会弹框
-3. **不用 `scene_save_scene_as`**：需要新场景就 `scene_create_scene`，然后手工搭（默认场景是空的，连 Canvas 都没有）
-4. **不跨场景复制节点**：要复用就把结构写进文档，按文档重建
-5. 每次 `node_*` 调用前后留意是否「变慢」——一旦有调用超时，先 `sceneAdvanced_query_scene_ready` + `debug_get_node_tree` 判分诊，不要再连发（会把队列堵得更死）
+```bash
+caffeinate -di &      # 保持显示器与系统不因空闲睡眠；任务结束再 kill
+```
+
+- 环境里随时可查：`pgrep -fl caffeinate`
+- MCP 场景调用一旦超时：**先查锁屏**，别连发（连发只会让插件队列堵得更死）；锁屏时任何场景操作都不可能成功
+- 已锁屏就只能请人解锁（`caffeinate` 不能解锁）；解锁后如果 `scene_get_current_scene` 仍超时，重启编辑器
+
+**两个次要发现（顺手记下，别当主因）**
+
+| 现象 | 结论 |
+|------|------|
+| `scene_save_scene_as` 超时且之后场景模块失效 | 它会弹保存对话框；但当时机器也处于锁屏前空闲期，**不能确认是它导致的**。仍然建议少用——要新场景就 `scene_create_scene` |
+| 跨场景 `copy_node` → 切场景 → `paste_node` | 粘贴**只得到空节点**（`New Node`，无子节点、无组件）。跨场景复用这条路径不通，按文档重建 |
+
+**顺带**：`scene_create_scene` 建出来的场景是**完全空的**（连 Canvas / Camera 都没有），
+从零搭必须自己建 `Canvas`(UITransform 720×1280 + cc.Canvas + cc.Widget alignFlags=45) 和 `Camera` 子节点。
 
 ---
 
@@ -369,5 +383,5 @@ app 无法被激活到前台（`System Events` 报的 frontmost 仍是 Terminal�
 - [ ] 细线（网格、分隔线）用 `rect()` + `fill()`，没有依赖 ≤ 2px 的 `stroke()`（§4.5）
 - [ ] 结构性变更被 `begin/end_undo_recording` 包裹，变更后跑过 `validate_scene`
 - [ ] 没有用文件工具直接改 `.scene` / `.prefab`
-- [ ] 全程只开一个场景；每次结构变更后立刻 `scene_save_scene`（§5.5）
-- [ ] 没用 `scene_save_scene_as`、没有跨场景复制节点（§5.5）
+- [ ] 长时段场景搭建前已 `caffeinate -di &`，且中途没锁屏（§5.5）
+- [ ] 每次结构变更后立刻 `scene_save_scene`（别让场景长期「脏」着）
