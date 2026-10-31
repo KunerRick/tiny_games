@@ -100,6 +100,14 @@
 | 场景搭建 | [`design/2026-10-31-brick-breaker-scene-setup.md`](./design/2026-10-31-brick-breaker-scene-setup.md) | 最终节点树、27 项绑定、MCP 踩坑、`?scene=` 预览技巧与浏览器实测清单（含界面截图） |
 | 回归自检 | [`../tools/verify-brick-core.js`](../tools/verify-brick-core.js) | 纯逻辑单测（50 项：碰撞/反射/炸弹/升级/激光/120 秒自动游玩） |
 
+### 合合大作战（Merge / merge）
+
+| 类型 | 文件 | 说明 |
+|------|------|------|
+| 游戏设计 | [`specs/2026-10-31-game-merge-design.md`](./specs/2026-10-31-game-merge-design.md) | 坐标系、11 级水果、自研圆形求解器参数、「停在警戒线上方」判负、场景节点树 |
+| 场景搭建 | [`design/2026-10-31-merge-scene-setup.md`](./design/2026-10-31-merge-scene-setup.md) | 目标节点树、19 项绑定、MCP 执行顺序、实测清单（搭建被编辑器故障阻塞，见文末） |
+| 回归自检 | [`../tools/verify-merge-core.js`](../tools/verify-merge-core.js) | 纯逻辑单测（12 项：叠放稳定性、合并/禁链式、确定性、失败判定、500 次长跑） |
+
 ### 大厅与整体
 
 | 类型 | 文件 | 说明 |

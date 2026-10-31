@@ -189,7 +189,7 @@ Merge (Scene)
 |---|-----|------|
 | 1 | 纯逻辑 | `node tools/verify-merge-core.js` 12/12 |
 | 2 | 编译 | `npx tsc --noEmit` 通过 |
-| 3 | 场景 | 22 项 `@property` 绑定全通，`validate_scene` 0 问题 |
+| 3 | 场景 | 19 项 `@property` 绑定全通（13 个 Node + 6 个 Label），`validate_scene` 0 问题 |
 | 4 | 浏览器 | 投放/合并/连击/暂停/继续/失败/重开/返回，0 console error |
 | 5 | 微信 | 构建后 `node tools/check-wechat-build.js` 9 项通过 |
 | 6 | 文档 | 本文 + `docs/design/<date>-merge-scene-setup.md` + `docs/README.md` 索引 |
