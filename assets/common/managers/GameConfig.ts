@@ -15,6 +15,7 @@ export const GAME_LIST: GameConfig[] = [
     { id: 'tiny_vanguard', name: '小小先锋', icon: 'default', sceneName: 'TinyVanguard', description: 'Roguelike 回合制战棋' },
     { id: 'tetris', name: '方块坠落', icon: 'default', sceneName: 'Tetris', description: '经典方块消除' },
     { id: 'brick', name: '砖块远征', icon: 'default', sceneName: 'BrickBreaker', description: '打砖块 + 肉鸽升级' },
+    { id: 'merge', name: '合合大作战', icon: 'default', sceneName: 'Merge', description: '合成同类水果，越滚越大' },
 ];
 
 export function getGameById(id: string): GameConfig | undefined {
