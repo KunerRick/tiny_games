@@ -268,6 +268,18 @@ node tools/sync-build-scenes.js --all            # 顺带修其它平台的构�
 - 不要提交 build/、library/、temp/、local/、profiles/、native/（已在 .gitignore）
 - 提交前跑 `npx tsc --noEmit`
 
+### 分支模型（两个长期分支，不再开一堆）
+
+| 分支 | 角色 | 规则 |
+|------|------|------|
+| `develop` | **默认分支 / 日常开发** | 所有提交都落在这里，始终保持最新；仓库的默认分支就是它 |
+| `main` | **发布分支** | 只在发版时从 `develop` 快进合并（`git merge --ff-only develop`），平时不动 |
+
+- 临时特性分支从 `develop` 拉，合并回 `develop` 后**立刻删除**（本地 + 远端），不要留存
+- `git worktree` 用完即删：`git worktree remove <路径>` + `git branch -d <分支>`，避免留下指向旧分支的僵尸目录
+- 定期 `git remote prune origin` 清理已删除的远端分支；`git branch -vv --merged develop` 列出可删的已合并分支
+- 历史上的 `worktree-*` / `feat/*` 分支已全部并入 `develop` 并删除，不要再捡回来当长期分支
+
 ## 相关文档
 
 - [Cocos Creator 最佳实践（完整版）](./docs/cocos-best-practices.md)

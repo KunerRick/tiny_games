@@ -938,7 +938,8 @@ export class SolitaireGame extends Component {
         }
 
         if (!topBar.getChildByName('HelpBtn')) {
-            const btn = this._makeButton('HelpBtn', topBar, 300, -24, 60, 60, '?', 26, true);
+            // 40×40 贴右上角：60×60 时会压住「抽 1 张」右下角那一截，正好挡住字
+            const btn = this._makeButton('HelpBtn', topBar, 330, -24, 40, 40, '?', 20, true);
             btn.on(Node.EventType.TOUCH_END, this._onHelpClicked, this);
             this._helpBtn = btn;
         }
