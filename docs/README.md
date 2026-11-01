@@ -108,6 +108,15 @@
 | 场景搭建 | [`design/2026-10-31-merge-scene-setup.md`](./design/2026-10-31-merge-scene-setup.md) | **实建节点树（含 UUID/坐标）**、19 项绑定、MCP 执行顺序、读回核对、浏览器实测结果、编辑器丢场景的真因与恢复 |
 | 回归自检 | [`../tools/verify-merge-core.js`](../tools/verify-merge-core.js) | 纯逻辑单测（12 项：叠放稳定性、合并/禁链式、确定性、失败判定、500 次长跑） |
 
+### 数值冲刺（Gate Runner / gate_runner）
+
+| 类型 | 文件 | 说明 |
+|------|------|------|
+| 游戏设计 | [`specs/2026-11-01-game-gate-runner-design.md`](./specs/2026-11-01-game-gate-runner-design.md) | 单资源（人数=火力=血条）、门模板与 `from` 曲线、对拼公式、敌人/Boss 曲线、与草案的 8 处差异 |
+| 场景搭建 | [`design/2026-11-01-gate-runner-scene-setup.md`](./design/2026-11-01-gate-runner-scene-setup.md) | **实建节点树（含 UUID/坐标）**、19 项绑定、`ClipLayer`+`cc.Mask` 修「敌人画到 HUD 上」、浏览器实测清单 |
+| 设计草案 | [`plans/2026-10-31-gate-runner-design-draft.md`](./plans/2026-10-31-gate-runner-design-draft.md) | 开工前的一页纸（以定稿规格为准，差异表见定稿 §9） |
+| 回归自检 | [`../tools/verify-gate-core.js`](../tools/verify-gate-core.js) | 纯逻辑单测（12 项：门只触发一次、对拼公式、生成确定性与合法性、180 s 自动游玩、平衡性） |
+
 ### 大厅与整体
 
 | 类型 | 文件 | 说明 |
@@ -115,9 +124,8 @@
 | 整体设计 | [`specs/2026-05-12-tiny-games-design.md`](./specs/2026-05-12-tiny-games-design.md) | 小游戏集合整体设计 |
 | 大厅设计 | [`specs/2026-05-12-phase1-lobby-design.md`](./specs/2026-05-12-phase1-lobby-design.md) | 第一阶段大厅设计 |
 | 大厅计划 | [`plans/2026-05-12-phase1-lobby-plan.md`](./plans/2026-05-12-phase1-lobby-plan.md) | 大厅实现计划 |
-| 路线图 | [`plans/2026-10-31-next-games-roadmap.md`](./plans/2026-10-31-next-games-roadmap.md) | 第 6–8 款：砖块远征 → 合成大西瓜 → 数值门跑酷 |
+| 路线图 | [`plans/2026-10-31-next-games-roadmap.md`](./plans/2026-10-31-next-games-roadmap.md) | 第 6–8 款：砖块远征 → 合成大西瓜 → 数值门跑酷（三款均已可玩） |
 | 物理方案评估 | [`plans/2026-10-31-merge-physics-evaluation.md`](./plans/2026-10-31-merge-physics-evaluation.md) | 合成大西瓜：自研圆形求解 vs Box2D，含求解器设计与 12 项验收 |
-| 设计草案 | [`plans/2026-10-31-gate-runner-design-draft.md`](./plans/2026-10-31-gate-runner-design-draft.md) | 数值门跑酷：单资源数值、门模板、敌人曲线与平衡验收 |
 
 ---
 
