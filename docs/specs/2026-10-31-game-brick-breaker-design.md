@@ -178,11 +178,18 @@ vy = -speed × cos(angle)                // y 向下为正，向上是负
 
 | 操作 | 行为 |
 |------|------|
-| 手指在游戏区内横向拖动 | 挡板中心跟随手指 x（带 `12 px` 平滑，不瞬移） |
-| 点击（`TOUCH_END` 位移 < 12 px） | `ready` 状态发球；`sticky` 且球粘住时发球 |
-| 松手 / `TOUCH_CANCEL` | 挡板停在当前位置，不触发发球 |
+| 手指**在屏幕任意位置**横向拖动 | 挡板中心跟随手指 x（带 `12 px` 平滑，不瞬移） |
+| 点击（`TOUCH_END` / `TOUCH_CANCEL` 位移 < 12 px） | `ready` 状态发球；`sticky` 且球粘住时发球 |
+| 拖拽结束 | 挡板停在当前位置，不发球 |
+| 手势起点落在暂停按钮上 | 整个手势交给按钮，既不驱动挡板也不发球 |
 
-- 监听挂在覆盖整个游戏区的节点上；桌面下拖拽结束会派发 `TOUCH_CANCEL`，必须与 `TOUCH_END` 同样处理为「结束拖拽」，但**都不发球**（发球只认点击判定）
+- **监听挂在全局 `input` 上，不再挂在 `InputArea` 节点上**（2026-11-01）：
+  原来只覆盖 660×860 的棋盘，用户反馈「棋盘下方左右滑动不能控制滑块」。
+  `inputArea` 现在只当作坐标基准（`convertToNodeSpaceAR` 换算），
+  所以逻辑坐标可以超出 `[0, PLAY_W]`，`setPaddleTarget` 会 clamp。
+- 轻触与拖拽**只按位移区分**，`TOUCH_END` 与 `TOUCH_CANCEL` 都走 `_finishGesture()`：
+  桌面下拖拽结束派发的是 `TOUCH_CANCEL`（踩坑手册 §11），只在 `END` 里判点击会让桌面发球失灵。
+- 阈值取 12 逻辑像素而不是 8：手册 §11.6 实测 8 设计像素会把「横移 5 CSS 像素」的手势静默吃成拖拽。
 - 挡板目标位置 clamp 到 `[PADDLE_W/2, PLAY_W - PADDLE_W/2]`，避免半个挡板出界
 - 球粘在挡板上时，球位置跟随挡板
 
@@ -216,7 +223,7 @@ BrickBreaker (Canvas)
 │   │   ├── Background                    [Graphics] → backgroundLayer
 │   │   ├── BrickLayer                    [Graphics] → brickLayer
 │   │   ├── EffectLayer                   [Graphics] → effectLayer
-│   │   └── InputArea                     UITransform 660×860 → inputArea（不挂渲染组件）
+│   │   └── InputArea                     UITransform 660×860 → inputArea（不挂渲染组件；仅作坐标基准，输入走全局 input）
 │   ├── HudTop                            位置 (0, 520)
 │   │   ├── ScoreLabel                    [Label] → scoreLabel
 │   │   ├── LivesLabel                    [Label] → livesLabel

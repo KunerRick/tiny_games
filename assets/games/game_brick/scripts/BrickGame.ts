@@ -8,7 +8,7 @@
  * - 细线一律 `rect()+fill()`，不依赖 `stroke()`（踩坑手册 §4.5）。
  */
 
-import { _decorator, Color, Component, EventTouch, Graphics, Label, Node, UITransform, Vec3 } from 'cc';
+import { _decorator, Color, Component, EventTouch, Graphics, Input, Label, Node, UITransform, Vec3, input as globalInput } from 'cc';
 import { BrickCore } from './BrickCore';
 import { COLORS, PLAY_H, PLAY_W, getUpgradeDef } from './BrickConfig';
 import type { UpgradeId } from './BrickConfig';
@@ -151,9 +151,11 @@ export class BrickGame extends Component {
     private _highScore = 0;
 
     // onDestroy 只用这些缓存（不访问 @property）
-    private _inputNode: Node | null = null;
     private _pauseNode: Node | null = null;
     private _destroyed = false;
+
+    /** 本次手势是从暂停按钮上开始的：整个手势都不驱动挡板，也不发球 */
+    private _gestureOnButton = false;
 
     /** 颜色缓存：按 (hex, alpha 1/32 量化) 复用，避免每帧给粒子新建 Color */
     private _colorCache: Map<number, Color> = new Map();
@@ -164,7 +166,6 @@ export class BrickGame extends Component {
         this._bgGraphics = this._graphicsOf(this.backgroundLayer);
         this._brickGraphics = this._graphicsOf(this.brickLayer);
         this._effectGraphics = this._graphicsOf(this.effectLayer);
-        this._inputNode = this.inputArea;
         this._inputTransform = this.inputArea ? this.inputArea.getComponent(UITransform) : null;
 
         this._highScore = this._readNumber('highScore', 0);
@@ -180,13 +181,11 @@ export class BrickGame extends Component {
 
     onDestroy(): void {
         this._destroyed = true;
-        const input = this._inputNode;
-        if (input && input.isValid) {
-            input.off(Node.EventType.TOUCH_START, this._onTouchStart, this);
-            input.off(Node.EventType.TOUCH_MOVE, this._onTouchMove, this);
-            input.off(Node.EventType.TOUCH_END, this._onTouchEnd, this);
-            input.off(Node.EventType.TOUCH_CANCEL, this._onTouchCancel, this);
-        }
+        // 输入挂在全局 input 上，销毁时必须按同样的函数引用解绑
+        globalInput.off(Input.EventType.TOUCH_START, this._onTouchStart, this);
+        globalInput.off(Input.EventType.TOUCH_MOVE, this._onTouchMove, this);
+        globalInput.off(Input.EventType.TOUCH_END, this._onTouchEnd, this);
+        globalInput.off(Input.EventType.TOUCH_CANCEL, this._onTouchCancel, this);
         const pause = this._pauseNode;
         if (pause && pause.isValid) {
             pause.off(Node.EventType.TOUCH_END, this._onPauseClicked, this);
@@ -233,13 +232,13 @@ export class BrickGame extends Component {
     // ==================== 输入 ====================
 
     private _bindStatic(): void {
-        const input = this.inputArea;
-        if (input) {
-            input.on(Node.EventType.TOUCH_START, this._onTouchStart, this);
-            input.on(Node.EventType.TOUCH_MOVE, this._onTouchMove, this);
-            input.on(Node.EventType.TOUCH_END, this._onTouchEnd, this);
-            input.on(Node.EventType.TOUCH_CANCEL, this._onTouchCancel, this);
-        }
+        // 整个屏幕都能拖挡板：监听挂在全局 input 上，inputArea 只当作坐标基准。
+        // 节点级监听只覆盖 660×860 的棋盘，棋盘下方滑动（用户反馈的位置）会完全没反应。
+        globalInput.on(Input.EventType.TOUCH_START, this._onTouchStart, this);
+        globalInput.on(Input.EventType.TOUCH_MOVE, this._onTouchMove, this);
+        globalInput.on(Input.EventType.TOUCH_END, this._onTouchEnd, this);
+        globalInput.on(Input.EventType.TOUCH_CANCEL, this._onTouchCancel, this);
+
         if (this.pauseButton) {
             this._pauseNode = this.pauseButton;
             this.pauseButton.on(Node.EventType.TOUCH_END, this._onPauseClicked, this);
@@ -247,22 +246,47 @@ export class BrickGame extends Component {
     }
 
     private _onTouchStart(event: EventTouch): void {
-        if (!this._acceptsPlayInput()) return;
-        const p = this._toLogic(event.getUILocation().x, event.getUILocation().y);
+        const loc = event.getUILocation();
+        // 从暂停按钮上开始的手势交给按钮自己处理，别顺手把挡板拽过去
+        this._gestureOnButton = this._isOverNode(this.pauseButton, loc.x, loc.y);
+        if (this._gestureOnButton || !this._acceptsPlayInput()) return;
+
+        const p = this._toLogic(loc.x, loc.y);
         this._touchStartX = p.x;
         this._touchStartY = p.y;
         this._core.setPaddleTarget(p.x);
     }
 
     private _onTouchMove(event: EventTouch): void {
-        if (!this._acceptsPlayInput()) return;
-        const p = this._toLogic(event.getUILocation().x, event.getUILocation().y);
-        this._core.setPaddleTarget(p.x);
+        if (this._gestureOnButton || !this._acceptsPlayInput()) return;
+        const loc = event.getUILocation();
+        this._core.setPaddleTarget(this._toLogic(loc.x, loc.y).x);
     }
 
     private _onTouchEnd(event: EventTouch): void {
-        if (!this._acceptsPlayInput()) return;
-        const p = this._toLogic(event.getUILocation().x, event.getUILocation().y);
+        const wasOnButton = this._gestureOnButton;
+        this._gestureOnButton = false;
+        if (wasOnButton || !this._acceptsPlayInput()) return;
+        const loc = event.getUILocation();
+        this._finishGesture(loc.x, loc.y);
+    }
+
+    /**
+     * 桌面拖拽结束时引擎派发的是 TOUCH_CANCEL（不是 TOUCH_END）。
+     * 轻触/拖拽的区分改看位移，所以两种结束都走同一套收尾逻辑，桌面上点击发球也不会失灵。
+     */
+    private _onTouchCancel(event: EventTouch): void {
+        const wasOnButton = this._gestureOnButton;
+        this._gestureOnButton = false;
+        if (wasOnButton || !this._acceptsPlayInput()) return;
+        const loc = event.getUILocation();
+        this._finishGesture(loc.x, loc.y);
+    }
+
+    /** 位移不超过 TAP_SLOP 视为点击 → 发球 */
+    private _finishGesture(uiX: number, uiY: number): void {
+        const p = this._toLogic(uiX, uiY);
+        this._core.setPaddleTarget(p.x);
         const dx = p.x - this._touchStartX;
         const dy = p.y - this._touchStartY;
         if (Math.sqrt(dx * dx + dy * dy) <= TAP_SLOP) {
@@ -270,9 +294,19 @@ export class BrickGame extends Component {
         }
     }
 
-    /** 桌面拖拽结束派发的是 TOUCH_CANCEL：结束拖拽，但不当作点击发球 */
-    private _onTouchCancel(): void {
-        // 故意留空：挡板停在当前位置
+    /** UI 坐标下点是否落在节点矩形内（预留 8px 手指容差） */
+    private _isOverNode(node: Node | null, uiX: number, uiY: number): boolean {
+        if (!node || !node.isValid || !node.activeInHierarchy) return false;
+        const transform = node.getComponent(UITransform);
+        if (!transform) return false;
+
+        const local = transform.convertToNodeSpaceAR(new Vec3(uiX, uiY, 0));
+        const pad = 8;
+        const left = -transform.width * transform.anchorX - pad;
+        const right = transform.width * (1 - transform.anchorX) + pad;
+        const bottom = -transform.height * transform.anchorY - pad;
+        const top = transform.height * (1 - transform.anchorY) + pad;
+        return local.x >= left && local.x <= right && local.y >= bottom && local.y <= top;
     }
 
     private _acceptsPlayInput(): boolean {
