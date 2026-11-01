@@ -14,6 +14,7 @@ export const GAME_LIST: GameConfig[] = [
     { id: 'snake', name: '贪吃蛇', icon: 'default', sceneName: 'Snake', description: '大作战风格贪吃蛇' },
     { id: 'tiny_vanguard', name: '小小先锋', icon: 'default', sceneName: 'TinyVanguard', description: 'Roguelike 回合制战棋' },
     { id: 'tetris', name: '方块坠落', icon: 'default', sceneName: 'Tetris', description: '经典方块消除' },
+    { id: 'solitaire', name: '纸牌接龙', icon: 'default', sceneName: 'Solitaire', description: '克朗代克单人纸牌' },
 ];
 
 export function getGameById(id: string): GameConfig | undefined {

@@ -277,10 +277,13 @@ export class SolitaireGame extends Component {
     }
 
     onDestroy(): void {
-        this._unbindEvents();
+        // 不调 _unbindEvents()：场景销毁时子节点（按钮）先于组件被销毁，
+        // 此时 @property(Node) 仍返回对象，但内部 _eventProcessor 已是 null，
+        // Node.off 会抛 "Cannot read properties of null (reading 'off')"（红线 4）。
+        // 节点连同其监听器一起被引擎回收，这里只解绑挂在全局 game 上的回调。
         game.off(Game.EVENT_HIDE, this._onAppHide, this);
         game.off(Game.EVENT_SHOW, this._onAppShow, this);
-        // 只清 JS 引用，不访问任何 @property(Node)（红线 4）
+        // 只清 JS 引用，不访问任何 @property(Node)
         this._views.clear();
         this._layout = [];
         this._layoutByKey.clear();
@@ -373,33 +376,9 @@ export class SolitaireGame extends Component {
         this._bindTap(this.autoAceBtn, this._onAutoAceClicked);
     }
 
-    private _unbindEvents(): void {
-        if (this.boardNode) {
-            this.boardNode.off(Node.EventType.TOUCH_START, this._onTouchStart, this);
-            this.boardNode.off(Node.EventType.TOUCH_MOVE, this._onTouchMove, this);
-            this.boardNode.off(Node.EventType.TOUCH_END, this._onTouchEnd, this);
-            this.boardNode.off(Node.EventType.TOUCH_CANCEL, this._onTouchCancel, this);
-        }
-        this._unbindTap(this.newGameBtn, this._onNewGameClicked);
-        this._unbindTap(this.undoBtn, this._onUndoClicked);
-        this._unbindTap(this.hintBtn, this._onHintClicked);
-        this._unbindTap(this.menuBtn, this._onMenuClicked);
-        this._unbindTap(this.collectBtn, this._onCollectClicked);
-        this._unbindTap(this.winNewBtn, this._onNewGameClicked);
-        this._unbindTap(this.menuCloseBtn, this._onMenuCloseClicked);
-        this._unbindTap(this.drawModeBtn, this._onDrawModeClicked);
-        this._unbindTap(this.vibrateBtn, this._onVibrateClicked);
-        this._unbindTap(this.autoAceBtn, this._onAutoAceClicked);
-    }
-
     private _bindTap(node: Node | null, handler: () => void): void {
         if (!node) return;
         node.on(Node.EventType.TOUCH_END, handler, this);
-    }
-
-    private _unbindTap(node: Node | null, handler: () => void): void {
-        if (!node) return;
-        node.off(Node.EventType.TOUCH_END, handler, this);
     }
 
     // ==================== 布局与渲染 ====================
