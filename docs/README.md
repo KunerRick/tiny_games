@@ -100,6 +100,13 @@
 | 验收报告 | [`plans/2026-11-01-game-solitaire-acceptance.md`](./plans/2026-11-01-game-solitaire-acceptance.md) | M8 逐项验收结论 + 微信构建预检（含阻塞项与空构建判据） |
 | 后续排期 | [`plans/2026-11-01-next-games-roadmap.md`](./plans/2026-11-01-next-games-roadmap.md) | 接龙 P0 / 吸血鬼幸存者 lite P1 的先后顺序、MVP 边界与压测门槛 |
 
+### 午夜幸存者（Survivor / survivor）
+
+| 类型 | 文件 | 说明 |
+|------|------|------|
+| 游戏设计（评审稿） | [`specs/2026-11-02-game-survivor-design.md`](./specs/2026-11-02-game-survivor-design.md) | 8 分钟群怪生存：4 武器 / 4 被动 / 3+2 槽、逐分钟节奏、数值与调参表、单 Graphics 性能预算与 M1/M2 双重 Go-No-Go |
+| 后续排期 | [`plans/2026-11-01-next-games-roadmap.md`](./plans/2026-11-01-next-games-roadmap.md) | 纸牌接龙 P0 之后启动本作（P1）的先后顺序与压测门槛 |
+
 ### 砖块远征（Brick Breaker / brick）
 
 | 类型 | 文件 | 说明 |
