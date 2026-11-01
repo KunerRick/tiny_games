@@ -83,9 +83,18 @@ export const REBOUND_SEC = 0.14;
 /** 回弹抖动横向位移 */
 export const REBOUND_SHAKE_X = 6;
 /** 提示高亮持续时长（秒） */
-export const HINT_SEC = 2.5;
+export const HINT_SEC = 4;
 /** 连续点击提示的最小间隔（秒） */
 export const HINT_COOLDOWN_SEC = 1.5;
+
+// ==================== 牌堆重洗 ====================
+
+/**
+ * 一局最多重洗几次（两种抽牌模式共用）。
+ * 不设上限时「抽 1 张」可以无限翻牌，一局能拖到天荒地老，也没有任何决策压力；
+ * 3 次是纸牌接龙的常见约定（抽 3 张通常限 3 遍）。
+ */
+export const MAX_RECYCLES = 3;
 
 // ==================== 计分 ====================
 

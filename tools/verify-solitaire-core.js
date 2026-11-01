@@ -325,8 +325,41 @@ test('抽 3 重洗扣 20 分，抽 1 不扣', () => {
     eq(c1.state.score, 100);
 });
 
-test('分数不会低于 0', () => {
-    const core = coreWith({
+test('重洗有上限：每局最多 MAX_RECYCLES 次', () => {
+    const core = coreWith({ waste: [card('S', 5, true)] });
+    for (let i = 0; i < CFG.MAX_RECYCLES; i++) {
+        ok(core.recycle(), `第 ${i + 1} 次重洗应当成功`);
+        while (core.state.stock.length > 0) core.draw(); // 抽空才能再洗
+    }
+    eq(core.state.recycles, CFG.MAX_RECYCLES);
+    eq(core.recyclesLeft(), 0);
+    ok(!core.recycle(), '超过上限应当被拒绝');
+    eq(core.state.stock.length, 0);
+    ok(!core.canDraw(), '牌堆空且次数用尽 → 不能再抽');
+    ok(!core.draw());
+    eq(core.state.recycles, CFG.MAX_RECYCLES);
+    eq(core.state.waste.length, 1); // 牌没被吞掉
+});
+
+test('重洗上限可被撤销回退', () => {
+    const core = coreWith({ waste: [card('S', 5, true)], recycles: CFG.MAX_RECYCLES - 1 });
+    ok(core.recycle());
+    eq(core.recyclesLeft(), 0);
+    while (core.state.stock.length > 0) core.draw();
+    ok(!core.canRecycle(), '次数用尽后不能再洗');
+    ok(core.undo()); // 退回最后一张牌
+    ok(core.undo()); // 退回这次重洗
+    eq(core.state.recycles, CFG.MAX_RECYCLES - 1);
+    eq(core.state.stock.length, 0);
+    ok(core.canRecycle());
+});
+
+test('重洗耗尽后提示不再建议抽牌', () => {
+    const core = coreWith({ waste: [card('S', 5, true)], recycles: CFG.MAX_RECYCLES });
+    eq(core.hint(), null);
+});
+
+test('分数不会低于 0', () => {    const core = coreWith({
         waste: [card('S', 5, true)],
         score: 10,
         drawCount: 3,

@@ -15,10 +15,12 @@ import {
     EventTouch,
     Game,
     Graphics,
+    HorizontalTextAlignment,
     Label,
     Node,
     UITransform,
     Vec3,
+    VerticalTextAlignment,
     game,
 } from 'cc';
 import {
@@ -29,11 +31,14 @@ import {
     COLOR_HIGHLIGHT,
     COLOR_SLOT_STROKE,
     COLOR_TABLE,
+    COLOR_TEXT_PRIMARY,
+    COLOR_TEXT_SECONDARY,
     DESIGN_H,
     DESIGN_W,
     FOUNDATION_COLS,
     HINT_COOLDOWN_SEC,
     HINT_SEC,
+    MAX_RECYCLES,
     SAVE_THROTTLE_SEC,
     STOCK_COL,
     TAP_SLOP,
@@ -42,6 +47,7 @@ import {
     colLeftX,
 } from './SolitaireConfig';
 import {
+    Card,
     PILE_FOUNDATION_BASE,
     PILE_WASTE,
     SolitaireCore,
@@ -65,6 +71,16 @@ import { StorageManager } from '../../../common/managers/StorageManager';
 const { ccclass, property } = _decorator;
 
 const GAME_ID = 'solitaire';
+
+/** 新手引导正文：只讲「怎么赢 + 怎么操作」，不讲计分细则 */
+const HELP_TEXT =
+    '目标：把 52 张牌按花色，从 A 到 K 依次收进右上角的四个收牌区。\n'
+    + '\n'
+    + '· 落牌规则：红黑交替、点数递减（红桃 7 只能放在黑桃 8 或梅花 8 上）。\n'
+    + '· 空列只能放 K。\n'
+    + '· 点左上角的牌堆发牌。牌堆空了会自动重洗，每局最多 3 次，用完就只能撤销或新开一局。\n'
+    + '· 拖动可以把一整段牌搬走；点一下牌顶，会自动找能放的位置。\n'
+    + '· 不知道走哪张就点「提示」，高亮会圈出这一步的起点和落点。';
 
 interface DragState {
     from: number;
@@ -218,10 +234,24 @@ export class SolitaireGame extends Component {
     private _hintPile = -1;
     private _hintTo = -1;
     private _hintCount = 0;
+    /** 当前提示的类型；用于每帧重绘呼吸式高亮（'move' | 'draw' | null） */
+    private _hintKind: 'move' | 'draw' | null = null;
+    private _hintPulseAt = 0;
+    private _hintPhase = 0;
+
+    /** 玩法说明面板：首次进入自动弹出，顶栏「?」可再次打开 */
+    private _helpPanel: Node | null = null;
+    private _helpOpen = false;
+    private _helpBtn: Node | null = null;
+    /** 顶栏「重洗 N/3」：把次数上限摆在明面上 */
+    private _redealLabel: Label | null = null;
 
     private _confirmNewUntil = 0;
     private _toastUntil = 0;
     private _toastText = '';
+    /** 浮层提示条：顶栏那一行放不下「提示：把 梅花3 拖到 红桃4 上」这种长句 */
+    private _toastBanner: Node | null = null;
+    private _toastLabel: Label | null = null;
 
     private _settings: Settings = { drawCount: 1, autoAce: true, vibrate: true };
     private _stats: Stats = { played: 0, won: 0, bestTime: 0, bestMoves: 0, bestScore: 0, streak: 0, bestStreak: 0 };
@@ -238,6 +268,7 @@ export class SolitaireGame extends Component {
         this._createCardViews();
         this._drawBackground();
         this._bindEvents();
+        this._createHelpEntry();
         this._restoreOrDeal();
 
         if (this.titleLabel) this.titleLabel.string = '纸牌接龙';
@@ -255,10 +286,11 @@ export class SolitaireGame extends Component {
         if (this.winPanel) this.winPanel.active = false;
         if (this.menuPanel) this.menuPanel.active = false;
         if (this.collectBtn) this.collectBtn.active = false;
+        this._showHelpOnFirstVisit();
     }
 
     update(dt: number): void {
-        if (this._running && !this._menuOpen && !this._won) {
+        if (this._running && !this._menuOpen && !this._won && !this._helpOpen) {
             this._elapsed += dt;
         }
 
@@ -273,6 +305,7 @@ export class SolitaireGame extends Component {
             if (this._sinceSave >= SAVE_THROTTLE_SEC) this._saveNow();
         }
 
+        this._pulseHint(dt);
         this._expireTimers();
     }
 
@@ -291,6 +324,9 @@ export class SolitaireGame extends Component {
         this._boardUT = null;
         this._bg = null;
         this._fx = null;
+        this._helpPanel = null;
+        this._toastBanner = null;
+        this._toastLabel = null;
     }
 
     // ==================== 初始化 ====================
@@ -329,11 +365,15 @@ export class SolitaireGame extends Component {
     private _startNewGame(countAsPlayed = true): void {
         const seed = ((Date.now() & 0x7fffffff) ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0;
         this._core.deal(seed, this._settings.drawCount);
+        // 发牌后会直接送掉露在外面的 A（+10 分、翻牌 +5 分），
+        // 这一步必须发生在刷新 HUD 之前 —— 否则分数标签要等下一秒轮询才跟上
+        this._autoSendAces();
         this._elapsed = 0;
         this._running = true;
         this._won = false;
         this._menuOpen = false;
         this._hintUntil = 0;
+        this._hintKind = null;
         this._hintPile = -1;
         this._hintTo = -1;
         this._drag = null;
@@ -447,6 +487,12 @@ export class SolitaireGame extends Component {
         return c;
     }
 
+    private _hexAlpha(color: string, alpha: number): Color {
+        const c = this._hex(color);
+        c.a = Math.max(0, Math.min(255, Math.round(alpha)));
+        return c;
+    }
+
     // ==================== 触摸输入 ====================
 
     private _designPoint(event: EventTouch): { x: number; y: number } {
@@ -473,8 +519,9 @@ export class SolitaireGame extends Component {
     }
 
     private _onTouchStart(event: EventTouch): void {
-        if (!this._running || this._won || this._menuOpen) return;
+        if (!this._running || this._won || this._menuOpen || this._helpOpen) return;
         if (this._drag) return; // 多指：忽略第二根手指
+        this._clearHint(); // 玩家开始操作，提示高亮让位给落点高亮
         this._touchId = event.getID();
 
         const point = this._designPoint(event);
@@ -572,6 +619,7 @@ export class SolitaireGame extends Component {
     private _finishTouch(event: EventTouch, allowStockDraw: boolean): void {
         if (this._touchId !== -1 && event.getID() !== this._touchId) return;
         this._touchId = -1;
+        if (this._helpOpen) return;
 
         const drag = this._drag;
         this._drag = null;
@@ -667,6 +715,11 @@ export class SolitaireGame extends Component {
         if (this._core.draw()) {
             this._vibrate();
             this._afterAction();
+            return;
+        }
+        // 牌堆空 + 重洗次数用尽：必须给出明确反馈，否则玩家只觉得「点了没反应」
+        if (this._core.state.stock.length === 0 && this._core.state.waste.length > 0) {
+            this._toast(`重洗次数已用完（每局 ${MAX_RECYCLES} 次），试试撤销或新开一局`, 2.5);
         }
     }
 
@@ -691,6 +744,7 @@ export class SolitaireGame extends Component {
         this._autoSendAces();
         this._render(true);
         this._refreshHud(true);
+        this._refreshModeLabel();
         this._markDirty();
         if (this._core.isWon()) this._onWin();
     }
@@ -714,25 +768,79 @@ export class SolitaireGame extends Component {
 
         const hint = this._core.hint();
         if (!hint) {
-            this._toast('没有可走的牌了，试试撤销或新开一局', 2.5);
-            return;
-        }
-        if (hint.kind === 'draw') {
-            this._hintPile = -1;
-            this._hintTo = -1;
-            this._hintUntil = now + HINT_SEC;
-            this._drawFxSlot(colLeftX(STOCK_COL), TOP_ROW_Y);
+            this._clearHint();
+            const text = this._core.canDraw()
+                ? '暂时没有可走的牌，点左上角牌堆抽一张'
+                : `重洗次数已用完（每局 ${MAX_RECYCLES} 次），试试撤销或新开一局`;
+            this._toast(text, HINT_SEC);
             return;
         }
 
+        this._hintKind = hint.kind === 'draw' ? 'draw' : 'move';
         this._hintPile = hint.from;
         this._hintTo = hint.to;
         this._hintCount = hint.count;
         this._hintUntil = now + HINT_SEC;
-        this._drawHint(hint.from, hint.to, hint.count);
+        this._hintPhase = 0;
+        this._hintPulseAt = 0;
+        this._drawActiveHint(4);
+        this._toast(this._describeHint(hint.from, hint.to, hint.count, hint.kind === 'draw'), HINT_SEC);
     }
 
-    private _drawHint(from: number, to: number, count: number): void {
+    /** 把一步棋讲成人话：只说「哪张牌 → 去哪」，不解释规则 */
+    private _describeHint(from: number, to: number, count: number, isDraw: boolean): string {
+        if (isDraw) return '提示：点左上角的牌堆抽一张';
+        const cards = this._core.pileCards(from);
+        const head = cards[cards.length - count];
+        if (!head) return '提示：按高亮位置移动';
+        const name = this._cardName(head);
+
+        if (to === PILE_WASTE) return `提示：把 ${name} 拖到废牌堆`;
+        if (to >= PILE_FOUNDATION_BASE) return `提示：把 ${name} 收进收牌区`;
+        const dest = this._core.pileCards(to);
+        if (dest.length === 0) return `提示：把 ${name} 拖到空列`;
+        return `提示：把 ${name} 拖到 ${this._cardName(dest[dest.length - 1])} 上`;
+    }
+
+    private _cardName(card: Card): string {
+        const suit = card.suit === 'S' ? '黑桃'
+            : card.suit === 'H' ? '红桃'
+            : card.suit === 'C' ? '梅花'
+            : '方块';
+        const rank = card.rank === 1 ? 'A'
+            : card.rank === 11 ? 'J'
+            : card.rank === 12 ? 'Q'
+            : card.rank === 13 ? 'K'
+            : String(card.rank);
+        return `${suit}${rank}`;
+    }
+
+    /**
+     * 提示高亮是「呼吸」的：每 50 ms 按正弦重绘一次线宽，
+     * 静态 3px 细线在深色桌面上几乎看不见（上一版收到最多的反馈就是「提示无效」）。
+     */
+    private _pulseHint(dt: number): void {
+        if (this._hintUntil <= 0 || this._hintKind === null) return;
+        this._hintPulseAt += dt;
+        if (this._hintPulseAt < 0.05) return;
+        this._hintPulseAt = 0;
+        this._hintPhase += 0.05;
+        const width = 4 + 2.5 * (0.5 + 0.5 * Math.sin(this._hintPhase * 6));
+        this._drawActiveHint(width);
+    }
+
+    private _drawActiveHint(width: number): void {
+        if (this._hintKind === 'draw') {
+            this._clearFx();
+            this._drawFxSlot(colLeftX(STOCK_COL), TOP_ROW_Y, width, true);
+            return;
+        }
+        if (this._hintKind === 'move') {
+            this._drawHint(this._hintPile, this._hintTo, this._hintCount, width);
+        }
+    }
+
+    private _drawHint(from: number, to: number, count: number, width: number = 4): void {
         this._clearFx();
         const g = this._fx;
         if (!g) return;
@@ -743,7 +851,8 @@ export class SolitaireGame extends Component {
             for (let i = start; i < cards.length; i++) {
                 const place = this._layoutByKey.get(cardKey(cards[i]));
                 if (!place) continue;
-                this._drawFxRect(place.left, place.top, 3);
+                // 来源牌只描边：填色会盖住牌面，玩家看不出提示的是哪张
+                this._drawFxRect(place.left, place.top, width, false);
             }
         }
 
@@ -751,14 +860,14 @@ export class SolitaireGame extends Component {
             const destCards = this._core.pileCards(to);
             if (destCards.length > 0) {
                 const place = this._layoutByKey.get(cardKey(destCards[destCards.length - 1]));
-                if (place) this._drawFxRect(place.left, place.top, 3);
+                if (place) this._drawFxRect(place.left, place.top, width, true);
             } else if (to === PILE_WASTE) {
-                this._drawFxSlot(colLeftX(WASTE_COL), TOP_ROW_Y);
+                this._drawFxSlot(colLeftX(WASTE_COL), TOP_ROW_Y, width, true);
             } else if (to < 7) {
-                this._drawFxSlot(colLeftX(to), COLUMN_TOP_Y);
+                this._drawFxSlot(colLeftX(to), COLUMN_TOP_Y, width, true);
             } else {
                 const f = to - PILE_FOUNDATION_BASE;
-                this._drawFxSlot(colLeftX(FOUNDATION_COLS[f]), TOP_ROW_Y);
+                this._drawFxSlot(colLeftX(FOUNDATION_COLS[f]), TOP_ROW_Y, width, true);
             }
         }
     }
@@ -777,22 +886,201 @@ export class SolitaireGame extends Component {
         else this._drawFxSlot(colLeftX(FOUNDATION_COLS[target - PILE_FOUNDATION_BASE]), TOP_ROW_Y);
     }
 
-    private _drawFxRect(left: number, top: number, width: number): void {
+    private _drawFxRect(left: number, top: number, width: number, fill: boolean = false): void {
         const g = this._fx;
         if (!g) return;
         const local = this._designToLocal(left, top);
+        const x = local.x - CARD_W / 2;
+        const y = local.y - CARD_H / 2;
+        if (fill) {
+            g.fillColor = this._hexAlpha(COLOR_HIGHLIGHT, 70);
+            g.roundRect(x, y, CARD_W, CARD_H, 10);
+            g.fill();
+        }
         g.lineWidth = width;
         g.strokeColor = this._hex(COLOR_HIGHLIGHT);
-        g.roundRect(local.x - CARD_W / 2, local.y - CARD_H / 2, CARD_W, CARD_H, 10);
+        g.roundRect(x, y, CARD_W, CARD_H, 10);
         g.stroke();
     }
 
-    private _drawFxSlot(left: number, top: number): void {
-        this._drawFxRect(left, top, 2);
+    private _drawFxSlot(left: number, top: number, width: number = 2, fill: boolean = false): void {
+        this._drawFxRect(left, top, width, fill);
     }
 
     private _clearFx(): void {
         if (this._fx) this._fx.clear();
+    }
+
+    private _clearHint(): void {
+        this._hintUntil = 0;
+        this._hintKind = null;
+        this._clearFx();
+    }
+
+    // ==================== 玩法说明（新手引导） ====================
+
+    /**
+     * 顶栏常驻入口：左侧「重洗 N/3」把上限摆在明面上，右侧「?」随时重看规则。
+     * 两者都是运行时创建的 —— 场景是 MCP 维护的，这里只做「追加一个入口」，
+     * 不动已有节点，避免再去同步 .scene。
+     */
+    private _createHelpEntry(): void {
+        const topBar = this.boardNode ? this.boardNode.getChildByName('TopBar') : null;
+        if (!topBar) return;
+
+        if (!topBar.getChildByName('RedealLabel')) {
+            const label = this._makeLabel(
+                'RedealLabel', topBar, 120, 20, 170, 32,
+                `重洗 ${MAX_RECYCLES}/${MAX_RECYCLES}`, 20, COLOR_TEXT_SECONDARY,
+            );
+            label.horizontalAlign = HorizontalTextAlignment.RIGHT;
+            this._redealLabel = label;
+        }
+
+        if (!topBar.getChildByName('HelpBtn')) {
+            const btn = this._makeButton('HelpBtn', topBar, 300, -24, 60, 60, '?', 26, true);
+            btn.on(Node.EventType.TOUCH_END, this._onHelpClicked, this);
+            this._helpBtn = btn;
+        }
+    }
+
+    private _makeLabel(
+        name: string,
+        parent: Node,
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        text: string,
+        size: number,
+        color: string,
+    ): Label {
+        const node = new Node(name);
+        node.layer = parent.layer;
+        const ut = node.addComponent(UITransform);
+        ut.setContentSize(w, h);
+        const label = node.addComponent(Label);
+        label.string = text;
+        label.fontSize = size;
+        label.lineHeight = Math.round(size * 1.4);
+        label.color = this._hex(color);
+        label.horizontalAlign = HorizontalTextAlignment.CENTER;
+        label.verticalAlign = VerticalTextAlignment.CENTER;
+        parent.addChild(node);
+        node.setPosition(x, y, 0);
+        return label;
+    }
+
+    private _makeButton(
+        name: string,
+        parent: Node,
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        text: string,
+        size: number,
+        round: boolean,
+    ): Node {
+        const node = new Node(name);
+        node.layer = parent.layer;
+        const ut = node.addComponent(UITransform);
+        ut.setContentSize(w, h);
+
+        const g = node.addComponent(Graphics);
+        const r = round ? Math.min(w, h) / 2 : 14;
+        g.fillColor = this._hexAlpha(COLOR_SLOT_STROKE, 235);
+        g.roundRect(-w / 2, -h / 2, w, h, r);
+        g.fill();
+        g.lineWidth = 2;
+        g.strokeColor = this._hex(COLOR_HIGHLIGHT);
+        g.roundRect(-w / 2, -h / 2, w, h, r);
+        g.stroke();
+
+        parent.addChild(node);
+        node.setPosition(x, y, 0);
+        this._makeLabel(`${name}Label`, node, 0, 0, w, h, text, size, COLOR_TEXT_PRIMARY);
+        return node;
+    }
+
+    private _ensureHelpPanel(): Node | null {
+        if (this._helpPanel && this._helpPanel.isValid) return this._helpPanel;
+        const board = this.boardNode;
+        if (!board) return null;
+
+        const root = new Node('HelpPanel');
+        root.layer = board.layer;
+        root.addComponent(UITransform).setContentSize(DESIGN_W, DESIGN_H);
+        board.addChild(root);
+
+        // 遮罩：点一下就关（同时挡住下层所有按钮，避免误触）
+        const dim = new Node('Dim');
+        dim.layer = board.layer;
+        dim.addComponent(UITransform).setContentSize(DESIGN_W, DESIGN_H);
+        const dimG = dim.addComponent(Graphics);
+        dimG.fillColor = this._hexAlpha('#000000', 200);
+        dimG.rect(-DESIGN_W / 2, -DESIGN_H / 2, DESIGN_W, DESIGN_H);
+        dimG.fill();
+        root.addChild(dim);
+        dim.on(Node.EventType.TOUCH_END, this._onHelpCloseClicked, this);
+
+        const panel = new Node('Panel');
+        panel.layer = board.layer;
+        panel.addComponent(UITransform).setContentSize(620, 860);
+        const pg = panel.addComponent(Graphics);
+        pg.fillColor = this._hex(COLOR_TABLE);
+        pg.roundRect(-310, -430, 620, 860, 24);
+        pg.fill();
+        pg.lineWidth = 3;
+        pg.strokeColor = this._hex(COLOR_HIGHLIGHT);
+        pg.roundRect(-310, -430, 620, 860, 24);
+        pg.stroke();
+        root.addChild(panel);
+
+        this._makeLabel('HelpTitle', panel, 0, 358, 560, 52, '怎么玩', 36, COLOR_TEXT_PRIMARY);
+
+        const body = this._makeLabel('HelpBody', panel, 0, 30, 540, 560, HELP_TEXT, 23, COLOR_TEXT_SECONDARY);
+        body.overflow = Label.Overflow.CLAMP;
+        body.horizontalAlign = HorizontalTextAlignment.LEFT;
+        body.verticalAlign = VerticalTextAlignment.TOP;
+        body.lineHeight = 42;
+
+        const start = this._makeButton('StartBtn', panel, 0, -350, 320, 84, '开始游戏', 28, false);
+        start.on(Node.EventType.TOUCH_END, this._onHelpCloseClicked, this);
+
+        root.active = false;
+        this._helpPanel = root;
+        return root;
+    }
+
+    /** 首次进入自动弹一次规则（之后靠顶栏「?」） */
+    private _showHelpOnFirstVisit(): void {
+        if (StorageManager.instance.getItem(GAME_ID, 'helpShown') === '1') return;
+        StorageManager.instance.setItem(GAME_ID, 'helpShown', '1');
+        this._showHelp();
+    }
+
+    private _showHelp(): void {
+        const panel = this._ensureHelpPanel();
+        if (!panel) return;
+        panel.active = true;
+        panel.setSiblingIndex(panel.parent ? panel.parent.children.length - 1 : 0);
+        this._helpOpen = true;
+        this._drag = null;
+        this._clearHint();
+    }
+
+    private _hideHelp(): void {
+        this._helpOpen = false;
+        if (this._helpPanel && this._helpPanel.isValid) this._helpPanel.active = false;
+    }
+
+    private _onHelpClicked(): void {
+        this._showHelp();
+    }
+
+    private _onHelpCloseClicked(): void {
+        this._hideHelp();
     }
 
     // ==================== 按钮回调 ====================
@@ -817,6 +1105,7 @@ export class SolitaireGame extends Component {
         this._clearFx();
         this._render(true);
         this._refreshHud(true);
+        this._refreshModeLabel();
         this._markDirty();
     }
 
@@ -913,8 +1202,12 @@ export class SolitaireGame extends Component {
     }
 
     private _refreshModeLabel(): void {
+        // 提示语走独立浮层（_toastBanner），这一行永远只显示抽牌模式
         if (this.modeLabel) {
             this.modeLabel.string = this._settings.drawCount === 1 ? '抽 1 张' : '抽 3 张';
+        }
+        if (this._redealLabel && this._redealLabel.isValid) {
+            this._redealLabel.string = `重洗 ${this._core.recyclesLeft()}/${MAX_RECYCLES}`;
         }
     }
 
@@ -948,18 +1241,61 @@ export class SolitaireGame extends Component {
     private _toast(text: string, duration: number): void {
         this._toastText = text;
         this._toastUntil = Date.now() / 1000 + duration;
-        if (this.modeLabel) this.modeLabel.string = text;
+        this._ensureToastBanner();
+        if (this._toastBanner && this._toastBanner.isValid) {
+            if (this._toastLabel && this._toastLabel.isValid) this._toastLabel.string = text;
+            this._toastBanner.active = true;
+        }
+    }
+
+    /**
+     * 提示条浮在牌区底部（底栏上方）。
+     * 之前借用顶栏的 ModeLabel，右侧只剩几十像素，「提示：把 梅花3 拖到 红桃4 上」
+     * 会被「?」按钮压住、根本读不出来。
+     */
+    private _ensureToastBanner(): void {
+        if (this._toastBanner && this._toastBanner.isValid) return;
+        const parent = this.fxLayer;
+        if (!parent) return;
+
+        const w = 660;
+        const h = 56;
+        const node = new Node('ToastBanner');
+        node.layer = parent.layer;
+        const ut = node.addComponent(UITransform);
+        ut.setContentSize(w, h);
+
+        const g = node.addComponent(Graphics);
+        g.fillColor = this._hexAlpha('#000000', 208);
+        g.roundRect(-w / 2, -h / 2, w, h, 12);
+        g.fill();
+        g.lineWidth = 2;
+        g.strokeColor = this._hexAlpha(COLOR_HIGHLIGHT, 170);
+        g.roundRect(-w / 2, -h / 2, w, h, 12);
+        g.stroke();
+
+        const label = this._makeLabel('ToastLabel', node, 0, 0, w - 36, h - 10, '', 22, COLOR_TEXT_PRIMARY);
+        label.overflow = Label.Overflow.SHRINK;
+
+        parent.addChild(node);
+        node.setPosition(0, -470, 0);
+        node.active = false;
+
+        this._toastBanner = node;
+        this._toastLabel = label;
     }
 
     private _expireTimers(): void {
         const now = Date.now() / 1000;
         if (this._hintUntil > 0 && now >= this._hintUntil) {
             this._hintUntil = 0;
+            this._hintKind = null;
             this._clearFx();
         }
         if (this._toastUntil > 0 && now >= this._toastUntil) {
             this._toastUntil = 0;
             this._toastText = '';
+            if (this._toastBanner && this._toastBanner.isValid) this._toastBanner.active = false;
             this._refreshModeLabel();
         }
     }

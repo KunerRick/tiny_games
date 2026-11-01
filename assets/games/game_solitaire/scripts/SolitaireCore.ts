@@ -10,6 +10,7 @@
  */
 
 import {
+    MAX_RECYCLES,
     SCORE_FLIP,
     SCORE_FOUNDATION_TO_TABLEAU,
     SCORE_RECYCLE,
@@ -246,8 +247,21 @@ export class SolitaireCore {
         return 0;
     }
 
+    /** 还能不能点牌堆：牌堆有牌，或者还有剩余的重洗次数 */
     canDraw(): boolean {
-        return this.state.stock.length > 0 || this.state.waste.length > 0;
+        return this.state.stock.length > 0 || this.canRecycle();
+    }
+
+    /** 牌堆空、废牌堆有牌、且本局重洗次数没用完 */
+    canRecycle(): boolean {
+        return this.state.stock.length === 0
+            && this.state.waste.length > 0
+            && this.state.recycles < MAX_RECYCLES;
+    }
+
+    /** 本局还剩几次重洗 */
+    recyclesLeft(): number {
+        return Math.max(0, MAX_RECYCLES - this.state.recycles);
     }
 
     canUndo(): boolean {
@@ -319,9 +333,9 @@ export class SolitaireCore {
         return true;
     }
 
-    /** 废牌堆整体翻回牌堆（顺序不反转，见设计文档 §2.3） */
+    /** 废牌堆整体翻回牌堆（顺序不反转，见设计文档 §2.3）；超过 MAX_RECYCLES 拒绝 */
     recycle(): boolean {
-        if (this.state.stock.length > 0 || this.state.waste.length === 0) return false;
+        if (!this.canRecycle()) return false;
 
         const snapshot = this._snapshot();
         this.state.stock = this.state.waste.map(c => ({ suit: c.suit, rank: c.rank, faceUp: false }));
