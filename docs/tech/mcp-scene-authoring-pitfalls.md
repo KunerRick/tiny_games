@@ -365,8 +365,22 @@ open -a "/Applications/Cocos/Creator/3.8.8/CocosCreator.app" --args --project "/
 - 退出时若弹“保存场景？”，它不会替你保存 —— 所以**每次结构变更后立刻 `scene_save_scene`**，别攒着。
 - 恢复后同一条 MCP 调用立即正常，无需再重试一轮。
 
-**预防**：`caffeinate -di &`（保持不空闲睡眠）能减少闲置丢场景的概率，但**不能修复已经丢掉的场景**；
-真丢了只能重启编辑器。环境里随时可查：`pgrep -fl caffeinate`。
+**预防（可选；如需使用必须带超时）**：`caffeinate -di` 能在长时段场景搭建期间保持显示器与系统不空闲睡眠，
+减少闲置丢场景的概率，但**不能修复已经丢掉的场景**，真丢了只能重启编辑器。
+
+```bash
+caffeinate -di -t 7200 &      # 2 小时自动退出；长任务按需续一次
+pgrep -fl "caffeinate -d"     # 确认在跑
+# 任务收尾（无论成功/失败/被打断）：
+pkill -f "caffeinate -di"
+```
+
+- **禁止不带 `-t` 的写法**（`nohup caffeinate -di &` 尤其危险）：父 shell 退出后它会由 launchd 收养，
+  一直阻止显示器休眠。2026-11-01 就有一个这样的孤儿从 00:22 跑到 18:00（17h+），
+  排查时被误当成「系统被设成永不熄屏」——实际 `pmset` 里 `displaysleep` 仍是 3 分钟。
+- **自查是否已被孤儿占住**：
+  `pgrep -fl "caffeinate -d"` 应无输出；`pmset -g assertions | grep PreventUserIdleDisplaySleep` 汇总值应为 `0`。
+  （`caffeinate -i` 只挡系统空闲睡眠、不挡显示器，Claude daemon 会临时起 `-i -t 300`，那种不用管。）
 
 **⚠️ 一条早期误判（已作废，别照抄）**：曾经把同一组症状归因为「锁屏 → 渲染进程被节流、WebGL 上下文失效」，
 并据此去解锁、去 `open -a` 唤起窗口 —— 全部无效。复现时机器并未锁屏，重启编辑器后立即恢复，
@@ -397,3 +411,4 @@ open -a "/Applications/Cocos/Creator/3.8.8/CocosCreator.app" --args --project "/
 - [ ] 没有用文件工具直接改 `.scene` / `.prefab`
 - [ ] 场景面板调用集体超时时，按 §5.5 先看窗口标题是不是 `Untitled - …`，是就命令行重启编辑器（别去折腾锁屏）
 - [ ] 每次结构变更后立刻 `scene_save_scene`（别让场景长期「脏」着——重启编辑器时它不会替你保存）
+- [ ] 用过 `caffeinate -di` 的话必带 `-t` 超时，并在任务收尾 `pkill -f "caffeinate -di"`（§5.5）

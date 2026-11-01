@@ -186,7 +186,8 @@ open -a "/Applications/Cocos/Creator/3.8.8/CocosCreator.app" --args --project "/
 ```
 
 - `kill -TERM` 在沙箱里会被拒；`osascript quit` 走 Apple Events，能正常退出（会弹“保存场景？”时它自动选了不保存 —— 所以**每次结构变更后立刻 `scene_save_scene`**）。
-- `caffeinate -di &` 只能**预防**：它让机器不睡，但**不能**解决“场景已丢”的状态；一旦丢场景就必须重启编辑器。
+- `caffeinate -di -t 7200 &` 只能**预防**：它让机器不睡，但**不能**解决“场景已丢”的状态；一旦丢场景就必须重启编辑器。
+  **必须带 `-t` 并在收尾 `pkill -f "caffeinate -di"`** —— 不带超时的孤儿进程会永久阻止显示器休眠（2026-11-01 实例，详见技术手册 §5.5）。
 - 早期误判是「锁屏导致渲染进程被节流」。锁屏确实会叠加干扰（`open -a` / `set frontmost` / 键盘事件都进不去），
   但它不是本故障的成因 —— 复现时机器并未锁屏，重启编辑器后同一条 MCP 调用立即恢复。
 
