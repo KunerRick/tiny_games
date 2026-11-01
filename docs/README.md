@@ -97,6 +97,7 @@
 | 类型 | 文件 | 说明 |
 |------|------|------|
 | 游戏设计 | [`specs/2026-11-01-game-solitaire-design.md`](./specs/2026-11-01-game-solitaire-design.md) | 克朗代克规则、拖拽交互、布局数字、存档与验收标准 |
+| 验收报告 | [`plans/2026-11-01-game-solitaire-acceptance.md`](./plans/2026-11-01-game-solitaire-acceptance.md) | M8 逐项验收结论 + 微信构建预检（含阻塞项与空构建判据） |
 | 后续排期 | [`plans/2026-11-01-next-games-roadmap.md`](./plans/2026-11-01-next-games-roadmap.md) | 接龙 P0 / 吸血鬼幸存者 lite P1 的先后顺序、MVP 边界与压测门槛 |
 
 ### 大厅与整体

@@ -54,6 +54,7 @@ export class SolitaireCard extends Component {
     private _lifted = false;
     private _moveTween: Tween<Node> | null = null;
     private _flipTween: Tween<Node> | null = null;
+    private _shakeTween: Tween<Node> | null = null;
 
     /** 由 SolitaireGame 调用；节点会挂到 parent 下并完成内部构建 */
     static create(parent: Node): SolitaireCard {
@@ -118,11 +119,42 @@ export class SolitaireCard extends Component {
 
     /** 直接落位（无动画） */
     placeAt(x: number, y: number): void {
+        this._stopShake();
         if (this._moveTween) {
             this._moveTween.stop();
             this._moveTween = null;
         }
         this.node.setPosition(x, y, 0);
+    }
+
+    /**
+     * 点了却无处可去时的横向抖动（规格 F10）。
+     * 只在原地左右各 6 设计像素三个来回，结束必然回到落位，不改变状态。
+     */
+    shake(): void {
+        if (!this.node || !this.node.isValid) return;
+        this._stopShake();
+        if (this._moveTween) {
+            this._moveTween.stop();
+            this._moveTween = null;
+        }
+        const x = this.node.position.x;
+        const y = this.node.position.y;
+        this._shakeTween = tween(this.node)
+            .to(0.045, { position: new Vec3(x - 6, y, 0) })
+            .to(0.09, { position: new Vec3(x + 6, y, 0) })
+            .to(0.045, { position: new Vec3(x, y, 0) })
+            .call(() => {
+                this._shakeTween = null;
+            })
+            .start();
+    }
+
+    private _stopShake(): void {
+        if (this._shakeTween) {
+            this._shakeTween.stop();
+            this._shakeTween = null;
+        }
     }
 
     /** 带动画移动到目标位置 */
@@ -131,6 +163,7 @@ export class SolitaireCard extends Component {
             this.placeAt(x, y);
             return;
         }
+        this._stopShake();
         if (this._moveTween) this._moveTween.stop();
         this._moveTween = tween(this.node)
             .to(duration, { position: new Vec3(x, y, 0) }, { easing: 'quadOut' })
@@ -156,6 +189,7 @@ export class SolitaireCard extends Component {
         this._card = null;
         this._moveTween = null;
         this._flipTween = null;
+        this._shakeTween = null;
     }
 
     // ==================== 构建 ====================

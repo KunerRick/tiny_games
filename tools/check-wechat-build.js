@@ -164,6 +164,38 @@ if (missing.length === 0 && empty.length === 0) {
   report('warn', '构建目录看起来不完整', '很可能是构建还在进行中，或上一次构建中途失败。重新构建一次再开开发者工具。');
 }
 
+// 1b. 「文件都在，但什么都没装进去」：assets/main/config.json 有内容却没有场景/UUID。
+// 这一种此前会漏判 —— 文件齐全、JSON 合法、体积远低于上限，9 项全绿，
+// 可产物里一个场景都没有，开发者工具打开就是黑屏。必须在交给工具之前挡住。
+const mainConfig = byRel.get('assets/main/config.json');
+if (mainConfig) {
+  let manifest = null;
+  try {
+    manifest = JSON.parse(fs.readFileSync(mainConfig.abs, 'utf8'));
+  } catch {
+    manifest = null; // JSON 坏了解析不了，交给第 2 项之外的常规排查
+  }
+  if (manifest) {
+    const sceneCount = manifest.scenes && typeof manifest.scenes === 'object' ? Object.keys(manifest.scenes).length : 0;
+    const uuidCount = Array.isArray(manifest.uuids) ? manifest.uuids.length : 0;
+    if (sceneCount === 0 || uuidCount === 0) {
+      report(
+        'fail',
+        `构建产物是空的：场景 ${sceneCount} 个、资源 UUID ${uuidCount} 个`,
+        [
+          `assets/main/config.json 里 scenes=${JSON.stringify(manifest.scenes || {})}，uuids=${uuidCount} 项。`,
+          'build/wechatgame 下只有启动脚本和空清单，一个场景都没打进去 —— 打开只会黑屏。',
+          '动作：在 Cocos Creator「构建 → 微信小游戏」里确认场景列表非空（可用',
+          '      node tools/sync-build-scenes.js 按 GameConfig 生成），然后重新构建。',
+          '      编辑器「构建」按钮是唯一的实际构建入口，MCP 无法代劳。',
+        ].join('\n'),
+      );
+    } else {
+      report('pass', `产物清单非空（场景 ${sceneCount} 个、资源 UUID ${uuidCount} 项）`);
+    }
+  }
+}
+
 // ── 2. 关键配置文件的 JSON 合法性与内容 ──────────────────────────────
 
 section('2. 配置文件（game.json / project.config.json）');

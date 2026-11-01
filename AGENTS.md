@@ -202,7 +202,7 @@ node tools/sync-build-scenes.js --all            # 顺带修其它平台的构�
 > MCP 的构建能力有限：`project_build_project` 没有 `wechatgame` 平台，`preferences_*` 读不到 `taskMap`，
 > 详见 [`docs/tech/wechat-build-pitfalls.md`](./docs/tech/wechat-build-pitfalls.md) §9。
 
-9 项检查：必需文件齐全且非空 / `game.json`·`project.config.json` 可解析无 BOM / 构建是否已落盘稳定 /
+9 项检查：必需文件齐全且非空（含产物清单非空，防空构建） / `game.json`·`project.config.json` 可解析无 BOM / 构建是否已落盘稳定 /
 产物 `.js` 能否按 ES2015 与 ES5 解析 / 主包 ≤ 4 MB / 无变体选择符 / **开发者工具是否停在过期构建** /
 **AppID 不是占位或样例值** / **工具编译缓存里用的是小游戏包装还是小程序包装**。
 最后两项针对「能编译但一打开就崩」，故障排查见

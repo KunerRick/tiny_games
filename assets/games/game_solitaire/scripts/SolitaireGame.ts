@@ -596,9 +596,13 @@ export class SolitaireGame extends Component {
 
         // 拖了个空、且几乎落回起点 → 当作一次点击（教训 D：轻触不能被静默吃掉）。
         // 只有抓的是堆顶（count === 1）才转点击，抓中间段不该顺手移动顶牌。
+        let tapLike = false;
         if (!moved && drag.count === 1) {
             const dist = Math.abs(drag.left - drag.originLeft) + Math.abs(drag.top - drag.originTop);
-            if (dist <= TAP_SLOP * 1.5) moved = !!this._core.tapPile(drag.from);
+            if (dist <= TAP_SLOP * 1.5) {
+                tapLike = true;
+                moved = !!this._core.tapPile(drag.from);
+            }
         }
 
         this._endDragVisual(drag);
@@ -607,7 +611,16 @@ export class SolitaireGame extends Component {
             this._afterAction();
         } else {
             this._render(false);
+            if (tapLike) this._shakePile(drag.from);
         }
+    }
+
+    /** 点了却无处可去：顶牌抖一下（F10），不改变任何状态 */
+    private _shakePile(pile: number): void {
+        const top = this._core.topOf(pile);
+        if (!top) return;
+        const view = this._views.get(cardKey(top));
+        if (view) view.shake();
     }
 
     private _beginDrag(drag: DragState): void {
@@ -669,6 +682,7 @@ export class SolitaireGame extends Component {
             this._afterAction();
         } else {
             this._render(false);
+            this._shakePile(pile);
         }
     }
 
