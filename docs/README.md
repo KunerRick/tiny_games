@@ -105,7 +105,7 @@
 | 类型 | 文件 | 说明 |
 |------|------|------|
 | 游戏设计 | [`specs/2026-10-31-game-merge-design.md`](./specs/2026-10-31-game-merge-design.md) | 坐标系、11 级水果、自研圆形求解器参数、「停在警戒线上方」判负、场景节点树 |
-| 场景搭建 | [`design/2026-10-31-merge-scene-setup.md`](./design/2026-10-31-merge-scene-setup.md) | 目标节点树、19 项绑定、MCP 执行顺序、实测清单（搭建被编辑器故障阻塞，见文末） |
+| 场景搭建 | [`design/2026-10-31-merge-scene-setup.md`](./design/2026-10-31-merge-scene-setup.md) | **实建节点树（含 UUID/坐标）**、19 项绑定、MCP 执行顺序、读回核对、浏览器实测结果、编辑器丢场景的真因与恢复 |
 | 回归自检 | [`../tools/verify-merge-core.js`](../tools/verify-merge-core.js) | 纯逻辑单测（12 项：叠放稳定性、合并/禁链式、确定性、失败判定、500 次长跑） |
 
 ### 大厅与整体

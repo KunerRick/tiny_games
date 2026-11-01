@@ -339,10 +339,11 @@ export class MergeGame extends Component {
         this._gameOverShown = true;
         this._saveRecords();
         if (this.gameOverScoreLabel) {
-            this.gameOverScoreLabel.string = `得分 ${this._core.score}`;
+            // 面板上已有「得分」标题，这里只写数值，避免「得分 得分 N」
+            this.gameOverScoreLabel.string = `${this._core.score}`;
         }
         if (this.gameOverBestLabel) {
-            this.gameOverBestLabel.string = `最高 ${this._highScore}`;
+            this.gameOverBestLabel.string = `${this._highScore}`;
         }
         this._bindGameOver();
         this._showPanel(this.gameOverPanel);
@@ -561,7 +562,8 @@ export class MergeGame extends Component {
         }
         const best = core.score > this._highScore ? core.score : this._highScore;
         if (best !== this._lastBest) {
-            if (this.bestLabel) this.bestLabel.string = `最高 ${best}`;
+            // HUD 上已有「最高」标题，这里只写数值
+            if (this.bestLabel) this.bestLabel.string = `${best}`;
             this._lastBest = best;
         }
         if (core.combo !== this._lastCombo) {

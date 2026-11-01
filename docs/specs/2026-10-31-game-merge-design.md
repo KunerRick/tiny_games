@@ -2,7 +2,7 @@
 
 **日期**: 2026-10-31
 **版本**: v1.0
-**状态**: 实现中
+**状态**: 可玩（场景已搭、浏览器验收通过；微信构建预检待跑）
 **代号**: `merge` / 场景 `Merge` / 目录 `assets/games/game_merge/`
 
 ---
@@ -157,11 +157,14 @@ Merge (Scene)
     │   │   ├── EffectLayer (Graphics)  待落水果 + 落点引导线 + 碎屑 + 合并圆环
     │   │   └── InputArea (UITransform 660×860)  触摸区
     │   ├── HudTop：ScoreLabel / BestLabel / NextTitle + NextPreview(Graphics) / ComboLabel / GuideLabel
+    │   ├── BackButton（返回大厅，与 PauseButton 左右对称）
     │   ├── PauseButton
     │   ├── PausePanel（Dim / Title / ResumeButton / RestartButton / LobbyButton）
     │   └── GameOverPanel（Dim / Title / ScoreLabel / BestLabel / RestartButton / LobbyButton）
-    └── BackButton
+    └── （实建时 BackButton 放在 GameRoot 下，见场景文档 §2）
 ```
+
+> 实际节点树、坐标与 UUID 见 [`../design/2026-10-31-merge-scene-setup.md`](../design/2026-10-31-merge-scene-setup.md) §2。
 
 ### 4.2 交互
 
@@ -185,13 +188,13 @@ Merge (Scene)
 
 ## 5. 验收
 
-| # | 项 | 判据 |
-|---|-----|------|
-| 1 | 纯逻辑 | `node tools/verify-merge-core.js` 12/12 |
-| 2 | 编译 | `npx tsc --noEmit` 通过 |
-| 3 | 场景 | 19 项 `@property` 绑定全通（13 个 Node + 6 个 Label），`validate_scene` 0 问题 |
-| 4 | 浏览器 | 投放/合并/连击/暂停/继续/失败/重开/返回，0 console error |
-| 5 | 微信 | 构建后 `node tools/check-wechat-build.js` 9 项通过 |
-| 6 | 文档 | 本文 + `docs/design/<date>-merge-scene-setup.md` + `docs/README.md` 索引 |
+| # | 项 | 判据 | 结果（2026-11-01） |
+|---|-----|------|------|
+| 1 | 纯逻辑 | `node tools/verify-merge-core.js` 12/12 | ✅ `MERGE_CORE_OK 通过 12/12` |
+| 2 | 编译 | `npx tsc --noEmit` 通过 | ✅ 编辑器自带 tsc 5.8.2 无错 |
+| 3 | 场景 | 19 项 `@property` 绑定全通（13 个 Node + 6 个 Label），无断开引用 | ✅ `missing: []`；`validate_asset_references` 6/6 有效、0 破链（`debug_validate_scene` 工具本身报消息不存在，见踩坑手册 §3.5 ⑨） |
+| 4 | 浏览器 | 投放/合并/连击/暂停/继续/失败/重开/返回，0 console error | ✅ 全通（含刷新后最高分持久化 22745） |
+| 5 | 微信 | 构建后 `node tools/check-wechat-build.js` 9 项通过 | ⏳ 待跑（需先退出编辑器，与砖块远征合并做一次构建） |
+| 6 | 文档 | 本文 + `docs/design/<date>-merge-scene-setup.md` + `docs/README.md` 索引 | ✅ 见 [`../design/2026-10-31-merge-scene-setup.md`](../design/2026-10-31-merge-scene-setup.md) |
 
 `verify-merge-core.js` 的 12 项：自由落体、两果叠放 5 s、10 果堆塔 10 s（高度漂移 < 2 px、速度 < 100）、同层合并、禁链式、顶果消除、墙体钳制、2400 px/s 不穿模、确定性（同 seed 逐位相同）、失败判定、投放冷却、500 次自动投放长跑。
