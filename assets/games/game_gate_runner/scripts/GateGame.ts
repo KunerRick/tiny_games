@@ -13,7 +13,6 @@ import { GateCore } from './GateCore';
 import {
     COLORS,
     COUNT_MAX,
-    FIRE_CAP,
     GATE_H,
     GATE_LEFT_X,
     GATE_RIGHT_X,
@@ -28,6 +27,10 @@ import {
     SQUAD_DOTS_MAX,
     SQUAD_DOT_MAX_R,
     SQUAD_DOT_MIN_R,
+    applyGateOp,
+    enemyKindLabel,
+    enemyProfile,
+    gateModLabel,
     gateOpColor,
     gateOpLabel,
     scrollSpeedAt,
@@ -50,10 +53,19 @@ const TAP_SLOP = 12;
 
 /** 门板最多同时显示 4 对 → 8 个标签 */
 const GATE_LABEL_POOL = 8;
+/** 门板下方的结果预览 + 附加效果小字 */
+const GATE_SUB_LABEL_POOL = 8;
 /** 敌人 / Boss 头顶数字 */
 const ENEMY_LABEL_POOL = 6;
 /** 飘字池 */
 const FX_LABEL_POOL = 8;
+/** 升级卡：3 张，每张一个标题 + 一行说明 */
+const CARD_COUNT = 3;
+
+/** 升级卡布局（逻辑坐标） */
+const CARD_W = 540;
+const CARD_H = 148;
+const CARD_YS = [250, 440, 630];
 
 interface Particle {
     x: number;
@@ -162,7 +174,9 @@ export class GateGame extends Component {
     private _bullets: Bullet[] = [];
     private _fxTexts: FxText[] = [];
     private _gateLabels: Label[] = [];
+    private _gateSubLabels: Label[] = [];
     private _enemyLabels: Label[] = [];
+    private _cardLabels: Label[] = [];       // 0–2 标题，3–5 说明
     private _shake = 0;
 
     private _fireTimer = 0;
@@ -223,7 +237,9 @@ export class GateGame extends Component {
         this._bullets = [];
         this._fxTexts = [];
         this._gateLabels = [];
+        this._gateSubLabels = [];
         this._enemyLabels = [];
+        this._cardLabels = [];
         this._colorCache.clear();
     }
 
@@ -262,6 +278,7 @@ export class GateGame extends Component {
         this._hidePanel(this.pausePanel);
         this._hidePanel(this.resultPanel);
         this._hideFxTexts();
+        for (let i = 0; i < this._cardLabels.length; i++) this._cardLabels[i].node.active = false;
         this._setWorldVisible(true);
         this._writeNumber('runs', this._readNumber('runs', 0) + 1);
     }
@@ -287,12 +304,37 @@ export class GateGame extends Component {
         // 落在暂停按钮上的手势交给按钮自己处理，别让它顺带开一次集火
         this._gestureOnButton = this._isOverNode(this.pauseButton, loc.x, loc.y);
         if (this._gestureOnButton) return;
-        if (!this._acceptsPlayInput()) return;
 
         const p = this._toLogic(loc.x, loc.y);
+
+        // 三选一：点卡片直接选，手势到此为止（不移动、不集火）
+        if (this._core.choiceOpen) {
+            this._gestureOnButton = true;
+            this._pickCardAt(p.x, p.y);
+            return;
+        }
+
+        if (!this._acceptsPlayInput()) return;
+
         this._touchStartX = p.x;
         this._touchStartY = p.y;
         this._core.setPlayerX(p.x);
+    }
+
+    /** 点卡片：命中就选并给反馈。返回是否命中。 */
+    private _pickCardAt(x: number, y: number): boolean {
+        const options = this._core.choiceOptions;
+        for (let i = 0; i < options.length && i < CARD_COUNT; i++) {
+            const cy = CARD_YS[i];
+            if (Math.abs(x - PLAY_W / 2) > CARD_W / 2) continue;
+            if (Math.abs(y - cy) > CARD_H / 2) continue;
+            if (this._core.choose(i)) {
+                this._spawnBurst(x, cy, COLORS.gold, 16, 140);
+                this._shake = Math.max(this._shake, 3);
+            }
+            return true;
+        }
+        return false;
     }
 
     private _onTouchMove(event: EventTouch): void {
@@ -363,6 +405,7 @@ export class GateGame extends Component {
 
     private _acceptsPlayInput(): boolean {
         if (this._paused || this._resultShown) return false;
+        if (this._core.choiceOpen) return false;
         return this._core.state === 'running';
     }
 
@@ -378,6 +421,7 @@ export class GateGame extends Component {
 
     private _onPauseClicked(): void {
         if (this._paused || this._resultShown) return;
+        if (this._core.choiceOpen) return;
         if (this._core.state !== 'running') return;
         this._paused = true;
         this._bindPausePanel();
@@ -491,13 +535,25 @@ export class GateGame extends Component {
                     if (event.bonus > 0) {
                         this._spawnFxText(`连击奖励 +${event.bonus}`, COLORS.gold, PLAYER_Y - 148);
                     }
+                    if (event.mod) {
+                        this._spawnFxText(gateModLabel(event.mod), COLORS.gold, PLAYER_Y - 184);
+                    }
                     break;
                 }
                 case 'pulse':
                     this._spawnFxText('集火!', COLORS.gold, PLAYER_Y - 96);
                     break;
                 case 'enemy_engaged':
-                    if (event.boss) this._shake = Math.max(this._shake, 8);
+                    if (event.boss) {
+                        this._shake = Math.max(this._shake, 8);
+                        this._spawnFxText('BOSS 战', COLORS.danger, PLAYER_Y - 130);
+                    } else if (event.kind !== 'grunt') {
+                        this._spawnFxText(enemyKindLabel(event.kind), enemyProfile(event.kind).color, PLAYER_Y - 130);
+                    }
+                    break;
+                case 'boss_phase':
+                    this._spawnFxText(event.phase === 2 ? 'Boss 强化' : 'Boss 狂暴', COLORS.danger, PLAYER_Y - 150);
+                    this._shake = Math.max(this._shake, 7);
                     break;
                 case 'enemy_destroyed':
                     this._spawnBurst(event.boss ? PLAY_W / 2 : this._core.playerX, PLAYER_Y - 140, COLORS.enemy, 22, 160);
@@ -506,6 +562,9 @@ export class GateGame extends Component {
                 case 'squad_hit':
                     this._spawnFxText(`−${event.amount}`, COLORS.danger, PLAYER_Y - 46);
                     this._shake = Math.max(this._shake, 2);
+                    break;
+                case 'upgrade_chosen':
+                    this._spawnFxText(`升级 · ${event.name}`, COLORS.gold, PLAYER_Y - 200);
                     break;
                 case 'victory':
                     this._showResult(true);
@@ -524,7 +583,7 @@ export class GateGame extends Component {
     private _updateBullets(dt: number): void {
         this._fireTimer -= dt;
         const blocking = this._blockingEnemy();
-        const canFire = this._core.state === 'running' && !this._paused;
+        const canFire = this._core.state === 'running' && !this._paused && !this._core.choiceOpen;
 
         if (canFire && this._fireTimer <= 0) {
             this._fireTimer = 1 / 30;
@@ -644,13 +703,19 @@ export class GateGame extends Component {
             this._drawGateSide(g, gate, 'left', sy + dy);
             this._drawGateSide(g, gate, 'right', sy + dy);
 
-            // 文字：每对门两个标签
-            this._placeGateLabel(labelIndex++, gate, 'left', sy);
-            this._placeGateLabel(labelIndex++, gate, 'right', sy);
+            // 文字：每对门两个标签，外加下方「结果预览 + 附加效果」小字
+            this._placeGateLabel(labelIndex, gate, 'left', sy);
+            this._placeGateLabel(labelIndex + 1, gate, 'right', sy);
+            this._placeGateSubLabel(labelIndex, gate, 'left', sy);
+            this._placeGateSubLabel(labelIndex + 1, gate, 'right', sy);
+            labelIndex += 2;
         }
 
         for (let i = labelIndex; i < this._gateLabels.length; i++) {
             this._gateLabels[i].node.active = false;
+        }
+        for (let i = labelIndex; i < this._gateSubLabels.length; i++) {
+            this._gateSubLabels[i].node.active = false;
         }
     }
 
@@ -667,6 +732,13 @@ export class GateGame extends Component {
         g.fillColor = this._color(gateOpColor(entry.op.kind), 0.9);
         g.rect(nx + 28, ny + GATE_H - 6, GATE_W - 56, 4);
         g.fill();
+
+        // 带附加效果的一侧加一条金色底线，和「纯数字门」区分开
+        if (entry.mod) {
+            g.fillColor = this._color(COLORS.gold, 0.95);
+            g.rect(nx + 16, ny + 10, GATE_W - 32, 5);
+            g.fill();
+        }
     }
 
     private _placeGateLabel(index: number, gate: GatePair, side: 'left' | 'right', screenY: number): void {
@@ -678,7 +750,21 @@ export class GateGame extends Component {
         label.string = gateOpLabel(entry.op);
         label.color = this._color(gateOpColor(entry.op.kind));
         label.node.active = true;
-        label.node.setPosition(this._sx(x0 + GATE_W / 2), this._sy(screenY), 0);
+        label.node.setPosition(this._sx(x0 + GATE_W / 2), this._sy(screenY - 12), 0);
+    }
+
+    /** 门下方小字：这一侧「换算成多少」+ 附加效果 */
+    private _placeGateSubLabel(index: number, gate: GatePair, side: 'left' | 'right', screenY: number): void {
+        const label = this._gateSubLabels[index];
+        if (!label) return;
+        const entry = side === 'left' ? gate.left : gate.right;
+        const x0 = side === 'left' ? GATE_LEFT_X : GATE_RIGHT_X;
+
+        const preview = applyGateOp(this._core.count, entry.op);
+        label.string = entry.mod ? `→ ${preview} · ${gateModLabel(entry.mod)}` : `→ ${preview}`;
+        label.color = this._color(entry.mod ? COLORS.gold : COLORS.textDim);
+        label.node.active = true;
+        label.node.setPosition(this._sx(x0 + GATE_W / 2), this._sy(screenY + 28), 0);
     }
 
     private _drawEnemies(g: Graphics, dx: number, dy: number): void {
@@ -696,7 +782,8 @@ export class GateGame extends Component {
             const nx = this._sx(PLAY_W / 2) - w / 2 + dx;
             const ny = this._sy(sy) - h / 2 + dy;
 
-            g.fillColor = this._color(e.boss ? COLORS.boss : COLORS.enemy, e.boss ? 0.95 : 0.85);
+            const prof = enemyProfile(e.kind);
+            g.fillColor = this._color(e.boss ? COLORS.boss : prof.color, e.boss ? 0.95 : 0.85);
             g.roundRect(nx, ny, w, h, 12);
             g.fill();
 
@@ -715,10 +802,27 @@ export class GateGame extends Component {
             g.rect(nx + 12, ny + h + 10, barW * ratio, 10);
             g.fill();
 
+            // 弱点：对拼时左右摆动的金色靶心，队伍停在它下方 = dps 放大
+            if (e.engaged && e.alive) {
+                const wx = this._sx(e.weakX) + dx;
+                const wy = this._sy(sy) + dy;
+                const breath = 0.7 + 0.3 * Math.sin(this._animTime * 9);
+                g.fillColor = this._color(COLORS.gold, 0.2 * breath);
+                g.circle(wx, wy, 28);
+                g.fill();
+                g.fillColor = this._color(COLORS.gold, 0.95);
+                g.circle(wx, wy, 15);
+                g.fill();
+                g.fillColor = this._color(COLORS.bg, 0.9);
+                g.circle(wx, wy, 7);
+                g.fill();
+            }
+
             // 数字
             const label = this._enemyLabels[labelIndex];
             if (label) {
-                label.string = `${Math.max(0, Math.ceil(e.hp))}`;
+                const name = e.boss ? 'BOSS' : enemyKindLabel(e.kind);
+                label.string = `${name} ${Math.max(0, Math.ceil(e.hp))}`;
                 label.node.active = true;
                 label.node.setPosition(this._sx(PLAY_W / 2) + dx, this._sy(sy) + h / 2 + 34 + dy, 0);
             }
@@ -755,6 +859,16 @@ export class GateGame extends Component {
             g.fill();
         }
 
+        // 弱点命中：外圈金色准星 + 前方指示，告诉玩家「现在就打在这」
+        if (this._core.aiming) {
+            g.fillColor = this._color(COLORS.gold, 0.28);
+            g.circle(px, py, 44);
+            g.fill();
+            g.fillColor = this._color(COLORS.gold, 0.85);
+            g.rect(px - 3, py + 34, 6, 24);
+            g.fill();
+        }
+
         const cols = Math.ceil(Math.sqrt(visible));
         const rows = Math.ceil(visible / cols);
         const spread = 56;
@@ -779,7 +893,7 @@ export class GateGame extends Component {
         }
 
         // 火力上限提示：dps 封顶后不再有额外收益
-        if (count > FIRE_CAP) {
+        if (count > this._core.fireCap) {
             g.fillColor = this._color(COLORS.allyDark, 0.5);
             g.rect(px - 30, py - 46, 60, 4);
             g.fill();
@@ -824,6 +938,57 @@ export class GateGame extends Component {
             g.rect(this._sx(p.x) - p.size / 2, this._sy(p.y) - p.size / 2, p.size, p.size);
         }
         g.fill();
+
+        this._drawChoiceCards(g);
+    }
+
+    /** 三选一：世界之上盖一层卡牌（点卡片选择，见 `_pickCardAt`） */
+    private _drawChoiceCards(g: Graphics): void {
+        const options = this._core.choiceOptions;
+        if (!this._core.choiceOpen || options.length === 0) {
+            for (let i = 0; i < this._cardLabels.length; i++) this._cardLabels[i].node.active = false;
+            return;
+        }
+
+        g.fillColor = this._color(0x000000, 0.5);
+        g.rect(-PLAY_W / 2, -PLAY_H / 2, PLAY_W, PLAY_H);
+        g.fill();
+
+        for (let i = 0; i < CARD_COUNT && i < options.length; i++) {
+            const cy = CARD_YS[i];
+            const nx = this._sx(PLAY_W / 2) - CARD_W / 2;
+            const ny = this._sy(cy) - CARD_H / 2;
+
+            g.fillColor = this._color(COLORS.card, 0.97);
+            g.roundRect(nx, ny, CARD_W, CARD_H, 16);
+            g.fill();
+            g.fillColor = this._color(COLORS.cardEdge, 0.85);
+            g.rect(nx + 18, ny + 26, 5, CARD_H - 52);
+            g.fill();
+            g.fillColor = this._color(COLORS.cardEdge, 0.55);
+            g.rect(nx, ny + CARD_H - 4, CARD_W, 4);
+            g.fill();
+
+            const title = this._cardLabels[i];
+            const desc = this._cardLabels[CARD_COUNT + i];
+            if (title) {
+                title.string = options[i].name;
+                title.color = this._color(COLORS.cardInk);
+                title.node.active = true;
+                title.node.setPosition(this._sx(PLAY_W / 2) + 6, this._sy(cy - 26), 0);
+            }
+            if (desc) {
+                desc.string = options[i].desc;
+                desc.color = this._color(COLORS.cardDesc);
+                desc.node.active = true;
+                desc.node.setPosition(this._sx(PLAY_W / 2) + 6, this._sy(cy + 26), 0);
+            }
+        }
+
+        for (let i = options.length; i < CARD_COUNT; i++) {
+            if (this._cardLabels[i]) this._cardLabels[i].node.active = false;
+            if (this._cardLabels[CARD_COUNT + i]) this._cardLabels[CARD_COUNT + i].node.active = false;
+        }
     }
 
     private _updateFx(dt: number): void {
@@ -900,11 +1065,15 @@ export class GateGame extends Component {
         const fieldParent = this.fieldLayer;
         if (fieldParent) {
             for (let i = 0; i < GATE_LABEL_POOL; i++) {
-                const label = this._makeLabel(fieldParent, 40, COLORS.text);
+                const label = this._makeLabel(fieldParent, 38, COLORS.text);
                 if (label) this._gateLabels.push(label);
             }
+            for (let i = 0; i < GATE_SUB_LABEL_POOL; i++) {
+                const label = this._makeLabel(fieldParent, 20, COLORS.textDim);
+                if (label) this._gateSubLabels.push(label);
+            }
             for (let i = 0; i < ENEMY_LABEL_POOL; i++) {
-                const label = this._makeLabel(fieldParent, 28, COLORS.text);
+                const label = this._makeLabel(fieldParent, 26, COLORS.text);
                 if (label) this._enemyLabels.push(label);
             }
         }
@@ -918,6 +1087,16 @@ export class GateGame extends Component {
                     label, node: label.node,
                     x: 0, y: 0, vy: 0, life: 0, maxLife: 1, hex: COLORS.text,
                 });
+            }
+
+            // 升级卡：0–2 标题，3–5 说明
+            for (let i = 0; i < CARD_COUNT; i++) {
+                const title = this._makeLabel(fxParent, 32, COLORS.cardInk);
+                if (title) this._cardLabels.push(title);
+            }
+            for (let i = 0; i < CARD_COUNT; i++) {
+                const desc = this._makeLabel(fxParent, 21, COLORS.cardDesc);
+                if (desc) this._cardLabels.push(desc);
             }
         }
     }
@@ -945,7 +1124,7 @@ export class GateGame extends Component {
         if (this.countLabel && count !== this._lastCount) {
             this._lastCount = count;
             this.countLabel.string = `${count}`;
-            this.countLabel.color = this._color(count > FIRE_CAP ? COLORS.ally : COLORS.text);
+            this.countLabel.color = this._color(count > this._core.fireCap ? COLORS.ally : COLORS.text);
         }
 
         const meters = Math.floor(this._core.distance / 10);
@@ -965,15 +1144,20 @@ export class GateGame extends Component {
     }
 
     private _hintFor(count: number): string {
+        if (this._core.choiceOpen) return '选一张升级卡 · 点卡片';
         if (this._core.state === 'game_over') return '人数归零 · 再来一局';
         if (this._core.state === 'victory') return '已通关';
         const blocking = this._blockingEnemy();
         if (blocking) {
-            if (!this._core.pulseReady) return '交火中 · 集火冷却中';
-            return blocking.boss ? 'Boss 战 · 点屏幕集火爆发' : '点屏幕集火 · 打得快掉得少';
+            if (this._core.aiming) return '弱点命中 · 点屏幕集火';
+            if (blocking.boss) {
+                return this._core.pulseReady ? 'Boss 战 · 对准金色弱点' : 'Boss 战 · 集火冷却中';
+            }
+            return this._core.pulseReady ? '对准金色弱点 · 点屏幕集火' : '对准金色弱点 · 集火冷却中';
         }
-        if (count > FIRE_CAP) return '火力已封顶 · 优先选 × 门攒血量';
+        if (count > this._core.fireCap) return '火力已封顶 · 优先选 × 门攒血量';
         if (count > COUNT_MAX - 1) return '人数已封顶';
+        if (this._core.activeMods.length > 0) return '拖动选门 · 金色门附带持续效果';
         return '拖动选门 · 点屏幕集火';
     }
 

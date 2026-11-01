@@ -2,10 +2,10 @@
 /**
  * 数值冲刺 —— 纯逻辑回归自检（不启动 Cocos）。
  *
- * 覆盖 docs/specs/2026-11-01-game-gate-runner-design.md §8 的 12 项：
+ * 覆盖 docs/specs/2026-11-01-game-gate-runner-design.md §8 的 20 项：
  * 门模板、乘除、钳制、门只触发一次、对拼公式、敌人死后继续前进、
- * 人数归零即结束、Boss 与胜利、生成确定性、生成合法性、180 s 自动游玩、平衡性；
- * 另加 2 项可玩性回归：集火（主动技能）与完美选门连击。
+ * 人数归零即结束、Boss 与胜利、生成确定性、生成合法性、180 s 自动游玩、平衡性、
+ * 集火、完美选门连击、门附加效果、敌人类型、弱点瞄准、三选一、Boss 三阶段、首门教学。
  *
  * 用法：
  *   node tools/verify-gate-core.js
@@ -50,15 +50,18 @@ execFileSync(process.execPath, [
 ], { stdio: 'inherit' });
 
 const Config = require(path.join(OUT, 'GateConfig.js'));
-const { GateCore } = require(path.join(OUT, 'GateCore.js'));
+const { GateCore, gateSideFor } = require(path.join(OUT, 'GateCore.js'));
 
 const {
     START_COUNT, COUNT_MAX, FIRE_CAP, ENEMY_DRAIN_RATIO,
     GATE_W, GATE_LEFT_X, GATE_RIGHT_X, GATE_H,
     SEGMENT_LEN, SEGMENT_COUNT, BOSS_DISTANCE, CONTACT_DIST,
     PLAYER_X_MIN, PLAYER_X_MAX,
+    UPGRADE_CHOICES,
     applyGateOp, gateOpLabel, clampCount,
 } = Config;
+
+const TOTAL_TESTS = 20;
 
 const LEFT_CENTER = GATE_LEFT_X + GATE_W / 2;
 const RIGHT_CENTER = GATE_RIGHT_X + GATE_W / 2;
@@ -113,11 +116,17 @@ function pickSide(core, gate, pick) {
     return leftBetter ? 'right' : 'left';
 }
 
+/** 三选一弹出来时必须选一张，否则世界停住 —— 自动驾驶统一选第一张 */
+function autoChoose(core) {
+    if (core.choiceOpen) core.choose(0);
+}
+
 function runAutopilot(core, pick, maxSec) {
     const dt = 1 / 60;
     let t = 0;
     const limit = maxSec || 180;
     while (t < limit && core.state === 'running') {
+        autoChoose(core);
         const g = nextGate(core);
         if (g && g.y - core.distance < 220) {
             core.setPlayerX(pickSide(core, g, pick) === 'left' ? LEFT_CENTER : RIGHT_CENTER);
@@ -128,12 +137,19 @@ function runAutopilot(core, pick, maxSec) {
     return t;
 }
 
-/** 一路推进到某个条件成立（或超时），返回耗时 */
-function stepUntil(core, cond, maxSec) {
+/** 一路推进到某个条件成立（或超时），返回耗时。传 pick 会顺带按优/劣侧选门。 */
+function stepUntil(core, cond, maxSec, pick) {
     const dt = 1 / 60;
     let t = 0;
     const limit = maxSec || 120;
     while (t < limit && core.state === 'running' && !cond(core)) {
+        autoChoose(core);
+        if (pick) {
+            const g = nextGate(core);
+            if (g && g.y - core.distance < 220) {
+                core.setPlayerX(pickSide(core, g, pick) === 'left' ? LEFT_CENTER : RIGHT_CENTER);
+            }
+        }
         core.step(dt);
         t += dt;
     }
@@ -220,7 +236,7 @@ test('4. 门只触发一次：同一对门停留 2 s 只生效一次', () => {
 
 // ==================== 5. 敌人对拼公式 ====================
 
-test('5. 对拼：dps = min(count, FIRE_CAP)，敌方按 atk + count×比例 扣血', () => {
+test('5. 对拼：dps = min(count, 火力上限)，敌方按 atk + count×比例 × 护甲 扣血', () => {
     const core = new GateCore();
     core.startRun(2024);
 
@@ -228,11 +244,15 @@ test('5. 对拼：dps = min(count, FIRE_CAP)，敌方按 atk + count×比例 扣
     const enemy = core.enemies.find((e) => e.engaged);
     assert(enemy, '应当已经接触到第一个敌人');
 
+    // 离开弱点，排除瞄准加成（弱点振幅不会摆到最左边）
+    core.setPlayerX(PLAYER_X_MIN);
+
     const hpBefore = enemy.hp;
     const countBefore = core.countExact;      // 用未取整值比较，否则会被 floor 差算成"人数上涨"
     const dt = 1 / 120;
-    const expectDps = Math.min(core.count, FIRE_CAP);
-    const expectDrain = enemy.atk + core.count * ENEMY_DRAIN_RATIO;
+    const expectDps = Math.min(core.count, core.fireCap);
+    const expectDrain = (enemy.atk + core.count * ENEMY_DRAIN_RATIO * Config.enemyProfile(enemy.kind).drainMult)
+        * (1 - core.armorReduction);
 
     core.step(dt);
 
@@ -394,7 +414,8 @@ test('13. 集火：短时 dps 放大，冷却期间不可再触发', () => {
     const make = () => {
         const core = new GateCore();
         core.startRun(4242);
-        stepUntil(core, (c) => c.enemies.some((e) => e.engaged), 60);
+        stepUntil(core, (c) => c.enemies.some((e) => e.engaged), 60, 'better');
+        core.setPlayerX(PLAYER_X_MIN);   // 两次测量都离开弱点，只比较集火倍率
         return core;
     };
 
@@ -418,7 +439,7 @@ test('13. 集火：短时 dps 放大，冷却期间不可再触发', () => {
     assert(plainDrop > 0, '不集火也应造成伤害');
     approx(boostDrop / plainDrop, Config.PULSE_DPS_MULT, 0.3, '集火 dps 倍率');
 
-    stepUntil(boosted, (c) => c.pulseReady, 10);
+    stepUntil(boosted, (c) => c.pulseReady, 10, 'better');
     assert(boosted.pulseReady === true, '冷却结束后应可再次集火');
     assert(boosted.pulseCooldown <= 0.01, `冷却结束后读数应为 0，实际 ${boosted.pulseCooldown}`);
 });
@@ -433,6 +454,7 @@ test('14. 完美连击：连续选优侧累计，每 3 连击给一次人数奖�
     const dt = 1 / 60;
     let t = 0;
     while (t < 180 && core.state === 'running' && hits.length < 8) {
+        autoChoose(core);
         const g = nextGate(core);
         if (g && g.y - core.distance < 220) {
             core.setPlayerX(pickSide(core, g, 'better') === 'left' ? LEFT_CENTER : RIGHT_CENTER);
@@ -464,6 +486,7 @@ test('14. 完美连击：连续选优侧累计，每 3 连击给一次人数奖�
     let badOk = true;
     let badT = 0;
     while (badT < 120 && bad.state === 'running' && badOk) {
+        autoChoose(bad);
         const g = nextGate(bad);
         if (g && g.y - bad.distance < 220) {
             bad.setPlayerX(pickSide(bad, g, 'worse') === 'left' ? LEFT_CENTER : RIGHT_CENTER);
@@ -477,14 +500,231 @@ test('14. 完美连击：连续选优侧累计，每 3 连击给一次人数奖�
     assert(badOk, '一路选差侧不应累计连击或拿奖励');
 });
 
+// ==================== 15. 门附加效果 ====================
+
+test('15. 门附加效果：选到带效果的一侧后生效，并在下一场对拼被消耗', () => {
+    let core = null;
+    let modGate = null;
+    let modSide = null;
+    let mod = null;
+
+    for (let seed = 1; seed <= 40 && !core; seed++) {
+        const c = new GateCore();
+        c.startRun(seed);
+        const g = c.gates.find((gg) => {
+            const m = gg.left.mod || gg.right.mod;
+            return m && m.kind !== 'cooldown';
+        });
+        if (!g) continue;
+        const leftIsMod = !!g.left.mod && g.left.mod.kind !== 'cooldown';
+        core = c;
+        modGate = g;
+        modSide = leftIsMod ? 'left' : 'right';
+        mod = leftIsMod ? g.left.mod : g.right.mod;
+    }
+    assert(core, '生成里应当存在带护甲/火力效果的门');
+
+    let hit = null;
+    let t = 0;
+    while (t < 60 && core.state === 'running' && core.distance < modGate.y + 1) {
+        autoChoose(core);
+        const g = nextGate(core);
+        if (g && g.y - core.distance < 220) {
+            const side = g === modGate ? modSide : pickSide(core, g, 'better');
+            core.setPlayerX(side === 'left' ? LEFT_CENTER : RIGHT_CENTER);
+        }
+        core.step(1 / 60);
+        t += 1 / 60;
+        for (const ev of core.popEvents()) {
+            if (ev.type === 'gate_hit' && Math.abs(ev.y - modGate.y) < 1) hit = ev;
+        }
+    }
+    assert(hit, '应当触发目标门');
+    assert(hit.mod && hit.mod.kind === mod.kind, 'gate_hit 事件应带上附加效果');
+
+    const active = core.activeMods.find((m) => m.kind === mod.kind);
+    assert(active, `附加效果应处于生效中（kind=${mod.kind}）`);
+    if (mod.kind === 'armor') {
+        assert(core.armorReduction >= mod.value - 1e-6, `护甲未计入减免：${core.armorReduction} < ${mod.value}`);
+    }
+
+    const before = active.fightsLeft;
+    stepUntil(core, (c) => c.enemies.some((e) => e.engaged && e.y > modGate.y), 30, 'better');
+    const after = core.activeMods.find((m) => m.kind === mod.kind);
+    assert(!after || after.fightsLeft < before, `下一场对拼应消耗一层：${before} → ${after ? after.fightsLeft : 0}`);
+});
+
+// ==================== 16. 敌人类型 ====================
+
+test('16. 敌人类型：合法、有数值差异，首个为步兵', () => {
+    const core = new GateCore();
+    core.startRun(7);
+
+    const normal = core.enemies.filter((e) => !e.boss);
+    assert(normal.length === SEGMENT_COUNT / 2, `普通敌人应为 ${SEGMENT_COUNT / 2} 个，实际 ${normal.length}`);
+    const kinds = normal.map((e) => e.kind);
+    for (const k of kinds) {
+        assert(['grunt', 'shield', 'assassin', 'regen'].includes(k), `非法敌人类型 ${k}`);
+    }
+    assert(kinds[0] === 'grunt', '第一场战斗应是最简单的步兵');
+    assert(new Set(kinds).size >= 2, '一局里应出现不止一种敌人');
+
+    assert(Config.enemyHpAt(1000, 'shield') > Config.enemyHpAt(1000, 'grunt'), '盾兵应当更肉');
+    assert(Config.enemyAtkAt(1000, 'assassin') > Config.enemyAtkAt(1000, 'grunt'), '刺客应当更疼');
+    assert(Config.enemyRegenAt('regen', 100) > 0, '再生兵应当有回血');
+    assert(Config.enemyRegenAt('grunt', 100) === 0, '步兵不应回血');
+
+    const boss = core.boss;
+    assert(boss && boss.kind === 'boss' && boss.phase === 1, 'Boss 初始应处于阶段 1');
+});
+
+// ==================== 17. 弱点瞄准 ====================
+
+test('17. 弱点瞄准：停在弱点下方时 dps 按倍率放大', () => {
+    const engage = (seed) => {
+        const c = new GateCore();
+        c.startRun(seed);
+        stepUntil(c, (x) => x.enemies.some((e) => e.engaged), 30, 'better');
+        return c;
+    };
+
+    const plainCore = engage(2024);
+    plainCore.setPlayerX(PLAYER_X_MIN);       // 最左边，离弱点足够远
+    const plainEnemy = plainCore.enemies.find((e) => e.engaged && e.alive);
+    const plainHp = plainEnemy.hp;
+    for (let i = 0; i < 18; i++) {
+        plainCore.setPlayerX(PLAYER_X_MIN);
+        plainCore.step(1 / 120);
+    }
+    const plainDrop = plainHp - plainEnemy.hp;
+
+    const aimedCore = engage(2024);
+    const aimedEnemy = aimedCore.enemies.find((e) => e.engaged && e.alive);
+    const aimedHp = aimedEnemy.hp;
+    for (let i = 0; i < 18; i++) {
+        aimedCore.setPlayerX(aimedEnemy.weakX);
+        aimedCore.step(1 / 120);
+    }
+    const aimedDrop = aimedHp - aimedEnemy.hp;
+
+    assert(plainDrop > 0 && aimedDrop > 0, '两种站位都应造成伤害');
+    approx(aimedDrop / plainDrop, aimedCore.aimMult, 0.2, '弱点击破倍率');
+    assert(aimedCore.aiming === true, '站在弱点上应判定为瞄准中');
+});
+
+// ==================== 18. 三选一 ====================
+
+function driveToChoice(seed, maxSec) {
+    const core = new GateCore();
+    core.startRun(seed);
+    let t = 0;
+    const limit = maxSec || 40;
+    while (t < limit && core.state === 'running' && !core.choiceOpen) {
+        const g = nextGate(core);
+        if (g && g.y - core.distance < 220) {
+            core.setPlayerX(pickSide(core, g, 'better') === 'left' ? LEFT_CENTER : RIGHT_CENTER);
+        }
+        core.step(1 / 60);
+        t += 1 / 60;
+    }
+    return core;
+}
+
+test('18. 三选一：弹出时冻结世界、选项不重复、选完立即生效且同 seed 一致', () => {
+    const core = driveToChoice(1);
+    assert(core.choiceOpen, '第 3 对门之后应弹出三选一');
+    assert(core.choiceOptions.length === UPGRADE_CHOICES, `应给 ${UPGRADE_CHOICES} 张卡`);
+    assert(core.choiceOptions.length === 3, '实际应为 3 张');
+
+    const ids = core.choiceOptions.map((o) => o.id);
+    assert(new Set(ids).size === ids.length, '三张卡不应重复');
+
+    const frozen = core.distance;
+    for (let i = 0; i < 60; i++) core.step(1 / 60);
+    assert(Math.abs(core.distance - frozen) < 1e-6, '三选一期间世界应冻结');
+    assert(core.choose(99) === false, '非法下标应返回 false');
+
+    const chosenName = core.choiceOptions[0].name;
+    const before = {
+        cap: core.fireCap,
+        armor: core.armorReduction,
+        aim: core.aimMult,
+        streak: core.streakMultiplier,
+        cdMult: core.pulseCooldownMultiplier,
+        count: core.count,
+    };
+    assert(core.choose(0) === true, '选第一张卡应成功');
+    assert(core.choiceOpen === false, '选完应关闭三选一');
+    const changed = core.fireCap !== before.cap
+        || core.armorReduction !== before.armor
+        || core.aimMult !== before.aim
+        || core.streakMultiplier !== before.streak
+        || core.pulseCooldownMultiplier !== before.cdMult
+        || core.count !== before.count;
+    assert(changed, `选了「${chosenName}」后应至少有一项属性变化`);
+
+    const other = driveToChoice(1);
+    const otherIds = other.choiceOptions.map((o) => o.id);
+    assert(JSON.stringify(otherIds) === JSON.stringify(ids), '同 seed 的三选一应当一致');
+});
+
+// ==================== 19. Boss 三阶段 ====================
+
+test('19. Boss 三阶段：跨过血量阈值时切换，且每阶段只切一次', () => {
+    const core = new GateCore();
+    core.startRun(4242);
+    const phases = [];
+    let t = 0;
+    while (t < 180 && core.state === 'running') {
+        autoChoose(core);
+        const g = nextGate(core);
+        if (g && g.y - core.distance < 220) {
+            core.setPlayerX(pickSide(core, g, 'better') === 'left' ? LEFT_CENTER : RIGHT_CENTER);
+        }
+        core.step(1 / 60);
+        t += 1 / 60;
+        for (const ev of core.popEvents()) if (ev.type === 'boss_phase') phases.push(ev.phase);
+    }
+    assert(core.state === 'victory', `应当通关，实际 ${core.state}`);
+    assert(JSON.stringify(phases) === JSON.stringify([2, 3]), `阶段事件应为 [2,3]，实际 ${JSON.stringify(phases)}`);
+    assert(core.boss && core.boss.phase === 3, 'Boss 死亡时应是阶段 3');
+});
+
+// ==================== 20. 首门教学 ====================
+
+test('20. 首门教学：两侧都是加法，出生侧拿到更差的一边', () => {
+    for (const seed of [1, 7, 42, 20260101]) {
+        const core = new GateCore();
+        core.startRun(seed);
+        const gate = core.gates[0];
+        assert(gate.left.op.kind === 'add' && gate.right.op.kind === 'add',
+            `seed ${seed}: 首门应两侧都加人，实际 ${gate.left.op.kind}/${gate.right.op.kind}`);
+
+        const spawnSide = gateSideFor(core.playerX);
+        const spawnVal = applyGateOp(START_COUNT, spawnSide === 'left' ? gate.left.op : gate.right.op);
+        const betterVal = applyGateOp(START_COUNT, spawnSide === 'left' ? gate.right.op : gate.left.op);
+        assert(spawnVal < betterVal, `seed ${seed}: 出生侧应更差（${spawnVal} vs ${betterVal}）`);
+
+        // 站着不动，第一次过门拿到的就是更差的那一边
+        const idle = new GateCore();
+        idle.startRun(seed);
+        let hit = null;
+        for (let i = 0; i < 300 && !hit; i++) {
+            idle.step(1 / 60);
+            for (const ev of idle.popEvents()) if (ev.type === 'gate_hit') hit = ev;
+        }
+        assert(hit && hit.after === spawnVal, `seed ${seed}: 不操作应拿到 ${spawnVal}，实际 ${hit && hit.after}`);
+    }
+});
+
 // ==================== 汇总 ====================
 
 console.log('');
 if (failures.length === 0) {
-    console.log(`GATE_CORE_OK  通过 ${passed}/14`);
+    console.log(`GATE_CORE_OK  通过 ${passed}/${TOTAL_TESTS}`);
     process.exit(0);
 } else {
-    console.log(`GATE_CORE_FAIL  通过 ${passed}/14，失败 ${failures.length} 项`);
+    console.log(`GATE_CORE_FAIL  通过 ${passed}/${TOTAL_TESTS}，失败 ${failures.length} 项`);
     for (const f of failures) console.log(`  - ${f.name}: ${f.err && f.err.message}`);
     process.exit(1);
 }
