@@ -24,6 +24,7 @@ import {
     PLAY_H,
     PLAY_W,
     PLAYER_Y,
+    PULSE_COOLDOWN_SEC,
     SQUAD_DOTS_MAX,
     SQUAD_DOT_MAX_R,
     SQUAD_DOT_MIN_R,
@@ -39,6 +40,13 @@ const { ccclass, property } = _decorator;
 
 const GAME_ID = 'gate_runner';
 const SHAKE_DECAY = 90;
+
+/**
+ * 位移不超过这个值算「点一下」= 集火。
+ * 8 设计像素（≈4 pt）在拖拽里会被吃东西，实测横移 5 CSS 像素就点不动了（手册 §11.6），
+ * 这里按逻辑坐标给 12，和砖块远征保持一致。
+ */
+const TAP_SLOP = 12;
 
 /** 门板最多同时显示 4 对 → 8 个标签 */
 const GATE_LABEL_POOL = 8;
@@ -159,6 +167,14 @@ export class GateGame extends Component {
 
     private _fireTimer = 0;
 
+    /** 手势起点（逻辑坐标）：用于区分「拖动选门」和「点一下集火」 */
+    private _touchStartX = 0;
+    private _touchStartY = 0;
+    /** 本次手势是否落在暂停按钮上（落在按钮上就完全不参与玩法输入） */
+    private _gestureOnButton = false;
+    /** 纯表现用的时间累加（脉冲光环/呼吸），不参与任何判定 */
+    private _animTime = 0;
+
     private _highScore = 0;
     private _lastCount = -1;
     private _lastDistance = -1;
@@ -213,6 +229,7 @@ export class GateGame extends Component {
 
     update(dt: number): void {
         if (this._destroyed) return;
+        this._animTime += dt;
 
         if (!this._paused && !this._resultShown) {
             this._core.step(dt);
@@ -238,6 +255,7 @@ export class GateGame extends Component {
         this._bullets = [];
         this._shake = 0;
         this._fireTimer = 0;
+        this._gestureOnButton = false;
         this._lastCount = -1;
         this._lastDistance = -1;
         this._lastHint = '';
@@ -265,26 +283,77 @@ export class GateGame extends Component {
     }
 
     private _onTouchStart(event: EventTouch): void {
+        const loc = event.getUILocation();
+        // 落在暂停按钮上的手势交给按钮自己处理，别让它顺带开一次集火
+        this._gestureOnButton = this._isOverNode(this.pauseButton, loc.x, loc.y);
+        if (this._gestureOnButton) return;
         if (!this._acceptsPlayInput()) return;
-        this._moveTo(event.getUILocation().x, event.getUILocation().y);
+
+        const p = this._toLogic(loc.x, loc.y);
+        this._touchStartX = p.x;
+        this._touchStartY = p.y;
+        this._core.setPlayerX(p.x);
     }
 
     private _onTouchMove(event: EventTouch): void {
+        if (this._gestureOnButton) return;
         if (!this._acceptsPlayInput()) return;
-        this._moveTo(event.getUILocation().x, event.getUILocation().y);
+        const loc = event.getUILocation();
+        this._moveTo(loc.x, loc.y);
     }
 
-    /** 抬起不做任何事：横移本身是纯位移操作，不需要"确认"动作 */
     private _onTouchEnd(event: EventTouch): void {
+        const wasOnButton = this._gestureOnButton;
+        this._gestureOnButton = false;
+        if (wasOnButton) return;
         if (!this._acceptsPlayInput()) return;
-        this._moveTo(event.getUILocation().x, event.getUILocation().y);
+        const loc = event.getUILocation();
+        this._finishGesture(loc.x, loc.y);
     }
 
-    /** 桌面拖拽结束派发 CANCEL（踩坑手册 §11）：同样只更新位置，不触发任何数值逻辑 */
+    /**
+     * 桌面拖拽结束派发的是 TOUCH_CANCEL 而不是 TOUCH_END（踩坑手册 §11）。
+     * 轻触/拖拽靠位移区分，所以两种结束都走同一套收尾逻辑，桌面上「点一下集火」才不会失灵。
+     */
     private _onTouchCancel(event: EventTouch): void {
+        const wasOnButton = this._gestureOnButton;
+        this._gestureOnButton = false;
+        if (wasOnButton) return;
         if (!this._acceptsPlayInput()) return;
         const loc = event ? event.getUILocation() : null;
-        if (loc) this._moveTo(loc.x, loc.y);
+        if (loc) this._finishGesture(loc.x, loc.y);
+    }
+
+    /** 收尾：先对齐位置，位移不超过 TAP_SLOP 视为点击 → 集火 */
+    private _finishGesture(uiX: number, uiY: number): void {
+        const p = this._toLogic(uiX, uiY);
+        this._core.setPlayerX(p.x);
+
+        const dx = p.x - this._touchStartX;
+        const dy = p.y - this._touchStartY;
+        if (Math.sqrt(dx * dx + dy * dy) <= TAP_SLOP) this._tryPulse();
+    }
+
+    /** 集火：核心会拒绝冷却中的请求，这里只做反馈 */
+    private _tryPulse(): void {
+        if (!this._core.pulse()) return;
+        this._spawnBurst(this._core.playerX, PLAYER_Y - 10, COLORS.gold, 14, 150);
+        this._shake = Math.max(this._shake, 3);
+    }
+
+    /** UI 坐标下点是否落在节点矩形内（预留 8px 手指容差） */
+    private _isOverNode(node: Node | null, uiX: number, uiY: number): boolean {
+        if (!node || !node.isValid || !node.activeInHierarchy) return false;
+        const transform = node.getComponent(UITransform);
+        if (!transform) return false;
+
+        const local = transform.convertToNodeSpaceAR(new Vec3(uiX, uiY, 0));
+        const pad = 8;
+        const left = -transform.width * transform.anchorX - pad;
+        const right = transform.width * (1 - transform.anchorX) + pad;
+        const bottom = -transform.height * transform.anchorY - pad;
+        const top = transform.height * (1 - transform.anchorY) + pad;
+        return local.x >= left && local.x <= right && local.y >= bottom && local.y <= top;
     }
 
     private _moveTo(uiX: number, uiY: number): void {
@@ -410,15 +479,23 @@ export class GateGame extends Component {
             const event: GateEvent = events[i];
             switch (event.type) {
                 case 'gate_hit': {
-                    const good = event.after >= event.before;
                     const color = gateOpColor(event.kind);
-                    const text = good
-                        ? `${gateOpLabel({ kind: event.kind, value: event.value })}  ${event.after}`
-                        : `${gateOpLabel({ kind: event.kind, value: event.value })}  ${event.after}`;
+                    const text = `${gateOpLabel({ kind: event.kind, value: event.value })}  ${event.after}`;
                     this._spawnFxText(text, color, PLAYER_Y - 70);
                     this._spawnBurst(this._core.playerX, PLAYER_Y - 20, color, 10, 90);
+                    // 完美选门：单独一行金色反馈，连击奖励再补一行
+                    if (event.perfect && event.streak >= 2) {
+                        this._spawnBurst(this._core.playerX, PLAYER_Y - 40, COLORS.gold, 8, 120);
+                        this._spawnFxText(`完美 ×${event.streak}`, COLORS.gold, PLAYER_Y - 112);
+                    }
+                    if (event.bonus > 0) {
+                        this._spawnFxText(`连击奖励 +${event.bonus}`, COLORS.gold, PLAYER_Y - 148);
+                    }
                     break;
                 }
+                case 'pulse':
+                    this._spawnFxText('集火!', COLORS.gold, PLAYER_Y - 96);
+                    break;
                 case 'enemy_engaged':
                     if (event.boss) this._shake = Math.max(this._shake, 8);
                     break;
@@ -670,6 +747,14 @@ export class GateGame extends Component {
 
         if (visible <= 0) return;
 
+        // 集火光环：生效中在队伍外圈画一层金色呼吸光（细线用 rect/circle + fill，不用 stroke）
+        if (this._core.pulseActive) {
+            const wave = Math.sin(this._animTime * 14);
+            g.fillColor = this._color(COLORS.gold, 0.16 + 0.12 * wave);
+            g.circle(px, py, 64 + wave * 4);
+            g.fill();
+        }
+
         const cols = Math.ceil(Math.sqrt(visible));
         const rows = Math.ceil(visible / cols);
         const spread = 56;
@@ -697,6 +782,30 @@ export class GateGame extends Component {
         if (count > FIRE_CAP) {
             g.fillColor = this._color(COLORS.allyDark, 0.5);
             g.rect(px - 30, py - 46, 60, 4);
+            g.fill();
+        }
+
+        // 集火冷却条：满了=可点（慢呼吸），生效中=金色全满，冷却中=暗色回填
+        const barW = 76;
+        const barH = 6;
+        const barX = px - barW / 2;
+        const barY = py - 66;
+        const pulseActive = this._core.pulseActive;
+        const pulseReady = this._core.pulseReady;
+        const fill = pulseActive || pulseReady
+            ? 1
+            : 1 - Math.max(0, Math.min(1, this._core.pulseCooldown / PULSE_COOLDOWN_SEC));
+
+        g.fillColor = this._color(0x000000, 0.45);
+        g.rect(barX, barY, barW, barH);
+        g.fill();
+
+        if (fill > 0) {
+            const alpha = pulseActive
+                ? 0.95
+                : (pulseReady ? 0.55 + 0.45 * Math.sin(this._animTime * 6) : 0.6);
+            g.fillColor = this._color(pulseReady || pulseActive ? COLORS.gold : COLORS.goldDark, alpha);
+            g.rect(barX, barY, barW * fill, barH);
             g.fill();
         }
     }
@@ -859,10 +968,13 @@ export class GateGame extends Component {
         if (this._core.state === 'game_over') return '人数归零 · 再来一局';
         if (this._core.state === 'victory') return '已通关';
         const blocking = this._blockingEnemy();
-        if (blocking) return blocking.boss ? 'Boss 战：撑住！' : '交火中 · 横移躲不开，硬打';
+        if (blocking) {
+            if (!this._core.pulseReady) return '交火中 · 集火冷却中';
+            return blocking.boss ? 'Boss 战 · 点屏幕集火爆发' : '点屏幕集火 · 打得快掉得少';
+        }
         if (count > FIRE_CAP) return '火力已封顶 · 优先选 × 门攒血量';
         if (count > COUNT_MAX - 1) return '人数已封顶';
-        return '左右拖动选门 · × 卖血换收益';
+        return '拖动选门 · 点屏幕集火';
     }
 
     // ==================== 工具 ====================

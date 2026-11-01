@@ -26,11 +26,11 @@ export const PLAYER_R = 26;
 /** 一个段落的世界长度 */
 export const SEGMENT_LEN = 360;
 
-/** 段落数（偶数段放门、奇数段放敌人） */
-export const SEGMENT_COUNT = 8;
+/** 段落数（偶数段放门、奇数段放敌人）。11 段太少跑 20 s 就结束，12 段约 40 s 一局 */
+export const SEGMENT_COUNT = 12;
 
 /** Boss 的世界位置：最后一段敌人之后留一小段空地 */
-export const BOSS_DISTANCE = 3200;
+export const BOSS_DISTANCE = 4600;
 
 /** 起始前进速度（px/s） */
 export const SCROLL_BASE = 420;
@@ -73,6 +73,41 @@ export const MAX_FRAME_DT = 0.05;
 /** 每这么久产出一个 squad_hit 飘字事件 */
 export const SQUAD_HIT_EVENT_SEC = 0.2;
 
+// ==================== 集火（主动技能） ====================
+
+/**
+ * 点一下屏幕 = 集火：短时把 dps 拉高。
+ * 对拼阶段原本是纯挂机看数字，加了集火之后玩家有事可做，而且"打得快 = 掉的少"，
+ * 时机好坏直接换算成存活人数。
+ */
+export const PULSE_DURATION_SEC = 1.6;
+
+/** 集火冷却 */
+export const PULSE_COOLDOWN_SEC = 4.5;
+
+/** 集火期间的 dps 倍率（仍以 FIRE_CAP 为基准放大） */
+export const PULSE_DPS_MULT = 2.2;
+
+// ==================== 完美选门连击 ====================
+
+/**
+ * 连续选到"更优的那一侧"记为完美。
+ * 好处不能给太猛（×2 / ×3 门本身已经是复利），给一点点人数 + 明确的正反馈。
+ */
+export const STREAK_BONUS_STEP = 3;
+
+/** 每满 STREAK_BONUS_STEP 连击，额外加当前人数的这个比例 */
+export const STREAK_BONUS_RATIO = 0.15;
+
+/** 连击奖励的下限，避免人数很少时奖励看不见 */
+export const STREAK_BONUS_MIN = 5;
+
+/** 连击奖励的人数增量 */
+export function streakBonus(after: number): number {
+    const b = Math.floor(after * STREAK_BONUS_RATIO);
+    return b > STREAK_BONUS_MIN ? b : STREAK_BONUS_MIN;
+}
+
 // ==================== 数值门 ====================
 
 /** 门板宽度：左门 x ∈ [40, 320]，右门 x ∈ [340, 620] */
@@ -104,7 +139,8 @@ export interface GateTemplate {
 
 /**
  * 门模板池。每对门随机抽一个模板，左右随机交换。
- * 前期只有加法/×2，中后期才出现 ÷2、−10 这类风险选项。
+ * 前期只有加法/×2，中后期才出现 ÷2 / ÷3、−N 这类风险选项。
+ * `from` 是模板开始出现的距离：越往后越可能出现"高收益高风险"。
  */
 export const GATE_TEMPLATES: GateTemplate[] = [
     { a: { kind: 'mul', value: 2 }, b: { kind: 'add', value: 30 }, from: 0 },
@@ -113,6 +149,10 @@ export const GATE_TEMPLATES: GateTemplate[] = [
     { a: { kind: 'sub', value: 10 }, b: { kind: 'mul', value: 2 }, from: 720 },
     { a: { kind: 'mul', value: 3 }, b: { kind: 'div', value: 2 }, from: 1440 },
     { a: { kind: 'div', value: 2 }, b: { kind: 'add', value: 100 }, from: 1440 },
+    // 中后期的三个高风险模板：一边暴增、一边暴跌，选错要肉疼
+    { a: { kind: 'mul', value: 3 }, b: { kind: 'div', value: 3 }, from: 2160 },
+    { a: { kind: 'add', value: 150 }, b: { kind: 'sub', value: 100 }, from: 2880 },
+    { a: { kind: 'mul', value: 2 }, b: { kind: 'div', value: 3 }, from: 3600 },
 ];
 
 /** 把人数钳进 [0, COUNT_MAX] */
@@ -235,6 +275,9 @@ export const COLORS = {
     gateInk: 0xffffff,
     success: 0x6ee7b7,
     danger: 0xff6b6b,
+    /** 集火 / 完美连击的高亮色 */
+    gold: 0xffd166,
+    goldDark: 0xb08a2e,
 };
 
 /** 门操作对应的色板 */

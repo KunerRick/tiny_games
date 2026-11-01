@@ -6,6 +6,8 @@
  *   - 世界按 `distance` 推进；玩家固定在屏幕 PLAYER_Y，物体按 (worldY - distance) 落屏
  *   - 遇到敌人即停下对拼：我方按 dps 扣敌人血，敌人按 atk + count×比例 扣我方人数
  *   - 数值门成对出现，玩家中心落在左/右半区即触发对应一侧
+ *   - 连续选到更优的一侧记「完美」，每 3 连击额外加一点人数
+ *   - 点屏幕触发「集火」：短时 dps 翻倍，冷却 4.5 s —— 打手动的唯一发力点
  *   - 打掉 Boss = victory；人数归零 = game_over
  *
  * 坐标系：原点在游戏区左上角，y 向下（与其它游戏一致）。
@@ -30,6 +32,11 @@ import {
     SEGMENT_COUNT,
     GATE_SPLIT_X,
     GATE_TEMPLATES,
+    PULSE_DURATION_SEC,
+    PULSE_COOLDOWN_SEC,
+    PULSE_DPS_MULT,
+    STREAK_BONUS_STEP,
+    streakBonus,
     GateOp,
     GateOpKind,
     clampCount,
@@ -84,7 +91,14 @@ export type GateEvent =
         before: number;
         after: number;
         y: number;
+        /** 这一侧的结果严格优于另一侧 */
+        perfect: boolean;
+        /** 当前连续完美次数 */
+        streak: number;
+        /** 连击奖励带来的人数增量（0 表示这次没有奖励） */
+        bonus: number;
     }
+    | { type: 'pulse' }
     | { type: 'enemy_engaged'; id: number; hp: number; boss: boolean }
     | { type: 'enemy_destroyed'; id: number; y: number; boss: boolean }
     | { type: 'squad_hit'; amount: number; count: number }
@@ -130,6 +144,12 @@ export class GateCore {
     private _hitTimer = 0;
     private _pendingHit = 0;
 
+    /** 集火剩余时长 / 剩余冷却 */
+    private _pulseTimer = 0;
+    private _pulseCd = 0;
+    /** 连续完美选门次数 */
+    private _streak = 0;
+
     // ==================== 生命周期 ====================
 
     /** 开一局。seed 相同则门/敌人序列完全相同 */
@@ -149,6 +169,9 @@ export class GateCore {
         this._nextId = 1;
         this._hitTimer = 0;
         this._pendingHit = 0;
+        this._pulseTimer = 0;
+        this._pulseCd = 0;
+        this._streak = 0;
 
         this._generate();
     }
@@ -165,6 +188,9 @@ export class GateCore {
         this._acc = 0;
         this._hitTimer = 0;
         this._pendingHit = 0;
+        this._pulseTimer = 0;
+        this._pulseCd = 0;
+        this._streak = 0;
     }
 
     /** 横移：钳制在 [PLAYER_X_MIN, PLAYER_X_MAX] */
@@ -172,6 +198,19 @@ export class GateCore {
         if (isNaN(x)) return;
         const v = x < PLAYER_X_MIN ? PLAYER_X_MIN : (x > PLAYER_X_MAX ? PLAYER_X_MAX : x);
         this._playerX = v;
+    }
+
+    /**
+     * 集火：冷却好了就开，短时 dps ×PULSE_DPS_MULT。
+     * 返回 false 表示没吃到（冷却中 / 不在对局中），调用方据此决定是否给反馈。
+     */
+    pulse(): boolean {
+        if (this._state !== 'running') return false;
+        if (this._pulseCd > 0) return false;
+        this._pulseTimer = PULSE_DURATION_SEC;
+        this._pulseCd = PULSE_COOLDOWN_SEC;
+        this._events.push({ type: 'pulse' });
+        return true;
     }
 
     /** 取走本帧产生的事件（取空即清空） */
@@ -189,6 +228,8 @@ export class GateCore {
         if (!isFinite(dt) || dt <= 0) return;
 
         const frame = dt > MAX_FRAME_DT ? MAX_FRAME_DT : dt;
+        if (this._pulseTimer > 0) this._pulseTimer = Math.max(0, this._pulseTimer - frame);
+        if (this._pulseCd > 0) this._pulseCd = Math.max(0, this._pulseCd - frame);
         this._acc += frame;
 
         let guard = 0;
@@ -233,8 +274,8 @@ export class GateCore {
             this._events.push({ type: 'enemy_engaged', id: e.id, hp: e.hp, boss: e.boss });
         }
 
-        // 我方输出：dps 封顶，人数再多也不会更快
-        const dps = Math.min(this.count, FIRE_CAP);
+        // 我方输出：dps 封顶，人数再多也不会更快；集火期间按倍率放大
+        const dps = Math.min(this.count, FIRE_CAP) * (this._pulseTimer > 0 ? PULSE_DPS_MULT : 1);
         e.hp -= dps * dt;
 
         if (e.hp <= 0) {
@@ -280,12 +321,24 @@ export class GateCore {
 
             const side = gateSideFor(this._playerX);
             const entry = side === 'left' ? g.left : g.right;
+            const other = side === 'left' ? g.right : g.left;
             const before = this.count;
             const after = applyGateOp(before, entry.op);
 
+            // 完美选门：这一侧的结果严格优于另一侧。两侧同结果不算，避免白送连击
+            const perfect = after > applyGateOp(before, other.op);
+            this._streak = perfect ? this._streak + 1 : 0;
+
+            let bonus = 0;
+            // 门把自己的队伍清空时不给连击奖励，否则 −N 门会被奖励救回来，惩罚失效
+            if (after > 0 && perfect && this._streak % STREAK_BONUS_STEP === 0) {
+                bonus = streakBonus(after);
+            }
+            const finalCount = clampCount(after + bonus);
+
             g.left.used = true;
             g.right.used = true;
-            this._countF = after;
+            this._countF = finalCount;
 
             this._events.push({
                 type: 'gate_hit',
@@ -293,11 +346,14 @@ export class GateCore {
                 kind: entry.op.kind,
                 value: entry.op.value,
                 before,
-                after,
+                after: finalCount,
                 y: g.y,
+                perfect,
+                streak: this._streak,
+                bonus,
             });
 
-            if (after <= 0) {
+            if (finalCount <= 0) {
                 this._fail();
                 return;
             }
@@ -381,6 +437,16 @@ export class GateCore {
     /** 未取整的人数，供血条/调试用 */
     get countExact(): number { return this._countF; }
     get playerX(): number { return this._playerX; }
+    /** 集火是否正在生效 */
+    get pulseActive(): boolean { return this._pulseTimer > 0; }
+    /** 集火能不能点（对局中且冷却已好） */
+    get pulseReady(): boolean { return this._state === 'running' && this._pulseCd <= 0; }
+    /** 集火剩余冷却（秒），0 = 已就绪 */
+    get pulseCooldown(): number { return this._pulseCd; }
+    /** 集火剩余生效时长（秒） */
+    get pulseRemaining(): number { return this._pulseTimer; }
+    /** 当前连续完美选门次数 */
+    get streak(): number { return this._streak; }
     get gates(): ReadonlyArray<GatePair> { return this._gates; }
     get enemies(): ReadonlyArray<Enemy> { return this._enemies; }
     get boss(): Enemy | null {

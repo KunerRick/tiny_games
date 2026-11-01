@@ -4,7 +4,8 @@
  *
  * 覆盖 docs/specs/2026-11-01-game-gate-runner-design.md §8 的 12 项：
  * 门模板、乘除、钳制、门只触发一次、对拼公式、敌人死后继续前进、
- * 人数归零即结束、Boss 与胜利、生成确定性、生成合法性、180 s 自动游玩、平衡性。
+ * 人数归零即结束、Boss 与胜利、生成确定性、生成合法性、180 s 自动游玩、平衡性；
+ * 另加 2 项可玩性回归：集火（主动技能）与完美选门连击。
  *
  * 用法：
  *   node tools/verify-gate-core.js
@@ -387,14 +388,103 @@ test('12. 平衡性：一路优门通关且有盈余，一路劣门必死', () =
     }
 });
 
+// ==================== 13. 集火 ====================
+
+test('13. 集火：短时 dps 放大，冷却期间不可再触发', () => {
+    const make = () => {
+        const core = new GateCore();
+        core.startRun(4242);
+        stepUntil(core, (c) => c.enemies.some((e) => e.engaged), 60);
+        return core;
+    };
+
+    const plain = make();
+    const enemyPlain = plain.enemies.find((e) => e.alive && e.engaged);
+    assert(enemyPlain, '应当已经在和第一个敌人对拼');
+    const hpPlain = enemyPlain.hp;
+    for (let i = 0; i < 24; i++) plain.step(1 / 60);      // 0.4 s
+    const plainDrop = hpPlain - enemyPlain.hp;
+
+    const boosted = make();
+    const enemyBoosted = boosted.enemies.find((e) => e.alive && e.engaged);
+    assert(boosted.pulseReady === true, '刚接敌时应可集火');
+    assert(boosted.pulse() === true, '首次集火应成功');
+    assert(boosted.pulseActive === true, '集火后应处于生效中');
+    assert(boosted.pulse() === false, '冷却期间再点应失败');
+    const hpBoosted = enemyBoosted.hp;
+    for (let i = 0; i < 24; i++) boosted.step(1 / 60);
+    const boostDrop = hpBoosted - enemyBoosted.hp;
+
+    assert(plainDrop > 0, '不集火也应造成伤害');
+    approx(boostDrop / plainDrop, Config.PULSE_DPS_MULT, 0.3, '集火 dps 倍率');
+
+    stepUntil(boosted, (c) => c.pulseReady, 10);
+    assert(boosted.pulseReady === true, '冷却结束后应可再次集火');
+    assert(boosted.pulseCooldown <= 0.01, `冷却结束后读数应为 0，实际 ${boosted.pulseCooldown}`);
+});
+
+// ==================== 14. 完美选门连击 ====================
+
+test('14. 完美连击：连续选优侧累计，每 3 连击给一次人数奖励，选差侧清零', () => {
+    const core = new GateCore();
+    core.startRun(1);
+
+    const hits = [];
+    const dt = 1 / 60;
+    let t = 0;
+    while (t < 180 && core.state === 'running' && hits.length < 8) {
+        const g = nextGate(core);
+        if (g && g.y - core.distance < 220) {
+            core.setPlayerX(pickSide(core, g, 'better') === 'left' ? LEFT_CENTER : RIGHT_CENTER);
+        }
+        core.step(dt);
+        t += dt;
+        for (const ev of core.popEvents()) if (ev.type === 'gate_hit') hits.push(ev);
+    }
+    assert(hits.length >= 5, `应至少经过 5 对门，实际 ${hits.length}`);
+
+    let expStreak = 0;
+    let bonuses = 0;
+    for (const ev of hits) {
+        expStreak = ev.perfect ? expStreak + 1 : 0;
+        assert(ev.streak === expStreak,
+            `连击数不对：perfect=${ev.perfect} 期望 ${expStreak}，实际 ${ev.streak}`);
+        if (ev.perfect && ev.streak > 0 && ev.streak % 3 === 0) {
+            assert(ev.bonus > 0, `${ev.streak} 连击应给奖励，实际 ${ev.bonus}`);
+            bonuses++;
+        } else {
+            assert(ev.bonus === 0, `非 3 的倍数不应给奖励：streak=${ev.streak} bonus=${ev.bonus}`);
+        }
+    }
+    assert(bonuses >= 1, '一路选优侧应至少吃到 1 次连击奖励');
+
+    // 一路选差侧：每对门都不完美，连击应一直是 0
+    const bad = new GateCore();
+    bad.startRun(1);
+    let badOk = true;
+    let badT = 0;
+    while (badT < 120 && bad.state === 'running' && badOk) {
+        const g = nextGate(bad);
+        if (g && g.y - bad.distance < 220) {
+            bad.setPlayerX(pickSide(bad, g, 'worse') === 'left' ? LEFT_CENTER : RIGHT_CENTER);
+        }
+        bad.step(1 / 60);
+        badT += 1 / 60;
+        for (const ev of bad.popEvents()) {
+            if (ev.type === 'gate_hit' && (ev.perfect || ev.streak !== 0 || ev.bonus !== 0)) badOk = false;
+        }
+    }
+    assert(badOk, '一路选差侧不应累计连击或拿奖励');
+});
+
 // ==================== 汇总 ====================
 
 console.log('');
 if (failures.length === 0) {
-    console.log(`GATE_CORE_OK  通过 ${passed}/12`);
+    console.log(`GATE_CORE_OK  通过 ${passed}/14`);
     process.exit(0);
 } else {
-    console.log(`GATE_CORE_FAIL  通过 ${passed}/12，失败 ${failures.length} 项`);
+    console.log(`GATE_CORE_FAIL  通过 ${passed}/14，失败 ${failures.length} 项`);
     for (const f of failures) console.log(`  - ${f.name}: ${f.err && f.err.message}`);
     process.exit(1);
 }
