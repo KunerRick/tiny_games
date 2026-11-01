@@ -1,0 +1,137 @@
+# 第 6–8 款游戏路线图
+
+**日期**: 2026-10-31（2026-11-01 更新：三款全部可玩，微信出包预检 9/9 通过）
+**状态**: 三款均已完成场景搭建、浏览器验收与微信小游戏出包预检
+**范围**: 方块坠落之后的连续三款新游戏，按顺序交付
+
+---
+
+## 1. 顺序与结论
+
+| 序 | 代号 | 名称 | 品类 | 核心操作 | 预估 | 状态 |
+|----|------|------|------|---------|------|------|
+| 第 6 款 | `brick` | 砖块远征 | 打砖块 + 轻肉鸽 | 横移挡板 | 5–7 天 | **可玩**（含微信出包预检） |
+| 第 7 款 | `merge` | 合合大作战 | 合成（大西瓜类） | 拖拽 → 松手投放 | 4–6 天 | **可玩**（含微信出包预检） |
+| 第 8 款 | `gate_runner` | 数值冲刺 | 数值门跑酷（gate runner） | 左右变道 | 3–5 天 | **可玩**（含微信出包预检） |
+
+**为什么是这个顺序**
+
+1. **砖块远征**是唯一「零新依赖 + 纯几何逻辑」的一款：不需要物理引擎、不需要美术资源、可以用现有 `tools/verify-*-core.js` 范式做无编辑器回归。它同时补齐了合集里缺失的「轨迹/反弹」手感品类。
+2. **合成大西瓜**是第一个真正的技术风险点（物理稳定性、确定性、手感调参）。放在第二款，用第一款验证过的场景/HUD 模板降低变量，把风险集中到物理本身。物理方案已定为自研圆形求解器（不引入 box2d），风险从「包体 + 未知引擎行为」收敛为「求解器参数」。 
+3. **数值门跑酷**依赖大量「一眼可读的数值反馈」和节奏调优，适合在已有三款场景模板、UI 模板之后做；并且它的核心（前进 + 门 + 数值）比前两款都轻，放最后风险最小。
+
+> 第三款的品类说明：用户描述的是 **gate runner（数值门跑酷 / count runner）**，代表作《Count Masters》《Number Gates》一类 hyper-casual。角色自动向前跑、边跑边射击，左右两扇门上写 ×2 / ÷2 / +20，撞到哪扇就按哪扇改数值。详见 `docs/specs/2026-11-xx-game-gate-runner-design.md`（第 8 款启动时产出）。
+
+---
+
+## 2. 共同基础设施
+
+以下在**第 6 款**里建立，后续两款直接复用：
+
+| 设施 | 落地位置 | 说明 |
+|------|---------|------|
+| 纯逻辑/表现分离 | `Config.ts`（常量，无 cc）+ `Core.ts`（规则，无 cc）+ `XxxGame.ts`（Cocos 组件） | 沿用 Tetris 的三层；`Core` 必须能被 Node 直接编译 |
+| 无编辑器回归 | `tools/verify-<game>-core.js` | 复用 `verify-tetris-core.js` 的 tsc 探测 + `test()/eq()` 框架 |
+| 场景/组件骨架 | 复制 Tetris 的 `HudPanel` / `PausePanel` / `GameOverPanel` 结构 | 只复制结构，不跨游戏 import |
+| 触摸手势 | 各游戏内独立一份输入组件 | **暂不抽公共模块**：Tetris 的手势重构还在未提交状态，等它合入后再评估抽取 |
+| 渲染约定 | 全 `Graphics` | 细线用 `rect()+fill()`（见 `tech/mcp-scene-authoring-pitfalls.md` §4.5）；圆角用 `roundRect`；禁用 ≤2px 描边 |
+| 存档 | `StorageManager` 前缀 `tiny_games_<gameId>_` | 最高分、局数、已解锁升级 |
+| 接入清单 | 见 §5 | 每款游戏收尾前逐项过 |
+
+---
+
+## 3. 第 6 款：砖块远征（brick）
+
+**目标**：挡板接球打砖块，每关清空后三选一升级，形成「越打越离谱」的肉鸽曲线。
+
+**范围（v1）**
+
+- 单指横移挡板 + 点击发球；不做多球同时手动瞄准之外的复杂手势
+- 12 个升级、3 种特殊砖、无限关（难度随关数增长）
+- 生命 3 条、连击倍率、最高分存档
+- 保底机制：球接近水平持续 1 秒会被纵向推开；连续 10 秒没打中任何砖则随机偏转球方向（防无限空转）
+
+**非目标**：道具掉落动画、Boss 关、排行榜、音效。
+
+**里程碑**
+
+1. ✅ 设计规格（`docs/specs/2026-10-31-game-brick-breaker-design.md`）
+2. ✅ `BrickConfig.ts` + `BrickCore.ts` + `tools/verify-brick-core.js`（50 项单测全绿）
+3. ✅ `BrickGame.ts` 运行时组件（Graphics 渲染 + 触摸 + HUD/升级面板/暂停/结算）
+4. ✅ MCP 搭场景 + `GameConfig` 注册（`sync-build-scenes` 仍需退出编辑器后执行）
+5. ✅ 浏览器实测（拖拽/点击/暂停/升级/结算/返回，0 报错）；✅ `check-wechat-build` 9/9（2026-11-01 与另两款一起出包）
+
+**验收**：纯逻辑单测全绿（50/50）；浏览器实测覆盖入口→发球→计分→暂停→过关三选一→结算→重开/返回；微信预检需出包后补跑。场景搭建细节见
+[`../design/2026-10-31-brick-breaker-scene-setup.md`](../design/2026-10-31-brick-breaker-scene-setup.md)。
+
+---
+
+## 4. 后续两款的关键风险
+
+### 第 7 款：合合大作战（merge）
+
+- ~~必须引入 box2d~~ → **结论：不引入，自研二维圆形求解器**（评估见 `2026-10-31-merge-physics-evaluation.md`）。圆形堆叠不需要旋转与任意凸包，专用求解器比通用刚体引擎更容易调稳、可确定性回归、零包体开销
+- **稳定性是本款唯一的物理难点**：实测踩到四个坑（冲量必须每轮施加、墙上外向速度每轮清零、收尾 `_settleWalls` 用容差、静止判定用「每帧净位移」而非内部速度），详情见设计文档 §3.3
+- **判负规则不能用「速度接近 0」**：高柱刚落下来会持续"呼吸" 2–5 s，改用「越线 + 有支撑（接触或休眠）」
+- **可回归**：`tools/verify-merge-core.js` 12 项覆盖叠放稳定、合并/禁链式、确定性（同 seed 逐位相同）、失败判定与 500 次自动投放长跑
+- **包体**：零新增依赖，主包预检无额外负担
+
+### 第 8 款：数值冲刺（gate_runner）
+
+- **核心是数值曲线而不是物理**：×2 / ÷2 / +20 的组合必须让玩家在 10 秒内看懂「我现在多少、撞了会变成多少」
+- **可测**：门选择、数值结算、敌人血量对抗全部纯逻辑，可 100% 回归
+- **风险**：hyper-casual 的爽点高度依赖节奏与镜头感，纯 Graphics 表现力有限；先用「数值大字 + 速度线 + 打击闪白」验证，够爽再考虑加美术
+
+**结果（2026-11-01）**：上述风险按预案落地 —— 全部纯 `Graphics`、零新增贴图（面板 `Dim` 复用砖块远征的 `white.png`），
+数值大字放在 `HudTop/CountLabel`（56pt）。
+
+1. ✅ 设计规格（`specs/2026-11-01-game-gate-runner-design.md`，含与草案的 8 处差异）
+2. ✅ `GateConfig.ts` + `GateCore.ts` + `tools/verify-gate-core.js`（12 项全绿）
+3. ✅ `GateGame.ts` 运行时组件（Graphics + 触摸 + HUD/暂停/结算）
+4. ✅ MCP 搭场景 + `GameConfig` 注册（19 项绑定全通）
+5. ✅ 浏览器实测（选门 / 对拼 / 暂停 / 通关 / 阵亡 / 重来 / 返回，0 报错）
+6. ✅ `sync-build-scenes` + 微信出包预检（三款一起，2026-11-01；`check-wechat-build` 9/9，模拟器里三款都能进）
+
+**验收**：`node tools/verify-gate-core.js` → `GATE_CORE_OK 通过 12/12`；
+场景搭建与实测细节见 [`../design/2026-11-01-gate-runner-scene-setup.md`](../design/2026-11-01-gate-runner-scene-setup.md)。
+
+---
+
+## 5. 新游戏接入清单（每款收尾必过）
+
+- [ ] `assets/common/managers/GameConfig.ts` 的 `GAME_LIST` 注册（id / name / sceneName / description）
+- [ ] 场景文件位于 `assets/games/game_<id>/scenes/<Scene>.scene`，场景名与 `sceneName` 一致
+- [ ] `node tools/sync-build-scenes.js`（先退出编辑器）
+- [ ] `npx tsc --noEmit` 通过
+- [ ] `node tools/verify-<game>-core.js` 全绿
+- [ ] 浏览器预览：入口 → 玩一局 → 暂停 → 结算 → 返回大厅
+- [ ] `node tools/check-wechat-build.js` 9 项通过
+- [ ] 文档：spec + 场景搭建指南 + `docs/README.md` 索引
+
+---
+
+## 6. 进度
+
+| 日期 | 事项 | 结论 |
+|------|------|------|
+| 2026-10-31 | 确定三款顺序与第 8 款品类 | 砖块远征 → 合合大作战 → 数值冲刺 |
+| 2026-10-31 | 第 6 款设计规格 + 纯逻辑与单测 | 见对应文档 |
+| 2026-10-31 | 第 6 款运行时组件 | 见 `BrickGame.ts`；场景待编辑器侧执行 |
+| 2026-10-31 | 第 6 款场景搭建 + 大厅注册 | `BrickBreaker.scene` 27 项绑定全通；踩坑与新发现（`?scene=<uuid>` 预览、HUD 冲突修正、遮罩加深）见 `design/2026-10-31-brick-breaker-scene-setup.md` |
+| 2026-10-31 | 第 6 款浏览器实测 | 拖拽/发球/计分/掉球/暂停/继续/过关三选一/结算/重开/返回全通过，0 console error |
+| 2026-10-31 | 第 7 款物理方案评估 | 建议自研圆形求解器；详见 `2026-10-31-merge-physics-evaluation.md` |
+| 2026-10-31 | 第 7 款设计规格 + 纯逻辑与 12 项回归 | 见 `specs/2026-10-31-game-merge-design.md`；`node tools/verify-merge-core.js` 12/12 |
+| 2026-10-31 | 第 7 款运行时组件 + 大厅注册 | `MergeGame.ts` 完成、`GAME_LIST` 注册 `merge`；场景待搭 |
+| 2026-10-31 | 第 8 款设计草案 | 单资源数值门跑酷；详见 `2026-10-31-gate-runner-design-draft.md` |
+| 2026-11-01 | 第 7 款场景搭建 | `Merge.scene` 93.6 KB，19 项绑定全通（13 Node + 6 Label），资产引用 0 破链；节点树/坐标/UUID 见 `design/2026-10-31-merge-scene-setup.md` |
+| 2026-11-01 | 第 7 款浏览器实测 | 投放/合并/连击（`连击 2 ×1.5`）/暂停冻结/失败结算（22745 分）/重开保留最高分/返回大厅全通过，0 console error；刷新后最高分持久化 |
+| 2026-11-01 | 编辑器「场景模块整块失联」真因 | 不是锁屏，是编辑器闲置后丢了当前场景（窗口变 `Untitled - …`）；恢复靠 `osascript quit` + `open -a … --project`，见 `tech/mcp-scene-authoring-pitfalls.md` §5.5 |
+| 2026-11-01 | 第 8 款设计规格（定稿） | `specs/2026-11-01-game-gate-runner-design.md`；把草案里的 `FIRE_CAP 30→60`、段长 `420→360`、Boss `2400→3200`、敌人扣血加「按人数比例」等 8 处改动全部记录在案 |
+| 2026-11-01 | 第 8 款纯逻辑 + 12 项回归 | `node tools/verify-gate-core.js` → `GATE_CORE_OK 通过 12/12` |
+| 2026-11-01 | 第 8 款场景搭建 | `GateRunner.scene` 83.9 KB，19 项绑定全通，资产引用 0 破链；修复「敌人画到 HUD 上」（加 `ClipLayer` + `cc.Mask`），见 `design/2026-11-01-gate-runner-scene-setup.md` |
+| 2026-11-01 | 第 8 款浏览器实测 | 选门（×2: 20→40）/ 拖动（x 152↔504）/ 对拼掉人 / 暂停三键 / 通关（1884 分）/ 阵亡结算 / 重来 / 返回大厅全通过，0 console error |
+| 2026-11-01 | 大厅容纳 8 款 | 第三行不再被裁：`content.Layout.spacingY 200→140`、`allGamesGrid.Layout.spacingY 60→40`；实测三行中心 y = 559/339/119 |
+| 2026-11-01 | 构建清单同步（三款） | 退出编辑器后 `node tools/sync-build-scenes.js`：`builder.json` 的 `common.scenes`、微信任务快照、`wechatgame.json` 三处各补 `Merge` / `GateRunner`（`BrickBreaker` 已在） |
+| 2026-11-01 | 微信小游戏出包 + 预检 | GUI「重新构建」得主包 3.41 MB、`main` 包 56 个资源 / 9 个场景；`node tools/check-wechat-build.js` **9/9 通过**；模拟器里大厅 8 款齐全，数值冲刺与合合大作战实点可玩 |
+| 2026-11-01 | 命令行构建的反证 | `--build`（含 `configPath` 完整配置）两次都 `exit 0` 但 `main` 包为空（日志 `Number of all scenes: 0`、`Build Assets (4ms)`）⇒ CLI 的 asset-db 认不出项目资源，出包只能用构建面板。详见 `tech/wechat-build-pitfalls.md` §9 |
+| 2026-11-01 | 预检第 7 项判据修正 | 模拟器已在跑时只打 `simulator app compile`、不再打 `simulator launch`，旧判据会把「自动重编译成功」误报成「停在过期构建」；已把两种标记都算 |

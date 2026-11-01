@@ -59,7 +59,11 @@ tiny_games/
 │   │   ├── game_snake/         # 场景: Snake
 │   │   ├── game_war_evolution/ # 场景: WarEvo
 │   │   ├── game_tiny_vanguard/ # 场景: TinyVanguard
-│   │   └── game_tetris/        # 场景: Tetris
+│   │   ├── game_tetris/        # 场景: Tetris
+│   │   ├── game_brick/         # 场景: BrickBreaker（打砖块 + 轻肉鸽）
+│   │   ├── game_merge/         # 场景: Merge（合合大作战）
+│   │   ├── game_gate_runner/   # 场景: GateRunner（数值冲刺）
+│   │   └── game_solitaire/     # 场景: Solitaire（纸牌接龙）
 │   ├── common/            # 公共模块
 │   │   ├── managers/      # SceneManager, StorageManager, GameConfig
 │   │   └── components/    # BackButton, SafeAreaAdapter
@@ -89,6 +93,10 @@ tiny_games/
 { id: 'snake',        name: '贪吃蛇',   icon: 'default', sceneName: 'Snake',        description: '大作战风格贪吃蛇' }
 { id: 'tiny_vanguard', name: '小小先锋', icon: 'default', sceneName: 'TinyVanguard', description: 'Roguelike 回合制战棋' }
 { id: 'tetris',       name: '方块坠落', icon: 'default', sceneName: 'Tetris',       description: '经典方块消除' }
+{ id: 'brick',        name: '砖块远征', icon: 'default', sceneName: 'BrickBreaker', description: '打砖块 + 肉鸽升级' }
+{ id: 'merge',        name: '合合大作战', icon: 'default', sceneName: 'Merge',      description: '合成同类水果，越滚越大' }
+{ id: 'gate_runner',  name: '数值冲刺', icon: 'default', sceneName: 'GateRunner',   description: '穿过 ×2 / ÷2 数值门，带队伍冲到 Boss' }
+{ id: 'solitaire',    name: '纸牌接龙', icon: 'default', sceneName: 'Solitaire',    description: '克朗代克单人纸牌' }
 ```
 
 **添加新游戏三步骤**：① `GameConfig.ts` 注册 ② 创建 `assets/games/game_xxx/scenes/Xxx.scene` ③ 场景名与 `sceneName` 一致。

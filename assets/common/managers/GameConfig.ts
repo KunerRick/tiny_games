@@ -14,6 +14,9 @@ export const GAME_LIST: GameConfig[] = [
     { id: 'snake', name: '贪吃蛇', icon: 'default', sceneName: 'Snake', description: '大作战风格贪吃蛇' },
     { id: 'tiny_vanguard', name: '小小先锋', icon: 'default', sceneName: 'TinyVanguard', description: 'Roguelike 回合制战棋' },
     { id: 'tetris', name: '方块坠落', icon: 'default', sceneName: 'Tetris', description: '经典方块消除' },
+    { id: 'brick', name: '砖块远征', icon: 'default', sceneName: 'BrickBreaker', description: '打砖块 + 肉鸽升级' },
+    { id: 'merge', name: '合合大作战', icon: 'default', sceneName: 'Merge', description: '合成同类水果，越滚越大' },
+    { id: 'gate_runner', name: '数值冲刺', icon: 'default', sceneName: 'GateRunner', description: '穿过 ×2 / ÷2 数值门，带队伍冲到 Boss' },
     { id: 'solitaire', name: '纸牌接龙', icon: 'default', sceneName: 'Solitaire', description: '克朗代克单人纸牌' },
 ];
 

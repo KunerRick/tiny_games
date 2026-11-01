@@ -404,7 +404,12 @@ function findLastDevtoolsCompile(logDirs) {
         continue;
       }
       for (const line of text.split('\n')) {
-        if (!/simulator launch (success|failed)/.test(line)) continue;
+        // 两种「工具处理了本项目」的信号：
+        //   ① 首次打开 / 重启模拟器 → `simulator launch success|failed`
+        //   ② 模拟器已在跑时的重新编译 → `[SimulatorService] simulator app compile`
+        // 只认 ① 会把「产物被改写后工具自动重编译」误判成「工具停在过期构建」，
+        // 而模拟器一直开着时，工具根本不会再打一条 launch 日志。
+        if (!/simulator launch (success|failed)|simulator app compile/.test(line)) continue;
         const t = parseLogTime(line);
         if (t > latest) {
           latest = t;

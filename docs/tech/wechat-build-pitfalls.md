@@ -128,7 +128,7 @@ node tools/check-wechat-build.js <构建目录>       # 指定其它目录
 | 4 | **全部产物 `.js` 按 ES2015 与 ES5 双重解析** | 开发者工具自带编译不支持该语法（本项目实测 17 个文件全通过） |
 | 5 | 主包体积 ≤ 4 MB | 真机下载失败（本次 3.20 MB / 4 MB，余量 814.9 KB） |
 | 6 | 产物 `.js`/`.json` 里无 `U+FE0E`/`U+FE0F` | 本项目不变量，见 [`wechat-text-rendering.md`](./wechat-text-rendering.md) |
-| 7 | **工具是否停在过期构建**：比对产物最新 mtime 与日志里最后一次 `simulator launch` | 就是本次那个"永远停在报错上"的状态 |
+| 7 | **工具是否停在过期构建**：比对产物最新 mtime 与日志里最后一次「工具处理了本项目」的时间戳 | 就是本次那个"永远停在报错上"的状态 |
 | 8 | **AppID 不是占位/样例值** | §8：样例 AppID 让工具认不出这是小游戏 → 按小程序编译 → 启动即崩 |
 | 9 | **工具编译缓存里的包装方式**：读 `define(...)` 头，看是「小游戏包装」还是「小程序包装」 | §8 的直接判据 —— 小程序包装 = 打开必崩 |
 
@@ -136,6 +136,11 @@ node tools/check-wechat-build.js <构建目录>       # 指定其它目录
 第 7/9 项目前只认 macOS 的日志与缓存路径；Windows 上路径不同，会降级成一条提醒（见 §6）。
 第 8/9 项是本项目 2026-10-18 新增的：它们把「构建产物对不对」扩展到了「**开发者工具会把它当什么编译**」。
 第 1 项里的「产物清单非空」是 2026-11-01 新增的：此前 9 项会放过一个**文件齐全、JSON 合法、体积 2.67 MB、却 `scenes: {}` + `uuids: 0`** 的空产物 —— 全绿，打开黑屏。判据就落在 `assets/main/config.json` 的两个字段上，代价是一次 `JSON.parse`。
+
+> **第 7 项的判据在 2026-11-01 修正过一次**：原先只认 `simulator launch success|failed`，
+> 但模拟器**已经开着**时，产物被改写只会让工具打 `[SimulatorService] simulator app compile`，**不会再打 launch**。
+> 于是「构建完成 → 工具自动重编译成功 → 模拟器里画面已经更新」这种情况会被误报成「停在过期构建」，
+> 卡住整个预检。现在两种标记都算（`simulator launch …|simulator app compile`）。
 
 ---
 
@@ -319,16 +324,34 @@ node tools/sync-build-scenes.js --all      # 顺带修其它平台（web-desktop
 `preferences_get_all_preferences` 也只暴露 `preview` / `console` / `builder.__version__`，读不到 `taskMap`。
 MCP 能做的只有「打开构建面板」「查构建器状态」「开关预览服务器」。
 
-**命令行构建**（不想开编辑器时）：入口确实存在 —— `launch/source/launch.ts` 里把 `--build "k=v;k=v"` 解析成 options
-后调 `Editor.Startup.__protected__.build()`，解析完直接 `app.exit(code)`，全程不开窗口：
+**命令行构建：实测不可用（2026-11-01）**。入口确实存在 —— `launch/source/launch.ts` 把 `--build "k=v;k=v"`
+解析成 options 后调 `Editor.Startup.__protected__.build()`，解析完直接 `app.exit(code)`，全程不开窗口：
 
 ```bash
 "/Applications/Cocos/Creator/3.8.8/CocosCreator.app/Contents/MacOS/CocosCreator" \
   --project "$(pwd)" --build "platform=wechatgame"
 ```
 
-前提是**编辑器没在跑**（同一项目会触发「已打开」拒绝）。本项目尚未实测整条链路，首次跑完请接
-`node tools/check-wechat-build.js` 确认产物合格。
+**但产物是空的**。两次尝试（`--build "platform=wechatgame;debug=false"` 与 `--build "configPath=<完整 options>.json"`，
+后者已确认把 9 个场景传了进去）都以 `exit 0` 结束、面板也会显示「成功」，可是：
+
+| 证据 | 现象 |
+|------|------|
+| 日志 `Check and complete build options` 之后 | `构建参数 scenes ([]) 校验失败`（第一轮）；第二轮 scenes 正确传入了 |
+| 日志 `Init bundle root assets` | `Number of all scenes: 0 / scripts: 0 / other assets: 1` |
+| 日志 `Build Assets` | `---- (4ms)` —— 什么都没打包 |
+| 产物 `assets/main/config.json` | `"uuids":[]`、`"scenes":{}`，整个包只有 16 KB |
+| 对照：同一天的 GUI「重新构建」 | `uuids` 56 项、`scenes` 9 项、主包 3.41 MB、模拟器里 8 款游戏全在大厅 |
+
+⇒ **CLI 进程里的 asset-db 认不出项目资源**（`library/` 里明明有 9 个场景的 import 结果）。
+退出码 0 不代表产物可用，**必须先看 `assets/main/config.json` 的 `uuids` 非空**。结论：出微信包走构建面板，
+CLI 只适合验证「引擎能不能编译」这类不依赖资源打包的事。
+
+**不开窗也能构建的替代做法**（本次实际采用）：退出编辑器 → `node tools/sync-build-scenes.js` →
+打开编辑器 → `project_open_build_panel`（或用命令行 `open -a` 启动后再开面板）→ 点微信小游戏那行的
+**「重新构建」**。它用的是 `taskMap` 里的完整快照，也就是 `sync-build-scenes` 刚写好的那份 9 场景清单。
+面板是 web 内容、系统辅助功能抓不到按钮时，可用 CGEvent 发点击（本次用一个 20 行 Swift 小程序按屏幕点坐标点击，
+点之前先 `screencapture` 截图核对按钮位置：截图 2940×1912、逻辑屏 1470×956，**点坐标 = 图像坐标 ÷ 2**）。
 
 ---
 

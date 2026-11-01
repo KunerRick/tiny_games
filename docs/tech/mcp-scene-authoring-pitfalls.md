@@ -251,6 +251,25 @@ const sp = node.getComponent('cc.Sprite');
 
 > 顺带：给运行时新建的节点设尺寸时，**顺序仍是 `spriteFrame → sizeMode=CUSTOM → setContentSize`**。血条首次实现按"先 `setContentSize` 后设 `spriteFrame`"写，实测被贴图原始尺寸覆盖成 `2×2`（正是 §3 那条坑的复发）。
 
+### ⑨ 工具级怪癖：脚本组件要传 **cid**，`attach_script` 的"失败"是假失败
+
+搭「砖块远征」时逐个踩到（2026-10-31）：
+
+| 工具 | 现象 | 处置 |
+|------|------|------|
+| `component_set_component_property` | 传类名 `'BrickGame'` → `Component 'BrickGame' not found` | 传**压缩 cid**（`0d70fCtCatNTozrMumC1P6x` 这种），可在 `component_get_available_components` 结果里查 |
+| `component_attach_script` | 返回 “Script 'X' was not found on node after addition”，**其实已经挂上了** | 以 `component_get_components` 里出现的 cid 为准；别重复挂，否则会挂两份 |
+| `component_remove_component` | 对脚本组件**三种入参（类名 / cid / 完整 UUID）全部失败** | 放弃移除：用 cid 把 `enabled` 设 `false`，并在代码里对 `onLoad` 判空（本次 `GamePlaceholder` 即如此处理） |
+| `node_duplicate_node` | 不返回新节点 uuid，副本命名 `X-001` | 先 `scene_get_scene_hierarchy` 找 uuid，再 `node_move_node` + `node_set_node_property` 改名 |
+| `debug_validate_scene` | 报 `Message does not exist: scene - check-missing-assets` | 改用 `assetAdvanced_validate_asset_references` 验引用完整性 |
+
+判断"脚本到底挂没挂上"，最快的是页内读原型方法：
+
+```js
+const comps = node.components.map(c => cc.js.getClassName(c));
+comps.includes('BrickGame');        // true 才算挂上
+```
+
 ---
 
 ## 4. 同一节点只能有一个渲染组件
@@ -313,6 +332,74 @@ end_undo_recording
 
 ---
 
+## 5.5 ⚠️ 场景模块整块失联：编辑器丢了当前场景（2026-10-31～11-01，踩了三次）
+
+**症状**：**所有**走场景面板的 MCP 调用永久超时——`scene_get_current_scene`、`node_get_all_nodes`、
+`scene_open_scene`、`sceneView_*`、`sceneAdvanced_query_scene_dirty` 全挂；
+而走资产库/主进程的调用（`scene_get_scene_list`、`scene_create_scene`、`project_*`、`server_*`）完全正常，
+`sceneAdvanced_query_scene_ready` 还报 `ready: true`。**编辑器窗口本身还在、也没有任何对话框**。
+
+**根因**：编辑器长时间闲置后**丢掉了当前打开的场景**（窗口标题变成 `Untitled - …`）——
+场景面板没有场景可处理，于是 `query-hierarchy` 这条消息根本没人接。
+资产库与 MCP 服务跑在**主进程**里，所以它们照常应答，看起来就像“只有场景模块死了”。
+
+**两条判据（30 秒分诊）**
+
+```bash
+# 1) 看编辑器窗口标题：变成 "Untitled - ..." 就是丢了场景
+osascript -e 'tell application "System Events" to tell process "CocosCreator" to get name of window 1'
+# 2) 场景消息处理器是否还在 —— 报 does not exist 即证实
+#    debug_get_node_tree → "Message does not exist: scene - query-hierarchy"
+```
+
+**恢复：命令行重启编辑器（不需要人工点界面，与是否锁屏无关）**
+
+```bash
+osascript -e 'tell application "CocosCreator" to quit'
+sleep 5
+open -a "/Applications/Cocos/Creator/3.8.8/CocosCreator.app" --args --project "/Users/kuner/work/code/github/tiny_games"
+# 等 40~60 s（首次索引更久）→ scene_get_current_scene 探活 → scene_open_scene 打开目标场景
+```
+
+- `kill -TERM` 在沙箱里会被权限拒绝；`osascript quit` 走 Apple Events 可以正常退出。
+- 退出时若弹“保存场景？”，它不会替你保存 —— 所以**每次结构变更后立刻 `scene_save_scene`**，别攒着。
+- 恢复后同一条 MCP 调用立即正常，无需再重试一轮。
+
+**预防（可选；如需使用必须带超时）**：`caffeinate -di` 能在长时段场景搭建期间保持显示器与系统不空闲睡眠，
+减少闲置丢场景的概率，但**不能修复已经丢掉的场景**，真丢了只能重启编辑器。
+
+```bash
+caffeinate -di -t 7200 &      # 2 小时自动退出；长任务按需续一次
+pgrep -fl "caffeinate -d"     # 确认在跑
+# 任务收尾（无论成功/失败/被打断）：
+pkill -f "caffeinate -di"
+```
+
+- **禁止不带 `-t` 的写法**（`nohup caffeinate -di &` 尤其危险）：父 shell 退出后它会由 launchd 收养，
+  一直阻止显示器休眠。2026-11-01 就有一个这样的孤儿从 00:22 跑到 18:00（17h+），
+  排查时被误当成「系统被设成永不熄屏」——实际 `pmset` 里 `displaysleep` 仍是 3 分钟。
+- **自查是否已被孤儿占住**：
+  `pgrep -fl "caffeinate -d"` 应无输出；`pmset -g assertions | grep PreventUserIdleDisplaySleep` 汇总值应为 `0`。
+  （`caffeinate -i` 只挡系统空闲睡眠、不挡显示器，Claude daemon 会临时起 `-i -t 300`，那种不用管。）
+
+**⚠️ 一条早期误判（已作废，别照抄）**：曾经把同一组症状归因为「锁屏 → 渲染进程被节流、WebGL 上下文失效」，
+并据此去解锁、去 `open -a` 唤起窗口 —— 全部无效。复现时机器并未锁屏，重启编辑器后立即恢复，
+证明锁屏只是叠加的干扰（锁屏时 `open -a` / `set frontmost` / 键盘事件确实进不去，但那是另一回事）。
+**判据一句话**：主进程工具全好、场景面板全挂、`query_scene_ready` 仍报 ready ⇒ 先怀疑编辑器丢了场景，
+直接重启编辑器，不要去折腾屏幕。
+
+**两个次要发现（顺手记下，别当主因）**
+
+| 现象 | 结论 |
+|------|------|
+| `scene_save_scene_as` 超时且之后场景模块失效 | 它会弹**保存对话框**——模态框一挂，场景面板的请求就全堵住，这是真正会把场景面板堵死的操作。要新场景就 `scene_create_scene`，别用 save-as |
+| 跨场景 `copy_node` → 切场景 → `paste_node` | 粘贴**只得到空节点**（`New Node`，无子节点、无组件）。跨场景复用这条路径不通，按文档重建 |
+
+**顺带**：`scene_create_scene` 建出来的场景是**完全空的**（连 Canvas / Camera 都没有），
+从零搭必须自己建 `Canvas`(UITransform 720×1280 + cc.Canvas + cc.Widget alignFlags=45) 和 `Camera` 子节点。
+
+---
+
 ## 6. 检查清单
 
 - [ ] 可点击元素声明为 `@property({ type: Node })`，事件用 `Node.EventType.TOUCH_END`
@@ -322,3 +409,6 @@ end_undo_recording
 - [ ] 细线（网格、分隔线）用 `rect()` + `fill()`，没有依赖 ≤ 2px 的 `stroke()`（§4.5）
 - [ ] 结构性变更被 `begin/end_undo_recording` 包裹，变更后跑过 `validate_scene`
 - [ ] 没有用文件工具直接改 `.scene` / `.prefab`
+- [ ] 场景面板调用集体超时时，按 §5.5 先看窗口标题是不是 `Untitled - …`，是就命令行重启编辑器（别去折腾锁屏）
+- [ ] 每次结构变更后立刻 `scene_save_scene`（别让场景长期「脏」着——重启编辑器时它不会替你保存）
+- [ ] 用过 `caffeinate -di` 的话必带 `-t` 超时，并在任务收尾 `pkill -f "caffeinate -di"`（§5.5）
