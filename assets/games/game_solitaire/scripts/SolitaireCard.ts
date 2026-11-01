@@ -228,8 +228,8 @@ export class SolitaireCard extends Component {
         const color = hexColor(isRed(card.suit) ? COLOR_RED : COLOR_BLACK);
         // 中心大花色
         this._drawSuit(g, card.suit, 0, -8, CENTER_SUIT_R, color);
-        // 左上角小花色（紧贴点数右侧）
-        this._drawSuit(g, card.suit, -CARD_W / 2 + 24, CARD_H / 2 - 22, CORNER_SUIT_R, color);
+        // 左上角小花色：排在点数**下方**（同排会让花色压在字形上，实测 K/Q 直接糊成一团）
+        this._drawSuit(g, card.suit, -CARD_W / 2 + 18, CARD_H / 2 - 48, CORNER_SUIT_R, color);
 
         if (this._rankLabel) {
             this._rankLabel.node.active = true;

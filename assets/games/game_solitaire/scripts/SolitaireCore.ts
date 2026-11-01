@@ -469,6 +469,48 @@ export class SolitaireCore {
         return !this.isWon();
     }
 
+    /**
+     * 自动收 A（规则附庸）：把裸露的 A 送进收牌区，返回送了几张。
+     *
+     * 与 autoCollect 的关键区别：这里**不计步、不压撤销栈**。
+     * 它总是在某次玩家操作之后被调用，撤销时应当跟着那次操作一起回滚；
+     * 若单独压栈，玩家按一次「撤销」只会看到 A 飞回来、自己刚做的动作还在（实测踩到）。
+     */
+    sendAces(): number {
+        let sent = 0;
+
+        for (let guard = 0; guard < 8; guard++) {
+            let moved = false;
+            for (let p = 0; p < 7; p++) {
+                const top = this.topOf(p);
+                if (!top || top.rank !== 1) continue;
+                for (let f = 0; f < 4; f++) {
+                    const to = PILE_FOUNDATION_BASE + f;
+                    if (!this.isLegalMove(p, to, 1)) continue;
+                    this._applyMove(p, to, 1);
+                    sent++;
+                    moved = true;
+                    break;
+                }
+                if (moved) break;
+            }
+            if (!moved) break;
+        }
+
+        const wasteTop = this.topOf(PILE_WASTE);
+        if (wasteTop && wasteTop.rank === 1) {
+            for (let f = 0; f < 4; f++) {
+                const to = PILE_FOUNDATION_BASE + f;
+                if (!this.isLegalMove(PILE_WASTE, to, 1)) continue;
+                this._applyMove(PILE_WASTE, to, 1);
+                sent++;
+                break;
+            }
+        }
+
+        return sent;
+    }
+
     /** 按点数从小到大把剩余牌收进收牌区；返回收了几张 */
     autoCollect(): number {
         if (!this.canAutoCollect()) return 0;

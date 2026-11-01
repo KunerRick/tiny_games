@@ -706,6 +706,50 @@ test('未收满不判胜', () => {
     ok(!core.isWon());
 });
 
+// ==================== 自动收 A ====================
+
+group('自动收 A');
+
+test('裸 A 送进收牌区，不计步、不压撤销栈', () => {
+    const core = coreWith();
+    core.state.tableau[0] = [card('S', 1, true)];
+    core.state.tableau[1] = [card('H', 1, true)];
+    eq(core.sendAces(), 2);
+    eq(core.state.foundations.map(f => f.length), [1, 1, 0, 0]);
+    eq(core.state.moves, 0, '自动收 A 不该算一步');
+    ok(!core.undo(), '不该存在可撤销的步骤');
+    eq(core.state.foundations.map(f => f.length), [1, 1, 0, 0]);
+});
+
+test('自动收 A 跟随上一次操作一起撤销', () => {
+    const core = coreWith();
+    core.state.tableau[0] = [card('D', 2, true)];
+    core.state.tableau[1] = [card('S', 1, true)];
+    core.state.tableau[2] = [card('S', 3, true)];
+
+    ok(core.move(0, 2, 1), 'D2 应能压在 S3 上');
+    eq(core.state.moves, 1);
+    eq(core.sendAces(), 1);
+    eq(core.state.moves, 1, '自动收 A 不增加步数');
+    eq(core.state.foundations[0].length, 1);
+
+    ok(core.undo(), '一次撤销应把整组操作全部回滚');
+    eq(core.state.tableau[0].length, 1, 'D2 应回到原列');
+    eq(core.state.tableau[2].length, 1, 'S3 不应多出牌');
+    eq(core.state.foundations.filter(f => f.length > 0).length, 0, 'A 应跟着回滚');
+    eq(core.state.moves, 0);
+});
+
+test('抽到 A 时从废牌堆自动收走', () => {
+    const core = coreWith({ stock: [card('C', 1, false)] });
+    ok(core.draw());
+    eq(core.state.waste.length, 1);
+    eq(core.sendAces(), 1);
+    eq(core.state.waste.length, 0);
+    eq(core.state.foundations[0].length, 1);
+    eq(core.state.moves, 1, '只有抽牌本身计一步');
+});
+
 // ==================== 提示 ====================
 
 group('提示');

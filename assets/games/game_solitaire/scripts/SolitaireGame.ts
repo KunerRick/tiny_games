@@ -472,8 +472,24 @@ export class SolitaireGame extends Component {
 
     private _designPoint(event: EventTouch): { x: number; y: number } {
         const ui = event.getUILocation();
-        if (!this._boardUT) return { x: ui.x, y: ui.y };
-        const local = this._boardUT.convertToNodeSpaceAR(new Vec3(ui.x, ui.y, 0));
+        const ut = this._boardUT;
+        // getUILocation() 是 UI 相机视图坐标（原点左下），不能直接喂给 convertToNodeSpaceAR
+        // —— 那个接口要的是世界坐标，少掉半个屏会整体偏移 (DESIGN_W/2, DESIGN_H/2)。
+        if (!ut) return { x: ui.x, y: DESIGN_H - ui.y };
+
+        const parent = this.node.parent;
+        const parentUT = parent ? parent.getComponent(UITransform) : null;
+        let local: Vec3;
+        if (parentUT) {
+            const canvasLocal = new Vec3(
+                ui.x - parentUT.width * parentUT.anchorX,
+                ui.y - parentUT.height * parentUT.anchorY,
+                0,
+            );
+            local = ut.convertToNodeSpaceAR(parentUT.convertToWorldSpaceAR(canvasLocal));
+        } else {
+            local = new Vec3(ui.x - DESIGN_W / 2, ui.y - DESIGN_H / 2, 0);
+        }
         return { x: local.x + DESIGN_W / 2, y: DESIGN_H / 2 - local.y };
     }
 
@@ -686,36 +702,14 @@ export class SolitaireGame extends Component {
         if (this._core.isWon()) this._onWin();
     }
 
-    /** 自动收 A（设置项）：只收点数 1，永远没有留在场上的理由 */
+    /**
+     * 自动收 A（设置项）：只收点数 1，永远没有留在场上的理由。
+     * 交给 core.sendAces() 执行 —— 不额外计步、不单独压撤销栈，
+     * 撤销时跟触发它的那次操作一起回滚。
+     */
     private _autoSendAces(): void {
         if (!this._settings.autoAce) return;
-        for (let guard = 0; guard < 8; guard++) {
-            let sent = false;
-            for (let p = 0; p < 7; p++) {
-                const top = this._core.topOf(p);
-                if (!top || top.rank !== 1) continue;
-                for (let f = 0; f < 4; f++) {
-                    const to = PILE_FOUNDATION_BASE + f;
-                    if (this._core.isLegalMove(p, to, 1)) {
-                        this._core.move(p, to, 1);
-                        sent = true;
-                        break;
-                    }
-                }
-                if (sent) break;
-            }
-            if (!sent) break;
-        }
-        const wasteTop = this._core.topOf(PILE_WASTE);
-        if (wasteTop && wasteTop.rank === 1) {
-            for (let f = 0; f < 4; f++) {
-                const to = PILE_FOUNDATION_BASE + f;
-                if (this._core.isLegalMove(PILE_WASTE, to, 1)) {
-                    this._core.move(PILE_WASTE, to, 1);
-                    break;
-                }
-            }
-        }
+        this._core.sendAces();
     }
 
     // ==================== 提示 ====================
@@ -909,15 +903,15 @@ export class SolitaireGame extends Component {
         const time = Math.floor(this._elapsed);
 
         if (this.scoreLabel && (force || score !== this._lastScore)) {
-            this.scoreLabel.string = `${score}`;
+            this.scoreLabel.string = `分数 ${score}`;
             this._lastScore = score;
         }
         if (this.movesLabel && (force || moves !== this._lastMoves)) {
-            this.movesLabel.string = `${moves}`;
+            this.movesLabel.string = `步数 ${moves}`;
             this._lastMoves = moves;
         }
         if (this.timeLabel && (force || time !== this._lastTime)) {
-            this.timeLabel.string = this._formatTime(time);
+            this.timeLabel.string = `时间 ${this._formatTime(time)}`;
             this._lastTime = time;
         }
         if (this.collectBtn) {
