@@ -176,11 +176,13 @@ GateRunner (Scene)                                                           [f2
 | 再来一局 | 场景重置、面板关闭、`state=running` | ✅ |
 | console | 0 error | ✅ |
 
-> **点击坐标换算（本轮唯一踩到的测量坑）**：预览画布是 CSS 拉伸的，
-> 直接按 `rect.height / canvas.height` 缩放会算错。正确做法是
-> `cssX = rect.left + camera.worldToScreen(node.worldPosition).x`、
-> `cssY = rect.bottom − sp.y`（**不做额外缩放**）。
-> 本轮先用错误公式导致「再来一局 / 暂停」点了没反应，改成上式后一次命中。
+> **点击坐标换算（本轮唯一踩到的测量坑）**：本轮用错了一次公式导致「再来一局 / 暂停」
+> 点了没反应（页面内不报错、看起来像按钮失效）。**通用式**仍是手册 §4 的
+> `cssX = rect.left + sp.x / canvas.width * rect.width`、`cssY = rect.top + (1 - sp.y / canvas.height) * rect.height`，
+> **`k` 每轮现场标定**。
+> 本轮实测 `canvas.width === rect.width`（后备像素与 CSS 1:1），缩放因子恰好为 1，
+> 于是退化成 `cssX = rect.left + sp.x`、`cssY = rect.bottom − sp.y`。
+> **不要把这句退化式当通则**：先读一次 `canvas.width` 与 `rect.width` 是否相等，不等就必须带缩放。
 > 详见 [`../tech/browser-verify-cocos-preview.md`](../tech/browser-verify-cocos-preview.md) §4。
 
 界面截图：[`../assets/gate_runner/01-boot.png`](../assets/gate_runner/01-boot.png)、
@@ -189,9 +191,17 @@ GateRunner (Scene)                                                           [f2
 [`04-result.png`](../assets/gate_runner/04-result.png)、
 [`05-lobby-8-games.png`](../assets/gate_runner/05-lobby-8-games.png)。
 
+**微信小游戏出包实测（2026-11-01，与本款一起出包的是砖块远征 / 合合大作战）**：
+`node tools/sync-build-scenes.js` 补齐 9 个场景 → 构建面板「重新构建」→ 主包 3.41 MB、
+`assets/main/config.json` 里 `uuids` 56 项 / `scenes` 9 项 → `node tools/check-wechat-build.js` **9/9 通过**。
+在微信开发者工具的模拟器里，大厅 8 款齐全（[`06-wechat-lobby.png`](../assets/gate_runner/06-wechat-lobby.png)），
+点进「数值冲刺」能正常跑（[`07-wechat-gate.png`](../assets/gate_runner/07-wechat-gate.png)：人数 60、106 m · 47 km/h、×2 / +30 门、敌血 93）。
+命令行 `--build` 路径出的是空包（`exit 0` 但 `uuids:[]`），**出包只能用构建面板**，详见
+[`../tech/wechat-build-pitfalls.md`](../tech/wechat-build-pitfalls.md) §9。
+
 ---
 
-## 9. 结算面板可读性修复（代码侧）
+## 8. 结算面板可读性修复（代码侧）
 
 **症状**：结算面板出现后，半透明 `Dim` 让底下的亮色门块（`×2` / `−10`）透上来，正好压在「最高分 N」那一行上，文字和色块叠在一起。
 
@@ -223,7 +233,7 @@ private _setWorldVisible(visible: boolean): void {
 
 ---
 
-## 8. 大厅改动（同批次）
+## 9. 大厅改动（同批次）
 
 大厅从 6 款增到 8 款后，第三行卡片被裁掉，做了两处 `Layout` 调整（`Lobby.scene`）：
 

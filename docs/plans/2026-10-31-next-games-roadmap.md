@@ -1,7 +1,7 @@
 # 第 6–8 款游戏路线图
 
-**日期**: 2026-10-31（2026-11-01 更新：三款全部可玩）
-**状态**: 三款均已完成场景搭建与浏览器验收
+**日期**: 2026-10-31（2026-11-01 更新：三款全部可玩，微信出包预检 9/9 通过）
+**状态**: 三款均已完成场景搭建、浏览器验收与微信小游戏出包预检
 **范围**: 方块坠落之后的连续三款新游戏，按顺序交付
 
 ---
@@ -10,9 +10,9 @@
 
 | 序 | 代号 | 名称 | 品类 | 核心操作 | 预估 | 状态 |
 |----|------|------|------|---------|------|------|
-| 第 6 款 | `brick` | 砖块远征 | 打砖块 + 轻肉鸽 | 横移挡板 | 5–7 天 | **可玩**（微信出包待验） |
-| 第 7 款 | `merge` | 合合大作战 | 合成（大西瓜类） | 拖拽 → 松手投放 | 4–6 天 | **可玩**（场景 + 浏览器验收通过） |
-| 第 8 款 | `gate_runner` | 数值冲刺 | 数值门跑酷（gate runner） | 左右变道 | 3–5 天 | **可玩**（场景 + 浏览器验收通过） |
+| 第 6 款 | `brick` | 砖块远征 | 打砖块 + 轻肉鸽 | 横移挡板 | 5–7 天 | **可玩**（含微信出包预检） |
+| 第 7 款 | `merge` | 合合大作战 | 合成（大西瓜类） | 拖拽 → 松手投放 | 4–6 天 | **可玩**（含微信出包预检） |
+| 第 8 款 | `gate_runner` | 数值冲刺 | 数值门跑酷（gate runner） | 左右变道 | 3–5 天 | **可玩**（含微信出包预检） |
 
 **为什么是这个顺序**
 
@@ -59,7 +59,7 @@
 2. ✅ `BrickConfig.ts` + `BrickCore.ts` + `tools/verify-brick-core.js`（50 项单测全绿）
 3. ✅ `BrickGame.ts` 运行时组件（Graphics 渲染 + 触摸 + HUD/升级面板/暂停/结算）
 4. ✅ MCP 搭场景 + `GameConfig` 注册（`sync-build-scenes` 仍需退出编辑器后执行）
-5. ✅ 浏览器实测（拖拽/点击/暂停/升级/结算/返回，0 报错）；`check-wechat-build` 待构建后执行
+5. ✅ 浏览器实测（拖拽/点击/暂停/升级/结算/返回，0 报错）；✅ `check-wechat-build` 9/9（2026-11-01 与另两款一起出包）
 
 **验收**：纯逻辑单测全绿（50/50）；浏览器实测覆盖入口→发球→计分→暂停→过关三选一→结算→重开/返回；微信预检需出包后补跑。场景搭建细节见
 [`../design/2026-10-31-brick-breaker-scene-setup.md`](../design/2026-10-31-brick-breaker-scene-setup.md)。
@@ -90,7 +90,7 @@
 3. ✅ `GateGame.ts` 运行时组件（Graphics + 触摸 + HUD/暂停/结算）
 4. ✅ MCP 搭场景 + `GameConfig` 注册（19 项绑定全通）
 5. ✅ 浏览器实测（选门 / 对拼 / 暂停 / 通关 / 阵亡 / 重来 / 返回，0 报错）
-6. ⬜ `sync-build-scenes` + 微信出包预检（与其它两款一起，待退出编辑器后执行）
+6. ✅ `sync-build-scenes` + 微信出包预检（三款一起，2026-11-01；`check-wechat-build` 9/9，模拟器里三款都能进）
 
 **验收**：`node tools/verify-gate-core.js` → `GATE_CORE_OK 通过 12/12`；
 场景搭建与实测细节见 [`../design/2026-11-01-gate-runner-scene-setup.md`](../design/2026-11-01-gate-runner-scene-setup.md)。
@@ -131,4 +131,7 @@
 | 2026-11-01 | 第 8 款场景搭建 | `GateRunner.scene` 83.9 KB，19 项绑定全通，资产引用 0 破链；修复「敌人画到 HUD 上」（加 `ClipLayer` + `cc.Mask`），见 `design/2026-11-01-gate-runner-scene-setup.md` |
 | 2026-11-01 | 第 8 款浏览器实测 | 选门（×2: 20→40）/ 拖动（x 152↔504）/ 对拼掉人 / 暂停三键 / 通关（1884 分）/ 阵亡结算 / 重来 / 返回大厅全通过，0 console error |
 | 2026-11-01 | 大厅容纳 8 款 | 第三行不再被裁：`content.Layout.spacingY 200→140`、`allGamesGrid.Layout.spacingY 60→40`；实测三行中心 y = 559/339/119 |
-| 待办 | 三款统一 `sync-build-scenes` + 微信预检 | 需先退出编辑器（它会刷回内存配置） |
+| 2026-11-01 | 构建清单同步（三款） | 退出编辑器后 `node tools/sync-build-scenes.js`：`builder.json` 的 `common.scenes`、微信任务快照、`wechatgame.json` 三处各补 `Merge` / `GateRunner`（`BrickBreaker` 已在） |
+| 2026-11-01 | 微信小游戏出包 + 预检 | GUI「重新构建」得主包 3.41 MB、`main` 包 56 个资源 / 9 个场景；`node tools/check-wechat-build.js` **9/9 通过**；模拟器里大厅 8 款齐全，数值冲刺与合合大作战实点可玩 |
+| 2026-11-01 | 命令行构建的反证 | `--build`（含 `configPath` 完整配置）两次都 `exit 0` 但 `main` 包为空（日志 `Number of all scenes: 0`、`Build Assets (4ms)`）⇒ CLI 的 asset-db 认不出项目资源，出包只能用构建面板。详见 `tech/wechat-build-pitfalls.md` §9 |
+| 2026-11-01 | 预检第 7 项判据修正 | 模拟器已在跑时只打 `simulator app compile`、不再打 `simulator launch`，旧判据会把「自动重编译成功」误报成「停在过期构建」；已把两种标记都算 |
