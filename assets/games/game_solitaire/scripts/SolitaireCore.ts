@@ -675,7 +675,7 @@ function parsePile(raw: unknown): Card[] | null {
     for (const item of raw) {
         if (!item || typeof item !== 'object') return null;
         const c = item as SaveCard;
-        if (!SUITS.includes(c.s)) return null;
+        if (SUITS.indexOf(c.s) < 0) return null;
         if (!Number.isInteger(c.r) || c.r < 1 || c.r > 13) return null;
         out.push({ suit: c.s, rank: c.r, faceUp: c.u === true });
     }
