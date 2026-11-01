@@ -24,8 +24,6 @@ import {
 import {
     CARD_H,
     CARD_W,
-    COL_STEP,
-    COLUMN_BOTTOM_Y,
     COLUMN_TOP_Y,
     COLOR_BG,
     COLOR_HIGHLIGHT,
@@ -33,48 +31,40 @@ import {
     COLOR_TABLE,
     DESIGN_H,
     DESIGN_W,
-    DROP_COLUMN_PAD_TOP,
-    DROP_FOUNDATION_PAD,
-    FAN_DOWN,
-    FAN_UP,
-    FAN_UP_MIN,
     FOUNDATION_COLS,
     HINT_COOLDOWN_SEC,
     HINT_SEC,
-    REBOUND_SEC,
     SAVE_THROTTLE_SEC,
     STOCK_COL,
-    STOCK_THICKNESS,
     TAP_SLOP,
     TOP_ROW_Y,
     WASTE_COL,
-    WASTE_FAN,
-    colCenterX,
     colLeftX,
 } from './SolitaireConfig';
 import {
-    Card,
     PILE_FOUNDATION_BASE,
     PILE_WASTE,
     SolitaireCore,
     SUITS,
     isTableau,
 } from './SolitaireCore';
+import {
+    Placement,
+    buildLayout,
+    cardKey,
+    designToLocal,
+    draggedRun,
+    hitStock,
+    hitTest,
+    indexLayout,
+    resolveDropTarget,
+} from './SolitaireLayout';
 import { SolitaireCard } from './SolitaireCard';
 import { StorageManager } from '../../../common/managers/StorageManager';
 
 const { ccclass, property } = _decorator;
 
 const GAME_ID = 'solitaire';
-
-interface Placement {
-    card: Card;
-    key: string;
-    left: number;
-    top: number;
-    pile: number;
-    index: number;
-}
 
 interface DragState {
     from: number;
@@ -109,14 +99,6 @@ interface Stats {
     bestScore: number;
     streak: number;
     bestStreak: number;
-}
-
-function cardKey(card: Card): string {
-    return `${card.suit}${card.rank}`;
-}
-
-function clamp(value: number, min: number, max: number): number {
-    return value < min ? min : value > max ? max : value;
 }
 
 @ccclass('SolitaireGame')
@@ -422,88 +404,13 @@ export class SolitaireGame extends Component {
 
     // ==================== 布局与渲染 ====================
 
-    private _fanGap(cards: Card[]): number {
-        let up = 0;
-        let down = 0;
-        for (const card of cards) {
-            if (card.faceUp) up++;
-            else down++;
-        }
-        if (up <= 1) return FAN_UP;
-        const available = COLUMN_BOTTOM_Y - COLUMN_TOP_Y;
-        const gap = Math.floor((available - CARD_H - FAN_DOWN * down) / (up - 1));
-        return clamp(gap, FAN_UP_MIN, FAN_UP);
-    }
-
     private _render(animated: boolean): void {
-        const state = this._core.state;
-        const placements: Placement[] = [];
-
-        const stockLeft = colLeftX(STOCK_COL);
-        for (let i = 0; i < state.stock.length; i++) {
-            placements.push({
-                card: state.stock[i],
-                key: cardKey(state.stock[i]),
-                left: stockLeft + Math.min(i, 4) * STOCK_THICKNESS,
-                top: TOP_ROW_Y,
-                pile: -1,
-                index: i,
-            });
-        }
-
-        const wasteLeft = colLeftX(WASTE_COL);
-        const wasteStart = Math.max(0, state.waste.length - 3);
-        for (let i = wasteStart; i < state.waste.length; i++) {
-            placements.push({
-                card: state.waste[i],
-                key: cardKey(state.waste[i]),
-                left: wasteLeft + (i - wasteStart) * WASTE_FAN,
-                top: TOP_ROW_Y,
-                pile: PILE_WASTE,
-                index: i,
-            });
-        }
-
-        for (let f = 0; f < 4; f++) {
-            const left = colLeftX(FOUNDATION_COLS[f]);
-            const pile = state.foundations[f];
-            for (let i = 0; i < pile.length; i++) {
-                placements.push({
-                    card: pile[i],
-                    key: cardKey(pile[i]),
-                    left,
-                    top: TOP_ROW_Y,
-                    pile: PILE_FOUNDATION_BASE + f,
-                    index: i,
-                });
-            }
-        }
-
-        for (let p = 0; p < 7; p++) {
-            const cards = state.tableau[p];
-            const gap = this._fanGap(cards);
-            let y = COLUMN_TOP_Y;
-            for (let i = 0; i < cards.length; i++) {
-                const card = cards[i];
-                placements.push({
-                    card,
-                    key: cardKey(card),
-                    left: colLeftX(p),
-                    top: y,
-                    pile: p,
-                    index: i,
-                });
-                y += card.faceUp ? gap : FAN_DOWN;
-            }
-        }
-
+        const placements = buildLayout(this._core.state);
         this._layout = placements;
-        this._layoutByKey.clear();
+        this._layoutByKey = indexLayout(placements);
 
         for (let z = 0; z < placements.length; z++) {
             const place = placements[z];
-            this._layoutByKey.set(place.key, place);
-
             const view = this._views.get(place.key);
             if (!view) continue;
 
@@ -522,10 +429,7 @@ export class SolitaireGame extends Component {
     }
 
     private _designToLocal(left: number, top: number): { x: number; y: number } {
-        return {
-            x: left + CARD_W / 2 - DESIGN_W / 2,
-            y: DESIGN_H / 2 - (top + CARD_H / 2),
-        };
+        return designToLocal(left, top);
     }
 
     private _drawBackground(): void {
@@ -579,7 +483,7 @@ export class SolitaireGame extends Component {
         this._touchId = event.getID();
 
         const point = this._designPoint(event);
-        if (this._hitStock(point.x, point.y)) {
+        if (hitStock(point.x, point.y)) {
             this._drag = {
                 from: -2, // 牌堆点击
                 count: 0,
@@ -598,26 +502,17 @@ export class SolitaireGame extends Component {
             return;
         }
 
-        const hit = this._hitTest(point.x, point.y);
+        const hit = hitTest(this._layoutByKey, this._core.state, point.x, point.y);
         if (!hit) return;
 
-        const place = this._layoutByKey.get(hit.key);
-        if (!place) return;
+        const run = draggedRun(this._core, hit.pile, hit.index);
+        if (!run) return;
 
-        const run = this._core.movableRun(hit.pile);
-        if (run <= 0) return;
-
-        // 只允许从「可移动段」里抓起：桌面列的 index 必须 >= pileSize - run
-        const pileSize = this._core.pileSize(hit.pile);
-        const tableauPile = isTableau(hit.pile);
-        const startIndex = tableauPile ? pileSize - run : pileSize - 1;
-        if (place.index < startIndex) return;
-
-        const count = pileSize - startIndex;
+        const count = run.count;
         const keys: string[] = [];
-        if (tableauPile) {
+        if (isTableau(hit.pile)) {
             const cards = this._core.pileCards(hit.pile);
-            for (let i = startIndex; i < cards.length; i++) keys.push(cardKey(cards[i]));
+            for (let i = run.startIndex; i < cards.length; i++) keys.push(cardKey(cards[i]));
         } else {
             keys.push(hit.key);
         }
@@ -693,7 +588,7 @@ export class SolitaireGame extends Component {
         }
 
         if (!drag.dragging) {
-            if (allowStockDraw) this._doTap(drag.from);
+            if (allowStockDraw) this._doTap(drag.from, this._core.pileSize(drag.from) - drag.count);
             else this._render(false);
             return;
         }
@@ -704,8 +599,9 @@ export class SolitaireGame extends Component {
             moved = !!this._core.move(drag.from, target, drag.count);
         }
 
-        // 拖了个空、且几乎落回起点 → 当作一次点击（教训 D：轻触不能被静默吃掉）
-        if (!moved) {
+        // 拖了个空、且几乎落回起点 → 当作一次点击（教训 D：轻触不能被静默吃掉）。
+        // 只有抓的是堆顶（count === 1）才转点击，抓中间段不该顺手移动顶牌。
+        if (!moved && drag.count === 1) {
             const dist = Math.abs(drag.left - drag.originLeft) + Math.abs(drag.top - drag.originTop);
             if (dist <= TAP_SLOP * 1.5) moved = !!this._core.tapPile(drag.from);
         }
@@ -756,36 +652,7 @@ export class SolitaireGame extends Component {
     }
 
     private _resolveDropTarget(drag: DragState): number {
-        // 1. 收牌区：顶牌与槽位矩形相交（外扩 12px）
-        for (let f = 0; f < 4; f++) {
-            const left = colLeftX(FOUNDATION_COLS[f]);
-            const top = TOP_ROW_Y;
-            const overlapX = drag.left < left + CARD_W + DROP_FOUNDATION_PAD &&
-                drag.left + CARD_W > left - DROP_FOUNDATION_PAD;
-            const overlapY = drag.top < top + CARD_H + DROP_FOUNDATION_PAD &&
-                drag.top + CARD_H > top - DROP_FOUNDATION_PAD;
-            if (!overlapX || !overlapY) continue;
-            const to = PILE_FOUNDATION_BASE + f;
-            if (this._core.isLegalMove(drag.from, to, drag.count)) return to;
-        }
-
-        // 2. 列：顶牌中心落在列区，按 x 最近的列
-        const centerY = drag.top + CARD_H / 2;
-        if (centerY < COLUMN_TOP_Y - DROP_COLUMN_PAD_TOP) return -1;
-
-        const centerX = drag.left + CARD_W / 2;
-        let best = -1;
-        let bestDist = Number.MAX_VALUE;
-        for (let p = 0; p < 7; p++) {
-            const dist = Math.abs(centerX - colCenterX(p));
-            if (dist < bestDist) {
-                bestDist = dist;
-                best = p;
-            }
-        }
-        if (best < 0) return -1;
-        if (bestDist > COL_STEP) return -1;
-        return this._core.isLegalMove(drag.from, best, drag.count) ? best : -1;
+        return resolveDropTarget(this._core, drag.from, drag.count, drag.left, drag.top);
     }
 
     private _doDraw(): void {
@@ -795,8 +662,13 @@ export class SolitaireGame extends Component {
         }
     }
 
-    private _doTap(pile: number): void {
+    private _doTap(pile: number, tappedIndex: number): void {
         if (pile < 0) return;
+        // 只有点堆顶才自动移动；点段中间不做任何事（避免“点 Q 却移走 K”）
+        if (tappedIndex !== this._core.pileSize(pile) - 1) {
+            this._render(false);
+            return;
+        }
         if (this._core.tapPile(pile)) {
             this._vibrate();
             this._afterAction();
@@ -844,50 +716,6 @@ export class SolitaireGame extends Component {
                 }
             }
         }
-    }
-
-    // ==================== 命中判定 ====================
-
-    private _hitStock(x: number, y: number): boolean {
-        const left = colLeftX(STOCK_COL);
-        return x >= left && x <= left + CARD_W && y >= TOP_ROW_Y && y <= TOP_ROW_Y + CARD_H;
-    }
-
-    private _hitTest(x: number, y: number): { pile: number; key: string } | null {
-        // 列：从每列最上面一张往下找
-        for (let p = 0; p < 7; p++) {
-            const cards = this._core.state.tableau[p];
-            for (let i = cards.length - 1; i >= 0; i--) {
-                const place = this._layoutByKey.get(cardKey(cards[i]));
-                if (!place) continue;
-                if (x < place.left || x > place.left + CARD_W) continue;
-                if (y < place.top || y > place.top + CARD_H) continue;
-                if (!cards[i].faceUp) return null;
-                return { pile: p, key: cardKey(cards[i]) };
-            }
-        }
-
-        const waste = this._core.state.waste;
-        if (waste.length > 0) {
-            const place = this._layoutByKey.get(cardKey(waste[waste.length - 1]));
-            if (place && x >= place.left && x <= place.left + CARD_W &&
-                y >= place.top && y <= place.top + CARD_H) {
-                return { pile: PILE_WASTE, key: cardKey(waste[waste.length - 1]) };
-            }
-        }
-
-        for (let f = 0; f < 4; f++) {
-            const foundation = this._core.state.foundations[f];
-            if (foundation.length === 0) continue;
-            const card = foundation[foundation.length - 1];
-            const place = this._layoutByKey.get(cardKey(card));
-            if (place && x >= place.left && x <= place.left + CARD_W &&
-                y >= place.top && y <= place.top + CARD_H) {
-                return { pile: PILE_FOUNDATION_BASE + f, key: cardKey(card) };
-            }
-        }
-
-        return null;
     }
 
     // ==================== 提示 ====================

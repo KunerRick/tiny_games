@@ -42,6 +42,7 @@ execFileSync(process.execPath, [
     tscPath,
     path.join(SRC, 'SolitaireConfig.ts'),
     path.join(SRC, 'SolitaireCore.ts'),
+    path.join(SRC, 'SolitaireLayout.ts'),
     '--outDir', OUT,
     '--rootDir', SRC,
     '--module', 'commonjs',
@@ -50,6 +51,8 @@ execFileSync(process.execPath, [
 ], { stdio: 'inherit' });
 
 const { SolitaireCore, PILE_WASTE, PILE_FOUNDATION_BASE, SUITS } = require(path.join(OUT, 'SolitaireCore.js'));
+const L = require(path.join(OUT, 'SolitaireLayout.js'));
+const CFG = require(path.join(OUT, 'SolitaireConfig.js'));
 
 // ==================== 测试框架 ====================
 
@@ -84,7 +87,7 @@ function ok(value, msg) {
 
 const FOUNDATION = i => PILE_FOUNDATION_BASE + i;
 
-function card(suit, rank, faceUp) {
+function card(suit, rank, faceUp = true) {
     return { suit, rank, faceUp: !!faceUp };
 }
 
@@ -848,6 +851,212 @@ test('提示给出的移动永远可提交', () => {
             }
         }
     }
+});
+
+// ==================== 布局与交互几何 ====================
+
+test('发牌后布局覆盖 52 张且键唯一', () => {
+    const core = new SolitaireCore();
+    core.deal(7, 1);
+    const places = L.buildLayout(core.state);
+    assert.strictEqual(places.length, 52);
+    assert.strictEqual(new Set(places.map(p => p.key)).size, 52);
+});
+
+test('列首位置与列栅格一致', () => {
+    const core = new SolitaireCore();
+    core.deal(1, 1);
+    const places = L.buildLayout(core.state);
+    for (let p = 0; p < 7; p++) {
+        const first = places.find(x => x.pile === p && x.index === 0);
+        assert.strictEqual(first.left, CFG.colLeftX(p), `列 ${p} 的 x`);
+        assert.strictEqual(first.top, CFG.COLUMN_TOP_Y, `列 ${p} 的 y`);
+    }
+});
+
+test('背面间距 14、正面顶牌间距 30', () => {
+    const core = new SolitaireCore();
+    core.deal(3, 1);
+    const places = L.buildLayout(core.state).filter(x => x.pile === 3);
+    assert.deepStrictEqual(places.map(x => x.top), [
+        CFG.COLUMN_TOP_Y,
+        CFG.COLUMN_TOP_Y + CFG.FAN_DOWN,
+        CFG.COLUMN_TOP_Y + CFG.FAN_DOWN * 2,
+        CFG.COLUMN_TOP_Y + CFG.FAN_DOWN * 3,
+    ]);
+    const col6 = L.buildLayout(core.state).filter(x => x.pile === 6);
+    assert.strictEqual(col6[1].top - col6[0].top, CFG.FAN_DOWN);
+});
+
+test('超长列正面间距会压缩到可用高度内', () => {
+    const cards = [];
+    for (let i = 0; i < 30; i++) cards.push(card('S', (i % 13) + 1));
+    const state = makeState({ tableau: [cards, [], [], [], [], [], []] });
+    const places = L.buildLayout(state).filter(x => x.pile === 0);
+    const gap = places[1].top - places[0].top;
+    const available = CFG.COLUMN_BOTTOM_Y - CFG.COLUMN_TOP_Y;
+    assert.ok(gap < CFG.FAN_UP, `30 张正面应压缩，实际 ${gap}`);
+    assert.ok(gap >= CFG.FAN_UP_MIN, `不低于下限，实际 ${gap}`);
+    assert.ok(places[29].top + CFG.CARD_H <= CFG.COLUMN_BOTTOM_Y, '最后一张不越界');
+    assert.strictEqual(gap, Math.floor((available - CFG.CARD_H) / 29));
+});
+
+test('压缩间距不低于 FAN_UP_MIN', () => {
+    const cards = [];
+    for (let i = 0; i < 50; i++) cards.push(card('H', (i % 13) + 1));
+    const state = makeState({ tableau: [cards, [], [], [], [], [], []] });
+    const places = L.buildLayout(state).filter(x => x.pile === 0);
+    assert.strictEqual(places[1].top - places[0].top, CFG.FAN_UP_MIN);
+});
+
+test('designToLocal / localToDesign 往返一致', () => {
+    const cases = [[0, 0], [315, 108], [colX(6), 700]];
+    for (const [left, top] of cases) {
+        const local = L.designToLocal(left, top);
+        const back = L.localToDesign(local.x, local.y);
+        assert.ok(Math.abs(back.left - left) < 1e-9);
+        assert.ok(Math.abs(back.top - top) < 1e-9);
+    }
+    const origin = L.designToLocal(0, 0);
+    assert.strictEqual(origin.x, CFG.CARD_W / 2 - CFG.DESIGN_W / 2);
+    assert.strictEqual(origin.y, CFG.DESIGN_H / 2 - CFG.CARD_H / 2);
+});
+
+function colX(i) {
+    return CFG.colLeftX(i);
+}
+
+test('牌堆命中矩形', () => {
+    assert.ok(L.hitStock(colX(0) + CFG.CARD_W / 2, CFG.TOP_ROW_Y + CFG.CARD_H / 2));
+    assert.ok(!L.hitStock(colX(0) + CFG.CARD_W / 2, CFG.TOP_ROW_Y + CFG.CARD_H + 1));
+    assert.ok(!L.hitStock(colX(1) + CFG.CARD_W / 2, CFG.TOP_ROW_Y + 10));
+});
+
+test('命中判定取同列视觉最上面那张', () => {
+    const core = new SolitaireCore();
+    core.deal(5, 1);
+    const layout = L.indexLayout(L.buildLayout(core.state));
+    const top = layout.get(L.cardKey(core.state.tableau[6][6]));
+    const hit = L.hitTest(layout, core.state, top.left + 10, top.top + 10);
+    assert.ok(hit, '应命中列顶牌');
+    assert.strictEqual(hit.pile, 6);
+    assert.strictEqual(hit.index, 6);
+});
+
+test('背面牌不可命中', () => {
+    const core = new SolitaireCore();
+    core.deal(5, 1);
+    const layout = L.indexLayout(L.buildLayout(core.state));
+    const back = layout.get(L.cardKey(core.state.tableau[6][0]));
+    const hit = L.hitTest(layout, core.state, back.left + 10, back.top + 5);
+    assert.strictEqual(hit, null);
+});
+
+test('空白区域不命中', () => {
+    const core = new SolitaireCore();
+    core.deal(5, 1);
+    const layout = L.indexLayout(L.buildLayout(core.state));
+    const hit = L.hitTest(layout, core.state, CFG.colCenterX(0), CFG.COLUMN_BOTTOM_Y - 5);
+    assert.strictEqual(hit, null);
+});
+
+test('废牌堆顶牌可命中', () => {
+    const core = new SolitaireCore();
+    core.deal(5, 1);
+    core.draw();
+    const layout = L.indexLayout(L.buildLayout(core.state));
+    const top = layout.get(L.cardKey(core.state.waste[core.state.waste.length - 1]));
+    const hit = L.hitTest(layout, core.state, top.left + 20, top.top + 20);
+    assert.ok(hit);
+    assert.strictEqual(hit.pile, PILE_WASTE);
+});
+
+test('拖拽段：列顶为 1 张', () => {
+    const core = new SolitaireCore();
+    core.deal(2, 1);
+    const run = L.draggedRun(core, 3, core.pileSize(3) - 1);
+    assert.deepStrictEqual(run, { startIndex: core.pileSize(3) - 1, count: 1 });
+});
+
+test('拖拽段：从点中的那张开始拖', () => {
+    const state = makeState({ tableau: [[card('S', 13), card('H', 12), card('S', 11)], [], [], [], [], [], []] });
+    const core = new SolitaireCore(state);
+    assert.deepStrictEqual(L.draggedRun(core, 0, 0), { startIndex: 0, count: 3 });
+    assert.deepStrictEqual(L.draggedRun(core, 0, 1), { startIndex: 1, count: 2 });
+    assert.deepStrictEqual(L.draggedRun(core, 0, 2), { startIndex: 2, count: 1 });
+});
+
+test('拖拽段：段中间断开的牌不可拖', () => {
+    const state = makeState({ tableau: [[card('S', 13), card('S', 12), card('H', 11)], [], [], [], [], [], []] });
+    const core = new SolitaireCore(state);
+    assert.strictEqual(L.draggedRun(core, 0, 0), null);
+    assert.deepStrictEqual(L.draggedRun(core, 0, 1), { startIndex: 1, count: 2 });
+});
+
+test('拖拽段：背面牌不可拖', () => {
+    const state = makeState({ tableau: [[card('S', 13, false), card('H', 12)], [], [], [], [], [], []] });
+    const core = new SolitaireCore(state);
+    assert.strictEqual(L.draggedRun(core, 0, 0), null);
+});
+
+test('落点：A 拖到收牌区', () => {
+    const state = makeState({ tableau: [[card('S', 1)], [], [], [], [], [], []] });
+    const core = new SolitaireCore(state);
+    const to = L.resolveDropTarget(core, 0, 1, colX(CFG.FOUNDATION_COLS[0]), CFG.TOP_ROW_Y);
+    assert.strictEqual(to, PILE_FOUNDATION_BASE);
+});
+
+test('落点：非 A 拖到收牌区不合法', () => {
+    const state = makeState({ tableau: [[card('S', 2)], [], [], [], [], [], []] });
+    const core = new SolitaireCore(state);
+    const to = L.resolveDropTarget(core, 0, 1, colX(CFG.FOUNDATION_COLS[0]), CFG.TOP_ROW_Y);
+    assert.strictEqual(to, -1);
+});
+
+test('落点：异色降序落到最近列', () => {
+    const state = makeState({
+        tableau: [[card('H', 12)], [], [card('S', 13)], [], [], [], []],
+    });
+    const core = new SolitaireCore(state);
+    const to = L.resolveDropTarget(core, 0, 1, colX(2), CFG.COLUMN_TOP_Y + 20);
+    assert.strictEqual(to, 2);
+});
+
+test('落点：同列与列区上方都返回 -1', () => {
+    const state = makeState({
+        tableau: [[card('H', 12)], [], [card('S', 13)], [], [], [], []],
+    });
+    const core = new SolitaireCore(state);
+    assert.strictEqual(L.resolveDropTarget(core, 0, 1, colX(0), CFG.COLUMN_TOP_Y + 20), -1);
+    assert.strictEqual(L.resolveDropTarget(core, 0, 1, colX(2), 0), -1);
+});
+
+test('落点：列间空隙仍归最近的列', () => {
+    const state = makeState({
+        tableau: [[card('H', 12)], [], [card('S', 13)], [], [], [], []],
+    });
+    const core = new SolitaireCore(state);
+    const gapX = CFG.colCenterX(2) + CFG.COL_STEP / 2 - 1;
+    const to = L.resolveDropTarget(core, 0, 1, gapX - CFG.CARD_W / 2, CFG.COLUMN_TOP_Y + 20);
+    assert.strictEqual(to, 2);
+});
+
+test('最近列判定', () => {
+    assert.strictEqual(L.nearestColumn(CFG.colCenterX(0)), 0);
+    assert.strictEqual(L.nearestColumn(CFG.colCenterX(6)), 6);
+    assert.strictEqual(L.nearestColumn(CFG.colCenterX(3) + 10), 3);
+});
+
+test('布局里桌面牌的绘制顺序在其它堆之上', () => {
+    const core = new SolitaireCore();
+    core.deal(9, 1);
+    const places = L.buildLayout(core.state);
+    const firstTableau = places.findIndex(p => p.pile === 0);
+    const lastTableau = places.length - 1;
+    assert.ok(firstTableau > 0);
+    assert.ok(places[lastTableau].pile >= 0 && places[lastTableau].pile < 7);
+    const col6 = places.filter(p => p.pile === 6);
+    for (let i = 1; i < col6.length; i++) assert.ok(col6[i].index > col6[i - 1].index);
 });
 
 // ==================== 汇总 ====================
