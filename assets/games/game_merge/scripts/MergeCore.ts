@@ -321,10 +321,11 @@ export class MergeCore {
             const f = fruits[i];
             if (f.sleeping) continue;
             // 重力每个子步都会重新注入 8.33 px/s，单次冲量压不到休眠阈值以下
-            // （实测叠放残余 12.4 > SLEEP_SPEED）：接触中的慢速水果额外衰减
+            // （实测叠放残余 12.4 > SLEEP_SPEED）：接触中的慢速水果额外衰减。
+            // 0.6 衰减太狠（每个子步 40%），水果一碰就不动；0.85 保留可见的滚动与回弹。
             if (f.contact && this._speedOf(f) < SLEEP_SPEED * 2) {
-                f.vx *= 0.6;
-                f.vy *= 0.6;
+                f.vx *= 0.85;
+                f.vy *= 0.85;
             }
             if (f.moveSpeed < SLEEP_SPEED) {
                 f.sleepTimer += dt;

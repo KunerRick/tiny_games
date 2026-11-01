@@ -52,6 +52,21 @@ interface Ring {
     color: number;
 }
 
+/**
+ * 单颗水果的表现状态（纯视图层，不进 `MergeCore`）。
+ * 物理只算圆心和速度，圆是各向同性的，画出来就是一堆"死圆片"——
+ * 这三个量负责让它看起来像有质量的果子：
+ * - `angle`  : 滚动角（角速度 = 切向速度 / 半径）
+ * - `squash` : 落地压扁量，撞击越猛越大
+ * - `pop`    : 新生成时的弹出（1 → 0），合成出来的水果会"蹦"一下
+ */
+interface FruitView {
+    angle: number;
+    squash: number;
+    pop: number;
+    lastVy: number;
+}
+
 @ccclass('MergeGame')
 export class MergeGame extends Component {
     // ==================== 场景绑定 ====================
@@ -131,6 +146,11 @@ export class MergeGame extends Component {
     private _rings: Ring[] = [];
     private _shake = 0;
 
+    /** 每颗水果的表现状态，按 fruit.id 索引（合并掉的水果在 _drawFruits 里被清掉） */
+    private _views: Map<number, FruitView> = new Map();
+    /** 本帧 dt，供 _drawFruits 推进滚动/压扁/弹出 */
+    private _frameDt = 0;
+
     /** 最后一次已知的指针逻辑 x（桌面上拖拽结束派发 CANCEL 时用它） */
     private _dragX = PLAY_W / 2;
 
@@ -186,6 +206,7 @@ export class MergeGame extends Component {
         this.unscheduleAllCallbacks();
         this._particles = [];
         this._rings = [];
+        this._views.clear();
         this._colorCache.clear();
     }
 
@@ -197,6 +218,7 @@ export class MergeGame extends Component {
             this._consumeEvents();
         }
 
+        this._frameDt = dt;
         this._updateEffects(dt);
         this._drawFruits();
         this._drawEffects();
@@ -212,6 +234,7 @@ export class MergeGame extends Component {
         this._gameOverShown = false;
         this._particles = [];
         this._rings = [];
+        this._views.clear();
         this._shake = 0;
         this._dragX = PLAY_W / 2;
         this._lastScore = -1;
@@ -442,34 +465,131 @@ export class MergeGame extends Component {
         if (!g) return;
         g.clear();
         const fruits = this._core.fruits;
+        const dt = this._frameDt;
         for (let i = 0; i < fruits.length; i++) {
             const f = fruits[i];
-            this._drawFruit(g, f.x, f.y, f.tier, 1);
+            const view = this._viewOf(f.id, f.vy);
+            const impact = this._advanceView(view, f.sleeping ? 0 : f.vx, f.vy, f.r, dt);
+
+            // 重落地：果子底部炸出一小撮尘土，强化"砸下来"的重量感
+            if (impact > 0.12) {
+                this._spawnDust(f.x, f.y + f.r * 0.75, fruitColor(f.tier), 4);
+            }
+
+            // 弹出：新生成的（含刚合成出来的）果子 0.65 → 1.2 → 1，像"蹦"出来一样
+            const popScale = 1 + 0.38 * Math.sin(Math.PI * view.pop) - 0.35 * view.pop;
+            const scaleX = popScale * (1 + view.squash * 0.55);
+            const scaleY = popScale * (1 - view.squash);
+
+            this._drawFruit(g, f.x, f.y, f.tier, 1, view.angle, scaleX, scaleY);
+        }
+
+        // 合并掉的果子从视图表里清掉（长度相等时不必建 Set）
+        if (this._views.size !== fruits.length) {
+            const alive = new Set<number>();
+            for (let i = 0; i < fruits.length; i++) alive.add(fruits[i].id);
+            this._views.forEach((_v, id) => {
+                if (!alive.has(id)) this._views.delete(id);
+            });
         }
     }
 
-    /** 画一颗水果（逻辑坐标入参） */
-    private _drawFruit(g: Graphics, x: number, y: number, tier: number, alpha: number): void {
+    private _viewOf(id: number, vy: number): FruitView {
+        let view = this._views.get(id);
+        if (!view) {
+            // 新建的果子（普通投放 / 合并产物）从 pop=1 开始
+            view = { angle: 0, squash: 0, pop: 1, lastVy: vy };
+            this._views.set(id, view);
+        }
+        return view;
+    }
+
+    /**
+     * 推进滚动角、落地压扁、弹出进度；返回本次撞击的压扁量（0 表示没有撞击）。
+     * 压扁用「竖直速度骤降」判定撞击：桌面 60 fps 下读取的 vy 已经跨过若干子步，
+     * 落地那一帧必然是 +大 → −中，差值就是撞击强度。
+     */
+    private _advanceView(view: FruitView, vx: number, vy: number, r: number, dt: number): number {
+        if (dt <= 0) return 0;
+        if (vx !== 0) view.angle -= (vx / Math.max(8, r)) * dt;
+
+        let impact = 0;
+        const dv = view.lastVy - vy;
+        if (dv > 150 && Math.abs(vy) < Math.abs(view.lastVy)) {
+            impact = Math.min(0.32, dv / 2000);
+            if (impact > view.squash) view.squash = impact;
+        }
+        view.lastVy = vy;
+        if (view.squash > 0) view.squash = Math.max(0, view.squash - dt * 2.4);
+        if (view.pop > 0) view.pop = Math.max(0, view.pop - dt / 0.22);
+        return impact;
+    }
+
+    /** 落地尘土：只往上/两侧轻飘，重力由 _updateEffects 统一加 */
+    private _spawnDust(x: number, y: number, color: number, count: number): void {
+        for (let i = 0; i < count; i++) {
+            if (this._particles.length >= PARTICLE_MAX) return;
+            const angle = -Math.PI / 2 + (Math.random() - 0.5) * 2.2;
+            const speed = 40 + Math.random() * 90;
+            this._particles.push({
+                x,
+                y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                life: 0.32,
+                maxLife: 0.32,
+                size: 2 + Math.random() * 2.5,
+                color,
+            });
+        }
+    }
+
+    /**
+     * 画一颗水果（逻辑坐标入参）。
+     * 用 ellipse 而不是 circle：落地压扁时要非等比缩放。
+     * 高光与果籽都按 `angle` 绕心旋转，静止时保持原样，滚动时能明显看出在转。
+     */
+    private _drawFruit(
+        g: Graphics,
+        x: number,
+        y: number,
+        tier: number,
+        alpha: number,
+        angle = 0,
+        scaleX = 1,
+        scaleY = 1,
+    ): void {
         const r = tierRadius(tier);
         const nx = -PLAY_W / 2 + x;
         const ny = PLAY_H / 2 - y;
+        const rx = r * scaleX;
+        const ry = r * scaleY;
 
         g.fillColor = this._color(fruitColor(tier), alpha);
-        g.circle(nx, ny, r);
+        g.ellipse(nx, ny, rx, ry);
         g.fill();
 
         // 外圈：颜色加深，给圆形一点"果皮"的立体感
         g.fillColor = this._color(0x000000, 0.12 * alpha);
-        g.circle(nx, ny, r * 0.8);
+        g.ellipse(nx, ny, rx * 0.82, ry * 0.82);
         g.fill();
         g.fillColor = this._color(fruitColor(tier), alpha);
-        g.circle(nx, ny, r * 0.72);
+        g.ellipse(nx, ny, rx * 0.72, ry * 0.72);
         g.fill();
 
-        // 左上高光
+        // 左上高光（角度 2.35 rad ≈ 左上，angle=0 时与旧版位置一致）
+        const ha = angle + 2.35;
         g.fillColor = this._color(0xffffff, 0.5 * alpha);
-        g.circle(nx - r * 0.32, ny + r * 0.34, r * 0.2);
+        g.ellipse(nx + Math.cos(ha) * rx * 0.42, ny + Math.sin(ha) * ry * 0.42, r * 0.2, r * 0.16);
         g.fill();
+
+        // 果籽：第二个标记，滚动时才看得出"在转"；小果子省掉这枚图元
+        if (r >= 34) {
+            const sa = angle - 0.55;
+            g.fillColor = this._color(0x000000, 0.22 * alpha);
+            g.circle(nx + Math.cos(sa) * rx * 0.5, ny + Math.sin(sa) * ry * 0.5, r * 0.1);
+            g.fill();
+        }
     }
 
     private _drawEffects(): void {

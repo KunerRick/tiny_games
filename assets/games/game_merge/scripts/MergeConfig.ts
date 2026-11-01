@@ -47,17 +47,24 @@ export const POSITION_CORRECTION = 0.8;
 /** 重叠小于该值视为接触但不修正，防止静止时抖动 */
 export const CONTACT_SLOP = 0.5;
 
-export const RESTITUTION = 0.05;
-export const FRICTION = 0.4;
+/**
+ * 恢复系数。0.05 时水果落地几乎不弹（实测整段接触后位移 1 px），手感"砸进沙子里"。
+ * 0.22 让一次满高落体回弹约 30 px，看得见弹性，又不会把堆叠弹散
+ * （圆-圆冲量只在首次且相对速度 ≥ SLEEP_SPEED 时才带恢复系数，静止接触仍是完全非弹性）。
+ */
+export const RESTITUTION = 0.22;
+
+/** 切向摩擦：0.4 太"粘"，水果横向滑不动；0.3 让落下的水果会滚一小段 */
+export const FRICTION = 0.3;
 
 /** 每秒线性阻尼，抑制长尾漂移 */
 export const LINEAR_DAMPING = 0.2;
 
 /** 低于该速度开始累计休眠计时 */
-export const SLEEP_SPEED = 12;
+export const SLEEP_SPEED = 10;
 
-/** 低速持续这么久进入休眠（速度清零，跳过积分） */
-export const SLEEP_HOLD_SEC = 0.4;
+/** 低速持续这么久进入休眠（速度清零，跳过积分）。0.4 s 会在刚停下的瞬间"啪"地冻住 */
+export const SLEEP_HOLD_SEC = 0.5;
 
 // ==================== 合并 ====================
 
