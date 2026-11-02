@@ -278,6 +278,8 @@ export class SurvivorRenderer extends Component {
         const g = this.playerGfx;
         if (!g) return;
         const p = snap.player;
+        // 世界根节点已按 -p 平移；玩家节点要补回自己的世界坐标，才能停在屏幕中心
+        g.node.setPosition(p.x, p.y, 0);
         g.clear();
 
         // 无敌帧闪烁
