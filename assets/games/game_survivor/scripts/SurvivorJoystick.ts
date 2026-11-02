@@ -7,8 +7,8 @@
  * 设计取舍：
  *  - **按下处即摇杆中心**（动态底座）。固定左下角时，拇指要先去够那个圈，急走位时根本来不及；
  *    动态底座在整屏任意位置按下就能立刻推方向，是移动端幸存者类的常见做法。
- *  - 左下角 `(-250, -470)` 常驻一圈很淡的提示环，只在没有触摸时显示，告诉新玩家从哪儿下手。
- *  - 底座 / 摇杆头 / 提示环都在运行时用 `Graphics` 画，零图片资源（规格 §5.2）。
+ *  - **没有触摸时屏幕上什么都不画**：不常驻底座、不留提示环，纯触屏操作不遮挡画面。
+ *  - 底座 / 摇杆头都在运行时用 `Graphics` 画，零图片资源（规格 §5.2）。
  *  - 只认第一根手指（`_touchId`），第二根手指不改变方向（避免双手误触乱走）。
  *
  * 约定：事件 handler 全部命名方法（红线 5）；`onDestroy()` 只解绑与清引用（红线 4）。
@@ -25,9 +25,6 @@ const BASE_RADIUS = 60;
 const KNOB_RADIUS = 26;
 /** 死区：推杆小于这个距离视为「没推」，避免手指轻抖就移动 */
 const DEAD_ZONE = 8;
-/** 左下角提示环的位置（Canvas 局部坐标） */
-const HINT_X = -250;
-const HINT_Y = -470;
 
 @ccclass('SurvivorJoystick')
 export class SurvivorJoystick extends Component {
@@ -41,7 +38,6 @@ export class SurvivorJoystick extends Component {
     private _center = new Vec3();
     private _base: Node | null = null;
     private _knob: Node | null = null;
-    private _hint: Node | null = null;
     private _tmpUi = new Vec3();
     private _tmpLocal = new Vec3();
 
@@ -60,7 +56,6 @@ export class SurvivorJoystick extends Component {
         this.node.off(Node.EventType.TOUCH_CANCEL, this.onTouchCancel, this);
         this._base = null;
         this._knob = null;
-        this._hint = null;
         this.direction.set(0, 0);
         this._active = false;
         this._touchId = -1;
@@ -72,14 +67,13 @@ export class SurvivorJoystick extends Component {
         return this._active;
     }
 
-    /** 松手 / 取消时归零；面板弹出、切后台也用它 */
+    /** 松手 / 取消时归零并隐藏；面板弹出、切后台也用它 */
     release(): void {
         this._active = false;
         this._touchId = -1;
         this.direction.set(0, 0);
         if (this._base && this._base.isValid) this._base.active = false;
         if (this._knob && this._knob.isValid) this._knob.active = false;
-        if (this._hint && this._hint.isValid) this._hint.active = true;
     }
 
     // ==================== 触摸 ====================
@@ -150,8 +144,6 @@ export class SurvivorJoystick extends Component {
     }
 
     private _applyVisual(offsetX: number, offsetY: number): void {
-        if (this._hint && this._hint.isValid) this._hint.active = false;
-
         const base = this._base;
         if (base && base.isValid) {
             base.active = true;
@@ -167,12 +159,6 @@ export class SurvivorJoystick extends Component {
     // ==================== 绘制 ====================
 
     private _buildViews(): void {
-        this._hint = this._makeCircleNode('JoystickHint', BASE_RADIUS, 0.10, 0.34, false);
-        if (this._hint) {
-            this._hint.setPosition(HINT_X, HINT_Y, 0);
-            this._hint.active = true;
-        }
-
         this._base = this._makeCircleNode('JoystickBase', BASE_RADIUS, 0.14, 0.55, true);
         if (this._base) this._base.active = false;
 
