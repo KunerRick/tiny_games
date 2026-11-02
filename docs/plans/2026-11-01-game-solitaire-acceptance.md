@@ -89,48 +89,47 @@
 
 ## 5. 微信小游戏构建预检
 
-**结论：本机这份 `build/wechatgame` 是空产物，构建尚未完成 —— 需要人工点一次「构建」。**
+**结论：构建已完成，预检 9 项全绿，产物可用于真机验证。只剩「上真机」这一步要人工做。**
 
-复测结果（`node tools/check-wechat-build.js`，产物目录指向主编出目录的 `build/wechatgame`）：
+最早这一节记录的是「本机这份 `build/wechatgame` 是空产物」——`assets/main/config.json` 里
+`scenes={}`、`uuids=0`，`assets/` 只有 1.7 KB（一个场景都没打进去）。重新构建后同一目录复测：
 
 | 项 | 结果 |
 |----|------|
 | 1 必需文件齐全（9 项） | ✅ |
-| 1b 产物清单非空 | ❌ **`assets/main/config.json` 里 `scenes={}`、`uuids=0`** |
-| 2 game.json / project.config.json | ✅ `compileType="game"`、appid 已填（非样例值） |
-| 3 构建已落盘稳定 | ✅ |
-| 4 产物 JS 语法级别 | ✅ 16 个 .js 均可按 ES2015 与 ES5 解析 |
-| 5 主包体积 | ✅ 2.67 MB / 4.00 MB（其中 `cocos-js/` 2.48 MB、`assets/` 仅 1.7 KB） |
+| 1b 产物清单非空 | ✅ **场景 10 个、资源 UUID 57 项** |
+| 2 game.json / project.config.json | ✅ `compileType="game"`、appid `wx755…6b7e`（非样例值） |
+| 3 构建已落盘稳定 | ✅ 最新文件 `first-screen.js @ 07:47:55` |
+| 4 产物 JS 语法级别 | ✅ 17 个 .js 均可按 ES2015 与 ES5 解析 |
+| 5 主包体积 | ✅ 3.48 MB / 4.00 MB（余量 534.5 KB，其中 `cocos-js/` 2.48 MB） |
 | 6 变体选择符 | ✅ 无 |
-| 7 工具是否停在过期构建 | ❌ 产物 19:45 落盘，工具最后一次编译停在 20:30（10-25） |
-| 8 AppID | ✅ 已填写，不是占位/样例值 |
+| 7 工具是否停在过期构建 | ✅ 开发者工具已跟上本次构建（最后编译 07:48:01） |
+| 8 AppID | ✅ `wx755…6b7e` |
 | 9 编译缓存里的包装方式 | ✅ 4 个模块均为「小游戏包装（process）」 |
 
-`assets/` 只有 1.7 KB 就是空构建的直接指纹：一个场景都没打进去。按第 7 项，开发者工具当前也停在
-更早的构建上，所以**先重新构建，再在工具里「编译」一次**。
+`node tools/replay-wechat-bundle.js` 的 A/B/C 三路对照也复跑过：小程序包装必崩、小游戏包装正常、
+注入真 window 后正常 —— 与文档结论一致。
+
+> 注意主包余量只剩 534 KB。后续再往 `assets/` 加内容（新游戏场景、贴图）要先估体积，
+> 超限就得拆分包或压缩 `cocos-js/`。
 
 ### 本轮修掉的校验盲点
 
 此前 `check-wechat-build.js` 对这份空产物**全绿通过**（文件齐全、JSON 合法、体积 2.67 MB 远低于上限），
 只有打开才是黑屏。已在第 1 项里补上「产物清单非空」判据（读 `assets/main/config.json` 的
-`scenes` / `uuids`），现在对同一目录返回：
+`scenes` / `uuids`），现在对空目录返回：
 
 ```
 ❌ 构建产物是空的：场景 0 个、资源 UUID 0 个        → 退出码 1
 ```
 
-`node tools/replay-wechat-bundle.js <产物>/web-adapter.js` 的 A/B/C 三路对照仍与文档一致：
-小程序包装必崩、小游戏包装正常、注入真 window 后正常 —— 说明**产物内容本身没问题，问题只在构建没跑完**。
+### 待人工完成（只剩真机）
 
-### 待人工完成（唯一阻塞项）
-
-1. 编辑器里打开「构建」面板，平台选微信小游戏，确认场景列表包含 10 个场景（`sync-build-scenes.js --check` 已确认配置正确）；
-2. 点「构建」；
-3. 构建完成后跑 `node tools/check-wechat-build.js`（应 0 项失败）+ `node tools/replay-wechat-bundle.js`；
-4. 再打开微信开发者工具编译一次。
+1. 打开微信开发者工具导入 `build/wechatgame`，点「编译」，确认能进大厅、能开纸牌接龙；
+2. 上 iOS / Android 真机，走一遍 §8.1 的功能项（发牌、拖拽、双击、重洗上限、提示、新手指引、通关/卡死判定）。
 
 > 本环境的 GUI 自动点击不可用（`osascript` 辅助访问被拒 `-25211`，无 `cliclick`），MCP 也没有
-> `wechatgame` 平台的构建入口（见 `docs/tech/wechat-build-pitfalls.md` §9），所以这一步只能人工点。
+> `wechatgame` 平台的构建入口（见 `docs/tech/wechat-build-pitfalls.md` §9），构建那一步只能人工点。
 
 ---
 
@@ -138,7 +137,7 @@
 
 | 事项 | 说明 |
 |------|------|
-| 真机 | 未上微信真机。构建产物目前本身是空的（§5），真机验证要等构建完成后补 |
+| 真机 | 未上微信真机。构建产物已就绪且预检 9 项全绿（§5），真机验证仍是唯一人工项 |
 | 真实多指（I5） | 桌面预览注入不了第二根触点，只有白盒断言；移动端真机行为待补 |
 | 拖拽阈值边界 | 阈值 8 设计像素 ≈ 4.3 CSS 像素；已按教训 D 让「拖了个空」退回点击，但极轻的斜向滑动仍可能被当成拖拽后回弹（与点击视觉结果相同，仅多一次回位动画） |
 | 提示算法的「最优性」 | 提示按 §3.6 的优先级给出第一步，不做全局可解性判定（Klondike 本身可能死局） |
@@ -169,5 +168,5 @@ node tools/verify-solitaire-core.js            # 期望：全部通过：89 项
 node "$TSC" --noEmit -p <指向 assets/ 的 tsconfig>   # 期望：无输出（TS_OK）
 grep -rInP "\x{FE0E}|\x{FE0F}" assets/ | wc -l # 期望：0
 node tools/sync-build-scenes.js --check        # 期望：10 个场景已最新
-node tools/check-wechat-build.js <产物目录>     # 构建完成后期望：0 项失败
+node tools/check-wechat-build.js <产物目录>     # 期望：0 项失败（当前已 0 项失败）
 ```
