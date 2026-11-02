@@ -63,7 +63,8 @@ tiny_games/
 │   │   ├── game_brick/         # 场景: BrickBreaker（打砖块 + 轻肉鸽）
 │   │   ├── game_merge/         # 场景: Merge（合合大作战）
 │   │   ├── game_gate_runner/   # 场景: GateRunner（数值冲刺）
-│   │   └── game_solitaire/     # 场景: Solitaire（纸牌接龙）
+│   │   ├── game_solitaire/     # 场景: Solitaire（纸牌接龙）
+│   │   └── game_survivor/      # 场景: Survivor（午夜幸存者）
 │   ├── common/            # 公共模块
 │   │   ├── managers/      # SceneManager, StorageManager, GameConfig
 │   │   └── components/    # BackButton, SafeAreaAdapter
@@ -97,6 +98,7 @@ tiny_games/
 { id: 'merge',        name: '合合大作战', icon: 'default', sceneName: 'Merge',      description: '合成同类水果，越滚越大' }
 { id: 'gate_runner',  name: '数值冲刺', icon: 'default', sceneName: 'GateRunner',   description: '穿过 ×2 / ÷2 数值门，带队伍冲到 Boss' }
 { id: 'solitaire',    name: '纸牌接龙', icon: 'default', sceneName: 'Solitaire',    description: '克朗代克单人纸牌' }
+{ id: 'survivor',     name: '午夜幸存者', icon: 'default', sceneName: 'Survivor',  description: '8 分钟肉鸽生存，自动攻击 + 三选一构筑' }
 ```
 
 **添加新游戏三步骤**：① `GameConfig.ts` 注册 ② 创建 `assets/games/game_xxx/scenes/Xxx.scene` ③ 场景名与 `sceneName` 一致。
@@ -294,3 +296,4 @@ node tools/sync-build-scenes.js --all            # 顺带修其它平台的构�
 - [Tiny Vanguard 设计](./docs/specs/2026-05-28-tiny-vanguard-design.md)
 - [方块坠落设计](./docs/specs/2026-10-25-game-tetris-design.md)
 - [方块坠落验收报告（含界面美化记录）](./docs/plans/2026-10-25-game-tetris-acceptance.md)
+- [午夜幸存者设计（含 M1/M2 实测记录）](./docs/specs/2026-11-02-game-survivor-design.md)
