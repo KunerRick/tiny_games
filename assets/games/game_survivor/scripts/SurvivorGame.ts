@@ -4,13 +4,15 @@
  * 职责（规格 §6.2）：摇杆/键盘输入、固定步长推进、倍速、相机跟随、渲染调度、调试读数。
  *  - 核心永远只收到 `FIXED_DT`（倍速只在「一帧跑几步」上体现，规格 §4.3）
  *  - 追帧上限：1x 最多 3 步/帧、2x 6 步、4x 12 步；超出直接丢弃积压，避免回来就瞬移（规格 P7）
- *  - 本阶段还没有摇杆与三选一面板（M3）：桌面用 WASD/方向键，升级自动选第一张
+ *  - 本阶段还没有三选一面板（M3）：升级自动选第一张
+ *  - 输入：触屏摇杆（运行时装在 Canvas 下的 `SurvivorJoystick`）为主，桌面 WASD/方向键仅作调试输入
  *
  * 约定：事件 handler 全部命名方法（红线 5）；`onDestroy()` 只解绑键盘，不碰 @property 节点（红线 4）。
  */
 
-import { _decorator, Component, EventKeyboard, Graphics, Input, input, KeyCode, Label, Node, Vec3 } from 'cc';
+import { _decorator, Component, EventKeyboard, Input, input, KeyCode, Label, Node, UITransform, Vec3, Widget } from 'cc';
 import { SurvivorCore } from './SurvivorCore';
+import { SurvivorJoystick } from './SurvivorJoystick';
 import { SurvivorRenderer } from './SurvivorRenderer';
 import { FIXED_DT } from './SurvivorConfig';
 import type { SurvivorInput } from './SurvivorConfig';
@@ -36,6 +38,9 @@ export class SurvivorGame extends Component {
 
     @property({ type: Label, tooltip: '调试读数（阶段验收用，正式 HUD 在 M3）' })
     debugLabel: Label | null = null;
+
+    @property({ type: SurvivorJoystick, tooltip: '虚拟摇杆（留空则运行时自动创建到 Canvas 下）' })
+    joystick: SurvivorJoystick | null = null;
 
     @property({ tooltip: '开局随机种子（0 = 用时间戳）' })
     seed = 0;
@@ -67,6 +72,7 @@ export class SurvivorGame extends Component {
     onLoad(): void {
         if (!this.renderer) this.renderer = this.getComponent(SurvivorRenderer);
         if (!this.worldNode) this.worldNode = this.node;
+        if (!this.joystick) this.joystick = this._ensureJoystick();
         input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
         input.on(Input.EventType.KEY_UP, this.onKeyUp, this);
         this.startRun();
@@ -78,6 +84,48 @@ export class SurvivorGame extends Component {
         this._keys.clear();
         this._core = null;
         this._input = null;
+        this.joystick = null;
+    }
+
+    /**
+     * 摇杆在运行时创建，不改场景文件。
+     *
+     * 挂在 Canvas 下、压在世界层之上但**排在 BackButton 之前**：
+     * 全屏的触摸节点若排在返回按钮之后，会把返回按钮的点击整个吞掉。
+     */
+    private _ensureJoystick(): SurvivorJoystick | null {
+        const parent = this.node.parent;
+        if (!parent) return null;
+
+        let node = parent.getChildByName('Joystick');
+        if (!node) {
+            node = new Node('Joystick');
+            node.layer = parent.layer;
+            const ut = node.addComponent(UITransform);
+            ut.setContentSize(720, 1280);
+            node.addComponent(SurvivorJoystick);
+            parent.addChild(node);
+
+            // 铺满 Canvas，随窗口尺寸变化
+            const widget = node.addComponent(Widget);
+            widget.target = parent;
+            widget.isAlignLeft = true;
+            widget.isAlignRight = true;
+            widget.isAlignTop = true;
+            widget.isAlignBottom = true;
+            widget.left = 0;
+            widget.right = 0;
+            widget.top = 0;
+            widget.bottom = 0;
+            widget.alignMode = Widget.AlignMode.ALWAYS;
+            widget.updateAlignment();
+
+            // 放到 BackButton 之前，别抢它的触摸
+            const back = parent.getChildByName('BackButton');
+            const idx = back ? back.getSiblingIndex() : -1;
+            node.setSiblingIndex(idx >= 0 ? idx : parent.children.length - 1);
+        }
+        return node.getComponent(SurvivorJoystick);
     }
 
     /** 开新局（重开也走这里） */
@@ -119,7 +167,7 @@ export class SurvivorGame extends Component {
         const mult = this._speed;
         const maxSteps = mult >= 4 ? MAX_STEPS_4X : mult >= 2 ? MAX_STEPS_2X : MAX_STEPS_1X;
 
-        this._readKeyboard();
+        this._readInput();
         this._acc += dt * mult;
         // 追帧：一次性积压太多就丢弃，宁可慢放也不瞬移
         if (this._acc > FIXED_DT * maxSteps) this._acc = FIXED_DT * maxSteps;
@@ -141,6 +189,18 @@ export class SurvivorGame extends Component {
         if (core.getSnapshot().phase !== 'running') this._acc = 0;
 
         core.drainEvents();
+    }
+
+    /** 摇杆优先（移动端唯一入口），没有触摸时回落到键盘（桌面调试） */
+    private _readInput(): void {
+        const joy = this.joystick;
+        if (joy && joy.isValid && joy.isActive()) {
+            const d = joy.direction;
+            this._input.moveX = d.x;
+            this._input.moveY = d.y;
+            return;
+        }
+        this._readKeyboard();
     }
 
     private _readKeyboard(): void {

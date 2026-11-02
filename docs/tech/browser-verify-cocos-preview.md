@@ -492,6 +492,82 @@ this.endDragGesture();                    // 消费标记照旧保留 → 引擎
 （>1 说明引擎点击没被压住，=0 说明兜底没生效）；同时读 `_selectedDeployUnitIndex` 与槽位
 `_deployState` 三态串。四条拖拽路径 + 非法落点回位都要复跑一遍确认没被这次改动波及。
 
+### 11.7 触摸分支实测：CDP 触摸仿真必须在**页面加载前**开启
+
+> **来源**：2026-11-02 午夜幸存者虚拟摇杆复查（"手机上能不能玩"）。
+
+#### ① 现象：DOM 收到了，引擎没收到
+
+桌面预览默认 `navigator.maxTouchPoints = 0`、`'ontouchstart' in window === false`。往**已经加载好**的页面
+派发 CDP 触摸事件时，DOM 层能收到（在 document 上挂捕获监听可数到 `touchstart/touchmove/touchend` 各 1 次，
+`target = CANVAS`），但**节点上的 `TOUCH_START/MOVE/END` 一次都不触发**：Cocos 在启动时按当时的触摸能力
+决定是否注册触摸监听，后开的仿真不会补注册。
+
+判据（先分清"工具没发"还是"引擎没接"）：
+
+| 观测点 | 引擎已注册触摸 | 引擎未注册触摸 |
+|--------|---------------|---------------|
+| document 捕获监听（DOM） | 有 | **也有** |
+| 节点 `hasEventListener('touch-start')` | `true` | `true`（回调绑了，但派发不到） |
+| 节点回调实际执行 | 有 | **无** |
+
+所以"节点上有监听器"**不能**证明触摸链路通，必须看回调有没有真的跑（读回调里写的探针字段）。
+
+#### ② 正确姿势：开仿真 → 重载 → 派发，**必须在同一次调用里**
+
+`Emulation.setTouchEmulationEnabled` 挂在 **CDP session** 上，session 一关仿真就失效；而每次
+`browser_run_code_unsafe` 都是新 session。所以「上一次调用开仿真、下一次调用派发」必然失败。
+
+```js
+async (page) => {
+  const client = await page.context().newCDPSession(page);
+  await client.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  await page.reload({ waitUntil: 'load' });      // ★ 重载让引擎按"有触摸"启动
+  await page.waitForTimeout(2500);
+  const send = (type, pts) => client.send('Input.dispatchTouchEvent', { type, touchPoints: pts });
+  await send('touchStart', [{ x: 640, y: 430, id: 1 }]);
+  await send('touchMove',  [{ x: 640, y: 350, id: 1 }]);
+  await send('touchEnd',   []);
+  // …断言也写在这次调用里
+}
+```
+
+进入这次调用后先断言 `navigator.maxTouchPoints > 0`，否则整轮结果是假的。
+
+#### ③ `dispatchTouchEvent` 的 `touchPoints` 语义：`touchEnd` 传的是**被抬起的点**
+
+- `touchEnd` + `touchPoints: []` = 抬起全部；
+- `touchEnd` + `touchPoints: [{id: 2}]` = **只抬 2 号**，1 号仍按着。实测 DOM 侧 `changedTouches = [2]`、`touches = [1]`。
+
+踩坑：想测"第二根手指抬起不影响摇杆"，却在 `touchEnd` 里传了**主手指**的坐标 ⇒ 摇杆被正常释放，
+看起来像"多指处理有 bug"。多指用例要明确传**要抬的那根**的 id。
+
+#### ④ 坐标：触摸走 **CSS 像素**，不需要乘 `devicePixelRatio`
+
+`Input.dispatchTouchEvent` 的 `x/y` 是视口 CSS 坐标（与 `getBoundingClientRect()` 同一套）；
+§4 的 `k` 标定只针对项目里"点击入参按设备像素"的老工具，别混用。
+
+#### ⑤ 又一个"截图误判成渲染缺陷"的实例
+
+拖住摇杆不松手时角色会**一直朝那个方向跑**。本轮二次截图时角色已跑到竞技场角落，画面只剩场内的
+一角、外面是场外底色，还多出一个白色方框（其实是场地边界）——**看起来像渲染被裁剪**，
+实际是玩家坐标 `(1184, 1184)`（场地半边长 1200）。教训：画面异常先读**玩家/相机坐标**和
+`World` 节点的 `position`，再怀疑渲染。同理，"松手后摇杆圈还在"要确认 `touchEnd` 是否真的发过。
+
+#### ⑥ 午夜幸存者摇杆的实测结果（触屏）
+
+| 用例 | 期望 | 实测 |
+|------|------|------|
+| 按下（屏中任意处） | 底座/摇杆头出现在按下点、提示环隐藏 | ✅ |
+| 上/下/左/右拖 80 CSS px | `direction` 为 `(0,1)/(0,-1)/(-1,0)/(1,0)`，玩家同向移动 | ✅ |
+| 松手 | `direction` 归零、玩家**立即**停（250ms 内位移 0） | ✅ |
+| 位移 4 CSS px（≈7.5 设计像素 < 死区 8） | 不动 | ✅ |
+| 位移 6 CSS px | 半幅速度（`direction.y ≈ 0.19`） | ✅ |
+| 第二根手指按下/移动 | `direction` 不变 | ✅ |
+| 抬起**第二根**手指 | 摇杆保持激活 | ✅ |
+| 点"返回" | 回大厅（全屏触摸节点没吞掉按钮） | ✅ |
+| 大厅点"午夜幸存者"再进 | 摇杆重建、方向正常 | ✅ |
+
 ---
 
 ## 附：本轮用到的 MCP 工具
