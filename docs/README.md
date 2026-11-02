@@ -104,7 +104,7 @@
 
 | 类型 | 文件 | 说明 |
 |------|------|------|
-| 游戏设计（评审稿） | [`specs/2026-11-02-game-survivor-design.md`](./specs/2026-11-02-game-survivor-design.md) | 8 分钟群怪生存：4 武器 / 4 被动 / 3+2 槽、逐分钟节奏、数值与调参表、单 Graphics 性能预算与 M1/M2 双重 Go-No-Go |
+| 游戏设计（已定稿） | [`specs/2026-11-02-game-survivor-design.md`](./specs/2026-11-02-game-survivor-design.md) | 8 分钟群怪生存：4 武器 / 4 被动 / 3+2 槽、1x/2x/4x 倍速、本地局内存档、逐分钟节奏、数值与调参表、单 Graphics 性能预算与 M1/M2 双重 Go-No-Go |
 | 后续排期 | [`plans/2026-11-01-next-games-roadmap.md`](./plans/2026-11-01-next-games-roadmap.md) | 纸牌接龙 P0 之后启动本作（P1）的先后顺序与压测门槛 |
 
 ### 砖块远征（Brick Breaker / brick）
