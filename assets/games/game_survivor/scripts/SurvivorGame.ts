@@ -1,0 +1,260 @@
+/**
+ * 午夜幸存者 — 运行时主组件（M2 版）。
+ *
+ * 职责（规格 §6.2）：摇杆/键盘输入、固定步长推进、倍速、相机跟随、渲染调度、调试读数。
+ *  - 核心永远只收到 `FIXED_DT`（倍速只在「一帧跑几步」上体现，规格 §4.3）
+ *  - 追帧上限：1x 最多 3 步/帧、2x 6 步、4x 12 步；超出直接丢弃积压，避免回来就瞬移（规格 P7）
+ *  - 本阶段还没有摇杆与三选一面板（M3）：桌面用 WASD/方向键，升级自动选第一张
+ *
+ * 约定：事件 handler 全部命名方法（红线 5）；`onDestroy()` 只解绑键盘，不碰 @property 节点（红线 4）。
+ */
+
+import { _decorator, Component, EventKeyboard, Graphics, Input, input, KeyCode, Label, Node, Vec3 } from 'cc';
+import { SurvivorCore } from './SurvivorCore';
+import { SurvivorRenderer } from './SurvivorRenderer';
+import { FIXED_DT } from './SurvivorConfig';
+import type { SurvivorInput } from './SurvivorConfig';
+
+const { ccclass, property } = _decorator;
+
+/** 倍速档位（规格 §3.12：1x → 2x → 4x → 1x） */
+const SPEED_STEPS = [1, 2, 4];
+/** 各倍速下的追帧上限（步/帧） */
+const MAX_STEPS_1X = 3;
+const MAX_STEPS_2X = 6;
+const MAX_STEPS_4X = 12;
+/** 调试读数刷新间隔（秒） */
+const HUD_REFRESH = 0.25;
+
+@ccclass('SurvivorGame')
+export class SurvivorGame extends Component {
+    @property({ type: SurvivorRenderer, tooltip: '渲染层（留空则取本节点上的 SurvivorRenderer）' })
+    renderer: SurvivorRenderer | null = null;
+
+    @property({ type: Node, tooltip: '世界根节点（相机跟随、随玩家反向移动）' })
+    worldNode: Node | null = null;
+
+    @property({ type: Label, tooltip: '调试读数（阶段验收用，正式 HUD 在 M3）' })
+    debugLabel: Label | null = null;
+
+    @property({ tooltip: '开局随机种子（0 = 用时间戳）' })
+    seed = 0;
+
+    /** 浏览器探针用：核心实例 */
+    _core: SurvivorCore | null = null;
+    /** 当前倍速 */
+    _speed = 1;
+    /** 上一帧渲染耗时（毫秒） */
+    _lastRenderMs = 0;
+    /** 累计平均渲染耗时（毫秒） */
+    _avgRenderMs = 0;
+    /** 上一帧实际跑的固定步数 */
+    _steps = 0;
+    /** 暂停标志 */
+    _paused = false;
+
+    private _acc = 0;
+    private _keys = new Set<KeyCode>();
+    private _input: SurvivorInput = { moveX: 0, moveY: 0 };
+    private _hudTimer = 0;
+    private _fps = 60;
+    private _fpsAcc = 0;
+    private _fpsFrames = 0;
+    private _renderSum = 0;
+    private _renderCount = 0;
+    private _tmp = new Vec3();
+
+    onLoad(): void {
+        if (!this.renderer) this.renderer = this.getComponent(SurvivorRenderer);
+        if (!this.worldNode) this.worldNode = this.node;
+        input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
+        input.on(Input.EventType.KEY_UP, this.onKeyUp, this);
+        this.startRun();
+    }
+
+    onDestroy(): void {
+        input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this);
+        input.off(Input.EventType.KEY_UP, this.onKeyUp, this);
+        this._keys.clear();
+        this._core = null;
+        this._input = null;
+    }
+
+    /** 开新局（重开也走这里） */
+    startRun(): void {
+        const seed = this.seed || (Date.now() % 2147483647);
+        this._core = new SurvivorCore(seed);
+        this._acc = 0;
+        this._steps = 0;
+        this._paused = false;
+        if (this.renderer) this.renderer.drawBackground();
+    }
+
+    update(dt: number): void {
+        if (!this._core) return;
+
+        this._fpsAcc += dt;
+        this._fpsFrames++;
+        if (this._fpsAcc >= 0.5) {
+            this._fps = this._fpsFrames / this._fpsAcc;
+            this._fpsAcc = 0;
+            this._fpsFrames = 0;
+        }
+
+        if (!this._paused) this._advance(dt);
+        this._syncView();
+        this._render();
+
+        this._hudTimer -= dt;
+        if (this._hudTimer <= 0) {
+            this._hudTimer = HUD_REFRESH;
+            this._refreshHud();
+        }
+    }
+
+    /** 固定步长推进 + 倍速 + 追帧上限 */
+    private _advance(dt: number): void {
+        const core = this._core;
+        if (!core) return;
+        const mult = this._speed;
+        const maxSteps = mult >= 4 ? MAX_STEPS_4X : mult >= 2 ? MAX_STEPS_2X : MAX_STEPS_1X;
+
+        this._readKeyboard();
+        this._acc += dt * mult;
+        // 追帧：一次性积压太多就丢弃，宁可慢放也不瞬移
+        if (this._acc > FIXED_DT * maxSteps) this._acc = FIXED_DT * maxSteps;
+
+        let steps = 0;
+        while (this._acc >= FIXED_DT && steps < maxSteps) {
+            core.step(FIXED_DT, this._input);
+            this._acc -= FIXED_DT;
+            steps++;
+            if (core.getSnapshot().phase !== 'running') break;
+        }
+        this._steps = steps;
+
+        // M3 接三选一面板；在这之前自动选第一张，保证 M2 能一直跑
+        let guard = 0;
+        while (core.getSnapshot().phase === 'levelup' && guard++ < 32) {
+            core.chooseUpgrade(0);
+        }
+        if (core.getSnapshot().phase !== 'running') this._acc = 0;
+
+        core.drainEvents();
+    }
+
+    private _readKeyboard(): void {
+        const k = this._keys;
+        let x = 0;
+        let y = 0;
+        if (k.has(KeyCode.KEY_A) || k.has(KeyCode.ARROW_LEFT)) x -= 1;
+        if (k.has(KeyCode.KEY_D) || k.has(KeyCode.ARROW_RIGHT)) x += 1;
+        if (k.has(KeyCode.KEY_W) || k.has(KeyCode.ARROW_UP)) y += 1;
+        if (k.has(KeyCode.KEY_S) || k.has(KeyCode.ARROW_DOWN)) y -= 1;
+        if (x !== 0 && y !== 0) {
+            const inv = Math.SQRT1_2;
+            x *= inv;
+            y *= inv;
+        }
+        this._input.moveX = x;
+        this._input.moveY = y;
+    }
+
+    /** 相机跟随：把世界根节点反向平移，让玩家固定在屏幕中心 */
+    private _syncView(): void {
+        const core = this._core;
+        const world = this.worldNode;
+        if (!core || !world) return;
+        const p = core.getSnapshot().player;
+        this._tmp.set(-p.x, -p.y, 0);
+        world.setPosition(this._tmp);
+    }
+
+    private _render(): void {
+        const core = this._core;
+        const renderer = this.renderer;
+        if (!core || !renderer) return;
+        const t0 = performance.now();
+        renderer.render(core.getSnapshot());
+        const ms = performance.now() - t0;
+        this._lastRenderMs = ms;
+        this._renderSum += ms;
+        this._renderCount++;
+        if (this._renderCount >= 60) {
+            this._avgRenderMs = this._renderSum / this._renderCount;
+            this._renderSum = 0;
+            this._renderCount = 0;
+        }
+    }
+
+    private _refreshHud(): void {
+        const core = this._core;
+        const label = this.debugLabel;
+        if (!core || !label) return;
+        const s = core.getSnapshot();
+        const t = s.time;
+        const mm = Math.floor(t / 60);
+        const ss = Math.floor(t % 60);
+        let enemies = 0;
+        for (let i = 0; i < s.enemies.length; i++) if (s.enemies[i].active) enemies++;
+        label.string =
+            `FPS ${this._fps.toFixed(0)}  步 ${this._steps}  渲染 ${this._lastRenderMs.toFixed(2)}ms\n` +
+            `Lv.${s.player.level}  HP ${Math.ceil(s.player.hp)}/${s.player.maxHp}  击杀 ${s.kills}\n` +
+            `${mm}:${ss < 10 ? '0' : ''}${ss}  敌 ${enemies}  速 ${this._speed}x  ${this._paused ? '暂停' : s.phase}`;
+    }
+
+    // ==================== 键盘（桌面调试输入，M3 换摇杆） ====================
+
+    private onKeyDown(ev: EventKeyboard): void {
+        this._keys.add(ev.keyCode);
+        if (ev.keyCode === KeyCode.DIGIT_1) this._speed = SPEED_STEPS[0];
+        else if (ev.keyCode === KeyCode.DIGIT_2) this._speed = SPEED_STEPS[1];
+        else if (ev.keyCode === KeyCode.DIGIT_4) this._speed = SPEED_STEPS[2];
+        else if (ev.keyCode === KeyCode.KEY_X) this.cycleSpeed();
+        else if (ev.keyCode === KeyCode.KEY_P) this.togglePause();
+        else if (ev.keyCode === KeyCode.KEY_R) this.startRun();
+        else if (ev.keyCode === KeyCode.KEY_K) this.debugStress(60);
+    }
+
+    private onKeyUp(ev: EventKeyboard): void {
+        this._keys.delete(ev.keyCode);
+    }
+
+    // ==================== 对外调试接口（浏览器探针 / 验收用） ====================
+
+    cycleSpeed(): void {
+        const i = SPEED_STEPS.indexOf(this._speed);
+        this._speed = SPEED_STEPS[(i + 1) % SPEED_STEPS.length];
+    }
+
+    togglePause(): void {
+        this._paused = !this._paused;
+        this._acc = 0;
+    }
+
+    /** 直接推进 N 秒逻辑（跳过等待，验收用） */
+    debugAdvance(seconds: number): void {
+        const core = this._core;
+        if (!core) return;
+        const steps = Math.round(seconds / FIXED_DT);
+        for (let i = 0; i < steps; i++) {
+            core.step(FIXED_DT, { moveX: 0, moveY: 0 });
+            let guard = 0;
+            while (core.getSnapshot().phase === 'levelup' && guard++ < 32) core.chooseUpgrade(0);
+            if (core.getSnapshot().phase !== 'running') break;
+        }
+        core.drainEvents();
+        this._syncView();
+        this._render();
+    }
+
+    /** 压测：直接刷 N 个敌人（Gate B 用） */
+    debugStress(count: number): void {
+        const core = this._core;
+        if (!core) return;
+        const kinds = ['chaser', 'weaver', 'shooter', 'bomber'] as const;
+        for (let i = 0; i < count; i++) {
+            core.debugSpawn(kinds[i % 4], 1, i % 10 === 0);
+        }
+    }
+}
