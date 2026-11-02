@@ -18,6 +18,7 @@ export const GAME_LIST: GameConfig[] = [
     { id: 'merge', name: '合合大作战', icon: 'default', sceneName: 'Merge', description: '合成同类水果，越滚越大' },
     { id: 'gate_runner', name: '数值冲刺', icon: 'default', sceneName: 'GateRunner', description: '穿过 ×2 / ÷2 数值门，带队伍冲到 Boss' },
     { id: 'solitaire', name: '纸牌接龙', icon: 'default', sceneName: 'Solitaire', description: '克朗代克单人纸牌' },
+    { id: 'survivor', name: '午夜幸存者', icon: 'default', sceneName: 'Survivor', description: '8 分钟肉鸽生存，自动攻击 + 三选一构筑' },
 ];
 
 export function getGameById(id: string): GameConfig | undefined {
