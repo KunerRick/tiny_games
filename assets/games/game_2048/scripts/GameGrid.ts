@@ -144,105 +144,58 @@ export class GameGrid extends Component {
     }
     
     // 游戏逻辑：移动和合并
+    //
+    // 不改入参：旧实现直接往 `tiles` 里的对象写新坐标，导致之后判断
+    // 「有没有动过」时读到的已经是改过的值 —— 纯滑动（没有合并）会被判成
+    // `hasMoved === false`，画面不动、数据却已移位，下一手就错位。
     move(tiles: TileData[], direction: Direction, gridSize: GridSize): MoveResult {
-        let newTiles: TileData[] = [];
+        const newTiles: TileData[] = [];
         let scoreGained = 0;
-        
-        // 根据方向处理每一行/列
+
         const isHorizontal = direction === Direction.LEFT || direction === Direction.RIGHT;
         const isReverse = direction === Direction.RIGHT || direction === Direction.DOWN;
         const posKey = isHorizontal ? 'col' : 'row';
-        
+
         for (let i = 0; i < gridSize; i++) {
-            // 第1步：获取该行/列的方块，按位置排序
-            let lineTiles = tiles.filter(t => isHorizontal ? t.row === i : t.col === i);
-            lineTiles.sort((a, b) => (a as any)[posKey] - (b as any)[posKey]);
-            
+            const lineTiles = tiles
+                .filter(t => (isHorizontal ? t.row : t.col) === i)
+                .sort((a, b) => (a as any)[posKey] - (b as any)[posKey]);
             if (lineTiles.length === 0) continue;
-            
-            // 第2步：Compact — 所有方块向滑动方向紧凑排列
-            // 反向方向时从远端开始紧凑
-            if (isReverse) {
-                let wp = gridSize - 1;
-                for (let rp = lineTiles.length - 1; rp >= 0; rp--) {
-                    (lineTiles[rp] as any)[posKey] = wp--;
+
+            // 统一按「滑动方向」读：反向时从远端的牌开始合并
+            const ordered = isReverse ? lineTiles.slice().reverse() : lineTiles;
+            const placed: TileData[] = [];
+            let wp = 0;
+            for (let rp = 0; rp < ordered.length; rp++) {
+                const current = ordered[rp];
+                const next = rp + 1 < ordered.length ? ordered[rp + 1] : null;
+                const pos = isReverse ? gridSize - 1 - wp : wp;
+                // 上一手留下的 isMerged 标记不能带进新一帧，否则会重复播合并动画
+                const { isMerged: _stale, ...clean } = current;
+
+                if (next && current.value === next.value) {
+                    placed.push({
+                        ...clean,
+                        [posKey]: pos,
+                        value: current.value * 2,
+                        isMerged: true,
+                    });
+                    scoreGained += current.value * 2;
+                    rp++; // 跳过被吞掉的那张
+                } else {
+                    placed.push({ ...clean, [posKey]: pos });
                 }
-            } else {
-                let wp = 0;
-                for (let rp = 0; rp < lineTiles.length; rp++) {
-                    (lineTiles[rp] as any)[posKey] = wp++;
-                }
+                wp++;
             }
-            
-            // 第3步：Merge — 从滑动的远方方向开始合并相邻同值方块
-            let merged: TileData[] = [];
-            if (isReverse) {
-                // 从右向左处理（远端是右侧）
-                let wp = gridSize - 1;
-                let rp = lineTiles.length - 1;
-                while (rp >= 0) {
-                    const current = lineTiles[rp];
-                    const next = rp - 1 >= 0 ? lineTiles[rp - 1] : null;
-                    
-                    if (next && current.value === next.value) {
-                        const { isMerged: _ignored, ...clean } = current;
-                        merged.unshift({
-                            ...clean,
-                            [posKey]: wp,
-                            value: current.value * 2,
-                            isMerged: true,
-                        });
-                        scoreGained += current.value * 2;
-                        rp -= 2; // 跳过被合并的 next
-                    } else {
-                        const { isMerged: _ignored, ...clean } = current;
-                        merged.unshift({
-                            ...clean,
-                            [posKey]: wp,
-                        });
-                        rp--;
-                    }
-                    wp--;
-                }
-            } else {
-                // 从左向右处理（远端是左侧）
-                let wp = 0;
-                let rp = 0;
-                while (rp < lineTiles.length) {
-                    const current = lineTiles[rp];
-                    const next = rp + 1 < lineTiles.length ? lineTiles[rp + 1] : null;
-                    
-                    if (next && current.value === next.value) {
-                        const { isMerged: _ignored, ...clean } = current;
-                        merged.push({
-                            ...clean,
-                            [posKey]: wp,
-                            value: current.value * 2,
-                            isMerged: true,
-                        });
-                        scoreGained += current.value * 2;
-                        rp += 2; // 跳过被合并的 next
-                    } else {
-                        const { isMerged: _ignored, ...clean } = current;
-                        merged.push({
-                            ...clean,
-                            [posKey]: wp,
-                        });
-                        rp++;
-                    }
-                    wp++;
-                }
-            }
-            
-            newTiles.push(...merged);
+            newTiles.push(...(isReverse ? placed.reverse() : placed));
         }
-        
-        // 判断是否有实际移动或合并：逐个对比新 tiles 与其原始状态
+
+        // 与原始数据比较：位置 / 数值有变化，或牌数变少（发生合并）才算动过
         const originalMap = new Map(tiles.map(t => [t.id, t]));
-        const hasMoved = newTiles.some(nt => {
+        const hasMoved = newTiles.length !== tiles.length || newTiles.some(nt => {
             const ot = originalMap.get(nt.id);
             return !ot || ot.row !== nt.row || ot.col !== nt.col || ot.value !== nt.value;
-        }) || newTiles.length !== tiles.length;
+        });
 
         return { tiles: newTiles, scoreGained, hasMoved };
     }

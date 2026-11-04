@@ -153,7 +153,7 @@ export class UpgradeUI extends Component {
 
   private rebuildCards(): void {
     if (!this.cardContainer) return;
-    this.cardContainer.removeAllChildren();
+    this.cardContainer.destroyAllChildren();
 
     const options = this._allOptions[this._currentUnitIndex] ?? [];
     const count = options.length;

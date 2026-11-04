@@ -175,7 +175,7 @@ export class RouteMapUI extends Component {
       this.connectionsLayer.setSiblingIndex(0);
     }
 
-    this.nodesContainer.removeAllChildren();
+    this.nodesContainer.destroyAllChildren();
     const typeIcons: Record<string, string> = {
       battle: '\u2694', elite: '\uD83D\uDD25', shop: '\uD83C\uDFEA',
       rest: '\uD83D\uDCA4', event: '\uD83E\uDDEA', boss: '\uD83C\uDFC6'

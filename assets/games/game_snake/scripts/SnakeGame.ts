@@ -1,7 +1,8 @@
-import { _decorator, Component, Node, Button, Label, EventTouch, Vec2, Vec3, UITransform, find, director } from 'cc';
+import { _decorator, Component, Node, Button, Label, EventTouch, Vec2, Vec3, UITransform } from 'cc';
 import { Snake } from './Snake';
 import { FoodSpawner } from './FoodSpawner';
 import { Joystick } from './Joystick';
+import { SceneManager } from '../../../common/managers/SceneManager';
 
 const { ccclass, property } = _decorator;
 
@@ -192,7 +193,7 @@ export class SnakeGame extends Component {
 
         // 清空子节点
         if (this.gameArea) {
-            this.gameArea.removeAllChildren();
+            this.gameArea.destroyAllChildren();
         }
 
         // 创建蛇
@@ -360,7 +361,7 @@ export class SnakeGame extends Component {
     }
 
     private _onBackToLobby(): void {
-        director.loadScene('Lobby');
+        SceneManager.gotoLobby();
     }
 
     private _cleanupGame(): void {
@@ -369,8 +370,8 @@ export class SnakeGame extends Component {
 
         if (this._snake) {
             this._snake.destroyAll();
-            // 注意：不要调用 this._snake.node.destroy()
-            // 因为蛇节点是 gameArea 的子节点，gameArea.removeAllChildren() 或场景切换时会自动销毁
+            // 蛇根节点交给下一次 _initGame 的 destroyAllChildren 一起销毁
+            // （removeAllChildren 只脱离子节点、不销毁，反复重开会累积泄漏）
             this._snake = null;
         }
         if (this._foodSpawner) {

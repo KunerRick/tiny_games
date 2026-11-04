@@ -269,6 +269,9 @@ export class SurvivorCore {
             gems: this._gems,
             boss: null,
             offers: this._offers,
+            weapons: this._weapons,
+            passives: this._passives,
+            temper: this._temper,
         };
     }
 
@@ -421,6 +424,9 @@ export class SurvivorCore {
         s.gems = this._gems;
         s.boss = this._bossIndex >= 0 && this._enemies[this._bossIndex].active ? this._enemies[this._bossIndex] : null;
         s.offers = this._offers;
+        s.weapons = this._weapons;
+        s.passives = this._passives;
+        s.temper = this._temper;
         return s;
     }
 

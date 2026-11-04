@@ -131,7 +131,7 @@ function child(parent: Node, name: string): Node {
 
 /** 装卡片的容器：本身是面板的直接子节点，尺寸要跟着内容变（fitPanelBackground 只看直接子节点） */
 function resetContainer(container: Node, width: number, height: number): void {
-  container.removeAllChildren();
+  container.destroyAllChildren();
   const ui = container.getComponent(UITransform) ?? container.addComponent(UITransform);
   ui.setContentSize(Math.max(1, width), Math.max(1, height));
 }

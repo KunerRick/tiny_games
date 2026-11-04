@@ -19,6 +19,14 @@ export class SettingsPanel extends Component {
 
     private _selectedSize: GridSize = 4;
     private _onConfirm: ((size: GridSize) => void) | null = null;
+    private _showCalled: boolean = false;
+
+    onLoad(): void {
+        // 场景若误存成 active，开局会直接盖住棋盘；show() 之前一律隐藏
+        if (!this._showCalled) {
+            this.node.active = false;
+        }
+    }
 
     onDestroy(): void {
         // ❌ 不能访问 @property(Node)，场景销毁时节点已被引擎清理
@@ -26,6 +34,8 @@ export class SettingsPanel extends Component {
     }
 
     show(currentSize: GridSize, onConfirm: (size: GridSize) => void): void {
+        // 必须先置位再激活：节点首次激活会同步触发 onLoad
+        this._showCalled = true;
         this._selectedSize = currentSize;
         this._onConfirm = onConfirm;
 

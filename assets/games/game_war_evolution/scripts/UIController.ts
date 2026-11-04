@@ -92,12 +92,12 @@ export class UIController extends Component {
     private _onLobby: (() => void) | null = null;
 
     onLoad() {
-        // 绑定按钮事件
-        this.bindButton(this.unitButton0, () => this._onUnitSpawn?.('__btn0__'));
-        this.bindButton(this.unitButton1, () => this._onUnitSpawn?.('__btn1__'));
-        this.bindButton(this.evolveButton, () => this._onEvolve?.());
-        this.bindButton(this.restartButton, () => this._onRestart?.());
-        this.bindButton(this.lobbyButton, () => this._onLobby?.());
+        // 绑定按钮事件（handler 必须具名，红线 5）
+        this.bindButton(this.unitButton0, this.onUnitButton0);
+        this.bindButton(this.unitButton1, this.onUnitButton1);
+        this.bindButton(this.evolveButton, this.onEvolveButton);
+        this.bindButton(this.restartButton, this.onRestartButton);
+        this.bindButton(this.lobbyButton, this.onLobbyButton);
 
         // 初始隐藏结算面板
         if (this.gameOverPanel) {
@@ -110,9 +110,29 @@ export class UIController extends Component {
         }
     }
 
-    private bindButton(btn: Button | null, callback: () => void): void {
+    private onUnitButton0(): void {
+        this._onUnitSpawn?.('__btn0__');
+    }
+
+    private onUnitButton1(): void {
+        this._onUnitSpawn?.('__btn1__');
+    }
+
+    private onEvolveButton(): void {
+        this._onEvolve?.();
+    }
+
+    private onRestartButton(): void {
+        this._onRestart?.();
+    }
+
+    private onLobbyButton(): void {
+        this._onLobby?.();
+    }
+
+    private bindButton(btn: Button | null, handler: (this: UIController) => void): void {
         if (!btn) return;
-        btn.node.on(Node.EventType.TOUCH_END, callback, this);
+        btn.node.on(Node.EventType.TOUCH_END, handler, this);
     }
 
     // ======== 外部设置回调 ========

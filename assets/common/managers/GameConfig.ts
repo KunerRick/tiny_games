@@ -19,6 +19,8 @@ export const GAME_LIST: GameConfig[] = [
     { id: 'gate_runner', name: '数值冲刺', icon: 'default', sceneName: 'GateRunner', description: '穿过 ×2 / ÷2 数值门，带队伍冲到 Boss' },
     { id: 'solitaire', name: '纸牌接龙', icon: 'default', sceneName: 'Solitaire', description: '克朗代克单人纸牌' },
     { id: 'survivor', name: '午夜幸存者', icon: 'default', sceneName: 'Survivor', description: '8 分钟肉鸽生存，自动攻击 + 三选一构筑' },
+    { id: 'minesweeper', name: '扫雷', icon: 'default', sceneName: 'Minesweeper', description: '经典扫雷，首点安全 + 和弦' },
+    { id: 'sudoku', name: '数独', icon: 'default', sceneName: 'Sudoku', description: '经典数独，笔记 / 提示 / 撤销' },
 ];
 
 export function getGameById(id: string): GameConfig | undefined {

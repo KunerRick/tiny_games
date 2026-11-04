@@ -58,7 +58,7 @@ export class EventUI extends Component {
     }
 
     if (this.choiceContainer) {
-      this.choiceContainer.removeAllChildren();
+      this.choiceContainer.destroyAllChildren();
 
       if (event.type === 'choice' && event.choices) {
         const btnHeight = 50;

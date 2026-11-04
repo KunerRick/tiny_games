@@ -18,7 +18,7 @@ export class GameGrid extends Component {
     
     refresh(games: GameConfig[]) {
         // Clear existing
-        this.node.removeAllChildren();
+        this.node.destroyAllChildren();
         
         // Create icons
         games.forEach(game => {

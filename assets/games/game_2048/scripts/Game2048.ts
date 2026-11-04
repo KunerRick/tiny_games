@@ -42,17 +42,27 @@ export class Game2048 extends Component {
     private _isGameOver: boolean = false;
     private _isMoving: boolean = false;
     private _hasWon: boolean = false;
-    
+
+    // onDestroy 只用这些缓存解绑：场景销毁时 @property 的 getter 可能已返回 null（红线 4）
+    private _settingsNode: Node | null = null;
+    private _newGameNode: Node | null = null;
+    private _backNode: Node | null = null;
+    /** 滑动动画后的补间结算；场景销毁时必须取消，否则会打到已销毁的组件上 */
+    private _moveTimer = 0;
+
     onLoad() {
         // 设置按钮事件
         if (this.settingsButton) {
-            this.settingsButton.node.on(Node.EventType.TOUCH_END, this.onSettingsClick, this);
+            this._settingsNode = this.settingsButton.node;
+            this._settingsNode.on(Node.EventType.TOUCH_END, this.onSettingsClick, this);
         }
         if (this.newGameButton) {
-            this.newGameButton.node.on(Node.EventType.TOUCH_END, this.onNewGameClick, this);
+            this._newGameNode = this.newGameButton.node;
+            this._newGameNode.on(Node.EventType.TOUCH_END, this.onNewGameClick, this);
         }
         if (this.backButton) {
-            this.backButton.node.on(Node.EventType.TOUCH_END, this.onBackClick, this);
+            this._backNode = this.backButton.node;
+            this._backNode.on(Node.EventType.TOUCH_END, this.onBackClick, this);
         }
 
         // 设置输入回调
@@ -65,15 +75,22 @@ export class Game2048 extends Component {
     }
 
     onDestroy(): void {
-        if (this.settingsButton) {
-            this.settingsButton.node.off(Node.EventType.TOUCH_END, this.onSettingsClick, this);
+        this._cancelMoveTimer();
+        const settings = this._settingsNode;
+        if (settings && settings.isValid) {
+            settings.off(Node.EventType.TOUCH_END, this.onSettingsClick, this);
         }
-        if (this.newGameButton) {
-            this.newGameButton.node.off(Node.EventType.TOUCH_END, this.onNewGameClick, this);
+        const newGame = this._newGameNode;
+        if (newGame && newGame.isValid) {
+            newGame.off(Node.EventType.TOUCH_END, this.onNewGameClick, this);
         }
-        if (this.backButton) {
-            this.backButton.node.off(Node.EventType.TOUCH_END, this.onBackClick, this);
+        const back = this._backNode;
+        if (back && back.isValid) {
+            back.off(Node.EventType.TOUCH_END, this.onBackClick, this);
         }
+        this._settingsNode = null;
+        this._newGameNode = null;
+        this._backNode = null;
     }
     
     start() {
@@ -92,6 +109,8 @@ export class Game2048 extends Component {
     }
     
     initGame(gridSize: GridSize, spawnInitialTiles: boolean = true): void {
+        // 重开时上一局的补间结算必须作废，否则会往新棋盘里多塞一块
+        this._cancelMoveTimer();
         this._gridSize = gridSize;
         this._isGameOver = false;
         this._isMoving = false;
@@ -148,28 +167,41 @@ export class Game2048 extends Component {
         this._isMoving = true;
 
         // 滑动动画完成后 → 生新方块 → 统一结算检测
-        setTimeout(() => {
-            this._isMoving = false;
+        this._cancelMoveTimer();
+        this._moveTimer = setTimeout(this.onMoveSettled, 150);
+    }
 
-            const newTile = this.gameGrid?.spawnRandomTile(this._tiles, this._gridSize);
-            if (newTile) {
-                this._tiles.push(newTile);
-                this.gameGrid?.spawnTile(newTile);
-            }
+    /** 滑动动画结束：补新方块并结算（150ms 后执行，场景可能已经销毁） */
+    private onMoveSettled = (): void => {
+        this._moveTimer = 0;
+        if (!this.isValid) return;
+        this._isMoving = false;
 
-            // 检查是否达到 2048
-            if (!this._hasWon && this._tiles.some(t => t.value >= 2048)) {
-                this._hasWon = true;
-                this.saveProgress();
-                this.showWin();
-                this._isGameOver = true;
-                return;
-            }
+        const newTile = this.gameGrid?.spawnRandomTile(this._tiles, this._gridSize);
+        if (newTile) {
+            this._tiles.push(newTile);
+            this.gameGrid?.spawnTile(newTile);
+        }
 
-            // 统一结算检测（用最终棋盘 state）
-            this.checkGameEnd();
+        // 检查是否达到 2048
+        if (!this._hasWon && this._tiles.some(t => t.value >= 2048)) {
+            this._hasWon = true;
             this.saveProgress();
-        }, 150);
+            this.showWin();
+            this._isGameOver = true;
+            return;
+        }
+
+        // 统一结算检测（用最终棋盘 state）
+        this.checkGameEnd();
+        this.saveProgress();
+    };
+
+    private _cancelMoveTimer(): void {
+        if (this._moveTimer) {
+            clearTimeout(this._moveTimer);
+            this._moveTimer = 0;
+        }
     }
 
     /** 用当前棋盘检测是否 Game Over，是则弹出结算面板 */
@@ -217,6 +249,9 @@ export class Game2048 extends Component {
             bestScore,
             true,
         );
+
+        // 与失败结算一致：通关的棋盘不再续玩
+        StorageManager.instance.clearProgress();
     }
 
     private showGameOver(): void {

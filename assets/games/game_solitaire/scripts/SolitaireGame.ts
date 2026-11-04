@@ -22,6 +22,7 @@ import {
     Vec3,
     VerticalTextAlignment,
     game,
+    instantiate,
 } from 'cc';
 import {
     CARD_H,
@@ -78,7 +79,7 @@ const HELP_TEXT =
     + '\n'
     + '· 落牌规则：红黑交替、点数递减（红桃 7 只能放在黑桃 8 或梅花 8 上）。\n'
     + '· 空列只能放 K。\n'
-    + '· 点左上角的牌堆发牌。牌堆空了会自动重洗，每局最多 3 次，用完就只能撤销或新开一局。\n'
+    + '· 点左上角的牌堆发牌。牌堆空了会把废牌堆翻回去重洗；经典规则可无限重洗，想提高难度可在设置里开「限 3 次」。\n'
     + '· 拖动可以把一整段牌搬走；点一下牌顶，会自动找能放的位置。\n'
     + '· 不知道走哪张就点「提示」，高亮会圈出这一步的起点和落点。';
 
@@ -105,6 +106,8 @@ interface Settings {
     drawCount: 1 | 3;
     autoAce: boolean;
     vibrate: boolean;
+    /** true = 挑战模式（每局最多 3 次重洗）；默认经典（无限重洗） */
+    limitRedeal: boolean;
 }
 
 interface Stats {
@@ -245,6 +248,12 @@ export class SolitaireGame extends Component {
     private _helpBtn: Node | null = null;
     /** 顶栏「重洗 N/3」：把次数上限摆在明面上 */
     private _redealLabel: Label | null = null;
+    /** 设置里的「重洗规则」按钮（运行时克隆抽牌按钮生成，不改场景） */
+    private _redealBtn: Node | null = null;
+    private _redealModeLabel: Label | null = null;
+    /** 牌堆角标：剩余张数 / 重洗状态，避免「牌堆永远抽不完」的错觉 */
+    private _stockBadge: Node | null = null;
+    private _stockBadgeLabel: Label | null = null;
 
     private _confirmNewUntil = 0;
     private _toastUntil = 0;
@@ -253,7 +262,7 @@ export class SolitaireGame extends Component {
     private _toastBanner: Node | null = null;
     private _toastLabel: Label | null = null;
 
-    private _settings: Settings = { drawCount: 1, autoAce: true, vibrate: true };
+    private _settings: Settings = { drawCount: 1, autoAce: true, vibrate: true, limitRedeal: false };
     private _stats: Stats = { played: 0, won: 0, bestTime: 0, bestMoves: 0, bestScore: 0, streak: 0, bestStreak: 0 };
 
     // ==================== 生命周期 ====================
@@ -268,7 +277,9 @@ export class SolitaireGame extends Component {
         this._createCardViews();
         this._drawBackground();
         this._bindEvents();
+        this._ensureRedealMenuRow();
         this._createHelpEntry();
+        this._ensureStockBadge();
         this._restoreOrDeal();
 
         if (this.titleLabel) this.titleLabel.string = '纸牌接龙';
@@ -327,6 +338,10 @@ export class SolitaireGame extends Component {
         this._helpPanel = null;
         this._toastBanner = null;
         this._toastLabel = null;
+        this._stockBadge = null;
+        this._stockBadgeLabel = null;
+        this._redealBtn = null;
+        this._redealModeLabel = null;
     }
 
     // ==================== 初始化 ====================
@@ -364,7 +379,7 @@ export class SolitaireGame extends Component {
 
     private _startNewGame(countAsPlayed = true): void {
         const seed = ((Date.now() & 0x7fffffff) ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0;
-        this._core.deal(seed, this._settings.drawCount);
+        this._core.deal(seed, this._settings.drawCount, this._settings.limitRedeal);
         // 发牌后会直接送掉露在外面的 A（+10 分、翻牌 +5 分），
         // 这一步必须发生在刷新 HUD 之前 —— 否则分数标签要等下一秒轮询才跟上
         this._autoSendAces();
@@ -428,6 +443,7 @@ export class SolitaireGame extends Component {
         this._layout = placements;
         this._layoutByKey = indexLayout(placements);
 
+        const placed = new Set<string>();
         for (let z = 0; z < placements.length; z++) {
             const place = placements[z];
             const view = this._views.get(place.key);
@@ -442,9 +458,17 @@ export class SolitaireGame extends Component {
             else view.placeAt(local.x, local.y);
             view.node.setSiblingIndex(z);
             view.resetVisual();
+            placed.add(place.key);
         }
 
+        // 废牌堆只画最近几张：落在可视窗口外的牌必须显式隐藏，
+        // 否则它们会停在最后一次被摆放的位置，越抽越多、糊成一摞（抽 3 张时最明显）。
+        this._views.forEach((view, key) => {
+            if (!placed.has(key)) view.setCard(null);
+        });
+
         if (this.collectBtn) this.collectBtn.active = this._running && this._core.canAutoCollect();
+        this._refreshStockBadge();
     }
 
     private _designToLocal(left: number, top: number): { x: number; y: number } {
@@ -712,14 +736,27 @@ export class SolitaireGame extends Component {
     }
 
     private _doDraw(): void {
+        const state = this._core.state;
+        const wasStockEmpty = state.stock.length === 0;
+        const hadWaste = state.waste.length > 0;
+
         if (this._core.draw()) {
+            // 牌堆抽空后自动重洗时给一条明确反馈 —— 否则牌堆看起来「永远抽不完」
+            if (wasStockEmpty && hadWaste) {
+                this._toast(
+                    this._core.isRecycleLimited()
+                        ? `牌堆已重洗，本局还剩 ${this._core.recyclesLeft()} 次`
+                        : '牌堆已重洗（经典规则：可无限重洗）',
+                    1.8,
+                );
+            }
             this._vibrate();
             this._afterAction();
             return;
         }
         // 牌堆空 + 重洗次数用尽：必须给出明确反馈，否则玩家只觉得「点了没反应」
-        if (this._core.state.stock.length === 0 && this._core.state.waste.length > 0) {
-            this._toast(`重洗次数已用完（每局 ${MAX_RECYCLES} 次），试试撤销或新开一局`, 2.5);
+        if (state.stock.length === 0 && state.waste.length > 0) {
+            this._toast(`牌堆已抽完（每局最多重洗 ${MAX_RECYCLES} 次），试试撤销或新开一局`, 2.5);
         }
     }
 
@@ -770,7 +807,7 @@ export class SolitaireGame extends Component {
         if (!hint) {
             this._clearHint();
             const text = this._core.canDraw()
-                ? '暂时没有可走的牌，点左上角牌堆抽一张'
+                ? `暂时没有可走的牌，点左上角牌堆抽 ${this._settings.drawCount} 张`
                 : `重洗次数已用完（每局 ${MAX_RECYCLES} 次），试试撤销或新开一局`;
             this._toast(text, HINT_SEC);
             return;
@@ -789,7 +826,7 @@ export class SolitaireGame extends Component {
 
     /** 把一步棋讲成人话：只说「哪张牌 → 去哪」，不解释规则 */
     private _describeHint(from: number, to: number, count: number, isDraw: boolean): string {
-        if (isDraw) return '提示：点左上角的牌堆抽一张';
+        if (isDraw) return `提示：点左上角的牌堆抽 ${this._settings.drawCount} 张`;
         const cards = this._core.pileCards(from);
         const head = cards[cards.length - count];
         if (!head) return '提示：按高亮位置移动';
@@ -931,7 +968,7 @@ export class SolitaireGame extends Component {
         if (!topBar.getChildByName('RedealLabel')) {
             const label = this._makeLabel(
                 'RedealLabel', topBar, 120, 20, 170, 32,
-                `重洗 ${MAX_RECYCLES}/${MAX_RECYCLES}`, 20, COLOR_TEXT_SECONDARY,
+                '重洗 ∞', 20, COLOR_TEXT_SECONDARY,
             );
             label.horizontalAlign = HorizontalTextAlignment.RIGHT;
             this._redealLabel = label;
@@ -942,6 +979,62 @@ export class SolitaireGame extends Component {
             const btn = this._makeButton('HelpBtn', topBar, 330, -24, 40, 40, '?', 20, true);
             btn.on(Node.EventType.TOUCH_END, this._onHelpClicked, this);
             this._helpBtn = btn;
+        }
+    }
+
+    /**
+     * 牌堆角标。
+     *
+     * 之前牌堆永远画成同样厚的一叠、空了又立刻重洗，玩家会觉得「怎么抽都抽不完」。
+     * 这里在牌堆右下角常驻一个数字：有牌显示剩余张数，抽空显示「重洗 N」，重洗次数用尽显示「抽完」。
+     */
+    private _ensureStockBadge(): void {
+        const board = this.boardNode;
+        if (!board || this._stockBadge) return;
+
+        const node = new Node('StockBadge');
+        node.layer = board.layer;
+        const ut = node.addComponent(UITransform);
+        ut.setContentSize(78, 28);
+
+        const g = node.addComponent(Graphics);
+        g.fillColor = this._hexAlpha('#000000', 190);
+        g.roundRect(-39, -14, 78, 28, 12);
+        g.fill();
+        g.lineWidth = 2;
+        g.strokeColor = this._hexAlpha(COLOR_HIGHLIGHT, 150);
+        g.roundRect(-39, -14, 78, 28, 12);
+        g.stroke();
+
+        const label = this._makeLabel('StockBadgeLabel', node, 0, 0, 70, 24, '', 18, COLOR_TEXT_PRIMARY);
+        board.addChild(node);
+        node.setSiblingIndex(board.children.length - 1);
+
+        const center = this._designToLocal(colLeftX(STOCK_COL), TOP_ROW_Y);
+        node.setPosition(center.x + CARD_W / 2 - 26, center.y - CARD_H / 2 + 18, 0);
+
+        this._stockBadge = node;
+        this._stockBadgeLabel = label;
+    }
+
+    private _refreshStockBadge(): void {
+        const node = this._stockBadge;
+        if (!node || !node.isValid) return;
+
+        const state = this._core.state;
+        let text = '';
+        if (state.stock.length > 0) {
+            text = String(state.stock.length);
+        } else if (this._core.canRecycle()) {
+            text = this._core.isRecycleLimited() ? `重洗 ${this._core.recyclesLeft()}` : '重洗 ∞';
+        } else if (state.waste.length > 0) {
+            text = '抽完';
+        }
+
+        const show = text !== '';
+        if (node.active !== show) node.active = show;
+        if (show && this._stockBadgeLabel && this._stockBadgeLabel.string !== text) {
+            this._stockBadgeLabel.string = text;
         }
     }
 
@@ -1138,6 +1231,14 @@ export class SolitaireGame extends Component {
         this._toast('新局生效', 1.5);
     }
 
+    /** 重洗规则：经典（无限）/ 挑战（每局最多 3 次）。只对下一局生效 */
+    private _onRedealModeClicked(): void {
+        this._settings.limitRedeal = !this._settings.limitRedeal;
+        this._saveSettings();
+        this._refreshMenuLabels();
+        this._toast(this._settings.limitRedeal ? '挑战模式：新局最多重洗 3 次' : '经典模式：新局可无限重洗', 1.8);
+    }
+
     private _onVibrateClicked(): void {
         this._settings.vibrate = !this._settings.vibrate;
         this._saveSettings();
@@ -1208,13 +1309,60 @@ export class SolitaireGame extends Component {
             this.modeLabel.string = this._settings.drawCount === 1 ? '抽 1 张' : '抽 3 张';
         }
         if (this._redealLabel && this._redealLabel.isValid) {
-            this._redealLabel.string = `重洗 ${this._core.recyclesLeft()}/${MAX_RECYCLES}`;
+            this._redealLabel.string = this._core.isRecycleLimited()
+                ? `重洗 ${this._core.recyclesLeft()}/${MAX_RECYCLES}`
+                : '重洗 ∞';
         }
+    }
+
+    /**
+     * 设置菜单里的「重洗规则」行：克隆「抽牌」按钮（同样的贴图与尺寸），
+     * 插在它下面，并把后续几行整体下移一格 —— 不改 .scene，也不写死坐标。
+     */
+    private _ensureRedealMenuRow(): void {
+        if (this._redealBtn || !this.drawModeBtn) return;
+        const parent = this.drawModeBtn.parent;
+        if (!parent) return;
+
+        // 行距取自场景现有布局（抽牌 → 震动），场景调整后这里自动跟随
+        const topY = this.drawModeBtn.position.y;
+        const step = this.vibrateBtn && this.vibrateBtn.isValid
+            ? Math.max(40, topY - this.vibrateBtn.position.y)
+            : 80;
+
+        this._shiftMenuRow(this.vibrateBtn, step);
+        this._shiftMenuRow(this.autoAceBtn, step);
+        this._shiftMenuRow(this.menuCloseBtn, step);
+        if (this.menuStatsLabel) {
+            const statsNode = this.menuStatsLabel.node;
+            this._shiftMenuRow(statsNode, step);
+            const ut = statsNode.getComponent(UITransform);
+            if (ut && ut.height < 120) ut.setContentSize(ut.width, 120);
+        }
+
+        const node = instantiate(this.drawModeBtn);
+        node.name = 'RedealBtn';
+        node.setPosition(0, topY - step, 0);
+        parent.addChild(node);
+
+        const labelNode = node.getChildByName('Label');
+        this._redealBtn = node;
+        this._redealModeLabel = labelNode ? labelNode.getComponent(Label) : null;
+        this._bindTap(node, this._onRedealModeClicked);
+    }
+
+    private _shiftMenuRow(node: Node | null, dy: number): void {
+        if (!node || !node.isValid) return;
+        const p = node.position;
+        node.setPosition(p.x, p.y - dy, 0);
     }
 
     private _refreshMenuLabels(): void {
         if (this.drawModeLabel) {
             this.drawModeLabel.string = `抽牌：${this._settings.drawCount === 1 ? '抽 1 张' : '抽 3 张'}`;
+        }
+        if (this._redealModeLabel) {
+            this._redealModeLabel.string = `重洗：${this._settings.limitRedeal ? '限 3 次' : '经典（无限）'}`;
         }
         if (this.vibrateLabel) {
             this.vibrateLabel.string = `震动：${this._settings.vibrate ? '开' : '关'}`;
@@ -1328,6 +1476,7 @@ export class SolitaireGame extends Component {
             this._settings.drawCount = parsed.drawCount === 3 ? 3 : 1;
             this._settings.autoAce = parsed.autoAce !== false;
             this._settings.vibrate = parsed.vibrate !== false;
+            this._settings.limitRedeal = parsed.limitRedeal === true;
         } catch (err) {
             // 忽略损坏设置
         }

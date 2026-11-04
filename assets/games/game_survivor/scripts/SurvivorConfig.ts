@@ -503,6 +503,10 @@ export interface SurvivorSnapshot {
     gems: readonly GemState[];
     boss: EnemyState | null;
     offers: readonly UpgradeOffer[];
+    /** 当前构筑（只读引用；HUD 展示用，核心每帧刷新快照） */
+    weapons: Readonly<Partial<Record<WeaponTrack, number>>>;
+    passives: Readonly<Partial<Record<PassiveTrack, number>>>;
+    temper: number;
 }
 
 export interface SurvivorInput {

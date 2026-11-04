@@ -4,14 +4,18 @@
  * 职责（规格 §6.2）：摇杆/键盘输入、固定步长推进、倍速、相机跟随、渲染调度、调试读数。
  *  - 核心永远只收到 `FIXED_DT`（倍速只在「一帧跑几步」上体现，规格 §4.3）
  *  - 追帧上限：1x 最多 3 步/帧、2x 6 步、4x 12 步；超出直接丢弃积压，避免回来就瞬移（规格 P7）
- *  - 本阶段还没有摇杆与三选一面板（M3）：桌面用 WASD/方向键，升级自动选第一张
+ *  - 本阶段还没有三选一面板（M3）：升级自动选第一张
+ *  - 输入：触屏摇杆（运行时装在 Canvas 下的 `SurvivorJoystick`）为主，桌面 WASD/方向键仅作调试输入
  *
  * 约定：事件 handler 全部命名方法（红线 5）；`onDestroy()` 只解绑键盘，不碰 @property 节点（红线 4）。
  */
 
-import { _decorator, Component, EventKeyboard, Graphics, Input, input, KeyCode, Label, Node, Vec3 } from 'cc';
+import { _decorator, Component, EventKeyboard, Input, input, KeyCode, Label, Node, UITransform, Vec3, Widget } from 'cc';
 import { SurvivorCore } from './SurvivorCore';
+import { SurvivorJoystick } from './SurvivorJoystick';
 import { SurvivorRenderer } from './SurvivorRenderer';
+import { SurvivorUpgradePanel } from './SurvivorUpgradePanel';
+import { SurvivorHud } from './SurvivorHud';
 import { FIXED_DT } from './SurvivorConfig';
 import type { SurvivorInput } from './SurvivorConfig';
 
@@ -37,6 +41,9 @@ export class SurvivorGame extends Component {
     @property({ type: Label, tooltip: '调试读数（阶段验收用，正式 HUD 在 M3）' })
     debugLabel: Label | null = null;
 
+    @property({ type: SurvivorJoystick, tooltip: '虚拟摇杆（留空则运行时自动创建到 Canvas 下）' })
+    joystick: SurvivorJoystick | null = null;
+
     @property({ tooltip: '开局随机种子（0 = 用时间戳）' })
     seed = 0;
 
@@ -52,6 +59,10 @@ export class SurvivorGame extends Component {
     _steps = 0;
     /** 暂停标志 */
     _paused = false;
+    /** 三选一升级面板（运行时创建） */
+    _upgradePanel: SurvivorUpgradePanel | null = null;
+    /** 正式 HUD（时间 / 等级 / 生命 / 经验 / 构筑） */
+    _hud: SurvivorHud | null = null;
 
     private _acc = 0;
     private _keys = new Set<KeyCode>();
@@ -67,6 +78,11 @@ export class SurvivorGame extends Component {
     onLoad(): void {
         if (!this.renderer) this.renderer = this.getComponent(SurvivorRenderer);
         if (!this.worldNode) this.worldNode = this.node;
+        if (!this.joystick) this.joystick = this._ensureJoystick();
+        this._hud = this._ensureHud();
+        this._upgradePanel = this._ensureUpgradePanel();
+        // M2 的调试读数退场：正式 HUD 接管顶栏
+        if (this.debugLabel) this.debugLabel.node.active = false;
         input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
         input.on(Input.EventType.KEY_UP, this.onKeyUp, this);
         this.startRun();
@@ -78,6 +94,71 @@ export class SurvivorGame extends Component {
         this._keys.clear();
         this._core = null;
         this._input = null;
+        this.joystick = null;
+        this._upgradePanel = null;
+        this._hud = null;
+    }
+
+    /**
+     * 摇杆在运行时创建，不改场景文件。
+     *
+     * 挂在 Canvas 下、压在世界层之上但**排在 BackButton 之前**：
+     * 全屏的触摸节点若排在返回按钮之后，会把返回按钮的点击整个吞掉。
+     */
+    private _ensureJoystick(): SurvivorJoystick | null {
+        const parent = this.node.parent;
+        if (!parent) return null;
+
+        let node = parent.getChildByName('Joystick');
+        if (!node) {
+            node = new Node('Joystick');
+            node.layer = parent.layer;
+            const ut = node.addComponent(UITransform);
+            ut.setContentSize(720, 1280);
+            node.addComponent(SurvivorJoystick);
+            parent.addChild(node);
+
+            // 铺满 Canvas，随窗口尺寸变化
+            const widget = node.addComponent(Widget);
+            widget.target = parent;
+            widget.isAlignLeft = true;
+            widget.isAlignRight = true;
+            widget.isAlignTop = true;
+            widget.isAlignBottom = true;
+            widget.left = 0;
+            widget.right = 0;
+            widget.top = 0;
+            widget.bottom = 0;
+            widget.alignMode = Widget.AlignMode.ALWAYS;
+            widget.updateAlignment();
+
+            // 放到 BackButton 之前，别抢它的触摸
+            const back = parent.getChildByName('BackButton');
+            const idx = back ? back.getSiblingIndex() : -1;
+            node.setSiblingIndex(idx >= 0 ? idx : parent.children.length - 1);
+        }
+        return node.getComponent(SurvivorJoystick);
+    }
+
+    private _ensureHud(): SurvivorHud | null {
+        const parent = this.node.parent;
+        if (!parent) return null;
+        let node = parent.getChildByName('Hud');
+        if (!node) node = SurvivorHud.create(parent).node;
+        return node.getComponent(SurvivorHud);
+    }
+
+    /** 面板必须最后创建，渲染层级压在摇杆和 HUD 之上 */
+    private _ensureUpgradePanel(): SurvivorUpgradePanel | null {
+        const parent = this.node.parent;
+        if (!parent) return null;
+        let node = parent.getChildByName('UpgradePanel');
+        if (!node) {
+            SurvivorUpgradePanel.create(parent);
+            node = parent.getChildByName('UpgradePanel');
+        }
+        if (node) node.setSiblingIndex(parent.children.length - 1);
+        return node ? node.getComponent(SurvivorUpgradePanel) : null;
     }
 
     /** 开新局（重开也走这里） */
@@ -87,11 +168,14 @@ export class SurvivorGame extends Component {
         this._acc = 0;
         this._steps = 0;
         this._paused = false;
+        if (this._upgradePanel) this._upgradePanel.hide();
         if (this.renderer) this.renderer.drawBackground();
+        if (this._hud && this._core) this._hud.refresh(this._core.getSnapshot());
     }
 
     update(dt: number): void {
         if (!this._core) return;
+        const phase = this._core.getSnapshot().phase;
 
         this._fpsAcc += dt;
         this._fpsFrames++;
@@ -101,7 +185,12 @@ export class SurvivorGame extends Component {
             this._fpsFrames = 0;
         }
 
-        if (!this._paused) this._advance(dt);
+        if (phase === 'levelup') {
+            // 逻辑暂停：面板打开期间敌人不动、不掉血，只等玩家选择
+            if (this._upgradePanel && !this._upgradePanel.visible) this._openUpgradePanel();
+        } else if (!this._paused) {
+            this._advance(dt);
+        }
         this._syncView();
         this._render();
 
@@ -119,7 +208,7 @@ export class SurvivorGame extends Component {
         const mult = this._speed;
         const maxSteps = mult >= 4 ? MAX_STEPS_4X : mult >= 2 ? MAX_STEPS_2X : MAX_STEPS_1X;
 
-        this._readKeyboard();
+        this._readInput();
         this._acc += dt * mult;
         // 追帧：一次性积压太多就丢弃，宁可慢放也不瞬移
         if (this._acc > FIXED_DT * maxSteps) this._acc = FIXED_DT * maxSteps;
@@ -133,14 +222,55 @@ export class SurvivorGame extends Component {
         }
         this._steps = steps;
 
-        // M3 接三选一面板；在这之前自动选第一张，保证 M2 能一直跑
-        let guard = 0;
-        while (core.getSnapshot().phase === 'levelup' && guard++ < 32) {
-            core.chooseUpgrade(0);
+        const phase = core.getSnapshot().phase;
+        if (phase === 'levelup') {
+            // 三选一：停止推进并弹出面板。连升多级由 _onOfferChosen 接续。
+            this._acc = 0;
+            this._openUpgradePanel();
+        } else if (phase !== 'running') {
+            this._acc = 0;
         }
-        if (core.getSnapshot().phase !== 'running') this._acc = 0;
 
         core.drainEvents();
+    }
+
+    /** 弹出升级面板；面板选择后调用 _onOfferChosen */
+    private _openUpgradePanel(): void {
+        const core = this._core;
+        const panel = this._upgradePanel;
+        if (!core || !panel) return;
+        const snap = core.getSnapshot();
+        if (snap.phase !== 'levelup' || snap.offers.length === 0) return;
+        this._acc = 0;
+        // 按住摇杆时升级：面板期间方向不该继续生效，松手前先归零
+        this.joystick?.release();
+        panel.show(snap.offers, snap.player.level, this._onOfferChosen);
+    }
+
+    /**
+     * 面板回调：应用一张卡；如果经验还够就继续弹下一组（逐级弹，不合并）。
+     * 用箭头属性保证面板调用时 this 仍指向本组件（面板只拿到函数引用）。
+     */
+    private _onOfferChosen = (index: number): void => {
+        const core = this._core;
+        if (!core) return;
+        core.chooseUpgrade(index);
+        const snap = core.getSnapshot();
+        if (snap.phase === 'levelup' && snap.offers.length > 0) {
+            if (this._upgradePanel) this._upgradePanel.show(snap.offers, snap.player.level, this._onOfferChosen);
+        }
+    };
+
+    /** 摇杆优先（移动端唯一入口），没有触摸时回落到键盘（桌面调试） */
+    private _readInput(): void {
+        const joy = this.joystick;
+        if (joy && joy.isValid && joy.isActive()) {
+            const d = joy.direction;
+            this._input.moveX = d.x;
+            this._input.moveY = d.y;
+            return;
+        }
+        this._readKeyboard();
     }
 
     private _readKeyboard(): void {
@@ -175,7 +305,9 @@ export class SurvivorGame extends Component {
         const renderer = this.renderer;
         if (!core || !renderer) return;
         const t0 = performance.now();
-        renderer.render(core.getSnapshot());
+        const snap = core.getSnapshot();
+        renderer.render(snap);
+        if (this._hud) this._hud.refresh(snap);
         const ms = performance.now() - t0;
         this._lastRenderMs = ms;
         this._renderSum += ms;
@@ -190,7 +322,8 @@ export class SurvivorGame extends Component {
     private _refreshHud(): void {
         const core = this._core;
         const label = this.debugLabel;
-        if (!core || !label) return;
+        // M2 调试读数已退场，节点关掉时不必再拼字符串
+        if (!core || !label || !label.node.activeInHierarchy) return;
         const s = core.getSnapshot();
         const t = s.time;
         const mm = Math.floor(t / 60);
@@ -236,6 +369,8 @@ export class SurvivorGame extends Component {
     debugAdvance(seconds: number): void {
         const core = this._core;
         if (!core) return;
+        // 调试推进不弹面板：自动选第一张，保持旧的验收脚本可用
+        if (this._upgradePanel && this._upgradePanel.visible) this._upgradePanel.hide();
         const steps = Math.round(seconds / FIXED_DT);
         for (let i = 0; i < steps; i++) {
             core.step(FIXED_DT, { moveX: 0, moveY: 0 });

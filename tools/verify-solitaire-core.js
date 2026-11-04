@@ -102,6 +102,7 @@ function makeState(partial) {
         seed: 1,
         drawCount: 1,
         recycles: 0,
+        limitRecycles: true,
         ...partial,
     };
 }
@@ -339,6 +340,56 @@ test('重洗有上限：每局最多 MAX_RECYCLES 次', () => {
     ok(!core.draw());
     eq(core.state.recycles, CFG.MAX_RECYCLES);
     eq(core.state.waste.length, 1); // 牌没被吞掉
+});
+
+test('经典模式可无限重洗', () => {
+    const core = coreWith({ waste: [card('S', 5, true)], limitRecycles: false });
+    for (let i = 0; i < CFG.MAX_RECYCLES + 4; i++) {
+        ok(core.recycle(), `第 ${i + 1} 次重洗应当成功（经典规则无上限）`);
+        while (core.state.stock.length > 0) core.draw();
+    }
+    eq(core.state.recycles, CFG.MAX_RECYCLES + 4);
+    eq(core.recyclesLeft(), Infinity);
+    eq(core.isRecycleLimited(), false);
+    ok(core.canDraw());
+});
+
+test('发牌默认走挑战模式，显式传 false 才是经典', () => {
+    const limited = new SolitaireCore();
+    limited.deal(123, 1);
+    eq(limited.isRecycleLimited(), true);
+    eq(limited.recyclesLeft(), CFG.MAX_RECYCLES);
+
+    const classic = new SolitaireCore();
+    classic.deal(123, 1, false);
+    eq(classic.isRecycleLimited(), false);
+    eq(classic.recyclesLeft(), Infinity);
+});
+
+test('存档往返保留重洗规则', () => {
+    const classic = new SolitaireCore();
+    classic.deal(2026, 1, false);
+    classic.draw();
+    const restored = SolitaireCore.fromSave(classic.serialize());
+    ok(restored);
+    eq(restored.isRecycleLimited(), false);
+    eq(restored.stateHash(), classic.stateHash());
+
+    const limited = new SolitaireCore();
+    limited.deal(2026, 3, true);
+    const back = SolitaireCore.fromSave(limited.serialize());
+    ok(back);
+    eq(back.isRecycleLimited(), true);
+});
+
+test('旧存档（无 limitRecycles 字段）按挑战模式解析', () => {
+    const core = new SolitaireCore();
+    core.deal(77, 1, true);
+    const data = core.serialize();
+    delete data.limitRecycles;
+    const restored = SolitaireCore.fromSave(data);
+    ok(restored);
+    eq(restored.isRecycleLimited(), true);
 });
 
 test('重洗上限可被撤销回退', () => {

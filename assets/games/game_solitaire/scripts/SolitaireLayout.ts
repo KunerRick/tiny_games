@@ -80,12 +80,15 @@ export function buildLayout(state: CoreState): Placement[] {
     const placements: Placement[] = [];
 
     const stockLeft = colLeftX(STOCK_COL);
+    // 牌堆厚度随剩余张数变薄（24 张约 4 层，剩个位数时只剩 1 层），
+    // 否则牌堆永远画成同样厚的一叠，玩家看不出「快抽完了」。
+    const stockDepth = clamp(Math.ceil(state.stock.length / 6), 1, 5);
     for (let i = 0; i < state.stock.length; i++) {
         const card = state.stock[i];
         placements.push({
             card,
             key: cardKey(card),
-            left: stockLeft + Math.min(i, 4) * STOCK_THICKNESS,
+            left: stockLeft + Math.min(i, stockDepth - 1) * STOCK_THICKNESS,
             top: TOP_ROW_Y,
             pile: -1,
             index: i,
@@ -93,17 +96,35 @@ export function buildLayout(state: CoreState): Placement[] {
     }
 
     const wasteLeft = colLeftX(WASTE_COL);
-    const wasteStart = Math.max(0, state.waste.length - 3);
-    for (let i = wasteStart; i < state.waste.length; i++) {
-        const card = state.waste[i];
-        placements.push({
-            card,
-            key: cardKey(card),
-            left: wasteLeft + (i - wasteStart) * WASTE_FAN,
-            top: TOP_ROW_Y,
-            pile: PILE_WASTE,
-            index: i,
-        });
+    if (state.drawCount === 1) {
+        // 抽 1 张：废牌堆是一摞，只露顶牌。下面最多两张用 2px 错位暗示厚度。
+        // 之前和抽 3 张共用 26px 扇形，抽得越多越往右铺，最后一张会压到收牌区。
+        const stackStart = Math.max(0, state.waste.length - 3);
+        for (let i = stackStart; i < state.waste.length; i++) {
+            const card = state.waste[i];
+            placements.push({
+                card,
+                key: cardKey(card),
+                left: wasteLeft + (i - stackStart) * STOCK_THICKNESS,
+                top: TOP_ROW_Y,
+                pile: PILE_WASTE,
+                index: i,
+            });
+        }
+    } else {
+        // 抽 3 张：当前这一组（最多 3 张）横向扇开
+        const wasteStart = Math.max(0, state.waste.length - 3);
+        for (let i = wasteStart; i < state.waste.length; i++) {
+            const card = state.waste[i];
+            placements.push({
+                card,
+                key: cardKey(card),
+                left: wasteLeft + (i - wasteStart) * WASTE_FAN,
+                top: TOP_ROW_Y,
+                pile: PILE_WASTE,
+                index: i,
+            });
+        }
     }
 
     for (let f = 0; f < 4; f++) {

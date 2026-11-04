@@ -64,6 +64,8 @@ export interface CoreState {
     seed: number;
     drawCount: DrawCount;
     recycles: number;
+    /** true = 挑战模式（每局最多 MAX_RECYCLES 次）；false = 经典模式（可无限重洗） */
+    limitRecycles: boolean;
 }
 
 export interface MoveResult {
@@ -109,6 +111,8 @@ export interface SaveData {
     score: number;
     moves: number;
     recycles: number;
+    /** 旧存档可能没有该字段；缺省按「挑战模式」解析，保持旧局的重洗上限不变 */
+    limitRecycles?: boolean;
     stock: SaveCard[];
     waste: SaveCard[];
     foundations: SaveCard[][];
@@ -149,7 +153,7 @@ export function createDeck(): Card[] {
     return deck;
 }
 
-function emptyState(seed: number, drawCount: DrawCount): CoreState {
+function emptyState(seed: number, drawCount: DrawCount, limitRecycles = true): CoreState {
     return {
         stock: [],
         waste: [],
@@ -160,6 +164,7 @@ function emptyState(seed: number, drawCount: DrawCount): CoreState {
         seed,
         drawCount,
         recycles: 0,
+        limitRecycles,
     };
 }
 
@@ -176,11 +181,11 @@ export class SolitaireCore {
 
     // ==================== 发牌 ====================
 
-    deal(seed: number, drawCount: DrawCount): void {
+    deal(seed: number, drawCount: DrawCount, limitRecycles = true): void {
         const deck = createDeck();
         shuffle(deck, mulberry32(seed));
 
-        const state = emptyState(seed >>> 0, drawCount);
+        const state = emptyState(seed >>> 0, drawCount, limitRecycles);
         let index = 0;
 
         // 第 p 列发 p+1 张，最后一张翻正面
@@ -252,15 +257,24 @@ export class SolitaireCore {
         return this.state.stock.length > 0 || this.canRecycle();
     }
 
-    /** 牌堆空、废牌堆有牌、且本局重洗次数没用完 */
+    /** 牌堆空、废牌堆有牌，且（经典模式，或本局重洗次数没用完） */
     canRecycle(): boolean {
         return this.state.stock.length === 0
             && this.state.waste.length > 0
-            && this.state.recycles < MAX_RECYCLES;
+            && (!this.state.limitRecycles || this.state.recycles < MAX_RECYCLES);
     }
 
-    /** 本局还剩几次重洗 */
+    /** 是否处于「每局最多 MAX_RECYCLES 次」的挑战模式 */
+    isRecycleLimited(): boolean {
+        return this.state.limitRecycles;
+    }
+
+    /**
+     * 本局还剩几次重洗。
+     * 经典模式返回 Infinity（界面上显示为 ∞），调用方不要拿它做算术。
+     */
     recyclesLeft(): number {
+        if (!this.state.limitRecycles) return Infinity;
         return Math.max(0, MAX_RECYCLES - this.state.recycles);
     }
 
@@ -579,6 +593,7 @@ export class SolitaireCore {
             score: this.state.score,
             moves: this.state.moves,
             recycles: this.state.recycles,
+            limitRecycles: this.state.limitRecycles,
             stock: this.state.stock.map(encode),
             waste: this.state.waste.map(encode),
             foundations: this.state.foundations.map(pile => pile.map(encode)),
@@ -629,6 +644,7 @@ export class SolitaireCore {
             seed: toScore(data.seed),
             drawCount: data.drawCount,
             recycles: toScore(data.recycles),
+            limitRecycles: data.limitRecycles !== false,
         };
         return new SolitaireCore(state);
     }
@@ -647,6 +663,7 @@ export class SolitaireCore {
             this.state.score,
             this.state.moves,
             this.state.recycles,
+            this.state.limitRecycles ? 'limited' : 'classic',
         ].join('|');
     }
 
@@ -714,6 +731,7 @@ export class SolitaireCore {
             seed: this.state.seed,
             drawCount: this.state.drawCount,
             recycles: this.state.recycles,
+            limitRecycles: this.state.limitRecycles,
         };
     }
 

@@ -1,7 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = 'D:\\code\\github\\tiny_games\\assets\\games\\game_tiny_vanguard\\scripts';
+// 跨平台：相对脚本位置定位项目，不再写死某台机器的绝对路径
+const ROOT = path.join(__dirname, '..', 'assets', 'games', 'game_tiny_vanguard', 'scripts');
 
 function read(rel) {
   return fs.readFileSync(path.join(ROOT, rel), 'utf-8');
@@ -17,11 +18,11 @@ function check(name, cond, detail = '') {
   }
 }
 
-const bm = read('battle\\BattleManager.ts');
-const uc = read('battle\\UnitController.ts');
-const ai = read('battle\\AIController.ts');
-const gc = read('battle\\GridController.ts');
-const bui = read('ui\\BattleUI.ts');
+const bm = read('battle/BattleManager.ts');
+const uc = read('battle/UnitController.ts');
+const ai = read('battle/AIController.ts');
+const gc = read('battle/GridController.ts');
+const bui = read('ui/BattleUI.ts');
 const tvm = read('TinyVanguardMain.ts');
 
 let ok = true;
