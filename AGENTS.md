@@ -64,7 +64,8 @@ tiny_games/
 │   │   ├── game_merge/         # 场景: Merge（合合大作战）
 │   │   ├── game_gate_runner/   # 场景: GateRunner（数值冲刺）
 │   │   ├── game_solitaire/     # 场景: Solitaire（纸牌接龙）
-│   │   └── game_survivor/      # 场景: Survivor（午夜幸存者）
+│   │   ├── game_survivor/      # 场景: Survivor（午夜幸存者）
+│   │   └── game_idiom/         # 场景: Idiom（成语填字）
 │   ├── common/            # 公共模块
 │   │   ├── managers/      # SceneManager, StorageManager, GameConfig
 │   │   └── components/    # BackButton, SafeAreaAdapter
@@ -78,7 +79,7 @@ tiny_games/
 │   ├── assets/            # 文档配图
 │   ├── tech/              # 技术决策与踩坑详情（AGENTS.md 教训的展开）
 │   └── cocos-best-practices.md
-├── tools/                 # 本地校验/同步脚本（verify-battle-fixes.js、verify-tetris-core.js、check-wechat-build.js、replay-wechat-bundle.js、sync-build-scenes.js）
+├── tools/                 # 本地校验/同步脚本（verify-battle-fixes.js、verify-tetris-core.js、verify-idiom-core.js、check-wechat-build.js、replay-wechat-bundle.js、sync-build-scenes.js）
 ├── settings/              # Cocos 编辑器设置
 ├── extensions/            # 编辑器插件（tsconfig 排除；node_modules 已 gitignore）
 └── build/                 # 构建输出（gitignored）
@@ -99,6 +100,7 @@ tiny_games/
 { id: 'gate_runner',  name: '数值冲刺', icon: 'default', sceneName: 'GateRunner',   description: '穿过 ×2 / ÷2 数值门，带队伍冲到 Boss' }
 { id: 'solitaire',    name: '纸牌接龙', icon: 'default', sceneName: 'Solitaire',    description: '克朗代克单人纸牌' }
 { id: 'survivor',     name: '午夜幸存者', icon: 'default', sceneName: 'Survivor',  description: '8 分钟肉鸽生存，自动攻击 + 三选一构筑' }
+{ id: 'idiom',        name: '成语填字', icon: 'default', sceneName: 'Idiom',     description: '纵横交叉填成语，全部锁定通关' }
 ```
 
 **添加新游戏三步骤**：① `GameConfig.ts` 注册 ② 创建 `assets/games/game_xxx/scenes/Xxx.scene` ③ 场景名与 `sceneName` 一致。
@@ -189,6 +191,13 @@ node tools/verify-battle-fixes.js
 ```bash
 node tools/verify-tetris-core.js
 # 需要 tsc：优先 $TSC，其次 node_modules，最后回落 Cocos Creator 自带版本
+```
+
+成语填字纯逻辑自检（不启动编辑器；覆盖词库、三档难度各 100 个种子生成、交叉 / 邻接约束、填字校验、提示死锁回归、计分与存档，共 24 项）：
+
+```bash
+node tools/verify-idiom-core.js
+# 同样需要 tsc（编译 IdiomCore.ts / IdiomData.ts）
 ```
 
 微信小游戏构建产物预检（**把 `build/wechatgame/` 交给微信开发者工具之前跑**，退出码 0 = 可开）：
@@ -297,3 +306,5 @@ node tools/sync-build-scenes.js --all            # 顺带修其它平台的构�
 - [方块坠落设计](./docs/specs/2026-10-25-game-tetris-design.md)
 - [方块坠落验收报告（含界面美化记录）](./docs/plans/2026-10-25-game-tetris-acceptance.md)
 - [午夜幸存者设计（含 M1/M2 实测记录）](./docs/specs/2026-11-02-game-survivor-design.md)
+- [成语填字设计（含浏览器试玩复核）](./docs/specs/2026-11-05-game-idiom-design.md)
+- [品类盘点与下一批路线图](./docs/plans/2026-11-05-game-catalog-and-roadmap.md)

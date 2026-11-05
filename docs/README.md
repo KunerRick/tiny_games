@@ -150,7 +150,7 @@
 | 大厅排版 | [`design/2026-11-01-lobby-scroll-grid.md`](./design/2026-11-01-lobby-scroll-grid.md) | 重叠/超出的三个根因、**由内向外**逐层刷新的顺序、`scrollHint` 判据、卡片文案与配色的运行时收敛 |
 | 大厅计划 | [`plans/2026-05-12-phase1-lobby-plan.md`](./plans/2026-05-12-phase1-lobby-plan.md) | 大厅实现计划 |
 | 路线图 | [`plans/2026-10-31-next-games-roadmap.md`](./plans/2026-10-31-next-games-roadmap.md) | 第 6–8 款：砖块远征 → 合成大西瓜 → 数值门跑酷（三款均已可玩） |
-| 品类盘点 + 路线图 | [`plans/2026-11-05-game-catalog-and-roadmap.md`](./plans/2026-11-05-game-catalog-and-roadmap.md) | 12 款现有游戏的品类覆盖、8 个缺口评分，下一批 8 款（P0 成语填字 / 五子棋 → P1 放置经营 / 三消 / 塔防 → P2 台球 / 推箱子 / 节奏）的实现计划与排期 |
+| 品类盘点 + 路线图 | [`plans/2026-11-05-game-catalog-and-roadmap.md`](./plans/2026-11-05-game-catalog-and-roadmap.md) | 12 款现有游戏的品类覆盖、8 个缺口评分，下一批 8 款（P0 成语填字 ✅ 已完成 / 五子棋 → P1 放置经营 / 三消 / 塔防 → P2 台球 / 推箱子 / 节奏）的实现计划与排期 |
 | 物理方案评估 | [`plans/2026-10-31-merge-physics-evaluation.md`](./plans/2026-10-31-merge-physics-evaluation.md) | 合成大西瓜：自研圆形求解 vs Box2D，含求解器设计与 12 项验收 |
 
 ---

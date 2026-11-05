@@ -1,7 +1,7 @@
 # 成语填字（`idiom`）玩法设计
 
 - 日期：2026-11-05
-- 状态：设计定稿，待实现
+- 状态：**已实现并合入 `develop`**（2026-11-05）。逻辑自检 24/24、`tsc --noEmit` 通过、浏览器试玩复核见 §12；微信真机验收待做
 - 对应路线图：[`2026-11-05-game-catalog-and-roadmap.md`](../plans/2026-11-05-game-catalog-and-roadmap.md) §5.1（P0-1）
 - 场景：`assets/games/game_idiom/scenes/Idiom.scene`
 - id / sceneName：`idiom` / `Idiom`
@@ -134,7 +134,7 @@
 ## 6. 词库
 
 - 位置：`assets/games/game_idiom/scripts/IdiomData.ts`，导出 `IDIOM_LIST: string[]`。
-- 约 260 条常用四字成语，全部简体、无重复、无变体选择符。
+- 实测 **509 条**常用四字成语（规划时写的 260/300 条已按实际扩充），全部简体、无重复、无变体选择符。
 - 选择标准：大众熟悉、字面常见、互相之间有足够的共用字（便于交叉生成）。
 - **不内置释义**（v1）：释义需要人工校对，写错会误导玩家；候选字机制本身已经承担「提示认词」的作用。v1.1 可补 100 条常用成语的释义作为可选线索。
 - 用 TS 常量而非 JSON：纯逻辑层可直接被 Node 自检脚本编译，不需要运行时异步加载 `JsonAsset`。
