@@ -22,6 +22,7 @@ export const GAME_LIST: GameConfig[] = [
     { id: 'minesweeper', name: '扫雷', icon: 'default', sceneName: 'Minesweeper', description: '经典扫雷，首点安全 + 和弦' },
     { id: 'sudoku', name: '数独', icon: 'default', sceneName: 'Sudoku', description: '经典数独，笔记 / 提示 / 撤销' },
     { id: 'idiom', name: '成语填字', icon: 'default', sceneName: 'Idiom', description: '纵横交叉填成语，全部锁定通关' },
+    { id: 'gomoku', name: '五子棋', icon: 'default', sceneName: 'Gomoku', description: '15×15 经典五子棋，人机三档 / 双人对战' },
 ];
 
 export function getGameById(id: string): GameConfig | undefined {

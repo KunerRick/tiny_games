@@ -114,6 +114,13 @@
 | 游戏设计 | [`specs/2026-11-05-game-idiom-design.md`](./specs/2026-11-05-game-idiom-design.md) | 交叉填字规则、候选字 + 干扰字、锁定 / 连击 / 计分、三档难度、可玩性评估与生成算法 |
 | 回归自检 | [`../tools/verify-idiom-core.js`](../tools/verify-idiom-core.js) | 纯逻辑单测（24 项：词库、三档难度各 100 个种子生成、交叉 / 邻接约束、填字校验、光标前移 / 擦除回退、提示（含「提示补满带错字成语」死锁回归）、计分、存档） |
 
+### 五子棋（Gomoku / gomoku）
+
+| 类型 | 文件 | 说明 |
+|------|------|------|
+| 游戏设计 | [`specs/2026-11-05-game-gomoku-design.md`](./specs/2026-11-05-game-gomoku-design.md) | 15×15 规则、人机三档 / 双人、悔棋与终局回滚、AI 剪枝与评分表、布局、浏览器复核记录（§12） |
+| 回归自检 | [`../tools/verify-gomoku-core.js`](../tools/verify-gomoku-core.js) | 纯逻辑单测（24 项：四方向胜负、边界 / 长连、平局、悔棋精确还原、AI 必赢必堵 / 合法性、530 局自对弈、确定性、评分与候选点） |
+
 ### 砖块远征（Brick Breaker / brick）
 
 | 类型 | 文件 | 说明 |
@@ -141,8 +148,6 @@
 
 ### 大厅与整体
 
-### 大厅与整体
-
 | 类型 | 文件 | 说明 |
 |------|------|------|
 | 整体设计 | [`specs/2026-05-12-tiny-games-design.md`](./specs/2026-05-12-tiny-games-design.md) | 小游戏集合整体设计 |
@@ -150,7 +155,7 @@
 | 大厅排版 | [`design/2026-11-01-lobby-scroll-grid.md`](./design/2026-11-01-lobby-scroll-grid.md) | 重叠/超出的三个根因、**由内向外**逐层刷新的顺序、`scrollHint` 判据、卡片文案与配色的运行时收敛 |
 | 大厅计划 | [`plans/2026-05-12-phase1-lobby-plan.md`](./plans/2026-05-12-phase1-lobby-plan.md) | 大厅实现计划 |
 | 路线图 | [`plans/2026-10-31-next-games-roadmap.md`](./plans/2026-10-31-next-games-roadmap.md) | 第 6–8 款：砖块远征 → 合成大西瓜 → 数值门跑酷（三款均已可玩） |
-| 品类盘点 + 路线图 | [`plans/2026-11-05-game-catalog-and-roadmap.md`](./plans/2026-11-05-game-catalog-and-roadmap.md) | 12 款现有游戏的品类覆盖、8 个缺口评分，下一批 8 款（P0 成语填字 ✅ 已完成 / 五子棋 → P1 放置经营 / 三消 / 塔防 → P2 台球 / 推箱子 / 节奏）的实现计划与排期 |
+| 品类盘点 + 路线图 | [`plans/2026-11-05-game-catalog-and-roadmap.md`](./plans/2026-11-05-game-catalog-and-roadmap.md) | 12 款现有游戏的品类覆盖、8 个缺口评分，下一批 8 款（P0 成语填字 ✅ / 五子棋 ✅ → P1 放置经营 / 三消 / 塔防 → P2 台球 / 推箱子 / 节奏）的实现计划与排期 |
 | 物理方案评估 | [`plans/2026-10-31-merge-physics-evaluation.md`](./plans/2026-10-31-merge-physics-evaluation.md) | 合成大西瓜：自研圆形求解 vs Box2D，含求解器设计与 12 项验收 |
 
 ---
