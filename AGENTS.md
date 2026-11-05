@@ -69,7 +69,8 @@ tiny_games/
 │   │   ├── game_sudoku/        # 场景: Sudoku（数独）
 │   │   ├── game_idiom/         # 场景: Idiom（成语填字）
 │   │   ├── game_gomoku/        # 场景: Gomoku（五子棋）
-│   │   └── game_idle/          # 场景: Idle（小店日记）
+│   │   ├── game_idle/          # 场景: Idle（小店日记）
+│   │   └── game_match3/        # 场景: Match3（缤纷消除）
 │   ├── common/            # 公共模块
 │   │   ├── managers/      # SceneManager, StorageManager, GameConfig
 │   │   └── components/    # BackButton, SafeAreaAdapter
@@ -83,7 +84,7 @@ tiny_games/
 │   ├── assets/            # 文档配图
 │   ├── tech/              # 技术决策与踩坑详情（AGENTS.md 教训的展开）
 │   └── cocos-best-practices.md
-├── tools/                 # 本地校验/同步脚本（verify-battle-fixes.js、verify-tetris-core.js、verify-idiom-core.js、verify-gomoku-core.js、check-wechat-build.js、replay-wechat-bundle.js、sync-build-scenes.js）
+├── tools/                 # 本地校验/同步脚本（verify-battle-fixes.js、verify-tetris-core.js、verify-idiom-core.js、verify-gomoku-core.js、verify-idle-core.js、verify-match3-core.js、check-wechat-build.js、replay-wechat-bundle.js、sync-build-scenes.js）
 ├── settings/              # Cocos 编辑器设置
 ├── extensions/            # 编辑器插件（tsconfig 排除；node_modules 已 gitignore）
 └── build/                 # 构建输出（gitignored）
@@ -109,6 +110,7 @@ tiny_games/
 { id: 'idiom',        name: '成语填字', icon: 'default', sceneName: 'Idiom',       description: '纵横交叉填成语，全部锁定通关' }
 { id: 'gomoku',       name: '五子棋',   icon: 'default', sceneName: 'Gomoku',      description: '15×15 经典五子棋，人机三档 / 双人对战' }
 { id: 'idle',         name: '小店日记', icon: 'default', sceneName: 'Idle',        description: '点击经营小店，升级设施，离线也赚钱' }
+{ id: 'match3',       name: '缤纷消除', icon: 'default', sceneName: 'Match3',      description: '交换相邻方块凑三连，连锁消除闯 30 关' }
 ```
 
 **添加新游戏三步骤**：① `GameConfig.ts` 注册 ② 创建 `assets/games/game_xxx/scenes/Xxx.scene` ③ 场景名与 `sceneName` 一致。
@@ -213,6 +215,20 @@ node tools/verify-idiom-core.js
 ```bash
 node tools/verify-gomoku-core.js
 # 同样需要 tsc（编译 GomokuCore.ts）
+```
+
+放置经营纯逻辑自检（不启动编辑器；覆盖费用表、点击 / 自动 / 离线公式、8h 封顶、时间倒退、30 天模拟、10 万次操作无 NaN、大数格式化、存档往返与坏档回落，共 27 项）：
+
+```bash
+node tools/verify-idle-core.js
+# 同样需要 tsc（编译 IdleCore.ts）
+```
+
+三消纯逻辑自检（不启动编辑器；覆盖 500 种子 × 4/5 色开局无三连、交换合法性与非法不改变棋盘、特殊块生成 / 触发 / 互炸不死循环、连锁计分公式、无解重排、10,000 次长跑、快照往返与坏档回落、30 关配置与星级边界，共 25 项）：
+
+```bash
+node tools/verify-match3-core.js
+# 同样需要 tsc（编译 Match3Core.ts / Match3Levels.ts）
 ```
 
 微信小游戏构建产物预检（**把 `build/wechatgame/` 交给微信开发者工具之前跑**，退出码 0 = 可开）：
@@ -324,4 +340,5 @@ node tools/sync-build-scenes.js --all            # 顺带修其它平台的构�
 - [成语填字设计（含浏览器试玩复核）](./docs/specs/2026-11-05-game-idiom-design.md)
 - [五子棋设计（含浏览器试玩复核）](./docs/specs/2026-11-05-game-gomoku-design.md)
 - [小店日记设计（点击 / 自动 / 离线三线收益）](./docs/specs/2026-11-05-game-idle-design.md)
+- [缤纷消除设计（交换消除 / 特殊块 / 30 关）](./docs/specs/2026-11-05-game-match3-design.md)
 - [品类盘点与下一批路线图](./docs/plans/2026-11-05-game-catalog-and-roadmap.md)

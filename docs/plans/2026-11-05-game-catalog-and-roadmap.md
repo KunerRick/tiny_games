@@ -1,7 +1,7 @@
 # 游戏合集品类盘点与下一批开发路线图
 
 - 日期：2026-11-05
-- 状态：**实施中** —— P0-1 / P0-2 / P1-1 已可玩并入库（见 §4.1），下一款 P1-2 `match3`
+- 状态：**实施中** —— P0-1 / P0-2 / P1-1 / P1-2 已可玩并入库（见 §4.1），下一款 P1-3 `tower_defense`
 - 范围：盘点现有 12 款游戏的品类覆盖，确定下一批 8 款候选的优先级、MVP 边界与排期
 - 前置文档：[`2026-10-31-next-games-roadmap.md`](./2026-10-31-next-games-roadmap.md)（第 6–8 款）、[`2026-11-01-next-games-roadmap.md`](./2026-11-01-next-games-roadmap.md)（接龙 / 幸存者）
 
@@ -95,8 +95,8 @@
 |------|----|------|------|------|-----------|------|
 | P0-1 | `idiom` | 成语填字 | 文字填字 | 6–8 人日 | 词库数据 + 棋盘生成器 | ✅ 已完成（2026-11-05 合入 `develop`） |
 | P0-2 | `gomoku` | 五子棋 | 棋类对战 | 5–7 人日 | 极小化极大 AI | ✅ 已完成（2026-11-05 合入 `develop`） |
-| P1-1 | `idle` | 小店日记（放置经营） | 挂机 / 模拟经营 | 12–16 人日 | 离线收益结算 + 大数格式化 | 未开始 |
-| P1-2 | `match3` | 缤纷消除 | 三消 | 18–25 人日 | 关卡生成器 + 连锁 / 特殊块 | 未开始 |
+| P1-1 | `idle` | 小店日记（放置经营） | 挂机 / 模拟经营 | 12–16 人日 | 离线收益结算 + 大数格式化 | ✅ 已完成（2026-11-05 合入 `develop`） |
+| P1-2 | `match3` | 缤纷消除 | 三消 | 18–25 人日 | 关卡生成器 + 连锁 / 特殊块 | ✅ 已完成（2026-11-05） |
 | P1-3 | `tower_defense` | 守卫塔楼 | 塔防 lite | 14–18 人日 | 寻路 + 波次 + 对象池 | 未开始 |
 | P2-1 | `pool` | 台球 | 体育手感 | 8–10 人日 | 圆形物理（复用 merge 求解器） | 未开始 |
 | P2-2 | `sokoban` | 推箱子 | 解谜机关 | 4–6 人日 | 关卡文本格式 + BFS 可解校验 | 未开始 |
@@ -111,7 +111,7 @@
 | P0-1 | `idiom` | ✅ 已可玩 | [`specs/2026-11-05-game-idiom-design.md`](../specs/2026-11-05-game-idiom-design.md) | `tools/verify-idiom-core.js`（24 项） |
 | P0-2 | `gomoku` | ✅ 已可玩 | [`specs/2026-11-05-game-gomoku-design.md`](../specs/2026-11-05-game-gomoku-design.md) | `tools/verify-gomoku-core.js`（34 项，含 500 局自我对弈） |
 | P1-1 | `idle` | ✅ 已可玩 | [`specs/2026-11-05-game-idle-design.md`](../specs/2026-11-05-game-idle-design.md) | `tools/verify-idle-core.js`（27 项） |
-| P1-2 | `match3` | 🚧 开发中 | `specs/2026-11-05-game-match3-design.md` | `tools/verify-match3-core.js` |
+| P1-2 | `match3` | ✅ 已可玩 | [`specs/2026-11-05-game-match3-design.md`](../specs/2026-11-05-game-match3-design.md) | `tools/verify-match3-core.js`（25 项） |
 | P1-3 | `tower_defense` | ⬜ 未开工 | — | — |
 | P2-1 | `pool` | ⬜ 未开工 | — | — |
 | P2-2 | `sokoban` | ⬜ 未开工 | — | — |
