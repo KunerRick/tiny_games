@@ -121,6 +121,13 @@
 | 游戏设计 | [`specs/2026-11-05-game-gomoku-design.md`](./specs/2026-11-05-game-gomoku-design.md) | 15×15 规则、人机三档 / 双人、悔棋与终局回滚、AI 剪枝与评分表、布局、浏览器复核记录（§12） |
 | 回归自检 | [`../tools/verify-gomoku-core.js`](../tools/verify-gomoku-core.js) | 纯逻辑单测（24 项：四方向胜负、边界 / 长连、平局、悔棋精确还原、AI 必赢必堵 / 合法性、530 局自对弈、确定性、评分与候选点） |
 
+### 小店日记（Idle / idle）
+
+| 类型 | 文件 | 说明 |
+|------|------|------|
+| 游戏设计 | [`specs/2026-11-05-game-idle-design.md`](./specs/2026-11-05-game-idle-design.md) | 点击 → 自动 → 离线三线收益、四设施 × 5 级、8 小时离线封顶、大数格式化、数值安全与验收清单 |
+| 回归自检 | [`../tools/verify-idle-core.js`](../tools/verify-idle-core.js) | 纯逻辑单测（27 项：费用表、点击 / 自动 / 离线公式、8h 封顶、时间倒退、30 天模拟、10 万次操作无 NaN、大数格式化、存档往返与坏档回落） |
+
 ### 砖块远征（Brick Breaker / brick）
 
 | 类型 | 文件 | 说明 |
