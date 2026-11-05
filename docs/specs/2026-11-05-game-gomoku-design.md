@@ -1,7 +1,7 @@
 # 五子棋（`gomoku`）玩法设计
 
 - 日期：2026-11-05
-- 状态：**已实现并完成浏览器复核**（2026-11-05），待合入 `develop`。逻辑自检 24/24、`tsc --noEmit` 通过、浏览器试玩复核见 §12；微信真机验收待做
+- 状态：**已实现并完成浏览器复核**（2026-11-05），已合入 `develop`。逻辑自检 24/24、`tsc --noEmit` 通过、浏览器试玩复核见 §12；微信真机验收待做
 - 对应路线图：[`2026-11-05-game-catalog-and-roadmap.md`](../plans/2026-11-05-game-catalog-and-roadmap.md) §5.2（P0-2）
 - 场景：`assets/games/game_gomoku/scenes/Gomoku.scene`
 - id / sceneName：`gomoku` / `Gomoku`
