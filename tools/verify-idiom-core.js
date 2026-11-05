@@ -283,6 +283,22 @@ test('填满正确成语会锁定并加分', () => {
     assert.strictEqual(core.streak, 1);
 });
 
+test('完成一条成语后不再保持激活状态', () => {
+    const core = new IdiomCore('easy', 47);
+    const slot = core.slots[0];
+    let lastKind = 'none';
+    for (const idx of slot.cells) {
+        if (core.locked[idx]) continue;
+        core.select(idx);
+        if (core.activeSlot !== slot.id) core.select(idx);
+        lastKind = core.fill(core.solution[idx]).kind;
+    }
+    assert.strictEqual(core.slotLocked[slot.id], true, '目标成语未完成');
+    assert.strictEqual(lastKind, 'correct', `最后一格期望 correct，实际 ${lastKind}`);
+    assert.notStrictEqual(core.activeSlot, slot.id, '已完成的成语仍被激活');
+    assert(core.locked.filter(Boolean).length >= 4, '成语格子没有全部锁定');
+});
+
 test('填错会记失误、红闪后清空未锁定格', () => {
     const core = new IdiomCore('easy', 13);
     const slot = core.slots[0];
@@ -331,6 +347,55 @@ test('擦除可清空自己填的字', () => {
     assert.strictEqual(core.values[idx], core.solution[idx]);
     assert.strictEqual(core.erase(), true);
     assert.strictEqual(core.values[idx], '');
+});
+
+test('填完一个字光标自动前移到本成语下一个空格', () => {
+    const core = new IdiomCore('easy', 41);
+    const slot = core.slots[0];
+    const first = slot.cells.find((i) => !core.locked[i]);
+    assert(typeof first === 'number', '该成语没有可填格');
+    core.select(first);
+    assert.strictEqual(core.activeSlot, slot.id, '未激活目标成语');
+    const res = core.fill(core.solution[first]);
+    assert.strictEqual(res.kind, 'filled', `期望 filled，实际 ${res.kind}`);
+    assert.strictEqual(core.values[first], core.solution[first]);
+    assert.notStrictEqual(core.selected, first, '光标没有前移');
+    assert(slot.cells.indexOf(core.selected) >= 0, '光标移出了当前成语');
+    assert.strictEqual(core.values[core.selected], '', '光标落在了已填格上');
+});
+
+test('擦除会回退并清掉上一个自己填的字', () => {
+    const core = new IdiomCore('easy', 43);
+    const slot = core.slots[0];
+    const first = slot.cells.find((i) => !core.locked[i]);
+    core.select(first);
+    core.fill(core.solution[first]);
+    const moved = core.selected;
+    assert.notStrictEqual(moved, first);
+    assert.strictEqual(core.erase(), true, '自动前移后擦除失效');
+    assert.strictEqual(core.values[first], '', '上一个字没有被擦掉');
+    assert.strictEqual(core.selected, first, '擦除后光标没有回到被擦的格');
+});
+
+test('提示补满带错字的成语会清空，不会卡在「还差 0 字」', () => {
+    const core = new IdiomCore('easy', 71);
+    const slot = core.slots.find((s) => s.cells.filter((i) => !core.locked[i]).length >= 2);
+    assert(slot, '没有找到可测试的成语');
+    const editable = slot.cells.filter((idx) => !core.locked[idx]);
+
+    // 模拟玩家：第一格填错字，中间填正确字，只留最后一格空着
+    core.values[editable[0]] = '龘';
+    for (let i = 1; i < editable.length - 1; i++) core.values[editable[i]] = core.solution[editable[i]];
+    core.activeSlot = slot.id;
+    core.selected = editable[editable.length - 1];
+
+    const hinted = core.hint();
+    assert(hinted >= 0, '提示不可用');
+    assert.strictEqual(core.slotLocked[slot.id], false, '带错字的成语被当成完成');
+    assert.strictEqual(core.hintClearedSlot, true, '没有标记已清空');
+    assert.strictEqual(core.values[editable[0]], '', '错字没有被清掉');
+    const emptyLeft = slot.cells.filter((idx) => !core.locked[idx] && !core.values[idx]);
+    assert(emptyLeft.length > 0, '清空后仍没有可填的格（卡死）');
 });
 
 test('提示填入正确字并计次扣分', () => {

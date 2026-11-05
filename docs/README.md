@@ -112,7 +112,7 @@
 | 类型 | 文件 | 说明 |
 |------|------|------|
 | 游戏设计 | [`specs/2026-11-05-game-idiom-design.md`](./specs/2026-11-05-game-idiom-design.md) | 交叉填字规则、候选字 + 干扰字、锁定 / 连击 / 计分、三档难度、可玩性评估与生成算法 |
-| 回归自检 | [`../tools/verify-idiom-core.js`](../tools/verify-idiom-core.js) | 纯逻辑单测（20 项：词库、三档难度各 100 个种子生成、交叉 / 邻接约束、填字校验、提示、计分、存档） |
+| 回归自检 | [`../tools/verify-idiom-core.js`](../tools/verify-idiom-core.js) | 纯逻辑单测（24 项：词库、三档难度各 100 个种子生成、交叉 / 邻接约束、填字校验、光标前移 / 擦除回退、提示（含「提示补满带错字成语」死锁回归）、计分、存档） |
 
 ### 砖块远征（Brick Breaker / brick）
 

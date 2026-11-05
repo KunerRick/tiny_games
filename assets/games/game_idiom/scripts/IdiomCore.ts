@@ -132,6 +132,8 @@ export class IdiomCore {
     bestStreak = 0;
     score = 0;
     status: 'playing' | 'won' = 'playing';
+    /** 上一次 hint() 是否因为「这条成语里已有错字」而清空了玩家填的字（供 UI 提示） */
+    hintClearedSlot = false;
 
     private _pendingWrong: number[] = [];
 
@@ -438,6 +440,7 @@ export class IdiomCore {
         if (!char) return result;
 
         this.values[this.selected] = char;
+        this._advanceWithinSlot();
         const full: IdiomSlot[] = [];
         for (let i = 0; i < this.slots.length; i++) {
             const slot = this.slots[i];
@@ -478,11 +481,38 @@ export class IdiomCore {
         }
         if (anyCorrect) {
             if (this.isComplete()) this.status = 'won';
+            if (this.activeSlot >= 0 && this.slotLocked[this.activeSlot]) {
+                // 当前成语已经完成：取消选中，提示玩家去点下一条
+                this.activeSlot = -1;
+                this.selected = -1;
+            }
             result.kind = 'correct';
             return result;
         }
         result.kind = 'filled';
         return result;
+    }
+
+    /** 填完一个字后，把光标挪到当前成语里下一个空格（没有空格则不动） */
+    private _advanceWithinSlot(): void {
+        if (this.activeSlot < 0) return;
+        const slot = this.slots[this.activeSlot];
+        if (!slot) return;
+        const cells = slot.cells;
+        let from = 0;
+        for (let i = 0; i < cells.length; i++) {
+            if (cells[i] === this.selected) {
+                from = i + 1;
+                break;
+            }
+        }
+        for (let step = 0; step < cells.length; step++) {
+            const idx = cells[(from + step) % cells.length];
+            if (!this.locked[idx] && !this.values[idx]) {
+                this.selected = idx;
+                return;
+            }
+        }
     }
 
     /** 红闪结束后清空错误格（由 UI 调用） */
@@ -498,16 +528,42 @@ export class IdiomCore {
 
     erase(): boolean {
         if (this.status === 'won' || this._pendingWrong.length > 0) return false;
-        if (this.selected < 0 || this.locked[this.selected]) return false;
-        if (!this.values[this.selected]) return false;
-        this.values[this.selected] = '';
-        return true;
+        if (this.activeSlot < 0) return false;
+
+        // 当前格里有自己填的字：直接擦掉
+        if (this.selected >= 0 && !this.locked[this.selected] && this.values[this.selected]) {
+            this.values[this.selected] = '';
+            return true;
+        }
+
+        // 否则回退到当前成语里光标前一个自己填的字（配合"填完自动前移"）
+        const slot = this.slots[this.activeSlot];
+        if (!slot) return false;
+        const cells = slot.cells;
+        let from = 0;
+        for (let i = 0; i < cells.length; i++) {
+            if (cells[i] === this.selected) {
+                from = i - 1;
+                break;
+            }
+        }
+        for (let step = 0; step < cells.length; step++) {
+            const i = ((from - step) % cells.length + cells.length) % cells.length;
+            const idx = cells[i];
+            if (!this.locked[idx] && this.values[idx]) {
+                this.values[idx] = '';
+                this.selected = idx;
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 提示当前激活成语里的一个空格，返回格下标；-1 = 不可用 */
     hint(): number {
         if (this.status === 'won' || this._pendingWrong.length > 0) return -1;
         if (this.hintsUsed >= this.maxHints) return -1;
+        this.hintClearedSlot = false;
 
         let slot: IdiomSlot | null = null;
         if (this.activeSlot >= 0 && !this.slotLocked[this.activeSlot]) {
@@ -547,6 +603,16 @@ export class IdiomCore {
                 for (let k = 0; k < slot.cells.length; k++) this.locked[slot.cells[k]] = true;
                 this.score = Math.max(0, this.score + this.completionScore());
                 if (this.isComplete()) this.status = 'won';
+            } else {
+                // 提示补满了这条成语，但里面有玩家填错的字。
+                // 若不处理会卡在「还差 0 字」——没有空格可填，也永远不会触发校验。
+                for (let k = 0; k < slot.cells.length; k++) {
+                    const cell = slot.cells[k];
+                    if (!this.locked[cell]) this.values[cell] = '';
+                }
+                const firstEmpty = slot.cells.find((cell) => !this.locked[cell] && !this.values[cell]);
+                if (firstEmpty !== undefined) this.selected = firstEmpty;
+                this.hintClearedSlot = true;
             }
         }
         return idx;

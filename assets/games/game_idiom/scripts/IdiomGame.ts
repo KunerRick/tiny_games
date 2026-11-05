@@ -38,13 +38,15 @@ const DIFF_KEY = 'tiny_games_idiom_diff';
 const SAVE_KEY = 'tiny_games_idiom_save';
 
 const BOARD_TOP = 258;
+/** 棋盘可用竖直区间（到候选字/状态行之前），用于把裁剪后的棋盘居中摆放 */
+const BOARD_BAND_H = 598;
 const CHIPS_Y = 150;
 const DIFF_Y = 218;
 
 const COLOR_FRAME = '#0E1728';
 const COLOR_FRAME_STROKE = '#2A3A57';
-const COLOR_CELL = '#121D31';
-const COLOR_CELL_ACTIVE = '#17263F';
+const COLOR_CELL = '#17233A';
+const COLOR_CELL_ACTIVE = '#20344F';
 const COLOR_CELL_SELECTED = '#1D4ED8';
 const COLOR_CELL_LOCKED = '#231F12';
 const COLOR_CELL_FLASH = '#7F1D1D';
@@ -242,7 +244,7 @@ export class IdiomGame extends Component {
         this._startTimerIfNeeded();
         this._refreshAll();
         this._saveSnapshot();
-        toast(this.node, '已填入一个正确的字', 1.2);
+        toast(this.node, core.hintClearedSlot ? '这条成语里有填错的字，已清空重填' : '已填入一个正确的字', 1.4);
         if (core.isWon) this._handleWin();
     }
 
@@ -422,12 +424,27 @@ export class IdiomGame extends Component {
 
         const conf = IDIOM_DIFFS[this._difficulty];
         const cell = conf.cell;
-        const px = core.size * cell;
-        const framePx = px + 20;
-        const board = createNode('Board', this.node, framePx, framePx);
-        board.setPosition(designPos(360, BOARD_TOP + framePx / 2));
+        // 成语只占网格的一部分：按实际占用范围裁剪外框并居中，避免整盘偏到一侧
+        let minRow = core.size, maxRow = -1, minCol = core.size, maxCol = -1;
+        for (let i = 0; i < core.solution.length; i++) {
+            if (core.solution[i] === '') continue;
+            const r = Math.floor(i / core.size);
+            const c = i % core.size;
+            if (r < minRow) minRow = r;
+            if (r > maxRow) maxRow = r;
+            if (c < minCol) minCol = c;
+            if (c > maxCol) maxCol = c;
+        }
+        if (maxRow < 0) { minRow = 0; maxRow = 0; minCol = 0; maxCol = 0; }
+        const contentW = (maxCol - minCol + 1) * cell;
+        const contentH = (maxRow - minRow + 1) * cell;
+        const frameW = contentW + 20;
+        const frameH = contentH + 20;
+        const boardTop = BOARD_TOP + Math.max(0, (BOARD_BAND_H - frameH) / 2);
+        const board = createNode('Board', this.node, frameW, frameH);
+        board.setPosition(designPos(360, boardTop + frameH / 2));
         const frameG = board.addComponent(Graphics);
-        drawRoundRect(frameG, framePx, framePx, 16, toColor(COLOR_FRAME), toColor(COLOR_FRAME_STROKE), 2);
+        drawRoundRect(frameG, frameW, frameH, 16, toColor(COLOR_FRAME), toColor(COLOR_FRAME_STROKE), 2);
         this._board = board;
 
         for (let i = 0; i < core.solution.length; i++) {
@@ -436,8 +453,8 @@ export class IdiomGame extends Component {
             const c = i % core.size;
             const node = createNode('Cell', board, cell, cell);
             node.setPosition(
-                (c + 0.5) * cell - px / 2,
-                px / 2 - (r + 0.5) * cell,
+                (c - minCol + 0.5) * cell - contentW / 2,
+                contentH / 2 - (r - minRow + 0.5) * cell,
                 0,
             );
             const g = node.addComponent(Graphics);
@@ -454,7 +471,7 @@ export class IdiomGame extends Component {
         }
 
         if (this._statusLabel) {
-            this._statusLabel.node.setPosition(designPos(360, BOARD_TOP + framePx + 26));
+            this._statusLabel.node.setPosition(designPos(360, boardTop + frameH + 26));
         }
     }
 
@@ -486,8 +503,8 @@ export class IdiomGame extends Component {
 
             let fill = COLOR_CELL;
             if (isActive) fill = COLOR_CELL_ACTIVE;
+            if (isSelected && !isLocked) fill = COLOR_CELL_SELECTED;
             if (isLocked) fill = COLOR_CELL_LOCKED;
-            if (isSelected) fill = COLOR_CELL_SELECTED;
             if (flashing) fill = COLOR_CELL_FLASH;
 
             const stroke = isLocked && !isSelected && !flashing
@@ -626,7 +643,7 @@ export class IdiomGame extends Component {
             width: 540,
             height: 56,
         });
-        createLabel(panel, this._isNewBest ? '这张盘比之前都快' : '交叉填字，一个不落', 21, {
+        createLabel(panel, this._isNewBest ? '刷新了最好成绩' : '交叉填字，一个不落', 21, {
             y: 196,
             color: UI.textDim,
             width: 520,
