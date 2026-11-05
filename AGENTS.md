@@ -65,8 +65,11 @@ tiny_games/
 │   │   ├── game_gate_runner/   # 场景: GateRunner（数值冲刺）
 │   │   ├── game_solitaire/     # 场景: Solitaire（纸牌接龙）
 │   │   ├── game_survivor/      # 场景: Survivor（午夜幸存者）
+│   │   ├── game_minesweeper/   # 场景: Minesweeper（扫雷）
+│   │   ├── game_sudoku/        # 场景: Sudoku（数独）
 │   │   ├── game_idiom/         # 场景: Idiom（成语填字）
-│   │   └── game_gomoku/        # 场景: Gomoku（五子棋）
+│   │   ├── game_gomoku/        # 场景: Gomoku（五子棋）
+│   │   └── game_idle/          # 场景: Idle（小店日记）
 │   ├── common/            # 公共模块
 │   │   ├── managers/      # SceneManager, StorageManager, GameConfig
 │   │   └── components/    # BackButton, SafeAreaAdapter
@@ -101,8 +104,11 @@ tiny_games/
 { id: 'gate_runner',  name: '数值冲刺', icon: 'default', sceneName: 'GateRunner',   description: '穿过 ×2 / ÷2 数值门，带队伍冲到 Boss' }
 { id: 'solitaire',    name: '纸牌接龙', icon: 'default', sceneName: 'Solitaire',    description: '克朗代克单人纸牌' }
 { id: 'survivor',     name: '午夜幸存者', icon: 'default', sceneName: 'Survivor',  description: '8 分钟肉鸽生存，自动攻击 + 三选一构筑' }
-{ id: 'idiom',        name: '成语填字', icon: 'default', sceneName: 'Idiom',     description: '纵横交叉填成语，全部锁定通关' }
-{ id: 'gomoku',       name: '五子棋',   icon: 'default', sceneName: 'Gomoku',    description: '15×15 经典五子棋，人机三档 / 双人对战' }
+{ id: 'minesweeper',  name: '扫雷',     icon: 'default', sceneName: 'Minesweeper', description: '经典扫雷，首点安全 + 和弦' }
+{ id: 'sudoku',       name: '数独',     icon: 'default', sceneName: 'Sudoku',      description: '经典数独，笔记 / 提示 / 撤销' }
+{ id: 'idiom',        name: '成语填字', icon: 'default', sceneName: 'Idiom',       description: '纵横交叉填成语，全部锁定通关' }
+{ id: 'gomoku',       name: '五子棋',   icon: 'default', sceneName: 'Gomoku',      description: '15×15 经典五子棋，人机三档 / 双人对战' }
+{ id: 'idle',         name: '小店日记', icon: 'default', sceneName: 'Idle',        description: '点击经营小店，升级设施，离线也赚钱' }
 ```
 
 **添加新游戏三步骤**：① `GameConfig.ts` 注册 ② 创建 `assets/games/game_xxx/scenes/Xxx.scene` ③ 场景名与 `sceneName` 一致。
@@ -317,4 +323,5 @@ node tools/sync-build-scenes.js --all            # 顺带修其它平台的构�
 - [午夜幸存者设计（含 M1/M2 实测记录）](./docs/specs/2026-11-02-game-survivor-design.md)
 - [成语填字设计（含浏览器试玩复核）](./docs/specs/2026-11-05-game-idiom-design.md)
 - [五子棋设计（含浏览器试玩复核）](./docs/specs/2026-11-05-game-gomoku-design.md)
+- [小店日记设计（点击 / 自动 / 离线三线收益）](./docs/specs/2026-11-05-game-idle-design.md)
 - [品类盘点与下一批路线图](./docs/plans/2026-11-05-game-catalog-and-roadmap.md)

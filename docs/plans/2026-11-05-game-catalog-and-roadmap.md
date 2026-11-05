@@ -1,7 +1,7 @@
 # 游戏合集品类盘点与下一批开发路线图
 
 - 日期：2026-11-05
-- 状态：计划（尚未开工）
+- 状态：**实施中** —— P0-1 / P0-2 / P1-1 已可玩并入库（见 §4.1），下一款 P1-2 `match3`
 - 范围：盘点现有 12 款游戏的品类覆盖，确定下一批 8 款候选的优先级、MVP 边界与排期
 - 前置文档：[`2026-10-31-next-games-roadmap.md`](./2026-10-31-next-games-roadmap.md)（第 6–8 款）、[`2026-11-01-next-games-roadmap.md`](./2026-11-01-next-games-roadmap.md)（接龙 / 幸存者）
 
@@ -103,6 +103,19 @@
 | P2-3 | `rhythm` | 节拍点击 | 音乐节奏 | 10–14 人日 | 全局音频管理 + 延迟校准 | 未开始 |
 
 **不做成新游戏的**：蜘蛛纸牌 / 空当接龙 / 21 点属于纸牌内容扩展，挂在 `solitaire` 的模式选择里，不计入品类缺口。
+
+### 4.1 实施进度
+
+| 批次 | id | 状态 | 设计文档 | 自检 |
+|------|----|------|----------|------|
+| P0-1 | `idiom` | ✅ 已可玩 | [`specs/2026-11-05-game-idiom-design.md`](../specs/2026-11-05-game-idiom-design.md) | `tools/verify-idiom-core.js`（24 项） |
+| P0-2 | `gomoku` | ✅ 已可玩 | [`specs/2026-11-05-game-gomoku-design.md`](../specs/2026-11-05-game-gomoku-design.md) | `tools/verify-gomoku-core.js`（34 项，含 500 局自我对弈） |
+| P1-1 | `idle` | ✅ 已可玩 | [`specs/2026-11-05-game-idle-design.md`](../specs/2026-11-05-game-idle-design.md) | `tools/verify-idle-core.js`（27 项） |
+| P1-2 | `match3` | 🚧 开发中 | `specs/2026-11-05-game-match3-design.md` | `tools/verify-match3-core.js` |
+| P1-3 | `tower_defense` | ⬜ 未开工 | — | — |
+| P2-1 | `pool` | ⬜ 未开工 | — | — |
+| P2-2 | `sokoban` | ⬜ 未开工 | — | — |
+| P2-3 | `rhythm` | ⬜ 未开工 | — | — |
 
 ---
 
