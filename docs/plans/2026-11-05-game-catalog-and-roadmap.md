@@ -1,7 +1,7 @@
 # 游戏合集品类盘点与下一批开发路线图
 
 - 日期：2026-11-05
-- 状态：**实施中** —— P0-1 / P0-2 / P1-1 / P1-2 / P1-3 已可玩并入库（见 §4.1），当前正在做 P2-1 `pool`（纯逻辑核心已完成，场景待接）
+- 状态：**实施中** —— P0-1 / P0-2 / P1-1 / P1-2 / P1-3 / P2-1 已可玩并入库（见 §4.1），下一款为 P2-2 `sokoban`
 - 范围：盘点现有 12 款游戏的品类覆盖，确定下一批 8 款候选的优先级、MVP 边界与排期
 - 前置文档：[`2026-10-31-next-games-roadmap.md`](./2026-10-31-next-games-roadmap.md)（第 6–8 款）、[`2026-11-01-next-games-roadmap.md`](./2026-11-01-next-games-roadmap.md)（接龙 / 幸存者）
 
@@ -98,7 +98,7 @@
 | P1-1 | `idle` | 小店日记（放置经营） | 挂机 / 模拟经营 | 12–16 人日 | 离线收益结算 + 大数格式化 | ✅ 已完成（2026-11-05 合入 `develop`） |
 | P1-2 | `match3` | 缤纷消除 | 三消 | 18–25 人日 | 关卡生成器 + 连锁 / 特殊块 | ✅ 已完成（2026-11-05） |
 | P1-3 | `tower_defense` | 守卫塔楼 | 塔防 lite | 14–18 人日 | 寻路 + 波次 + 对象池 | ✅ 已完成（2026-11-06） |
-| P2-1 | `pool` | 台球 | 体育手感 | 8–10 人日 | 圆形物理（复用 merge 求解器） | 🔧 核心完成（2026-11-06），场景待接 |
+| P2-1 | `pool` | 台球 | 体育手感 | 8–10 人日 | 圆形物理（复用 merge 求解器） | ✅ 已完成（2026-11-07 合入 `develop`） |
 | P2-2 | `sokoban` | 推箱子 | 解谜机关 | 4–6 人日 | 关卡文本格式 + BFS 可解校验 | 未开始 |
 | P2-3 | `rhythm` | 节拍点击 | 音乐节奏 | 10–14 人日 | 全局音频管理 + 延迟校准 | 未开始 |
 
@@ -113,7 +113,7 @@
 | P1-1 | `idle` | ✅ 已可玩 | [`specs/2026-11-05-game-idle-design.md`](../specs/2026-11-05-game-idle-design.md) | `tools/verify-idle-core.js`（27 项） |
 | P1-2 | `match3` | ✅ 已可玩 | [`specs/2026-11-05-game-match3-design.md`](../specs/2026-11-05-game-match3-design.md) | `tools/verify-match3-core.js`（25 项） |
 | P1-3 | `tower_defense` | ✅ 已可玩 | [`specs/2026-11-06-game-tower-defense-design.md`](../specs/2026-11-06-game-tower-defense-design.md) | `tools/verify-td-core.js`（21 项，含三图自动通关） |
-| P2-1 | `pool` | 🔧 纯逻辑完成，场景待接 | [`specs/2026-11-06-game-pool-design.md`](../specs/2026-11-06-game-pool-design.md) | `tools/verify-pool-core.js`（24 项，含 1,000 次穿透/长跑） |
+| P2-1 | `pool` | ✅ 已可玩 | [`specs/2026-11-06-game-pool-design.md`](../specs/2026-11-06-game-pool-design.md) | `tools/verify-pool-core.js`（24 项，含 1,000 次穿透/长跑） |
 | P2-2 | `sokoban` | ⬜ 未开工 | — | — |
 | P2-3 | `rhythm` | ⬜ 未开工 | — | — |
 
@@ -278,9 +278,9 @@
 
 ---
 
-### 5.6 P2-1 台球（`pool`，8–10 人日）
+### 5.6 P2-1 台球（`pool`，8–10 人日）— ✅ 已完成（2026-11-07）
 
-> 进度：**纯逻辑核心已完成（2026-11-06）**。设计文档：[`../specs/2026-11-06-game-pool-design.md`](../specs/2026-11-06-game-pool-design.md)；自检 `node tools/verify-pool-core.js`（24/24，含 1,000 次高速对撞不穿透、1,000 杆随机长跑）。`PoolGame.ts` 运行时与场景待接。
+> 实现文档：[`../specs/2026-11-06-game-pool-design.md`](../specs/2026-11-06-game-pool-design.md)（含 §9 浏览器实测记录）；自检 `node tools/verify-pool-core.js`（24/24，含 1,000 次高速对撞不穿透、1,000 杆随机长跑）。物理为自研「固定 1/120 外层步长 + 自适应子步」求解器，未直接复用 `merge` 的重力休眠机制。微信真机验收仍待做。
 
 **一句话玩法**：单指拖拽瞄准，击打母球把目标球打进袋；v1 做「单人清台 + 步数限制」。
 

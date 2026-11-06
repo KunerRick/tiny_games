@@ -1,7 +1,7 @@
 # 台球（`pool`）玩法设计
 
 - 日期：2026-11-06
-- 状态：**纯逻辑核心完成**（`PoolCore.ts` / `PoolConfig.ts` + 自检 24/24），场景与运行时 `PoolGame.ts` 待接
+- 状态：**已可玩**（2026-11-07 场景接好，浏览器实测通过；微信真机待验）
 - 对应路线图：[`2026-11-05-game-catalog-and-roadmap.md`](../plans/2026-11-05-game-catalog-and-roadmap.md) §5.6（P2-1）
 - 计划场景：`assets/games/game_pool/scenes/Pool.scene`
 - 计划 id / sceneName：`pool` / `Pool`
@@ -116,11 +116,13 @@
   - 母球复位：开球点被占时围绕它螺旋搜索空位。
 - 与 `merge` 的差异：无重力、无休眠机制（有摩擦必然停机）、等质量弹性碰撞、自适应子步替代固定 1/240。
 
-### 6.2 待做的运行时 `PoolGame.ts`
+### 6.2 运行时 `PoolGame.ts`（已完成）
 
-- 单 `Graphics` 整盘重绘：台面 → 库边 → 袋口 → 球（实心 / 花色 + 号码）→ 瞄准线 / 幽灵球 → 力度条。
+- 单 `Graphics` 整盘重绘：库边 → 台面 → 袋口 → 瞄准线 / 幽灵球 / 目标球去向 → 球（实心 / 花色 + 高光）→ 球杆。
 - `update(dt)` 直接喂 `PoolCore.step(dt)`（核心内部已是固定步长）。
-- 触摸：`TOUCH_START/MOVE/END` 具名 handler，`convertToNodeSpaceAR` 换算赛台坐标。
+- 触摸：`TOUCH_START/MOVE/END/CANCEL` 具名 handler，`convertToNodeSpaceAR` 换算赛台坐标；拉杆向量 = 起点 − 当前点。
+- 力度条独立节点（`PowerBar`），填充从左侧起算。
+- 球杆画在出杆方向的反侧；注意 `aimAngle` 是**台面坐标（y 向下）**，转节点局部坐标时只取反 x、y 取反号。
 - 音效：v1 不做（项目当前无音频基建）。
 
 ### 6.3 自检 `tools/verify-pool-core.js`（24 项，全绿）
@@ -144,8 +146,25 @@ node tools/verify-pool-core.js
 - [x] `PoolConfig.ts` / `PoolCore.ts` 无 `cc` 依赖，可被 Node 直接编译
 - [x] `node tools/verify-pool-core.js` 24/24
 - [x] Cocos 自带 `tsc --noEmit` 通过
-- [ ] `PoolGame.ts` 运行时 + 场景 `Pool.scene`
-- [ ] `GameConfig.ts` 注册（id `pool`、sceneName `Pool`）——**必须与场景同时落地**，否则大厅会跳进不存在的场景
-- [ ] 浏览器实测：瞄准 / 出杆 / 落袋 / 滑杆 / 胜负结算 / 换关 / 返回大厅
+- [x] `PoolGame.ts` 运行时 + 场景 `Pool.scene`（Canvas > GameRoot[UITransform + PoolGame]，UI 全部运行时构建）
+- [x] `GameConfig.ts` 注册（id `pool`、sceneName `Pool`）
+- [x] 浏览器实测：瞄准 / 出杆 / 落袋 / 滑杆 / 胜负结算 / 换关 / 返回大厅 / 大厅回进
 - [ ] `node tools/sync-build-scenes.js` 同步构建场景
 - [ ] 微信真机 60 FPS
+
+## 9. 浏览器实测记录（2026-11-07）
+
+预览 `http://127.0.0.1:7456/`，真实鼠标拖拽驱动（按下→多段移动→松开）：
+
+| 场景 | 结果 |
+|------|------|
+| 开球拉杆 | 拖 200 CSS 像素 → `aimPower=1`、松开后 `rolling`、杆数 +1；球散开且全部留在台内 |
+| 进球 | 母球对准球堆右下方的球，力度 0.69 出杆 → 目标球入角袋、`score=100`、HUD 同步「杆数 3/14 · 分数 100」 |
+| 瞄准显示 | 拖拽中虚线瞄准线指向预测碰撞点、幽灵球可见、球杆出现在出杆方向的反侧、力度条从左向右填充（>0.75 转红） |
+| 母球落袋 | 母球送入角袋 → 本杆结束复位到开球点 (165,165)，不计分 |
+| 换关 | ◀换关 / 换关▶ 在 1→2→3→2 间切换，球数 6/10/15、杆数 14/26/40 与关卡表一致 |
+| 胜利 | 清空 6 球 → 「清台成功！」，6/6 颗、杆数 1/14、得分含连击加成 |
+| 失败 | 把杆数拉到上限前 1 再出杆 → 「杆数用尽」 |
+| 大厅往返 | 返回大厅 → 台球卡片出现在「全部游戏」第 18 张 → 点进去回到上次关卡（`lastLevel` 存档生效） |
+
+实测中修掉两个渲染缺陷：球杆方向的 y 轴符号取反（杆画到了出杆方向一侧）、力度条填充居中而非从左起。控制台 0 error。
