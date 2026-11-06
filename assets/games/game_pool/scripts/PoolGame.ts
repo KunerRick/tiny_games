@@ -631,9 +631,10 @@ export class PoolGame extends Component {
     private _drawCueStick(g: Graphics, core: PoolCore): void {
         const cue = core.cueBall;
         if (!cue || !cue.onTable) return;
+        // aimAngle 是台面坐标（y 轴向下），画到节点局部坐标（y 轴向上）要取反方向
         const a = core.aimAngle;
         const dx = -Math.cos(a);
-        const dy = -Math.sin(a);
+        const dy = Math.sin(a);
         const cx = this._lx(cue.x);
         const cy = this._ly(cue.y);
         const back = BALL_R + 10 + this.aimPower * 60;
@@ -659,11 +660,15 @@ export class PoolGame extends Component {
         const h = 26;
         g.clear();
         drawRoundRect(g, w, h, 13, toColor('#0E1626'), toColor('#2A3A57'), 2);
+
+        // 填充从左侧起算（drawRoundRect 是居中绘制，这里手动画圆角矩形）
         const p = this.aimPower;
-        if (p > 0) {
-            const fw = Math.max(h, (w - 6) * p);
-            const color = p > 0.75 ? UI.danger : p > 0.45 ? UI.warning : UI.success;
-            drawRoundRect(g, fw, h - 6, 10, toColor(color));
-        }
+        if (p <= 0) return;
+        const innerH = h - 6;
+        const fw = Math.max(innerH, (w - 6) * p);
+        const color = p > 0.75 ? UI.danger : p > 0.45 ? UI.warning : UI.success;
+        g.fillColor = toColor(color);
+        g.roundRect(-w / 2 + 3, -innerH / 2, fw, innerH, Math.min(10, fw / 2, innerH / 2));
+        g.fill();
     }
 }
