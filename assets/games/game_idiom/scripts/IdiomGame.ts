@@ -37,16 +37,16 @@ const BEST_KEY_PREFIX = 'tiny_games_idiom_best_';
 const DIFF_KEY = 'tiny_games_idiom_diff';
 const SAVE_KEY = 'tiny_games_idiom_save';
 
-const BOARD_TOP = 258;
+const BOARD_TOP = 272;
 /** 棋盘可用竖直区间（到候选字/状态行之前），用于把裁剪后的棋盘居中摆放 */
-const BOARD_BAND_H = 598;
+const BOARD_BAND_H = 584;
 const CHIPS_Y = 150;
-const DIFF_Y = 218;
+const DIFF_Y = 228;
 
-const COLOR_FRAME = '#0E1728';
+const COLOR_FRAME = '#101B2E';
 const COLOR_FRAME_STROKE = '#2A3A57';
-const COLOR_CELL = '#17233A';
-const COLOR_CELL_ACTIVE = '#20344F';
+const COLOR_CELL = '#1B2740';
+const COLOR_CELL_ACTIVE = '#27405F';
 const COLOR_CELL_SELECTED = '#1D4ED8';
 const COLOR_CELL_LOCKED = '#231F12';
 const COLOR_CELL_FLASH = '#7F1D1D';
@@ -509,7 +509,7 @@ export class IdiomGame extends Component {
 
             const stroke = isLocked && !isSelected && !flashing
                 ? toColor('#7C5A12')
-                : toColor('#1E2C44');
+                : toColor('#2C3E60');
             drawRoundRect(view.g, cell - 2, cell - 2, 5, toColor(fill), stroke, 2);
 
             view.label.node.active = !!value;

@@ -11,7 +11,7 @@
  *      逻辑用 update 固定步长泵推进，不用 scheduleOnce 自排期。
  */
 
-import { _decorator, Component, EventTouch, Graphics, Label, Node, UITransform, Vec3 } from 'cc';
+import { _decorator, Component, EventTouch, Graphics, Label, Node, UIOpacity, UITransform, Vec3 } from 'cc';
 import { SceneManager } from '../../../common/managers/SceneManager';
 import { StorageManager } from '../../../common/managers/StorageManager';
 import {
@@ -66,16 +66,19 @@ const MAX_STEPS_2X = 6;
 const COLOR_BOARD = '#0E1A2E';
 const COLOR_BOARD_EDGE = '#22334F';
 const COLOR_GRID = '#16233B';
-const COLOR_PATH = '#233047';
-const COLOR_PATH_INNER = '#2F4260';
-const COLOR_SLOT = '#3A4C6B';
-const COLOR_SLOT_FILL = '#111C30';
+const COLOR_PATH = '#283955';
+const COLOR_PATH_INNER = '#3A5075';
+const COLOR_SLOT = '#4C6690';
+const COLOR_SLOT_FILL = '#152238';
 const COLOR_START = '#22C55E';
 const COLOR_END = '#EF4444';
 const COLOR_HP_BACK = '#0A1120';
 const COLOR_HP = '#22C55E';
 const COLOR_HP_LOW = '#EF4444';
 const COLOR_RANGE = '#F8FAFC';
+
+/** 面板弹出动画时长 */
+const PANEL_IN_SEC = 0.18;
 
 const TOWER_COLORS: Record<TDTowerKind, string> = {
     gun: '#38BDF8',
@@ -111,6 +114,9 @@ export class TDGame extends Component {
     private _startBtn: UiButton | null = null;
     private _speedBtn: UiButton | null = null;
     private _panel: Node | null = null;
+    /** 面板弹出动画：目标节点 + 剩余时间（用 update 泵推进） */
+    private _panelNode: Node | null = null;
+    private _panelAnim = 0;
     private _selectedSlot = -1;
 
     private _acc = 0;
@@ -143,6 +149,7 @@ export class TDGame extends Component {
         }
 
         this._drawBoard();
+        this._tickPanelIn(dt);
         this._hudTimer -= dt;
         if (this._hudTimer <= 0) {
             this._hudTimer = 0.1;
@@ -373,6 +380,7 @@ export class TDGame extends Component {
         });
         close.node.setPosition(0, -190, 0);
 
+        this._playPanelIn(panel);
         this._panel = root;
     }
 
@@ -466,6 +474,7 @@ export class TDGame extends Component {
         });
         close.node.setPosition(0, -160, 0);
 
+        this._playPanelIn(panel);
         this._panel = root;
     }
 
@@ -555,12 +564,39 @@ export class TDGame extends Component {
         });
         lobby.node.setPosition(0, -150, 0);
 
+        this._playPanelIn(panel);
         this._panel = root;
     }
 
     private _destroyPanel(): void {
         if (this._panel && this._panel.isValid) this._panel.destroy();
         this._panel = null;
+        this._panelNode = null;
+        this._panelAnim = 0;
+    }
+
+    /** 面板弹出：从 0.92 缩放到 1 并淡入 */
+    private _playPanelIn(panel: Node): void {
+        this._panelNode = panel;
+        this._panelAnim = PANEL_IN_SEC;
+        panel.setScale(0.92, 0.92, 1);
+        panel.addComponent(UIOpacity).opacity = 0;
+    }
+
+    private _tickPanelIn(dt: number): void {
+        if (this._panelAnim <= 0) return;
+        this._panelAnim = Math.max(0, this._panelAnim - dt);
+        const node = this._panelNode;
+        if (!node || !node.isValid) {
+            this._panelAnim = 0;
+            return;
+        }
+        const p = 1 - this._panelAnim / PANEL_IN_SEC;
+        const ease = 1 - (1 - p) * (1 - p);
+        const s = 0.92 + 0.08 * ease;
+        node.setScale(s, s, 1);
+        const op = node.getComponent(UIOpacity);
+        if (op) op.opacity = Math.round(255 * ease);
     }
 
     // ==================== 存档 ====================
@@ -813,12 +849,12 @@ export class TDGame extends Component {
         g.fillColor = toColor(COLOR_SLOT_FILL);
         g.circle(cx, cy, r);
         g.fill();
-        g.strokeColor = toColor(selected ? UI.accent : COLOR_SLOT, selected ? 255 : 190);
+        g.strokeColor = toColor(selected ? UI.accent : COLOR_SLOT);
         g.lineWidth = selected ? 3 : 2;
         g.circle(cx, cy, r);
         g.stroke();
         // 加号
-        g.fillColor = toColor(selected ? UI.accent : COLOR_SLOT, 200);
+        g.fillColor = toColor(selected ? UI.accent : COLOR_SLOT, 235);
         g.rect(cx - 4, cy - 13, 8, 26);
         g.rect(cx - 13, cy - 4, 26, 8);
         g.fill();

@@ -60,7 +60,8 @@ const PIECE_COLORS = [
     { fill: '#A855F7', stroke: '#7E22CE' },
 ];
 
-const COLOR_BOARD = '#0E1729';
+const COLOR_BOARD = '#101C31';
+const COLOR_BOARD_STROKE = '#22304A';
 const COLOR_CELL_EMPTY = '#101B2E';
 const COLOR_SELECTED = '#F8FAFC';
 const COLOR_HINT = '#FDE68A';
@@ -410,18 +411,24 @@ export class Match3Game extends Component {
         const flashNode = createNode('Flash', this._board, BOARD_PX, BOARD_PX);
         this._flashG = flashNode.addComponent(Graphics);
 
-        this._scoreLabel = createLabel(this.node, '0', 44, {
-            ...this._at(360, 960),
+        createLabel(this.node, '得分', 18, {
+            ...this._at(360, 898),
+            color: UI.textMuted,
+            width: 200,
+            height: 26,
+        });
+        this._scoreLabel = createLabel(this.node, '0', 46, {
+            ...this._at(360, 940),
             bold: true,
             width: 400,
-            height: 56,
+            height: 58,
             color: UI.text,
         });
-        this._chainLabel = createLabel(this.node, '', 30, {
-            ...this._at(360, 1002),
+        this._chainLabel = createLabel(this.node, '', 28, {
+            ...this._at(360, 992),
             bold: true,
             width: 400,
-            height: 38,
+            height: 36,
             color: UI.warning,
         });
 
@@ -503,6 +510,10 @@ export class Match3Game extends Component {
         g.fillColor = toColor(COLOR_BOARD);
         g.roundRect(-BOARD_HALF, -BOARD_HALF, BOARD_PX, BOARD_PX, 20);
         g.fill();
+        g.strokeColor = toColor(COLOR_BOARD_STROKE);
+        g.lineWidth = 2;
+        g.roundRect(-BOARD_HALF, -BOARD_HALF, BOARD_PX, BOARD_PX, 20);
+        g.stroke();
 
         for (let index = 0; index < core.cells.length; index++) {
             const row = Math.floor(index / 8);
@@ -569,9 +580,14 @@ export class Match3Game extends Component {
         if (special !== 'none') this._drawSpecialMark(g, special, cx, cy);
 
         if (this.selected === index) {
+            // 外圈柔和光晕 + 内圈亮描边，比单根 3px 白线在缩小预览下更醒目
+            g.strokeColor = toColor(UI.accent, 90);
+            g.lineWidth = 9;
+            g.roundRect(cx - 35, cy - 35, 70, 70, 17);
+            g.stroke();
             g.strokeColor = toColor(COLOR_SELECTED);
-            g.lineWidth = 3;
-            g.roundRect(cx - 31, cy - 31, 62, 62, 13);
+            g.lineWidth = 4;
+            g.roundRect(cx - 32, cy - 32, 64, 64, 15);
             g.stroke();
         }
         if (this._hintCells.indexOf(index) >= 0) {

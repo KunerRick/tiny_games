@@ -10,7 +10,7 @@
  * 约定：事件 handler 全部具名（红线 5）；onDestroy 只清 JS 引用（红线 4）。
  */
 
-import { _decorator, Component, EventTouch, Graphics, Label, Node } from 'cc';
+import { _decorator, Component, EventTouch, Graphics, Label, Node, UIOpacity } from 'cc';
 import { SceneManager } from '../../../common/managers/SceneManager';
 import { StorageManager } from '../../../common/managers/StorageManager';
 import {
@@ -63,6 +63,19 @@ interface IdleDismissData {
     dismiss: () => void;
 }
 
+/** 点击时飘起的 +N 金币提示 */
+interface CoinFloater {
+    node: Node;
+    opacity: UIOpacity;
+    life: number;
+    ttl: number;
+    baseY: number;
+}
+
+const FLOATER_TTL = 0.65;
+const FLOATER_RISE = 70;
+const COIN_PULSE_SEC = 0.14;
+
 function onOverlayTouchStart(ev: EventTouch): void {
     ev.propagationStopped = true;
     const node = ev.currentTarget as Node;
@@ -83,6 +96,8 @@ export class IdleGame extends Component {
     private _offlineOverlay: Node | null = null;
     private _saveTimer = 0;
     private _refreshTimer = 0;
+    private _floaters: CoinFloater[] = [];
+    private _coinPulse = 0;
 
     onLoad(): void {
         this._core = this._load();
@@ -123,12 +138,65 @@ export class IdleGame extends Component {
             this._refreshCoins();
             this._refreshCards();
         }
+
+        this._tickFloaters(dt);
+        this._tickCoinPulse(dt);
+    }
+
+    /** 飘字：向上浮 + 淡出；到寿命即销毁（用 update 泵推进，不用 scheduleOnce 自排期） */
+    private _tickFloaters(dt: number): void {
+        if (this._floaters.length === 0) return;
+        const left: CoinFloater[] = [];
+        for (let i = 0; i < this._floaters.length; i++) {
+            const f = this._floaters[i];
+            f.life += dt;
+            const t = Math.min(1, f.life / f.ttl);
+            if (!f.node || !f.node.isValid) continue;
+            if (t >= 1) {
+                f.node.destroy();
+                continue;
+            }
+            const ease = 1 - (1 - t) * (1 - t);
+            f.node.setPosition(0, f.baseY + FLOATER_RISE * ease, 0);
+            f.opacity.opacity = Math.round(255 * (1 - t * t));
+            left.push(f);
+        }
+        this._floaters = left;
+    }
+
+    private _tickCoinPulse(dt: number): void {
+        if (this._coinPulse <= 0) return;
+        this._coinPulse = Math.max(0, this._coinPulse - dt);
+        const label = this._coinsLabel;
+        if (!label || !label.node || !label.node.isValid) return;
+        const t = this._coinPulse / COIN_PULSE_SEC;
+        const scale = 1 + 0.08 * t;
+        label.node.setScale(scale, scale, 1);
+    }
+
+    private _spawnFloater(text: string): void {
+        if (this._floaters.length >= 6) {
+            const oldest = this._floaters.shift();
+            if (oldest && oldest.node && oldest.node.isValid) oldest.node.destroy();
+        }
+        const label = createLabel(this.node, text, 34, {
+            x: 0,
+            y: -360,
+            bold: true,
+            color: UI.warning,
+            width: 320,
+            height: 44,
+        });
+        label.node.setSiblingIndex(this.node.children.length - 1);
+        const opacity = label.node.addComponent(UIOpacity);
+        this._floaters.push({ node: label.node, opacity, life: 0, ttl: FLOATER_TTL, baseY: -360 });
     }
 
     onDestroy(): void {
         this._persist();
         this._core = null;
         this._cards = [];
+        this._floaters = [];
         this._coinsLabel = null;
         this._rateLabel = null;
         this._tapBtn = null;
@@ -145,8 +213,11 @@ export class IdleGame extends Component {
     private _onTapMoney(): void {
         const core = this._core;
         if (!core) return;
+        const gain = core.clickPower;
         core.tap();
         this._refreshAll();
+        this._spawnFloater(`+${formatIdleNumber(gain)}`);
+        this._coinPulse = COIN_PULSE_SEC;
     }
 
     private _onBuy(id: IdleFacilityId): void {
@@ -281,7 +352,7 @@ export class IdleGame extends Component {
         const level = createLabel(node, 'Lv 0/5', 22, {
             x: -250,
             y: 10,
-            width: 200,
+            width: 120,
             height: 30,
             color: UI.textDim,
             align: 'left',
@@ -303,7 +374,7 @@ export class IdleGame extends Component {
         });
 
         const pipsNode = createNode('Pips', node, 110, 20);
-        pipsNode.setPosition(38, -58, 0);
+        pipsNode.setPosition(-70, 10, 0);
         const pips = pipsNode.addComponent(Graphics);
 
         const btn = createButton(node, {
