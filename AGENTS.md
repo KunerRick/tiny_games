@@ -85,7 +85,7 @@ tiny_games/
 │   ├── assets/            # 文档配图
 │   ├── tech/              # 技术决策与踩坑详情（AGENTS.md 教训的展开）
 │   └── cocos-best-practices.md
-├── tools/                 # 本地校验/同步脚本（verify-battle-fixes.js、verify-tetris-core.js、verify-idiom-core.js、verify-gomoku-core.js、verify-idle-core.js、verify-match3-core.js、verify-td-core.js、check-wechat-build.js、replay-wechat-bundle.js、sync-build-scenes.js）
+├── tools/                 # 本地校验/同步脚本（verify-battle-fixes.js、verify-tetris-core.js、verify-idiom-core.js、verify-gomoku-core.js、verify-idle-core.js、verify-match3-core.js、verify-td-core.js、verify-pool-core.js、check-wechat-build.js、replay-wechat-bundle.js、sync-build-scenes.js）
 ├── settings/              # Cocos 编辑器设置
 ├── extensions/            # 编辑器插件（tsconfig 排除；node_modules 已 gitignore）
 └── build/                 # 构建输出（gitignored）
@@ -238,6 +238,13 @@ node tools/verify-match3-core.js
 ```bash
 node tools/verify-td-core.js
 # 同样需要 tsc（编译 TDConfig.ts / TDCore.ts）
+```
+
+台球纯逻辑自检（不启动编辑器；覆盖摆球与关卡合法性、力度映射、正碰动量转移、库边反弹、摩擦必然停机、1,000 次高速对撞不穿透、1,000 杆随机长跑不变量、落袋与连击计分、母球落袋复位、清台 / 杆数耗尽胜负、瞄准预测、确定性与存档回落，共 24 项）：
+
+```bash
+node tools/verify-pool-core.js
+# 同样需要 tsc（编译 PoolConfig.ts / PoolCore.ts）
 ```
 
 微信小游戏构建产物预检（**把 `build/wechatgame/` 交给微信开发者工具之前跑**，退出码 0 = 可开）：
