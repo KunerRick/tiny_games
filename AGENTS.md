@@ -258,8 +258,9 @@ node tools/sync-build-scenes.js --all            # 顺带修其它平台的构�
 # 必须先退出编辑器（它会把内存里的旧配置刷回磁盘，覆盖改动）；脚本检测到编辑器在跑会拒绝写入
 ```
 
-> MCP 的构建能力有限：`project_build_project` 没有 `wechatgame` 平台，`preferences_*` 读不到 `taskMap`，
-> 详见 [`docs/tech/wechat-build-pitfalls.md`](./docs/tech/wechat-build-pitfalls.md) §9。
+> MCP 的构建能力：`project_build_project` 没有 `wechatgame` 平台；但 `preferences_query/set_preferences_config`
+> **带 `path`** 时能直接读写运行中编辑器的构建配置（`builder` + `common` / `BuildTaskManager.taskMap.<id>.options.scenes`），
+> 改场景清单不必退出编辑器，详见 [`docs/tech/wechat-build-pitfalls.md`](./docs/tech/wechat-build-pitfalls.md) §9。
 
 9 项检查：必需文件齐全且非空（含产物清单非空，防空构建） / `game.json`·`project.config.json` 可解析无 BOM / 构建是否已落盘稳定 /
 产物 `.js` 能否按 ES2015 与 ES5 解析 / 主包 ≤ 4 MB / 无变体选择符 / **开发者工具是否停在过期构建** /

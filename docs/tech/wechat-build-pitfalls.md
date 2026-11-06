@@ -318,11 +318,36 @@ node tools/sync-build-scenes.js --all      # 顺带修其它平台（web-desktop
 脚本检测到编辑器正在跑这个项目时会直接拒绝写入（`--check` / `--dry-run` 不受影响，`--force` 可强行越过）。
 `profiles/` 在 `.gitignore` 里，脚本落盘前会留一份 `.bak`。
 
-**MCP 帮不上忙**：`project_get_build_settings` 自己返回的说明是
-`Full build configuration requires direct Editor UI access`；
-`project_build_project` 的 `platform` 枚举只有 web-mobile / web-desktop / ios / android / windows / mac，**没有 wechatgame**，
-`preferences_get_all_preferences` 也只暴露 `preview` / `console` / `builder.__version__`，读不到 `taskMap`。
-MCP 能做的只有「打开构建面板」「查构建器状态」「开关预览服务器」。
+**MCP 能不能改？能，但必须带 `path`（2026-11-06 实测）**。容易踩的误解是
+`preferences_get_all_preferences` 只枚举出 `preview` / `console` / `builder.__version__`，
+于是以为读不到构建配置。实际上 `query-config` / `set-config` 的第二个参数 `path`
+才是关键 —— **带上 path 就直接落到运行中编辑器的 profile 上**（读的是内存 + 落盘同步）：
+
+```text
+preferences_query_preferences_config({name:'builder', path:'common', type:'local'})
+  → 构建面板勾选列表（含 binGroupConfig / polyfills / startScene）
+
+preferences_query_preferences_config({name:'builder', path:'BuildTaskManager', type:'local'})
+  → 完整 taskMap；path 支持点号深路径，例如
+    'BuildTaskManager.taskMap.<任务号>.options.scenes' 直接返回数组
+
+preferences_set_preferences_config({name:'builder',
+  path:'BuildTaskManager.taskMap.<任务号>.options.scenes',
+  value:[...], type:'local'})
+  → 返回 "updated successfully"，磁盘上的 builder.json 立刻同步
+```
+
+这样写入是**编辑器自己写盘**，不存在「内存里的旧配置刷回来」的问题，
+**不用退出编辑器**，脚本 `sync-build-scenes.js` 也就只在「编辑器没开」时才用得上。
+
+仍有一处 MCP 够不到：`profiles/v2/packages/wechatgame.json` → `builder.common.scenes`
+（平台插件自己的 profile）。`name:'wechatgame'` 查询返回 `null`、
+写入报 `Failed to update preference`，即使先 `project_open_build_panel` 也没注册进内存 ——
+这份只能直接改文件；因为编辑器当前**没有把它加载进内存**，改完不会被刷回（改后 `--check` 通过）。
+不要用同样的思路去直接改 `builder.json`：那份是加载进内存的，会被覆盖。
+
+`project_build_project` 依旧不能用于微信（`platform` 枚举里没有 wechatgame），
+`project_get_build_settings` 也依旧自述 `Full build configuration requires direct Editor UI access`。
 
 **命令行构建：实测不可用（2026-11-01）**。入口确实存在 —— `launch/source/launch.ts` 把 `--build "k=v;k=v"`
 解析成 options 后调 `Editor.Startup.__protected__.build()`，解析完直接 `app.exit(code)`，全程不开窗口：
