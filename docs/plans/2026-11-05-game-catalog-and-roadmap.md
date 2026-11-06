@@ -1,7 +1,7 @@
 # 游戏合集品类盘点与下一批开发路线图
 
 - 日期：2026-11-05
-- 状态：**实施中** —— P0-1 / P0-2 / P1-1 / P1-2 已可玩并入库（见 §4.1），下一款 P1-3 `tower_defense`
+- 状态：**实施中** —— P0-1 / P0-2 / P1-1 / P1-2 / P1-3 已可玩并入库（见 §4.1），下一款 P2-1 `pool`
 - 范围：盘点现有 12 款游戏的品类覆盖，确定下一批 8 款候选的优先级、MVP 边界与排期
 - 前置文档：[`2026-10-31-next-games-roadmap.md`](./2026-10-31-next-games-roadmap.md)（第 6–8 款）、[`2026-11-01-next-games-roadmap.md`](./2026-11-01-next-games-roadmap.md)（接龙 / 幸存者）
 
@@ -97,7 +97,7 @@
 | P0-2 | `gomoku` | 五子棋 | 棋类对战 | 5–7 人日 | 极小化极大 AI | ✅ 已完成（2026-11-05 合入 `develop`） |
 | P1-1 | `idle` | 小店日记（放置经营） | 挂机 / 模拟经营 | 12–16 人日 | 离线收益结算 + 大数格式化 | ✅ 已完成（2026-11-05 合入 `develop`） |
 | P1-2 | `match3` | 缤纷消除 | 三消 | 18–25 人日 | 关卡生成器 + 连锁 / 特殊块 | ✅ 已完成（2026-11-05） |
-| P1-3 | `tower_defense` | 守卫塔楼 | 塔防 lite | 14–18 人日 | 寻路 + 波次 + 对象池 | 未开始 |
+| P1-3 | `tower_defense` | 守卫塔楼 | 塔防 lite | 14–18 人日 | 寻路 + 波次 + 对象池 | ✅ 已完成（2026-11-06） |
 | P2-1 | `pool` | 台球 | 体育手感 | 8–10 人日 | 圆形物理（复用 merge 求解器） | 未开始 |
 | P2-2 | `sokoban` | 推箱子 | 解谜机关 | 4–6 人日 | 关卡文本格式 + BFS 可解校验 | 未开始 |
 | P2-3 | `rhythm` | 节拍点击 | 音乐节奏 | 10–14 人日 | 全局音频管理 + 延迟校准 | 未开始 |
@@ -112,7 +112,7 @@
 | P0-2 | `gomoku` | ✅ 已可玩 | [`specs/2026-11-05-game-gomoku-design.md`](../specs/2026-11-05-game-gomoku-design.md) | `tools/verify-gomoku-core.js`（34 项，含 500 局自我对弈） |
 | P1-1 | `idle` | ✅ 已可玩 | [`specs/2026-11-05-game-idle-design.md`](../specs/2026-11-05-game-idle-design.md) | `tools/verify-idle-core.js`（27 项） |
 | P1-2 | `match3` | ✅ 已可玩 | [`specs/2026-11-05-game-match3-design.md`](../specs/2026-11-05-game-match3-design.md) | `tools/verify-match3-core.js`（25 项） |
-| P1-3 | `tower_defense` | ⬜ 未开工 | — | — |
+| P1-3 | `tower_defense` | ✅ 已可玩 | [`specs/2026-11-06-game-tower-defense-design.md`](../specs/2026-11-06-game-tower-defense-design.md) | `tools/verify-td-core.js`（21 项，含三图自动通关） |
 | P2-1 | `pool` | ⬜ 未开工 | — | — |
 | P2-2 | `sokoban` | ⬜ 未开工 | — | — |
 | P2-3 | `rhythm` | ⬜ 未开工 | — | — |
@@ -248,7 +248,7 @@
 
 ---
 
-### 5.5 P1-3 守卫塔楼（`tower_defense`，14–18 人日）
+### 5.5 P1-3 守卫塔楼（`tower_defense`，14–18 人日）— ✅ 已完成（2026-11-06）
 
 **一句话玩法**：沿路径布置炮塔，阻止敌人抵达终点，撑过 10 波。
 
@@ -352,7 +352,7 @@
 | 存档 | `StorageManager` + 各游戏自有键 | 统一的「离线时间戳 / 版本号 / 迁移」约定 | `idle` |
 | 大数格式化 | 无 | `formatNumber()`（K/M/B，封顶 1e15） | `idle` |
 | 关卡配置 | 各游戏内联 | JSON 配置 + 关卡选择界面模式 | `match3` |
-| 对象池 / 批量 Graphics | `survivor` 已有写法 | 抽到 `assets/common/` 供塔防复用 | `tower_defense` |
+| 对象池 / 批量 Graphics | `survivor` 已有写法；`tower_defense` 直接复用同一套（单 Graphics 整盘重绘，未抽公共层） | 出现第三款同类需求时再抽到 `assets/common/` | `tower_defense`（复用） |
 | 音频 | **全项目无音频代码** | `AudioManager` + 延迟校准 | `rhythm`（或提前到 P1 做通用音效） |
 | 大厅承载 | Layout + ScrollView，12 张卡 | 20+ 张需确认滚动性能与卡片信息密度 | 阶段 A 结束时 |
 | 设置 / 统计面板 | 各游戏独立实现 | 抽公共组件（音量、震动、特效开关） | `idle` 或 `match3` |

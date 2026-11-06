@@ -25,6 +25,7 @@ export const GAME_LIST: GameConfig[] = [
     { id: 'gomoku', name: '五子棋', icon: 'default', sceneName: 'Gomoku', description: '15×15 经典五子棋，人机三档 / 双人对战' },
     { id: 'idle', name: '小店日记', icon: 'default', sceneName: 'Idle', description: '点击经营小店，升级设施，离线也赚钱' },
     { id: 'match3', name: '缤纷消除', icon: 'default', sceneName: 'Match3', description: '交换相邻方块凑三连，连锁消除闯 30 关' },
+    { id: 'tower_defense', name: '守卫塔楼', icon: 'default', sceneName: 'TowerDefense', description: '沿路径布塔，撑过 10 波进攻' },
 ];
 
 export function getGameById(id: string): GameConfig | undefined {

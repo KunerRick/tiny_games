@@ -135,6 +135,13 @@
 | 游戏设计 | [`specs/2026-11-05-game-match3-design.md`](./specs/2026-11-05-game-match3-design.md) | 8×8 交换消除、四连炸弹 / 五连彩球、队列式触发扩散、重力补位与连锁计分、30 关三类目标与星级、无解自动重排、布局与验收清单 |
 | 回归自检 | [`../tools/verify-match3-core.js`](../tools/verify-match3-core.js) | 纯逻辑单测（25 项：500 种子 × 4/5 色开局无三连、交换合法性与非法不改变棋盘、特殊块生成 / 触发 / 互炸不死循环、连锁计分公式、无解重排、10,000 次长跑、快照往返与坏档回落、30 关配置与星级边界） |
 
+### 守卫塔楼（Tower Defense / tower_defense）
+
+| 类型 | 文件 | 说明 |
+|------|------|------|
+| 游戏设计 | [`specs/2026-11-06-game-tower-defense-design.md`](./specs/2026-11-06-game-tower-defense-design.md) | 9×12 ASCII 地图 + BFS 路径推导、固定塔位、4 塔 × 3 级、10 波含 Boss、金币 / 生命 / 50% 出售返还、三图难度（自动玩家 10 / 10 / 2 生命）、布局与验收清单 |
+| 回归自检 | [`../tools/verify-td-core.js`](../tools/verify-td-core.js) | 纯逻辑单测（21 项：三图合法性与路径、建造 / 升级 / 出售经济、三种索敌、溅射与减速、漏怪扣血与判负、10 波全清判胜、1,000 局随机长跑不变量、三图自动玩家通关） |
+
 ### 砖块远征（Brick Breaker / brick）
 
 | 类型 | 文件 | 说明 |
@@ -169,7 +176,7 @@
 | 大厅排版 | [`design/2026-11-01-lobby-scroll-grid.md`](./design/2026-11-01-lobby-scroll-grid.md) | 重叠/超出的三个根因、**由内向外**逐层刷新的顺序、`scrollHint` 判据、卡片文案与配色的运行时收敛 |
 | 大厅计划 | [`plans/2026-05-12-phase1-lobby-plan.md`](./plans/2026-05-12-phase1-lobby-plan.md) | 大厅实现计划 |
 | 路线图 | [`plans/2026-10-31-next-games-roadmap.md`](./plans/2026-10-31-next-games-roadmap.md) | 第 6–8 款：砖块远征 → 合成大西瓜 → 数值门跑酷（三款均已可玩） |
-| 品类盘点 + 路线图 | [`plans/2026-11-05-game-catalog-and-roadmap.md`](./plans/2026-11-05-game-catalog-and-roadmap.md) | 12 款现有游戏的品类覆盖、8 个缺口评分，下一批 8 款（P0 成语填字 ✅ / 五子棋 ✅ → P1 放置经营 / 三消 / 塔防 → P2 台球 / 推箱子 / 节奏）的实现计划与排期 |
+| 品类盘点 + 路线图 | [`plans/2026-11-05-game-catalog-and-roadmap.md`](./plans/2026-11-05-game-catalog-and-roadmap.md) | 12 款现有游戏的品类覆盖、8 个缺口评分，下一批 8 款（P0 成语填字 ✅ / 五子棋 ✅ → P1 放置经营 ✅ / 三消 ✅ / 塔防 ✅ → P2 台球 / 推箱子 / 节奏）的实现计划与排期 |
 | 物理方案评估 | [`plans/2026-10-31-merge-physics-evaluation.md`](./plans/2026-10-31-merge-physics-evaluation.md) | 合成大西瓜：自研圆形求解 vs Box2D，含求解器设计与 12 项验收 |
 
 ---
