@@ -71,7 +71,8 @@ tiny_games/
 │   │   ├── game_gomoku/        # 场景: Gomoku（五子棋）
 │   │   ├── game_idle/          # 场景: Idle（小店日记）
 │   │   ├── game_match3/        # 场景: Match3（缤纷消除）
-│   │   └── game_tower_defense/ # 场景: TowerDefense（守卫塔楼）
+│   │   ├── game_tower_defense/ # 场景: TowerDefense（守卫塔楼）
+│   │   └── game_pool/          # 场景: Pool（台球）
 │   ├── common/            # 公共模块
 │   │   ├── managers/      # SceneManager, StorageManager, GameConfig
 │   │   └── components/    # BackButton, SafeAreaAdapter
