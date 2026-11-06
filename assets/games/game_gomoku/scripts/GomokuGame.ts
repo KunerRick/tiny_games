@@ -398,7 +398,7 @@ export class GomokuGame extends Component {
                 stroke: '#26364F',
                 onTap: () => this._onModeClicked(key),
             });
-            btn.node.setPosition(designPos(360 + (i - 0.5) * 174, 150));
+            btn.node.setPosition(designPos(360 + (i - 0.5) * 174, 146));
             this._modeBtns[key] = btn;
         }
 
@@ -415,7 +415,7 @@ export class GomokuGame extends Component {
                 stroke: '#26364F',
                 onTap: () => this._onDifficultyClicked(key),
             });
-            btn.node.setPosition(designPos(186 + i * 174, 214));
+            btn.node.setPosition(designPos(186 + i * 174, 206));
             this._diffBtns[key] = btn;
         }
 
@@ -430,18 +430,18 @@ export class GomokuGame extends Component {
         drawRoundRect(frameG, BOARD_FRAME, BOARD_FRAME, 20, toColor(COLOR_BOARD), toColor(COLOR_BOARD_STROKE), 3);
         this._boardNode = board;
 
-        const gridNode = createNode('Grid', board, BOARD_FRAME, BOARD_FRAME);
-        const grid = gridNode.addComponent(Graphics);
-        grid.lineWidth = 2;
-        grid.strokeColor = toColor(COLOR_GRID);
+        // 网格用「矩形填充」而非 moveTo/lineTo + stroke()：实测水平线用 stroke 画，
+        // 路径几何生成了却整片不渲染（竖线正常、换成 fill 立即可见）。
+        // 详见 docs/tech/cocos-graphics-lines-pitfall.md
+        const grid = createNode('Grid', board, BOARD_FRAME, BOARD_FRAME).addComponent(Graphics);
+        grid.fillColor = toColor(COLOR_GRID);
         for (let i = 0; i < 15; i++) {
             const p = -GRID_HALF + i * CELL;
-            grid.moveTo(-GRID_HALF, p);
-            grid.lineTo(GRID_HALF, p);
-            grid.moveTo(p, -GRID_HALF);
-            grid.lineTo(p, GRID_HALF);
+            grid.rect(-GRID_HALF, p - 1, GRID_HALF * 2, 2);
+            grid.fill();
+            grid.rect(p - 1, -GRID_HALF, 2, GRID_HALF * 2);
+            grid.fill();
         }
-        grid.stroke();
         grid.fillColor = toColor(COLOR_STAR);
         const stars = [[3, 3], [3, 11], [11, 3], [11, 11], [7, 7]];
         for (let i = 0; i < stars.length; i++) {
