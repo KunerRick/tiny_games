@@ -272,7 +272,8 @@ export class IdleGame extends Component {
         const glowNode = createNode('Glow', this.node, 720, 1280);
         const glow = glowNode.addComponent(Graphics);
         glow.fillColor = toColor('#12203A');
-        glow.circle(-250, 380, 320);
+        // 光斑压进左上角，避免圆弧边切过金币数字
+        glow.circle(-360, 500, 280);
         glow.fill();
         glow.fillColor = toColor('#0E1A30');
         glow.circle(280, -420, 360);
@@ -292,15 +293,21 @@ export class IdleGame extends Component {
             height: 24,
         });
 
+        createLabel(this.node, '金币', 16, {
+            ...this._at(360, 152),
+            color: UI.textMuted,
+            width: 300,
+            height: 22,
+        });
         this._coinsLabel = createLabel(this.node, '0', 60, {
-            ...this._at(360, 188),
+            ...this._at(360, 192),
             bold: true,
             width: 660,
             height: 76,
             color: UI.warning,
         });
         this._rateLabel = createLabel(this.node, '', 22, {
-            ...this._at(360, 240),
+            ...this._at(360, 244),
             color: UI.textDim,
             width: 660,
             height: 30,

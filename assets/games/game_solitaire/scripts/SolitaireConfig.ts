@@ -124,7 +124,7 @@ export const SAVE_THROTTLE_SEC = 0.5;
 
 export const COLOR_BG = '#0B1020';
 export const COLOR_TABLE = '#151E33';
-export const COLOR_SLOT_STROKE = '#2E3A5E';
+export const COLOR_SLOT_STROKE = '#3C4A73';
 export const COLOR_CARD_FACE = '#FDFBF7';
 export const COLOR_CARD_EDGE = '#D8D2C4';
 export const COLOR_CARD_BACK = '#2C5F8A';

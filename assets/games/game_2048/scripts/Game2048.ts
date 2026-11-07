@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, director, Button, Label } from 'cc';
+import { _decorator, Component, Node, director, Button, Label, Color } from 'cc';
 import { SceneManager } from '../../../common/managers/SceneManager';
 import { StorageManager as CommonStorageManager } from '../../../common/managers/StorageManager';
 import { GridSize, TileData, Direction, DEFAULT_GRID_SIZE } from './GameConfig';
@@ -8,6 +8,7 @@ import { InputHandler } from './InputHandler';
 import { GameGrid } from './GameGrid';
 import { SettingsPanel } from './SettingsPanel';
 import { GameOverPanel } from './GameOverPanel';
+import { createLabel, designPos } from '../../../common/ui/GameUIKit';
 
 const { ccclass, property } = _decorator;
 
@@ -72,6 +73,39 @@ export class Game2048 extends Component {
         
         // 记录最近游玩
         CommonStorageManager.instance.addRecentGame('2048');
+
+        // 棋盘与底栏之间有一大段空白，补一行玩法提示（新玩家不知道要滑动）
+        const hint = createLabel(this.node, '滑动屏幕合并相同数字 · 凑出 2048', 20, {
+            width: 680,
+            height: 28,
+            color: '#64748B',
+        });
+        hint.node.setPosition(designPos(360, 940));
+
+        this._polishScoreCards();
+    }
+
+    /**
+     * 分数卡片的字色是 #776E65，配深棕卡面几乎看不清（对比度约 1.1:1）。
+     * 预制体不便改，这里在运行时统一提亮，并把标题号稍微放大。
+     */
+    private _polishScoreCards(): void {
+        const light = new Color(245, 239, 230, 255);
+        const titles = ['scoreTitle', 'bestScoreTitle'];
+        const values = ['scoreLabel', 'bestScoreLabel'];
+        const stack: Node[] = [this.node];
+        while (stack.length > 0) {
+            const node = stack.pop()!;
+            if (!node || !node.isValid) continue;
+            if (titles.indexOf(node.name) >= 0 || values.indexOf(node.name) >= 0) {
+                const label = node.getComponent(Label);
+                if (label) {
+                    label.color = light;
+                    label.fontSize = titles.indexOf(node.name) >= 0 ? 20 : 36;
+                }
+            }
+            for (const child of node.children) stack.push(child);
+        }
     }
 
     onDestroy(): void {

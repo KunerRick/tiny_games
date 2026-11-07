@@ -78,6 +78,8 @@ export class PoolGame extends Component {
     private _table: Node | null = null;
     private _gfx: Graphics | null = null;
     private _powerG: Graphics | null = null;
+    private _powerLabel: Label | null = null;
+    private _powerText = '';
     private _levelLabel: Label | null = null;
     private _strokeLabel: Label | null = null;
     private _scoreLabel: Label | null = null;
@@ -124,6 +126,7 @@ export class PoolGame extends Component {
         this._table = null;
         this._gfx = null;
         this._powerG = null;
+        this._powerLabel = null;
         this._levelLabel = null;
         this._strokeLabel = null;
         this._scoreLabel = null;
@@ -416,8 +419,8 @@ export class PoolGame extends Component {
             ...this._at(360, 700), color: UI.textDim, width: 680, height: 28,
         });
 
-        createLabel(this.node, '力度', 19, {
-            ...this._at(64, 758), color: UI.textMuted, width: 90, height: 26,
+        this._powerLabel = createLabel(this.node, '力度 0%', 19, {
+            ...this._at(70, 758), color: UI.textMuted, width: 140, height: 26,
         });
         const powerBar = createNode('PowerBar', this.node, 520, 26);
         powerBar.setPosition(designPos(430, 758));
@@ -660,15 +663,25 @@ export class PoolGame extends Component {
         const h = 26;
         g.clear();
         drawRoundRect(g, w, h, 13, toColor('#0E1626'), toColor('#2A3A57'), 2);
+        // 空槽也给一点底色，否则不拖拽时整条力度条看着像不存在
+        g.fillColor = toColor('#15203A');
+        g.roundRect(-w / 2 + 3, -(h - 8) / 2, w - 6, h - 8, (h - 8) / 2);
+        g.fill();
 
         // 填充从左侧起算（drawRoundRect 是居中绘制，这里手动画圆角矩形）
         const p = this.aimPower;
+        const text = `力度 ${Math.round(p * 100)}%`;
+        if (this._powerLabel && this._powerText !== text) {
+            this._powerText = text;
+            this._powerLabel.string = text;
+            this._powerLabel.color = toColor(p > 0.75 ? UI.danger : p > 0.45 ? UI.warning : UI.textMuted);
+        }
         if (p <= 0) return;
-        const innerH = h - 6;
+        const innerH = h - 8;
         const fw = Math.max(innerH, (w - 6) * p);
         const color = p > 0.75 ? UI.danger : p > 0.45 ? UI.warning : UI.success;
         g.fillColor = toColor(color);
-        g.roundRect(-w / 2 + 3, -innerH / 2, fw, innerH, Math.min(10, fw / 2, innerH / 2));
+        g.roundRect(-w / 2 + 3, -innerH / 2, fw, innerH, Math.min(innerH / 2, fw / 2));
         g.fill();
     }
 }

@@ -48,13 +48,19 @@ export class FoodSpawner extends Component {
     private _halfH: number = 600;
     private _margin: number = 50;
 
-    public init(gameArea: Node): void {
+    public init(gameArea: Node, halfW?: number, halfH?: number): void {
         this._gameArea = gameArea;
 
-        const transform = gameArea.getComponent(UITransform);
-        if (transform) {
-            this._halfW = transform.width / 2;
-            this._halfH = transform.height / 2;
+        if (halfW !== undefined && halfH !== undefined) {
+            // 由外部传入可玩区域（例如扣除 HUD 占用的顶部），保证食物不会生成到 HUD 上
+            this._halfW = halfW;
+            this._halfH = halfH;
+        } else {
+            const transform = gameArea.getComponent(UITransform);
+            if (transform) {
+                this._halfW = transform.width / 2;
+                this._halfH = transform.height / 2;
+            }
         }
 
         this.refill();

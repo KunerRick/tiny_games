@@ -23,6 +23,7 @@ import {
 import type { MergeEvent } from './MergeCore';
 import { StorageManager } from '../../../common/managers/StorageManager';
 import { SceneManager } from '../../../common/managers/SceneManager';
+import { applySceneClearColor } from '../../../common/ui/GameUIKit';
 
 const { ccclass, property } = _decorator;
 
@@ -173,6 +174,7 @@ export class MergeGame extends Component {
     // ==================== 生命周期 ====================
 
     onLoad(): void {
+        applySceneClearColor();
         this._bgGraphics = this._graphicsOf(this.backgroundLayer);
         this._fruitGraphics = this._graphicsOf(this.fruitLayer);
         this._effectGraphics = this._graphicsOf(this.effectLayer);

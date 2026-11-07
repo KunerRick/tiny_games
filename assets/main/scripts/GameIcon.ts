@@ -1,13 +1,26 @@
-import { _decorator, Component, Node, Label, Sprite, Color, EventTouch, tween, Vec3 } from 'cc';
-import { GameConfig } from '../../common/managers/GameConfig';
+import {
+    _decorator,
+    Component,
+    Node,
+    Label,
+    Sprite,
+    Color,
+    EventTouch,
+    Graphics,
+    UITransform,
+    tween,
+    Vec3,
+} from 'cc';
+import { GameConfig, GAME_LIST } from '../../common/managers/GameConfig';
+import { drawGameIconArt } from './GameIconArt';
 
 const { ccclass, property } = _decorator;
 
 /** 卡片文字的中心 y（卡片高 180，文字落在卡片内底部） */
 const LABEL_Y = -58;
 
-/** 卡片文字的描边色：浅色底 + 深色描边，避免文字和图标糊在一起 */
-const OUTLINE_COLOR = new Color(45, 52, 70, 255);
+/** 卡片文字色：浅色卡片底上用墨色，比白字 + 深描边更干净 */
+const LABEL_COLOR = new Color(43, 53, 80, 255);
 
 /** 卡片底色（浅色系，配深色图标剪影）；按 id 哈希取色，相邻卡片尽量不同色 */
 const CARD_COLORS = [
@@ -34,6 +47,7 @@ export class GameIcon extends Component {
     
     private _gameConfig: GameConfig | null = null;
     private _onClickCallback: ((gameId: string) => void) | null = null;
+    private _art: Graphics | null = null;
     
     onLoad() {
         this.node.on(Node.EventType.TOUCH_START, this.onTouchStart, this);
@@ -72,24 +86,43 @@ export class GameIcon extends Component {
         }
         label.fontSize = 24;
         label.lineHeight = 26;
-        label.enableOutline = true;
-        label.outlineColor = OUTLINE_COLOR;
-        label.outlineWidth = 2;
+        label.color = LABEL_COLOR;
+        label.enableOutline = false;
     }
 
-    /** 卡片底色按游戏 id 取色；用整串 id 求和，避免只按首字母取色导致大片同色 */
-    private applyCardColor(gameId: string): void {
-        const bg = this.bgNode;
-        if (!bg || !bg.isValid) return;
+    /**
+     * 卡片底色按游戏在 GAME_LIST 里的序号取色（不是哈希）。
+     * 哈希会让相邻卡片撞成同一种颜色（实测一排里出现两张粉卡），
+     * 按序号轮转可以保证网格里相邻三张颜色不同。
+     */
+    private cardColor(gameId: string): Color {
+        const index = GAME_LIST.findIndex((g) => g.id === gameId);
+        const slot = index >= 0 ? index : 0;
+        return CARD_COLORS[slot % CARD_COLORS.length];
+    }
 
-        let hash = 0;
-        for (let i = 0; i < gameId.length; i++) {
-            hash = (hash * 31 + gameId.charCodeAt(i)) & 0x7fffffff;
+    /**
+     * 用 Graphics 现画卡片底 + 专属图标。
+     * 预制体里的 Sprite 只是一张通用占位图（18 个游戏长得一模一样），
+     * 这里把它关掉，改画每个游戏各自的图形。
+     */
+    private applyCardColor(gameId: string): void {
+        const sprite = this.node.getComponent(Sprite);
+        if (sprite) sprite.enabled = false;
+
+        let art = this._art;
+        if (!art) {
+            const artNode = new Node('Art');
+            artNode.layer = this.node.layer;
+            this.node.addChild(artNode);
+            // 图标垫在名称文字下面
+            artNode.setSiblingIndex(0);
+            const ut = artNode.addComponent(UITransform);
+            ut.setContentSize(150, 180);
+            art = artNode.addComponent(Graphics);
+            this._art = art;
         }
-        const sprite = bg.getComponent(Sprite);
-        if (sprite) {
-            sprite.color = CARD_COLORS[hash % CARD_COLORS.length];
-        }
+        drawGameIconArt(art, gameId, this.cardColor(gameId));
     }
     
     private onTouchStart(event: EventTouch) {

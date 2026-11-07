@@ -374,8 +374,8 @@ export class IdiomGame extends Component {
             btn.node.setPosition(designPos(actionStart + i * (actionW + actionGap), 1115));
         }
 
-        createLabel(this.node, '选格子 → 点候选字填入 · 填满整条成语自动校验（含干扰字）', 18, {
-            ...this._at(360, 1192),
+        createLabel(this.node, '填满整条成语会自动校验 · 填错记一次失误', 18, {
+            ...this._at(360, 1172),
             color: UI.textMuted,
             width: 680,
             height: 26,

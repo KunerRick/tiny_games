@@ -14,6 +14,7 @@ import { COLORS, PLAY_H, PLAY_W, getUpgradeDef } from './BrickConfig';
 import type { UpgradeId } from './BrickConfig';
 import { StorageManager } from '../../../common/managers/StorageManager';
 import { SceneManager } from '../../../common/managers/SceneManager';
+import { applySceneClearColor } from '../../../common/ui/GameUIKit';
 
 const { ccclass, property } = _decorator;
 
@@ -163,6 +164,7 @@ export class BrickGame extends Component {
     // ==================== 生命周期 ====================
 
     onLoad(): void {
+        applySceneClearColor();
         this._bgGraphics = this._graphicsOf(this.backgroundLayer);
         this._brickGraphics = this._graphicsOf(this.brickLayer);
         this._effectGraphics = this._graphicsOf(this.effectLayer);

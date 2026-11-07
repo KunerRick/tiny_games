@@ -2,7 +2,7 @@ import { _decorator, Component, Node, Graphics, Color, Vec3, Vec2 } from 'cc';
 
 const { ccclass, property } = _decorator;
 
-const SEGMENT_SIZE = 14;          // 每段尺寸
+const SEGMENT_SIZE = 22;          // 每段尺寸（要比食物点明显大，否则蛇头会和普通光点混在一起）
 const SEGMENT_GAP = 6;            // 路径采样间隔（帧数）
 const TURN_SPEED = 5.0;           // 转向速度（弧度/秒）
 const HEAD_COLOR = new Color(0, 245, 255);    // #00F5FF 亮青
@@ -51,7 +51,7 @@ export class Snake extends Component {
         this._headNode = new Node('snakeHead');
         const headG = this._headNode.addComponent(Graphics);
         headG.fillColor = HEAD_COLOR;
-        headG.rect(-SEGMENT_SIZE / 2, -SEGMENT_SIZE / 2, SEGMENT_SIZE, SEGMENT_SIZE);
+        headG.roundRect(-SEGMENT_SIZE / 2, -SEGMENT_SIZE / 2, SEGMENT_SIZE, SEGMENT_SIZE, 7);
         headG.fill();
 
         // 蛇头稍微圆润一点 — 加一个小圆角效果
@@ -122,7 +122,7 @@ export class Snake extends Component {
             const node = new Node('snakeBody');
             const g = node.addComponent(Graphics);
             g.fillColor = BODY_COLOR;
-            g.rect(-SEGMENT_SIZE / 2, -SEGMENT_SIZE / 2, SEGMENT_SIZE, SEGMENT_SIZE);
+            g.roundRect(-SEGMENT_SIZE / 2, -SEGMENT_SIZE / 2, SEGMENT_SIZE, SEGMENT_SIZE, 6);
             g.fill();
             node.setParent(this._gameArea!);
             this._bodyNodes.push(node);

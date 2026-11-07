@@ -10,7 +10,9 @@
  */
 
 import {
+    Camera,
     Color,
+    director,
     EventTouch,
     Graphics,
     HorizontalTextAlignment,
@@ -45,6 +47,21 @@ export const UI = {
 };
 
 // ==================== 基础 ====================
+
+/**
+ * 把当前场景相机清屏色改成统一的深蓝。
+ *
+ * 场景自带的相机默认是纯黑，切进来会和其它用 GameUIKit 的游戏明显不是一套 UI；
+ * 这些场景又没有全屏底图，所以在 onLoad 里直接改相机即可（随场景销毁自动还原）。
+ */
+export function applySceneClearColor(hex: string = UI.bg): void {
+    const scene = director.getScene();
+    if (!scene) return;
+    const canvas = scene.getChildByName('Canvas');
+    if (!canvas) return;
+    const camera = canvas.getComponentInChildren(Camera);
+    if (camera) camera.clearColor = toColor(hex);
+}
 
 /** `#RRGGBB` / `#RRGGBBAA` → Color */
 export function toColor(hex: string, alpha = 255): Color {

@@ -74,8 +74,9 @@ export class SurvivorHud extends Component {
         this._time = this._label(root, 0, 588, 240, 40, '', 28, TEXT_PRIMARY, true);
         this._level = this._label(root, 250, 588, 160, 36, '', 24, TEXT_PRIMARY, true);
         this._level.horizontalAlign = Label.HorizontalAlign.RIGHT;
-        this._hp = this._label(root, -190, 548, 300, 22, '', 18, TEXT_PRIMARY, true);
-        this._hp.horizontalAlign = Label.HorizontalAlign.LEFT;
+        this._hp = this._label(root, -170, 548, 300, 22, '', 18, TEXT_PRIMARY, true);
+        // 左对齐会压到左上角的返回按钮，改成贴着生命条右端右对齐
+        this._hp.horizontalAlign = Label.HorizontalAlign.RIGHT;
         this._kills = this._label(root, 250, 472, 180, 28, '', 20, TEXT_SECONDARY, false);
         this._kills.horizontalAlign = Label.HorizontalAlign.RIGHT;
         this._build = this._label(root, -80, 472, 520, 28, '', 20, TEXT_SECONDARY, false);

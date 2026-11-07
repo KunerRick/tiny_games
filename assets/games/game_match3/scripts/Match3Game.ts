@@ -489,13 +489,19 @@ export class Match3Game extends Component {
         const g = this._goalBar;
         if (!g) return;
         g.clear();
-        g.fillColor = toColor('#1C2942');
-        g.roundRect(-260, -7, 520, 14, 7);
+        g.fillColor = toColor('#15203A');
+        g.roundRect(-260, -9, 520, 18, 9);
         g.fill();
-        const width = Math.max(0, Math.min(1, ratio)) * 520;
-        if (width > 0) {
-            g.fillColor = toColor(ratio >= 1 ? UI.success : UI.primary);
-            g.roundRect(-260, -7, width, 14, 7);
+        g.strokeColor = toColor('#2A3A57');
+        g.lineWidth = 2;
+        g.roundRect(-260, -9, 520, 18, 9);
+        g.stroke();
+        const r = Math.max(0, Math.min(1, ratio));
+        if (r > 0) {
+            // 最窄也画成一个圆头，避免刚开始时是一小条硬边
+            const width = Math.max(18, r * 520);
+            g.fillColor = toColor(r >= 1 ? UI.success : UI.primary);
+            g.roundRect(-260, -9, width, 18, 9);
             g.fill();
         }
     }

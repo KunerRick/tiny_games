@@ -499,9 +499,15 @@ export class SolitaireGame extends Component {
 
     private _strokeSlot(g: Graphics, left: number, top: number): void {
         const local = this._designToLocal(left, top);
+        const x = local.x - CARD_W / 2;
+        const y = local.y - CARD_H / 2;
+        // 空位先铺一层更深的底，不然在深色台面上只剩一道很难看清的描边
+        g.fillColor = this._hexAlpha('#000000', 60);
+        g.roundRect(x, y, CARD_W, CARD_H, 10);
+        g.fill();
         g.lineWidth = 2;
         g.strokeColor = this._hex(COLOR_SLOT_STROKE);
-        g.roundRect(local.x - CARD_W / 2, local.y - CARD_H / 2, CARD_W, CARD_H, 10);
+        g.roundRect(x, y, CARD_W, CARD_H, 10);
         g.stroke();
     }
 

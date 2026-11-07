@@ -3,6 +3,7 @@ import {
 } from 'cc';
 import { SceneManager } from '../../../common/managers/SceneManager';
 import { StorageManager } from '../../../common/managers/StorageManager';
+import { applySceneClearColor } from '../../../common/ui/GameUIKit';
 import {
     Age, GOLD_INCOME, WORLD, CASTLE_CONFIG, BUY_EXP,
     getUnitConfig, getNextAgeConfig,
@@ -67,6 +68,7 @@ export class WarEvo extends Component {
     // ======== 生命周期 ========
 
     onLoad() {
+        applySceneClearColor();
         // 记录最近游玩
         StorageManager.instance.addRecentGame('war_evo');
 

@@ -1,8 +1,28 @@
-import { _decorator, Component, Node, Button, Label, EventTouch, Vec2, Vec3, UITransform } from 'cc';
+import {
+    _decorator,
+    Component,
+    Node,
+    Button,
+    Label,
+    EventTouch,
+    Vec2,
+    Vec3,
+    UITransform,
+    Graphics,
+    UIOpacity,
+    tween,
+} from 'cc';
 import { Snake } from './Snake';
 import { FoodSpawner } from './FoodSpawner';
 import { Joystick } from './Joystick';
 import { SceneManager } from '../../../common/managers/SceneManager';
+import {
+    createLabel,
+    createNode,
+    designPos,
+    drawRoundRect,
+    toColor,
+} from '../../../common/ui/GameUIKit';
 
 const { ccclass, property } = _decorator;
 
@@ -66,6 +86,9 @@ export class SnakeGame extends Component {
     private _score: number = 0;
     private _bestScore: number = 0;
     private _isPlaying: boolean = false;
+    /** 是否已经由玩家首次输入启动（进场时蛇静止，避免没人操作就自己撞墙） */
+    private _started: boolean = false;
+    private _startHint: Node | null = null;
     private _halfW: number = 360;
     private _halfH: number = 640;
 
@@ -122,6 +145,7 @@ export class SnakeGame extends Component {
 
         // 设置摇杆回调
         this.joystick.onDirectionChange = (angle: number) => {
+            this._beginPlay();
             this._snake?.setTargetAngle(angle);
         };
 
@@ -129,7 +153,8 @@ export class SnakeGame extends Component {
         if (this.gameArea) {
             this._joystickTouchStartHandler = (event: EventTouch) => {
                 if (this.joystick?.onTouchStart(event)) {
-                    // 摇杆消费了事件
+                    // 摇杆消费了事件：这也是一次玩家输入，开始游戏
+                    this._beginPlay();
                 }
             };
             this._joystickTouchMoveHandler = (event: EventTouch) => {
@@ -172,12 +197,14 @@ export class SnakeGame extends Component {
     }
 
     private _initGame(): void {
-        // 获取游戏区域尺寸
+        // 获取游戏区域尺寸；顶部让出 HUD（得分/返回）的高度，底部也留出安全边
         if (this.gameArea) {
             const transform = this.gameArea.getComponent(UITransform);
             if (transform) {
-                this._halfW = transform.width / 2;
-                this._halfH = transform.height / 2;
+                const topInset = 150;   // HUD 在 y≈140 以上的区域
+                const sideInset = 24;
+                this._halfW = transform.width / 2 - sideInset;
+                this._halfH = transform.height / 2 - topInset;
             }
         }
 
@@ -208,7 +235,7 @@ export class SnakeGame extends Component {
 
         // 创建食物
         this._foodSpawner = this.node.addComponent(FoodSpawner);
-        this._foodSpawner.init(this.gameArea!);
+        this._foodSpawner.init(this.gameArea!, this._halfW, this._halfH);
 
         // 重置分数和连击
         this._score = 0;
@@ -216,7 +243,51 @@ export class SnakeGame extends Component {
         this._lastEatTime = 0;
         this._comboTimer = 0;
         this._isPlaying = true;
+        this._started = false;
         this._updateScoreLabels();
+        this._showStartHint();
+    }
+
+    /** 进场先静止，等玩家第一次滑动再开始——否则蛇会自己撞墙 */
+    private _showStartHint(): void {
+        if (this._startHint && this._startHint.isValid) {
+            this._startHint.destroy();
+        }
+        this._startHint = null;
+
+        const hint = createNode('StartHint', this.node, 380, 84);
+        hint.setPosition(designPos(360, 500));
+        const g = hint.addComponent(Graphics);
+        drawRoundRect(g, 380, 84, 42, toColor('#0A1120', 235), toColor('#38BDF8'), 2);
+        createLabel(hint, '滑动屏幕开始', 28, {
+            width: 350,
+            height: 76,
+            color: '#E2F5FF',
+            bold: true,
+        });
+
+        const op = hint.addComponent(UIOpacity);
+        op.opacity = 255;
+        tween(op)
+            .repeatForever(
+                tween(op)
+                    .to(0.75, { opacity: 130 })
+                    .to(0.75, { opacity: 255 }),
+            )
+            .start();
+
+        this._startHint = hint;
+    }
+
+    /** 玩家首次输入：收起提示，开始移动 */
+    private _beginPlay(): void {
+        if (this._started) return;
+        this._started = true;
+
+        if (this._startHint && this._startHint.isValid) {
+            this._startHint.destroy();
+        }
+        this._startHint = null;
     }
 
     // ==================== 触摸控制（备用）====================
@@ -226,6 +297,7 @@ export class SnakeGame extends Component {
     private _onTouchStart(event: EventTouch): void {
         const pos = event.getUILocation();
         this._touchPrevPos = new Vec2(pos.x, pos.y);
+        this._beginPlay();
     }
 
     private _onTouchMove(event: EventTouch): void {
@@ -254,7 +326,7 @@ export class SnakeGame extends Component {
     // ==================== 主循环 ====================
 
     update(dt: number) {
-        if (!this._isPlaying || !this._snake || !this._foodSpawner) return;
+        if (!this._isPlaying || !this._started || !this._snake || !this._foodSpawner) return;
 
         // 1. 更新连击计时器
         this._updateCombo(dt);
@@ -367,6 +439,12 @@ export class SnakeGame extends Component {
     private _cleanupGame(): void {
         // 标记游戏结束——确保 update() 在清理期间不会继续执行
         this._isPlaying = false;
+        this._started = false;
+
+        if (this._startHint && this._startHint.isValid) {
+            this._startHint.destroy();
+        }
+        this._startHint = null;
 
         if (this._snake) {
             this._snake.destroyAll();
@@ -425,6 +503,7 @@ export class SnakeGame extends Component {
         // 所以只清引用，不调任何节点/组件方法。
         this._snake = null;
         this._foodSpawner = null;
+        this._startHint = null;
         this._joystickTouchStartHandler = null;
         this._joystickTouchMoveHandler = null;
         this._joystickTouchEndHandler = null;

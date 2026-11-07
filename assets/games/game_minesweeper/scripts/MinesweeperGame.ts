@@ -386,8 +386,8 @@ export class MinesweeperGame extends Component {
         newBtn.node.setPosition(designPos(508, 1128));
         this._newBtn = newBtn;
 
-        createLabel(this.node, '点击翻开 · 长按插旗 · 点数字自动开周围', 20, {
-            ...this._at(360, 1214),
+        createLabel(this.node, '首次点击必安全 · 数字表示周围雷数', 20, {
+            ...this._at(360, 1192),
             color: UI.textMuted,
             width: 660,
             height: 30,
