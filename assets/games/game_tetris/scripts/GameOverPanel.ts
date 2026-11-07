@@ -55,11 +55,15 @@ export class GameOverPanel extends Component {
         this._host = host;
     }
 
-    show(score: number, bestScore: number, lines: number, isNewBest: boolean): void {
+    show(score: number, bestScore: number, lines: number, isNewBest: boolean, level: number = 0): void {
         this._applySkin();
         if (this.scoreLabel) this.scoreLabel.string = formatScore(score);
         if (this.bestLabel) this.bestLabel.string = `最高分 ${formatScore(bestScore)}`;
-        if (this.linesLabel) this.linesLabel.string = `消行 ${Math.max(0, Math.floor(lines))}`;
+        if (this.linesLabel) {
+            const safeLines = Math.max(0, Math.floor(lines));
+            // 等级是本局「打到多快」的唯一证据，结算漏了它玩家无从比较两局
+            this.linesLabel.string = level > 0 ? `消行 ${safeLines} · 等级 ${Math.max(1, Math.floor(level))}` : `消行 ${safeLines}`;
+        }
         if (this.newBestLabel) this.newBestLabel.node.active = isNewBest;
 
         this.node.active = true;

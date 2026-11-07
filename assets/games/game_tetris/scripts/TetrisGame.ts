@@ -5,19 +5,37 @@
  * （同一回调在自身执行中重新排期会被引擎静默丢弃，见 AGENTS.md 教训 F）。
  */
 
-import { _decorator, Color, Component, Game, Graphics, Node, Sprite, SpriteFrame, UITransform, Vec3, game } from 'cc';
+import {
+    _decorator,
+    Color,
+    Component,
+    Game,
+    Graphics,
+    Label,
+    Node,
+    Sprite,
+    SpriteFrame,
+    Tween,
+    UIOpacity,
+    UITransform,
+    Vec3,
+    game,
+    tween,
+} from 'cc';
 import {
     BOARD_COLS,
     BUTTON_BOTTOM_ZONE,
     COLOR_BOARD_BG,
     COLOR_GRID_LINE,
     HARD_DROP_POINTS_PER_CELL,
+    HARD_DROP_TRAIL_SEC,
     LINE_CLEAR_SEC,
     LOCK_DELAY_SEC,
     MAX_LOCK_RESETS,
     PIECE_COLORS,
     SOFT_DROP_INTERVAL_SEC,
     SOFT_DROP_POINTS_PER_CELL,
+    TETRIS_BANNER_SEC,
     UI_STROKE,
     VISIBLE_ROWS,
     computeCellSize,
@@ -167,6 +185,8 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
     private _cell: number = 38;
     private _colorCache: Map<string, Color> = new Map<string, Color>();
     private _clearTint: Color | null = null;
+    /** 消行扫光的临时色（每帧复用，不新建 Color） */
+    private _sweepTint: Color | null = null;
 
     /** onDestroy 只碰这些普通引用，不访问任何 @property(Node) */
     private _pauseBtn: Node | null = null;
@@ -194,6 +214,12 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
     private _shakeTimer: number = 0;
     /** 棋盘原始位置：震屏偏移后必须能精确还原 */
     private _shakeBase: Vec3 = new Vec3();
+    /** 硬降拖影：从起点到落点的路径格与剩余时长 */
+    private _trailCells: { x: number; y: number; color: Color }[] = [];
+    private _trailTimer: number = 0;
+    private _trailLayer: Node | null = null;
+    /** 四行消除横幅（懒创建，见 `_ensureBannerLabel`） */
+    private _bannerLabel: Label | null = null;
 
     /** 本次打开教程是否为「首局引导」 */
     private _tutorialFirstRun: boolean = false;
@@ -294,6 +320,9 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
             this._clearTimer += step;
             if (this._clearTimer >= LINE_CLEAR_SEC) {
                 this._finishClear();
+            } else {
+                // 消行闪光要「从中间向两侧」扫过，必须逐帧重画（整层合并成一次 Graphics）
+                this._render();
             }
             return;
         }
@@ -355,6 +384,16 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
             }
         }
 
+        if (this._trailTimer > 0) {
+            this._trailTimer -= step;
+            if (this._trailTimer <= 0) {
+                this._trailTimer = 0;
+                this._trailCells.length = 0;
+            }
+            // 拖影透明度随剩余时间衰减，逐帧重画（0.14s，几十个格子）
+            this._render();
+        }
+
         if (this._shakeTimer > 0) {
             this._shakeTimer -= step;
             if (this._shakeTimer <= 0) {
@@ -406,6 +445,9 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
         this._flashCells.length = 0;
         this._flashTimer = 0;
         this._shakeTimer = 0;
+        this._trailCells.length = 0;
+        this._trailTimer = 0;
+        this._hideBanner();
         this._applyShakeOffset(0, 0);
     }
 
@@ -501,6 +543,10 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
         if (mode === this._controlMode) return;
         this._controlMode = mode;
         TetrisStorage.setControlMode(mode);
+        // 游戏侧自己收掉软降，不指望输入层「记得自己按着」：
+        // `disable()` 只在输入层自己的 `_softDropOn` 为真时才补发 `SoftDropEnd`，
+        // 两边状态一旦不同步（例如上层直接改过 `_softDrop`），切完还会继续加速下落。
+        this._setSoftDrop(false);
         this._syncInputEnabled();
         this.pausePanel?.refresh(mode, this._vibrate);
         this._syncHints();
@@ -712,12 +758,65 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
     private _hardDrop(piece: ActivePiece): void {
         const distance = this._board.getDropDistance(piece);
         if (distance > 0) {
+            this._startTrail(piece, distance, this._pieceColor(piece.type));
             piece.y -= distance;
             this._score += distance * HARD_DROP_POINTS_PER_CELL;
         }
         this._markHint('drop');
         this._render();
         this._lockPiece();
+    }
+
+    /**
+     * 硬降拖影：记下方块扫过的每一格，0.14s 内淡出。
+     * 硬降原本是「一帧瞬移 + 一次锁白」，中间过程完全不可见，
+     * 玩家只能靠分数变化判断方块到底落在哪一列。
+     */
+    private _startTrail(piece: ActivePiece, distance: number, color: Color): void {
+        this._trailCells.length = 0;
+        for (const cell of getPieceCells(piece)) {
+            for (let y = cell.y - 1; y >= cell.y - distance && y >= 0; y--) {
+                if (y >= VISIBLE_ROWS) continue;
+                this._trailCells.push({ x: cell.x, y, color });
+            }
+        }
+        this._trailTimer = this._trailCells.length > 0 ? HARD_DROP_TRAIL_SEC : 0;
+    }
+
+    /** 拖影独立一层（在方块层之下）：和落点预览共用一个 Graphics 会互相 clear */
+    private _paintTrail(): void {
+        const alive = this._trailTimer > 0 && this._trailCells.length > 0;
+        if (!alive && !this._trailLayer) return;
+        const node = alive ? this._ensureTrailLayer() : this._trailLayer;
+        if (!node || !node.isValid) return;
+
+        const graphics = ensureGraphics(node);
+        graphics.clear();
+        if (!alive) return;
+
+        const k = Math.max(0, Math.min(1, this._trailTimer / HARD_DROP_TRAIL_SEC));
+        const alpha = Math.round(120 * k);
+        const size = this._cell - 3;
+        for (const cell of this._trailCells) {
+            const x = (cell.x - (BOARD_COLS - 1) / 2) * this._cell - size / 2;
+            const y = (cell.y - (VISIBLE_ROWS - 1) / 2) * this._cell - size / 2;
+            drawCell(graphics, x, y, size, new Color(cell.color.r, cell.color.g, cell.color.b, alpha));
+        }
+    }
+
+    private _ensureTrailLayer(): Node | null {
+        if (this._trailLayer && this._trailLayer.isValid) return this._trailLayer;
+        const parent = this.boardRoot;
+        if (!parent || !parent.isValid) return null;
+        const node = new Node('TrailLayer');
+        node.layer = parent.layer;
+        parent.addChild(node);
+        // 插到方块层之前：残影不能盖住已经落定的方块
+        if (this.blockLayer && this.blockLayer.isValid) {
+            node.setSiblingIndex(Math.max(0, this.blockLayer.getSiblingIndex()));
+        }
+        this._trailLayer = node;
+        return node;
     }
 
     private _doHold(piece: ActivePiece): void {
@@ -818,6 +917,10 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
         this._clearTimer = 0;
         this._state = GameState.Playing;
 
+        if (count >= 4) {
+            this._showTetrisBanner();
+        }
+
         this._spawn();
         this._render();
         this._syncHud(true);
@@ -831,7 +934,7 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
         this._syncInputEnabled();
 
         const result = TetrisStorage.submitScore(this._score, this._lines);
-        this.gameOverPanel?.show(this._score, result.bestScore, this._lines, result.isNewBest);
+        this.gameOverPanel?.show(this._score, result.bestScore, this._lines, result.isNewBest, this._level);
         // 局数变了：提示条可能到了「累计 3 局自动隐藏」的阈值
         this._syncHints();
     }
@@ -958,7 +1061,15 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
                 const clearing = this._clearRows.indexOf(y) >= 0;
                 // 刚落地的方块闪一下（80ms），消行时整行闪白优先
                 const flash = !clearing && this._isFlashing(x, y);
-                cells.push({ x, y, color: clearing || flash ? this._clearColor() : this._pieceColor(type) });
+                let color: Color;
+                if (clearing) {
+                    color = this._sweepColor(x, this._pieceColor(type));
+                } else if (flash) {
+                    color = this._clearColor();
+                } else {
+                    color = this._pieceColor(type);
+                }
+                cells.push({ x, y, color });
             }
         }
 
@@ -973,6 +1084,7 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
         this._paintCells(this.blockLayer, cells);
         this._renderGhost(piece);
         this._renderHighlight(piece);
+        this._paintTrail();
     }
 
     private _renderGhost(piece: ActivePiece | null): void {
@@ -1061,6 +1173,94 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
         return this._clearTint;
     }
 
+    /**
+     * 消行闪光：越靠近中线的格子越早亮白，靠两侧的格子延后点亮。
+     * 原来是整行同时变白（一帧切图），看不出「消掉了多少行」，扫过一遍才有反馈。
+     * 返回临时对象，调用方只在本次绘制内使用。
+     */
+    private _sweepColor(x: number, base: Color): Color {
+        const half = (BOARD_COLS - 1) / 2;
+        const dist = half > 0 ? Math.abs(x - half) / half : 0;
+        const delay = dist * 0.55;
+        const progress = LINE_CLEAR_SEC > 0 ? this._clearTimer / LINE_CLEAR_SEC : 1;
+        const p = Math.max(0, Math.min(1, (progress - delay) / Math.max(0.001, 1 - delay)));
+        if (!this._sweepTint) this._sweepTint = new Color();
+        const out = this._sweepTint;
+        out.r = Math.round(255 + (base.r - 255) * p);
+        out.g = Math.round(255 + (base.g - 255) * p);
+        out.b = Math.round(255 + (base.b - 255) * p);
+        out.a = 255;
+        return out;
+    }
+
+    // ==================== 四行消除横幅 ====================
+
+    private _showTetrisBanner(): void {
+        const label = this._ensureBannerLabel();
+        if (!label || !label.node.isValid) return;
+        const node = label.node;
+        Tween.stopAllByTarget(node);
+        node.active = true;
+        node.setScale(0.62, 0.62, 1);
+
+        const fade = node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
+        Tween.stopAllByTarget(fade);
+        fade.opacity = 0;
+
+        tween(fade)
+            .to(0.12, { opacity: 255 })
+            .delay(Math.max(0, TETRIS_BANNER_SEC - 0.42))
+            .to(0.28, { opacity: 0 })
+            .call(() => { if (node.isValid) node.active = false; })
+            .start();
+        tween(node)
+            .to(0.16, { scale: new Vec3(1.08, 1.08, 1) })
+            .to(0.12, { scale: new Vec3(1, 1, 1) })
+            .start();
+    }
+
+    private _hideBanner(): void {
+        const label = this._bannerLabel;
+        if (!label || !label.node || !label.node.isValid) return;
+        Tween.stopAllByTarget(label.node);
+        const fade = label.node.getComponent(UIOpacity);
+        if (fade) {
+            Tween.stopAllByTarget(fade);
+            fade.opacity = 0;
+        }
+        label.node.active = false;
+    }
+
+    /** 懒创建：绝大多数对局不会消四行，没必要在场景里常驻一个空标签 */
+    private _ensureBannerLabel(): Label | null {
+        if (this._bannerLabel && this._bannerLabel.node && this._bannerLabel.node.isValid) {
+            return this._bannerLabel;
+        }
+        const parent = this.boardRoot;
+        if (!parent || !parent.isValid) return null;
+
+        const node = new Node('TetrisBanner');
+        node.layer = parent.layer;
+        parent.addChild(node);
+        const transform = node.addComponent(UITransform);
+        transform.setContentSize(BOARD_COLS * this._cell, this._cell * 1.6);
+
+        const label = node.addComponent(Label);
+        label.string = '四行消除';
+        label.fontSize = 52;
+        label.lineHeight = 62;
+        label.isBold = true;
+        label.horizontalAlign = Label.HorizontalAlign.CENTER;
+        label.verticalAlign = Label.VerticalAlign.CENTER;
+        label.color = colorOf(PIECE_COLORS[1]);
+
+        // 压在棋盘上部三分之一：下面才是堆叠区，短暂 0.9s 不挡关键信息
+        node.setPosition(0, (VISIBLE_ROWS * this._cell) / 2 - this._cell * 2.2, 0);
+        node.active = false;
+        this._bannerLabel = label;
+        return label;
+    }
+
     // ==================== HUD ====================
 
     private _syncHud(full: boolean = false): void {
@@ -1069,7 +1269,7 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
         hud.updateStats(this._score, this._level, this._lines);
         if (full) {
             hud.setNext(this._next);
-            hud.setHold(this._hold);
+            hud.setHold(this._hold, !this._holdUsed);
         }
     }
 

@@ -11,6 +11,9 @@ import { PieceType, ROTATIONS } from './TetrisPieces';
 
 const { ccclass, property } = _decorator;
 
+/** 暂存不可用时方块的不透明度 */
+const HOLD_DIM_ALPHA = 0.34;
+
 @ccclass('HudPanel')
 export class HudPanel extends Component {
     @property(Label)
@@ -104,8 +107,13 @@ export class HudPanel extends Component {
             .start();
     }
 
-    setHold(type: PieceType | null): void {
-        this._drawPreview(this.holdPreviewRoot, type);
+    /**
+     * 暂存槽。
+     * `available = false`（本回合已经用过一次 Hold）时把方块画淡：
+     * 以前这里什么都不变，玩家点了 Hold 没反应会以为是卡了。
+     */
+    setHold(type: PieceType | null, available: boolean = true): void {
+        this._drawPreview(this.holdPreviewRoot, type, available ? 1 : HOLD_DIM_ALPHA);
     }
 
     setNext(types: PieceType[]): void {
@@ -116,7 +124,7 @@ export class HudPanel extends Component {
     }
 
     /** 预览用 Graphics 现画圆角小格：20px 的贴图方块在圆角界面里太突兀 */
-    private _drawPreview(root: Node | null, type: PieceType | null): void {
+    private _drawPreview(root: Node | null, type: PieceType | null, alpha: number = 1): void {
         if (!root || !root.isValid) return;
 
         const graphics = ensureGraphics(root);
@@ -138,11 +146,12 @@ export class HudPanel extends Component {
         const centerY = (minY + maxY) / 2;
 
         const color = this._pieceColor(type);
+        const tint = alpha >= 1 ? color : new Color(color.r, color.g, color.b, Math.round(255 * alpha));
         const size = NEXT_MINI_CELL - 2;
         for (const cell of cells) {
             const cx = (cell.x - centerX) * NEXT_MINI_CELL;
             const cy = (cell.y - centerY) * NEXT_MINI_CELL;
-            drawCell(graphics, cx - size / 2, cy - size / 2, size, color);
+            drawCell(graphics, cx - size / 2, cy - size / 2, size, tint);
         }
     }
 

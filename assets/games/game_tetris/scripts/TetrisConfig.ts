@@ -34,8 +34,14 @@ export const MAX_LOCK_RESETS = 15;
  */
 export const SOFT_DROP_INTERVAL_SEC = 0.1;
 
-/** 消行闪白时长 */
+/** 消行闪白时长（中心向两侧扫过的总时长） */
 export const LINE_CLEAR_SEC = 0.12;
+
+/** 硬降拖影存续时长 */
+export const HARD_DROP_TRAIL_SEC = 0.14;
+
+/** 四行消除横幅显示时长 */
+export const TETRIS_BANNER_SEC = 0.9;
 
 /** 重力间隔下限 */
 export const MIN_GRAVITY_SEC = 0.03;
