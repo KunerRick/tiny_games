@@ -11,8 +11,12 @@
 import { _decorator, Color, Component, EventTouch, Graphics, Label, Node, UITransform, Vec3 } from 'cc';
 import { GateCore } from './GateCore';
 import {
+    BOSS_PHASE_COLORS,
+    BOSS_PHASE_FLASH_SEC,
     COLORS,
     COUNT_MAX,
+    ENEMY_LABEL_GAP,
+    ENEMY_LABEL_MAX_W,
     GATE_H,
     GATE_LEFT_X,
     GATE_RIGHT_X,
@@ -24,9 +28,13 @@ import {
     PLAY_W,
     PLAYER_Y,
     PULSE_COOLDOWN_SEC,
+    SCROLL_BASE,
+    SCROLL_MAX,
     SQUAD_DOTS_MAX,
     SQUAD_DOT_MAX_R,
     SQUAD_DOT_MIN_R,
+    WEAK_GLOW_R,
+    WEAK_POINT_R,
     applyGateOp,
     enemyKindLabel,
     enemyProfile,
@@ -177,7 +185,12 @@ export class GateGame extends Component {
     private _gateSubLabels: Label[] = [];
     private _enemyLabels: Label[] = [];
     private _cardLabels: Label[] = [];       // 0–2 标题，3–5 说明
+    /** 人数超出圆点表达上限时，在队伍旁显示真实人数 */
+    private _squadBadgeLabel: Label | null = null;
     private _shake = 0;
+
+    /** Boss 阶段切换闪光剩余时长（0 = 无闪光） */
+    private _bossPhaseFlash = 0;
 
     private _fireTimer = 0;
 
@@ -240,6 +253,8 @@ export class GateGame extends Component {
         this._gateSubLabels = [];
         this._enemyLabels = [];
         this._cardLabels = [];
+        this._squadBadgeLabel = null;
+        this._bossPhaseFlash = 0;
         this._colorCache.clear();
     }
 
@@ -252,6 +267,9 @@ export class GateGame extends Component {
             this._consumeEvents();
             this._updateBullets(dt);
             this._updateFx(dt);
+            if (this._bossPhaseFlash > 0) {
+                this._bossPhaseFlash = Math.max(0, this._bossPhaseFlash - dt);
+            }
         }
 
         this._drawBackground();
@@ -271,6 +289,7 @@ export class GateGame extends Component {
         this._bullets = [];
         this._shake = 0;
         this._fireTimer = 0;
+        this._bossPhaseFlash = 0;
         this._gestureOnButton = false;
         this._lastCount = -1;
         this._lastDistance = -1;
@@ -527,6 +546,9 @@ export class GateGame extends Component {
                     const text = `${gateOpLabel({ kind: event.kind, value: event.value })}  ${event.after}`;
                     this._spawnFxText(text, color, PLAYER_Y - 70);
                     this._spawnBurst(this._core.playerX, PLAYER_Y - 20, color, 10, 90);
+                    // 队员从选中那侧的门「飞入」队伍：把门的屏幕位置作为粒子出生点
+                    const gateX = event.side === 'left' ? GATE_LEFT_X + GATE_W / 2 : GATE_RIGHT_X + GATE_W / 2;
+                    this._spawnGateTrail(gateX, this._screenY(event.y), color, event.after >= event.before);
                     // 完美选门：单独一行金色反馈，连击奖励再补一行
                     if (event.perfect && event.streak >= 2) {
                         this._spawnBurst(this._core.playerX, PLAYER_Y - 40, COLORS.gold, 8, 120);
@@ -552,6 +574,7 @@ export class GateGame extends Component {
                     }
                     break;
                 case 'boss_phase':
+                    this._bossPhaseFlash = BOSS_PHASE_FLASH_SEC;
                     this._spawnFxText(event.phase === 2 ? 'Boss 强化' : 'Boss 狂暴', COLORS.danger, PLAYER_Y - 150);
                     this._shake = Math.max(this._shake, 7);
                     break;
@@ -666,6 +689,34 @@ export class GateGame extends Component {
         }
         g.fill();
 
+        // 虚线中线：选门时给左右两道的分界参考（GATE_SPLIT_X = 画面正中）
+        const dash = 46;
+        const dashGap = 46;
+        const dashOff = this._core.distance % (dash + dashGap);
+        g.fillColor = this._color(COLORS.roadEdge, 0.75);
+        for (let y = -dashOff; y < PLAY_H + dash + dashGap; y += dash + dashGap) {
+            g.rect(left + PLAY_W / 2 - 3, bottom + y, 6, dash);
+        }
+        g.fill();
+
+        // 速度线：只放在左右路肩（对称的 [106,216] / [444,554] 设计 x 区间），
+        // 数量与长度随当前速度增长；不画在中间，避免和战斗信息抢注意力。
+        const speedNorm = Math.max(0, Math.min(1, (scrollSpeedAt(this._core.distance) - SCROLL_BASE) / (SCROLL_MAX - SCROLL_BASE)));
+        const lineCount = 8 + Math.round(speedNorm * 8);
+        const span = PLAY_H + 40;
+        // 随距离**向下**漂移（与滚动横线同向）；JS 取模对负数返回负值，先加 span 再取模
+        const drift = this._core.distance * (0.9 + 0.8 * speedNorm);
+        g.fillColor = this._color(COLORS.roadEdge, 0.22 + speedNorm * 0.45);
+        for (let i = 0; i < lineCount; i++) {
+            const k = i % 2 === 0
+                ? 106 + ((i * 137 + 23) % 110)
+                : 444 + ((i * 97 + 11) % 110);
+            const ly = (((i * 211 - drift) % span) + span) % span - 20;
+            const len = 12 + speedNorm * 26 + (i % 3) * 6;
+            g.rect(k - PLAY_W / 2, bottom + ly, 3, len);
+        }
+        g.fill();
+
         // 左右路肩
         g.fillColor = this._color(COLORS.roadEdge);
         g.rect(left + 46, bottom, 4, PLAY_H);
@@ -733,6 +784,23 @@ export class GateGame extends Component {
         g.rect(nx + 28, ny + GATE_H - 6, GATE_W - 56, 4);
         g.fill();
 
+        // 方向箭头：变多朝上、变少朝下。颜色 + 箭头双通道，不看数字也能读出趋势。
+        const gain = entry.op.kind === 'mul' || entry.op.kind === 'add';
+        const ax = nx + 26;
+        const ay = ny + GATE_H / 2;
+        g.fillColor = this._color(gateOpColor(entry.op.kind), 0.95);
+        if (gain) {
+            g.moveTo(ax, ay + 13);
+            g.lineTo(ax - 10, ay - 8);
+            g.lineTo(ax + 10, ay - 8);
+        } else {
+            g.moveTo(ax, ay - 13);
+            g.lineTo(ax - 10, ay + 8);
+            g.lineTo(ax + 10, ay + 8);
+        }
+        g.close();
+        g.fill();
+
         // 带附加效果的一侧加一条金色底线，和「纯数字门」区分开
         if (entry.mod) {
             g.fillColor = this._color(COLORS.gold, 0.95);
@@ -783,14 +851,18 @@ export class GateGame extends Component {
             const ny = this._sy(sy) - h / 2 + dy;
 
             const prof = enemyProfile(e.kind);
-            g.fillColor = this._color(e.boss ? COLORS.boss : prof.color, e.boss ? 0.95 : 0.85);
-            g.roundRect(nx, ny, w, h, 12);
-            g.fill();
+            if (e.boss) {
+                this._drawBossBody(g, e, nx, ny, w, h);
+            } else {
+                g.fillColor = this._color(prof.color, 0.85);
+                g.roundRect(nx, ny, w, h, 12);
+                g.fill();
 
-            // 眼睛/灯带：让方块看着不像纯色块
-            g.fillColor = this._color(0x000000, 0.28);
-            g.rect(nx + 12, ny + h - 18, w - 24, 6);
-            g.fill();
+                // 眼睛/灯带：让方块看着不像纯色块
+                g.fillColor = this._color(0x000000, 0.28);
+                g.rect(nx + 12, ny + h - 18, w - 24, 6);
+                g.fill();
+            }
 
             // 血条：实心矩形
             const barW = w - 24;
@@ -802,19 +874,25 @@ export class GateGame extends Component {
             g.rect(nx + 12, ny + h + 10, barW * ratio, 10);
             g.fill();
 
-            // 弱点：对拼时左右摆动的金色靶心，队伍停在它下方 = dps 放大
+            // 弱点：对拼时左右摆动的金色靶心，队伍停在它下方 = dps 放大。
+            // 靶心直径 = 44 设计像素（触屏命中区下限），外圈只做呼吸提示，不参与判定。
             if (e.engaged && e.alive) {
                 const wx = this._sx(e.weakX) + dx;
                 const wy = this._sy(sy) + dy;
                 const breath = 0.7 + 0.3 * Math.sin(this._animTime * 9);
                 g.fillColor = this._color(COLORS.gold, 0.2 * breath);
-                g.circle(wx, wy, 28);
+                g.circle(wx, wy, WEAK_GLOW_R);
                 g.fill();
                 g.fillColor = this._color(COLORS.gold, 0.95);
-                g.circle(wx, wy, 15);
+                g.circle(wx, wy, WEAK_POINT_R);
                 g.fill();
                 g.fillColor = this._color(COLORS.bg, 0.9);
-                g.circle(wx, wy, 7);
+                g.circle(wx, wy, WEAK_POINT_R * 0.36);
+                g.fill();
+                // 左右准星短线：44 px 的靶心在 300+ 敌人同屏时也能一眼认出
+                g.fillColor = this._color(COLORS.gold, 0.9);
+                g.rect(wx - WEAK_POINT_R - 14, wy - 2, 10, 4);
+                g.rect(wx + WEAK_POINT_R + 4, wy - 2, 10, 4);
                 g.fill();
             }
 
@@ -824,7 +902,9 @@ export class GateGame extends Component {
                 const name = e.boss ? 'BOSS' : enemyKindLabel(e.kind);
                 label.string = `${name} ${Math.max(0, Math.ceil(e.hp))}`;
                 label.node.active = true;
-                label.node.setPosition(this._sx(PLAY_W / 2) + dx, this._sy(sy) + h / 2 + 34 + dy, 0);
+                // 血条占 [h+10, h+20]，名字中心再往上让出 4 px 间距 + 半个行高
+                const labelY = this._sy(sy) + h / 2 + 20 + ENEMY_LABEL_GAP + 16 + dy;
+                label.node.setPosition(this._sx(PLAY_W / 2) + dx, labelY, 0);
             }
             labelIndex++;
         }
@@ -832,6 +912,57 @@ export class GateGame extends Component {
         for (let i = labelIndex; i < this._enemyLabels.length; i++) {
             this._enemyLabels[i].node.active = false;
         }
+    }
+
+    /**
+     * Boss：三阶段靠「环数 + 配色 + 核心」区分，阶段越高环越多、核心越大。
+     * 对拼时有一圈缓慢外扩的攻击脉冲，阶段切换瞬间叠一层 0.5 s 白光。
+     */
+    private _drawBossBody(g: Graphics, e: Enemy, nx: number, ny: number, w: number, h: number): void {
+        const phase = Math.max(1, Math.min(3, e.phase || 1));
+        const color = BOSS_PHASE_COLORS[phase - 1] || COLORS.boss;
+        const flash = this._bossPhaseFlash > 0
+            ? this._bossPhaseFlash / BOSS_PHASE_FLASH_SEC
+            : 0;
+
+        // 攻击脉冲（画在身体下层，只露出外圈）：越到后期越快、越亮
+        if (e.engaged) {
+            const period = 1.0 - phase * 0.15;
+            const k = (this._animTime % period) / period;
+            g.fillColor = this._color(color, (1 - k) * 0.28);
+            g.circle(nx + w / 2, ny + h / 2, 70 + k * (110 + phase * 20));
+            g.fill();
+        }
+
+        // 阶段环：phase = 1/2/3 → 0/1/2 层外扩描边（用半透明填充近似）
+        for (let i = phase - 1; i >= 1; i--) {
+            const inset = i * 12;
+            g.fillColor = this._color(color, 0.10 + 0.05 * i + flash * 0.2);
+            g.roundRect(nx - inset, ny - inset, w + inset * 2, h + inset * 2, 18);
+            g.fill();
+        }
+
+        g.fillColor = this._color(flash > 0.2 ? 0xfff1f1 : color, 0.95);
+        g.roundRect(nx, ny, w, h, 14);
+        g.fill();
+
+        // 核心单眼：阶段越高越大
+        const cx = nx + w / 2;
+        const cy = ny + h / 2;
+        g.fillColor = this._color(0x000000, 0.4);
+        g.circle(cx, cy, 24 + phase * 6);
+        g.fill();
+        g.fillColor = this._color(flash > 0.2 ? 0xffffff : COLORS.gold, 0.95);
+        g.circle(cx, cy, 12 + phase * 3);
+        g.fill();
+
+        // 阶段角标：左侧三条竖杠，亮起的条数 = 当前阶段
+        g.fillColor = this._color(0x000000, 0.35);
+        g.rect(nx + 10, ny + h / 2 - 22, 8, 44);
+        g.fill();
+        g.fillColor = this._color(color, 0.95);
+        g.rect(nx + 10, ny + h / 2 - 22, 8, (44 * phase) / 3);
+        g.fill();
     }
 
     private _drawBullets(g: Graphics, dx: number, dy: number): void {
@@ -849,7 +980,10 @@ export class GateGame extends Component {
         const px = this._sx(this._core.playerX) + dx;
         const py = this._sy(PLAYER_Y) + dy;
 
-        if (visible <= 0) return;
+        if (visible <= 0) {
+            if (this._squadBadgeLabel) this._squadBadgeLabel.node.active = false;
+            return;
+        }
 
         // 集火光环：生效中在队伍外圈画一层金色呼吸光（细线用 rect/circle + fill，不用 stroke）
         if (this._core.pulseActive) {
@@ -889,6 +1023,30 @@ export class GateGame extends Component {
                 g.circle(px + ox, py + oy + bob, radius);
                 g.fill();
                 drawn++;
+            }
+        }
+
+        // 人数徽标：圆点最多 40 个，超过之后画面不再随人数变化，
+        // 用队伍上方的小胶囊补回「现在到底多少人」。
+        const badge = this._squadBadgeLabel;
+        if (badge) {
+            if (count > SQUAD_DOTS_MAX) {
+                const text = `${count}`;
+                const pillW = Math.max(56, 18 + text.length * 12);
+                const pillH = 26;
+                const pillX = px - pillW / 2;
+                const pillY = py + 46;
+                if (badge.string !== text) badge.string = text;
+                badge.node.active = true;
+                badge.node.setPosition(px, pillY + pillH / 2, 0);
+                g.fillColor = this._color(COLORS.badge, 0.8);
+                g.roundRect(pillX, pillY, pillW, pillH, 13);
+                g.fill();
+                g.fillColor = this._color(COLORS.gold, 0.8);
+                g.rect(pillX + 8, pillY + pillH - 4, pillW - 16, 3);
+                g.fill();
+            } else {
+                badge.node.active = false;
             }
         }
 
@@ -938,6 +1096,28 @@ export class GateGame extends Component {
             g.rect(this._sx(p.x) - p.size / 2, this._sy(p.y) - p.size / 2, p.size, p.size);
         }
         g.fill();
+
+        // Boss 阶段切换闪光：一圈从 Boss 身上扩散出去的实心碎片环 + 一层淡红压屏。
+        // 阶段判定本身在 `_drawBossBody`（本体描边换色），这里只补"什么时候变了"的瞬时提示。
+        if (this._bossPhaseFlash > 0) {
+            const k = Math.max(0, Math.min(1, this._bossPhaseFlash / BOSS_PHASE_FLASH_SEC));
+            const boss = this._core.enemies.find((e) => e.boss && e.alive);
+            if (boss) {
+                const bx = this._sx(PLAY_W / 2);
+                const by = this._sy(this._screenY(boss.y));
+                const r = 70 + (1 - k) * 210;
+                const segs = 44;
+                g.fillColor = this._color(COLORS.danger, 0.55 * k);
+                for (let i = 0; i < segs; i++) {
+                    const a = (i / segs) * Math.PI * 2;
+                    g.rect(bx + Math.cos(a) * r - 5, by + Math.sin(a) * r - 5, 10, 10);
+                }
+                g.fill();
+            }
+            g.fillColor = this._color(COLORS.danger, 0.1 * k);
+            g.rect(-PLAY_W / 2, -PLAY_H / 2, PLAY_W, PLAY_H);
+            g.fill();
+        }
 
         this._drawChoiceCards(g);
     }
@@ -1034,6 +1214,38 @@ export class GateGame extends Component {
         }
     }
 
+    /**
+     * 门触发时，从选中那侧的门向队伍拖一条粒子流（表现"队员从门里加入队伍"）。
+     *
+     * 坐标是设计坐标（与 _spawnBurst 一致）：x 沿用逻辑 x，y 是 _screenY() 算出的屏幕 y。
+     * 粒子带一点横向散开，越靠门越亮 —— 直接复用 _particles 与 _updateFx 的重力，
+     * 所以重力项在这里被直线速度盖过，视觉上仍是"飞向队伍"而不是"往下掉"。
+     */
+    private _spawnGateTrail(x: number, screenY: number, color: number, gain: boolean): void {
+        const tx = this._core.playerX;
+        const ty = PLAYER_Y - 30;
+        const n = gain ? 16 : 12;
+        for (let i = 0; i < n; i++) {
+            if (this._particles.length >= MAX_DEBRIS) break;
+            const t = i / Math.max(1, n - 1);
+            const sx = x + (tx - x) * t * 0.35 + (Math.random() - 0.5) * 46;
+            const sy = screenY + (ty - screenY) * t * 0.3 + (Math.random() - 0.5) * 18;
+            // 速度指向队伍，后半段更快，让"吸收"发生在队伍身上
+            const vx = (tx - sx) * (1.4 + t * 1.2);
+            const vy = (ty - sy) * (1.4 + t * 1.2);
+            this._particles.push({
+                x: sx,
+                y: sy,
+                vx,
+                vy,
+                life: 0.34 + t * 0.26,
+                maxLife: 0.6,
+                size: gain ? 4 + Math.random() * 4 : 3 + Math.random() * 3,
+                color,
+            });
+        }
+    }
+
     private _spawnFxText(text: string, color: number, y: number): void {
         if (this._fxTexts.length === 0) return;
         // 先找空闲的，池满就抢占（飘字只是表现，丢一两条无所谓）
@@ -1073,9 +1285,13 @@ export class GateGame extends Component {
                 if (label) this._gateSubLabels.push(label);
             }
             for (let i = 0; i < ENEMY_LABEL_POOL; i++) {
-                const label = this._makeLabel(fieldParent, 26, COLORS.text);
+                const label = this._makeLabel(fieldParent, 26, COLORS.text, ENEMY_LABEL_MAX_W);
                 if (label) this._enemyLabels.push(label);
             }
+
+            // 人数徽标：人多到圆点画不全时，在队伍上方补一个数字胶囊
+            this._squadBadgeLabel = this._makeLabel(fieldParent, 24, COLORS.gold, 180);
+            if (this._squadBadgeLabel) this._squadBadgeLabel.node.active = false;
         }
 
         const fxParent = this.effectLayer;
@@ -1101,7 +1317,11 @@ export class GateGame extends Component {
         }
     }
 
-    private _makeLabel(parent: Node | null, size: number, color: number): Label | null {
+    /**
+     * @param maxWidth > 0 时把节点宽度钳到这个值并开启 SHRINK，
+     *                 长文本按宽度缩字而不是横向撑开压住邻居（如「再生」+ 长血量数字）。
+     */
+    private _makeLabel(parent: Node | null, size: number, color: number, maxWidth: number = 0): Label | null {
         if (!parent) return null;
         const node = new Node('FxLabel');
         node.layer = parent.layer;
@@ -1114,6 +1334,12 @@ export class GateGame extends Component {
         label.horizontalAlign = Label.HorizontalAlign.CENTER;
         label.verticalAlign = Label.VerticalAlign.CENTER;
         label.isBold = true;
+        if (maxWidth > 0) {
+            const ut = node.getComponent(UITransform);
+            if (ut) ut.setContentSize(maxWidth, 0);
+            label.overflow = Label.Overflow.SHRINK;
+            label.enableWrapText = false;
+        }
         return label;
     }
 

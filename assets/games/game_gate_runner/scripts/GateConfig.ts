@@ -26,17 +26,22 @@ export const PLAYER_R = 26;
 /** 一个段落的世界长度 */
 export const SEGMENT_LEN = 360;
 
-/** 段落数（偶数段放门、奇数段放敌人）。11 段太少跑 20 s 就结束，12 段约 40 s 一局 */
-export const SEGMENT_COUNT = 12;
+/**
+ * 段落数（偶数段放门、奇数段放敌人）。
+ *
+ * 原 12 段（6 门 + 6 敌人）实测 autopilot 17 s 就通关，远低于本作 1–3 分钟的目标；
+ * 22 段（11 门 + 11 敌人）+ 更慢的滚动速度把 casual 一局拉到 60–80 s，Boss 约 6–8 s。
+ */
+export const SEGMENT_COUNT = 22;
 
-/** Boss 的世界位置：最后一段敌人之后留一小段空地 */
-export const BOSS_DISTANCE = 4600;
+/** Boss 的世界位置：最后一段敌人之后留一小段空地（22 × 360 + 280） */
+export const BOSS_DISTANCE = 8200;
 
 /** 起始前进速度（px/s） */
-export const SCROLL_BASE = 420;
+export const SCROLL_BASE = 300;
 
-/** 速度上限 */
-export const SCROLL_MAX = 620;
+/** 速度上限（原 620 下 4600 px 只够跑 8 s，撑不起一局） */
+export const SCROLL_MAX = 440;
 
 /** 每前进 1 px 增加的速度，封顶 SCROLL_MAX */
 export const SCROLL_ACCEL = 0.05;
@@ -49,8 +54,8 @@ export const CONTACT_DIST = 64;
 /** 初始人数 */
 export const START_COUNT = 20;
 
-/** 人数上限（防溢出/防显示撑爆） */
-export const COUNT_MAX = 9999;
+/** 人数上限（防溢出/防显示撑爆）。22 段规模下单局人数可以到几万，9999 会过早封顶 */
+export const COUNT_MAX = 99999;
 
 /** 开局火力上限（之后随距离与升级卡成长，见 fireCapAt） */
 export const FIRE_CAP = 60;
@@ -69,8 +74,8 @@ export const ENEMY_DRAIN_RATIO = 0.03;
 /** Boss 的额外消耗倍率（比例部分同乘） */
 export const BOSS_DRAIN_MULT = 1.5;
 
-/** Boss 血量（比旧版 160 高，给三个阶段留出空间） */
-export const BOSS_HP = 300;
+/** Boss 血量（22 段局长跑后火力上限更高，300 血只够打 1–2 s，撑不起终局） */
+export const BOSS_HP = 1200;
 
 /** Boss 阶段阈值（剩余血量比例）与每阶段的 dps / 攻击倍率 */
 export const BOSS_PHASE_2_RATIO = 0.66;
@@ -190,8 +195,8 @@ export const UPGRADE_POOL: UpgradeDef[] = [
 ];
 
 /** 升级卡出现的时机：第 N 对门之后（按 gates 下标）。
- *  [2] = 第 3 对门之后（中段），[5] = 最后一对门之后（Boss 前）。 */
-export const CHOICE_AFTER_GATE_INDEX: number[] = [2, 5];
+ *  22 段局共 11 对门，三次分别落在中前段 / 中段 / Boss 前。 */
+export const CHOICE_AFTER_GATE_INDEX: number[] = [2, 5, 8];
 
 /** 门触发后前进这么远才弹卡片，避免和门的反馈叠在同一帧 */
 export const CHOICE_TRIGGER_OFFSET = 100;
@@ -272,17 +277,17 @@ export const GATE_TEMPLATES: GateTemplate[] = [
     { a: side('mul', 2), b: side('div', 2), from: 0 },
     { a: side('add', 20), b: side('add', 50), from: 0 },
     // 附加效果开始出现：人数少时 +60 反而更大，人多时用护甲换掉一部分血量
-    { a: side('mul', 2), b: side('add', 60, armorMod(0.35, 2)), from: 720 },
+    { a: side('mul', 2), b: side('add', 60, armorMod(0.35, 2)), from: 1300 },
     // 挨一刀换两场火力：给「下个敌人是再生/盾兵」的预判用
-    { a: side('mul', 2), b: side('sub', 10, powerMod(0.35, 2)), from: 720 },
+    { a: side('mul', 2), b: side('sub', 10, powerMod(0.35, 2)), from: 1300 },
     // 激进：÷2 换两场 ×1.5 火力
-    { a: side('mul', 3), b: side('div', 2, powerMod(0.5, 2)), from: 1440 },
+    { a: side('mul', 3), b: side('div', 2, powerMod(0.5, 2)), from: 2600 },
     // 拿大数，或拿一次立刻可用的爆发（冷却直接清零式缩短）
-    { a: side('add', 100), b: side('div', 2, cdMod(3)), from: 1440 },
-    { a: side('mul', 3), b: side('div', 3), from: 2160 },
+    { a: side('add', 100), b: side('div', 2, cdMod(3)), from: 2600 },
+    { a: side('mul', 3), b: side('div', 3), from: 3900 },
     // 读秒题：−100 换三场 50% 减伤，扛得过下一个刺客就赚
-    { a: side('add', 150), b: side('sub', 100, armorMod(0.5, 3)), from: 2160 },
-    { a: side('mul', 2), b: side('div', 3), from: 3600 },
+    { a: side('add', 150), b: side('sub', 100, armorMod(0.5, 3)), from: 3900 },
+    { a: side('mul', 2), b: side('div', 3), from: 6500 },
 ];
 
 /** 附加效果的简短标签（门下方的小字） */
@@ -368,12 +373,20 @@ export const ENEMY_PROFILES: Record<EnemyKind, EnemyProfile> = {
     boss:     { label: 'BOSS', hpMult: 1,    atkMult: 1,    widthMult: 1,    drainMult: 1.5, regenRatio: 0,    color: 0xff4d6d },
 };
 
-/** 6 个普通敌人的类型排期：前期教学，后期才出现刺客/再生 */
+/**
+ * 11 个普通敌人的类型排期（22 段 = 11 场对拼）：前期教学，后期才出现刺客/再生。
+ * 每一档给一个明确的「这一战考什么」，最后几场以组合池收尾。
+ */
 export const ENEMY_KIND_POOLS: EnemyKind[][] = [
     ['grunt'],
     ['grunt', 'shield'],
     ['shield', 'assassin'],
     ['assassin', 'regen'],
+    ['shield', 'regen'],
+    ['shield', 'assassin', 'regen'],
+    ['shield', 'assassin', 'regen'],
+    ['assassin', 'regen'],
+    ['shield', 'assassin', 'regen'],
     ['shield', 'regen'],
     ['shield', 'assassin', 'regen'],
 ];
@@ -386,9 +399,13 @@ export function enemyKindLabel(kind: EnemyKind): string {
     return enemyProfile(kind).label;
 }
 
-/** 普通敌人血量：随前进距离线性增长，再乘类型系数 */
+/**
+ * 普通敌人血量：随前进距离线性增长，再乘类型系数。
+ * 斜率 0.05→0.12：22 段局跑到 8200 px 时血量约 1000（配合成长后的火力上限约 3–6 s 一场），
+ * 让后半程的对拼有足够重量，而不是一击秒杀。
+ */
 export function enemyHpAt(distance: number, kind: EnemyKind = 'grunt'): number {
-    return Math.round((24 + 0.05 * distance) * enemyProfile(kind).hpMult);
+    return Math.round((24 + 0.12 * distance) * enemyProfile(kind).hpMult);
 }
 
 /** 普通敌人每秒基础伤害 */
@@ -446,6 +463,24 @@ export const MAX_DEBRIS = 120;
 /** 枪口相对于队伍中心的前方偏移 */
 export const MUZZLE_OFFSET_Y = 34;
 
+/** 敌人名标签的最大宽度（超长按 SHRINK 缩字，避免压到相邻物体） */
+export const ENEMY_LABEL_MAX_W = 240;
+
+/** 敌人名标签与血条之间的最小间距（逻辑 px） */
+export const ENEMY_LABEL_GAP = 4;
+
+/**
+ * 弱点靶心的可视半径。命中判定是「队伍中心 x 与弱点 x 相差 ≤ AIM_TOLERANCE」，
+ * 视觉直径不能小于 44 设计像素（触屏命中区的通行下限），否则玩家会以为打不到。
+ */
+export const WEAK_POINT_R = 22;
+
+/** 弱点外圈呼吸光环半径 */
+export const WEAK_GLOW_R = 40;
+
+/** Boss 阶段切换闪光时长 */
+export const BOSS_PHASE_FLASH_SEC = 0.5;
+
 export const COLORS = {
     bg: 0x151e33,
     bgLine: 0x1e2a44,
@@ -458,8 +493,9 @@ export const COLORS = {
     boss: 0xff4d6d,
     text: 0xffffff,
     textDim: 0x8ea3c8,
-    mul: 0x4ea8ff,
-    div: 0xff6b6b,
+    /** 门：变多=绿、变少=红（配合门上的方向箭头，不看数字也能读出趋势） */
+    mul: 0x22c55e,
+    div: 0xef4444,
     add: 0x6ee7b7,
     sub: 0xffa94d,
     gateInk: 0xffffff,
@@ -468,12 +504,17 @@ export const COLORS = {
     /** 集火 / 完美连击 / 弱点的高亮色 */
     gold: 0xffd166,
     goldDark: 0xb08a2e,
+    /** 人数徽标 / 状态小胶囊 */
+    badge: 0x0f172a,
     /** 升级卡 */
     card: 0x1b2a4a,
     cardEdge: 0x4ea8ff,
     cardInk: 0xffffff,
     cardDesc: 0x9fb6dc,
 };
+
+/** Boss 三阶段的配色（越长越危险） */
+export const BOSS_PHASE_COLORS = [0xff4d6d, 0xff7a3d, 0xff2d55];
 
 /** 门操作对应的色板 */
 export function gateOpColor(kind: GateOpKind): number {

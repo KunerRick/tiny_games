@@ -121,17 +121,29 @@ function autoChoose(core) {
     if (core.choiceOpen) core.choose(0);
 }
 
+/**
+ * 自动驾驶：会瞄准弱点、集火一好就用，选门按 pick 走优/劣侧。
+ *
+ * 为什么必须会瞄准：22 段局（本作目标 1–3 分钟一局）的难度就是为「瞄准 + 集火」设计的，
+ * 只会选门、不打的 bot 在中后段必然阵亡。那是玩法深度，不是平衡缺陷；
+ * 这里用「有手感的玩家」当基线，平衡断言才有意义。
+ */
 function runAutopilot(core, pick, maxSec) {
     const dt = 1 / 60;
     let t = 0;
     const limit = maxSec || 180;
     while (t < limit && core.state === 'running') {
         autoChoose(core);
+        const blocker = core.enemies.find((e) => e.alive && e.engaged);
         const g = nextGate(core);
-        if (g && g.y - core.distance < 220) {
+        if (blocker) {
+            core.setPlayerX(blocker.weakX);
+            if (core.pulseReady) core.pulse();
+        } else if (g && g.y - core.distance < 220) {
             core.setPlayerX(pickSide(core, g, pick) === 'left' ? LEFT_CENTER : RIGHT_CENTER);
         }
         core.step(dt);
+        core.popEvents();
         t += dt;
     }
     return t;
@@ -544,12 +556,16 @@ test('15. 门附加效果：选到带效果的一侧后生效，并在下一场�
 
     const active = core.activeMods.find((m) => m.kind === mod.kind);
     assert(active, `附加效果应处于生效中（kind=${mod.kind}）`);
+
+    const before = active.fightsLeft;
+    stepUntil(core, (c) => c.enemies.some((e) => e.engaged && e.y > modGate.y), 30, 'better');
+
+    // 护甲是「下一战生效」的：_fightArmor 在接敌时才刷新，
+    // 所以断言必须放在下一场对拼真的打起来之后，而不是门前。
     if (mod.kind === 'armor') {
         assert(core.armorReduction >= mod.value - 1e-6, `护甲未计入减免：${core.armorReduction} < ${mod.value}`);
     }
 
-    const before = active.fightsLeft;
-    stepUntil(core, (c) => c.enemies.some((e) => e.engaged && e.y > modGate.y), 30, 'better');
     const after = core.activeMods.find((m) => m.kind === mod.kind);
     assert(!after || after.fightsLeft < before, `下一场对拼应消耗一层：${before} → ${after ? after.fightsLeft : 0}`);
 });
