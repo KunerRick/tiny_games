@@ -1,6 +1,6 @@
 import {
     _decorator, Component, Node, Button, Prefab, instantiate, UITransform,
-    Graphics, UIOpacity, tween, isValid,
+    Graphics, UIOpacity, tween, isValid, Vec3,
 } from 'cc';
 import { SceneManager } from '../../../common/managers/SceneManager';
 import { StorageManager } from '../../../common/managers/StorageManager';
@@ -340,24 +340,49 @@ export class WarEvo extends Component {
         return best;
     }
 
-    /** 炮塔弹道：从城堡射向目标的一条短命细线（0.15s） */
+    /** 炮塔弹道：一颗带光晕的炮弹从城堡飞向目标，落点炸出亮点 */
     private spawnCastleShot(fromX: number, toX: number, toY: number): void {
-        if (!this.unitContainer?.isValid) return;
+        const container = this.unitContainer;
+        if (!container?.isValid) return;
+
+        const fromY = WORLD.BATTLE_Y + 46;
         const node = new Node('castleShot');
-        this.unitContainer.addChild(node);
-        const ut = node.addComponent(UITransform);
-        ut.setContentSize(10, 10);
+        container.addChild(node);
+        node.addComponent(UITransform).setContentSize(28, 28);
+        node.setPosition(fromX, fromY, 0);
         const g = node.addComponent(Graphics);
-        g.lineWidth = 3;
-        g.strokeColor = colorFromHex('#FDE68A', 230);
-        g.moveTo(fromX, WORLD.BATTLE_Y + 20);
-        g.lineTo(toX, toY);
-        g.stroke();
-        const op = node.addComponent(UIOpacity);
-        tween(op)
-            .to(0.15, { opacity: 0 })
+        g.fillColor = colorFromHex('#F59E0B', 120);
+        g.circle(0, 0, 8);
+        g.fill();
+        g.fillColor = colorFromHex('#FDE68A', 245);
+        g.circle(0, 0, 4.4);
+        g.fill();
+        g.fillColor = colorFromHex('#FFFFFF', 250);
+        g.circle(-1.2, 1.2, 2);
+        g.fill();
+
+        const dist = Math.hypot(toX - fromX, toY - fromY);
+        const dur = Math.max(0.1, Math.min(0.3, dist / 900));
+
+        tween(node)
+            .to(dur, { position: new Vec3(toX, toY, 0) }, { easing: 'quadIn' })
             .call(() => {
-                if (node.isValid) node.destroy();
+                if (!node.isValid) return;
+                node.destroy();
+                if (!container.isValid) return;
+                const hit = new Node('castleHit');
+                container.addChild(hit);
+                hit.addComponent(UITransform).setContentSize(40, 40);
+                hit.setPosition(toX, toY, 0);
+                const hg = hit.addComponent(Graphics);
+                hg.fillColor = colorFromHex('#FDE68A', 220);
+                hg.circle(0, 0, 7);
+                hg.fill();
+                const hop = hit.addComponent(UIOpacity);
+                tween(hit).to(0.2, { scale: new Vec3(2.2, 2.2, 1) }, { easing: 'quadOut' })
+                    .call(() => { if (hit.isValid) hit.destroy(); })
+                    .start();
+                tween(hop).to(0.2, { opacity: 0 }).start();
             })
             .start();
     }

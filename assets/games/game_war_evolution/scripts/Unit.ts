@@ -2,7 +2,7 @@ import {
     _decorator, Component, Sprite, Color, Label, UITransform, tween, Tween, Vec3, Node, Graphics, UIOpacity,
 } from 'cc';
 import { UnitConfig, UnitState, WORLD, UNIT_COLORS, UNIT_ROW } from './GameConfig';
-import { drawUnitSilhouette, drawShadow, drawChargeRing, colorFromHex } from './UnitArt';
+import { drawUnitSilhouette, drawShadow, drawChargeAura, drawShieldBubble, drawImpactSpark, drawStompRing, drawRing, colorFromHex } from './UnitArt';
 
 const { ccclass, property } = _decorator;
 
@@ -61,9 +61,15 @@ export class Unit extends Component {
 
     // ---- 表现层 ----
     private _renderY: number = WORLD.BATTLE_Y;    // 分行后的渲染 y（逻辑坐标不变）
+    private _silhouetteNode: Node | null = null;  // 剪影节点（两侧镜像靠它）
     private _silhouette: Graphics | null = null;  // 兵种剪影
     private _shadow: Graphics | null = null;      // 脚下阴影
     private _chargeRing: Graphics | null = null;  // 冲锋光环
+    private _chargeNode: Node | null = null;      // 冲锋光环节点（脉冲用）
+    private _chargeOpacity: UIOpacity | null = null;
+    private _shieldNode: Node | null = null;      // 机甲护盾泡
+    private _visualPhase: number = 0;             // 循环动效相位（tick 驱动，不挂补间）
+    private _sparkCd: number = 0;                 // 命中火花节流
     private _opacity: UIOpacity | null = null;    // 死亡淡出
     private _bodyColor: Color = new Color(255, 255, 255);
     private _speedMul: number = 1;
@@ -149,15 +155,26 @@ export class Unit extends Component {
         if (config.hasLaserFocus) {
             const indicatorNode = new Node('laserIndicator');
             indicatorNode.setParent(this.node);
-            const indicatorY = 30 * scale;
+            const indicatorY = 34 * scale;
             indicatorNode.setPosition(0, indicatorY, 0);
+            indicatorNode.addComponent(UITransform).setContentSize(36, 20);
+            // 深色药丸底，避免白字直接压在战场/天空上读不清
+            const pill = indicatorNode.addComponent(Graphics);
+            pill.fillColor = new Color(8, 14, 26, 200);
+            pill.roundRect(-17, -10, 34, 20, 10);
+            pill.fill();
+            pill.lineWidth = 1.4;
+            pill.strokeColor = new Color(125, 211, 252, 180);
+            pill.roundRect(-17, -10, 34, 20, 10);
+            pill.stroke();
+
             const label = indicatorNode.addComponent(Label);
             label.string = '1.0×';
-            label.fontSize = 14;
+            label.fontSize = 15;
+            label.isBold = true;
             label.color = Color.WHITE.clone();
             label.horizontalAlign = Label.HorizontalAlign.CENTER;
-            const ut = indicatorNode.addComponent(UITransform);
-            ut.setContentSize(40, 20);
+            label.verticalAlign = Label.VerticalAlign.CENTER;
             this._laserIndicator = indicatorNode;
             this._laserLabel = label;
         }
@@ -180,7 +197,7 @@ export class Unit extends Component {
         );
     }
 
-    /** 创建阴影 / 剪影 / 冲锋光环 */
+    /** 创建阴影 / 剪影 / 护盾泡 / 冲锋光环 */
     private buildVisual(): void {
         if (!this._config) return;
 
@@ -188,26 +205,42 @@ export class Unit extends Component {
         shadowNode.setParent(this.node);
         shadowNode.setSiblingIndex(0);
         const shadowUt = shadowNode.addComponent(UITransform);
-        shadowUt.setContentSize(40, 20);
-        shadowNode.setPosition(0, -18, 0);
+        shadowUt.setContentSize(48, 20);
+        shadowNode.setPosition(0, -25, 0);
         this._shadow = shadowNode.addComponent(Graphics);
-        drawShadow(this._shadow, 36);
+        drawShadow(this._shadow, 46);
 
         const shapeNode = new Node('silhouette');
         shapeNode.setParent(this.node);
         shapeNode.setSiblingIndex(1);
         const ut = shapeNode.addComponent(UITransform);
-        ut.setContentSize(48, 48);
+        ut.setContentSize(56, 56);
+        // UnitArt 一律按「面向右」绘制：敌方镜像，两军面对面冲锋
+        shapeNode.setScale(this._side === 'player' ? 1 : -1, 1, 1);
+        this._silhouetteNode = shapeNode;
         this._silhouette = shapeNode.addComponent(Graphics);
         drawUnitSilhouette(this._silhouette, this._config.icon ?? 'default', this._bodyColor);
 
+        // 机甲护盾泡（有护盾时显示，打破时消失）
+        let nextIndex = 2;
+        if (this._config.hasShield) {
+            const shieldNode = new Node('shield');
+            shieldNode.setParent(this.node);
+            shieldNode.setSiblingIndex(nextIndex++);
+            shieldNode.addComponent(UITransform).setContentSize(72, 72);
+            drawShieldBubble(shieldNode.addComponent(Graphics), 28);
+            shieldNode.active = this._shieldHp > 0;
+            this._shieldNode = shieldNode;
+        }
+
         const ringNode = new Node('chargeRing');
         ringNode.setParent(this.node);
-        ringNode.setSiblingIndex(2);
-        const ringUt = ringNode.addComponent(UITransform);
-        ringUt.setContentSize(56, 56);
+        ringNode.setSiblingIndex(nextIndex);
+        ringNode.addComponent(UITransform).setContentSize(64, 64);
         this._chargeRing = ringNode.addComponent(Graphics);
-        drawChargeRing(this._chargeRing, 24);
+        drawChargeAura(this._chargeRing, 26);
+        this._chargeOpacity = ringNode.addComponent(UIOpacity);
+        this._chargeNode = ringNode;
         ringNode.active = false;
     }
 
@@ -251,16 +284,22 @@ export class Unit extends Component {
         this._isCharging = active;
         this._speedMul = active ? 1.6 : 1;
         this._attackSpeedMul = active ? 1.3 : 1;
-        if (this._chargeRing) {
-            this._chargeRing.node.active = active && !this.isDying();
+        if (this._chargeNode && this._chargeNode.isValid) {
+            this._chargeNode.active = active && !this.isDying();
+            this._chargeNode.setScale(1, 1, 1);
         }
     }
 
     // ==================== 主 Tick（由 WarEvo 每帧调用） ====================
 
     public tick(dt: number, allUnits: Unit[], playerCastleX: number, enemyCastleX: number): void {
+        // 节点可能已被外部销毁（重开局 / 验收探针直接 destroy），此时 this.node 为 null，
+        // 继续往下走会在 this.node.parent 上抛异常并刷满控制台
+        if (!this.node || !this.node.isValid) return;
         if (this._state === UnitState.DEAD) return;
         if (!this._config) return;
+
+        this.updateVisuals(dt);
 
         switch (this._state) {
             case UnitState.MOVING:
@@ -275,6 +314,29 @@ export class Unit extends Component {
         }
 
         this.updateHPBar();
+    }
+
+    /**
+     * 循环动效（冲锋光焰 / 护盾泡脉动）。
+     * 用 tick 驱动节点缩放与透明度，而不是给每个单位挂 repeatForever 补间 ——
+     * 20 个单位 × 1 条循环补间就会超掉美术原则 A5 的「单屏 ≤ 20 个补间」。
+     */
+    private updateVisuals(dt: number): void {
+        this._visualPhase += dt;
+        if (this._sparkCd > 0) this._sparkCd -= dt;
+
+        if (this._chargeNode && this._chargeNode.active) {
+            const p = this._visualPhase * 7;
+            const s = 1 + Math.sin(p) * 0.08;
+            this._chargeNode.setScale(s, s, 1);
+            if (this._chargeOpacity) {
+                this._chargeOpacity.opacity = Math.round(190 + Math.sin(p * 1.6) * 55);
+            }
+        }
+        if (this._shieldNode && this._shieldNode.active) {
+            const s = 1 + Math.sin(this._visualPhase * 3.4) * 0.045;
+            this._shieldNode.setScale(s, s, 1);
+        }
     }
 
     // ==================== 移动 ====================
@@ -489,8 +551,9 @@ export class Unit extends Component {
         const cfg = this._config!;
         let damage = cfg.attack;
 
-        // 骑士冲锋：首次攻击 2 倍
-        if (cfg.hasCharge && !this._chargeUsed) {
+        // 骑士冲锋：首次攻击 2 倍（并留一道冲刺残影）
+        const isChargeHit = !!cfg.hasCharge && !this._chargeUsed;
+        if (isChargeHit) {
             damage *= 2;
         }
 
@@ -527,8 +590,9 @@ export class Unit extends Component {
         }
 
         target.takeDamage(damage, this, allUnits);
-        if (cfg.hasCharge && !this._chargeUsed) {
+        if (isChargeHit) {
             this._chargeUsed = true;
+            this.spawnChargeStreak();
         }
         this._attackCooldown = (1.0 / cfg.attackSpeed) / this._attackSpeedMul;
 
@@ -596,15 +660,18 @@ export class Unit extends Component {
             if (remaining <= this._shieldHp) {
                 this._shieldHp -= remaining;
                 this.triggerHitFlash();
+                this.spawnHitSpark('#67E8F9');
                 this.spawnDamageNumber(remaining, attacker?.getSide() ?? 'enemy');
                 return;
             }
             remaining -= this._shieldHp;
             this._shieldHp = 0;
+            this.breakShield();
         }
 
         this._hp -= remaining;
         this.triggerHitFlash();
+        this.spawnHitSpark();
         this.spawnDamageNumber(remaining, attacker?.getSide() ?? 'enemy');
 
         if (attacker && attacker.getConfig().hasCharge && !attacker.hasChargeUsed()) {
@@ -615,12 +682,65 @@ export class Unit extends Component {
             this._hp = 0;
             this.updateHPBar();
             this._state = UnitState.DEAD;
-            if (this._chargeRing) this._chargeRing.node.active = false;
+            if (this._chargeNode) this._chargeNode.active = false;
             if (this._hasSelfDestruct && allUnits) {
                 this.performSelfDestruct(allUnits);
             }
             this.startFadeOut();
         }
+    }
+
+    /** 护盾被打穿：护盾泡消失 + 一圈青色爆环 */
+    private breakShield(): void {
+        if (this._shieldNode && this._shieldNode.isValid) {
+            this._shieldNode.active = false;
+        }
+        this.spawnRingBurst('#67E8F9', 30, 0.28);
+    }
+
+    /** 命中火花：受击点一顆四角星（节流到 ~16 帧一次，避免 AoE 刷屏） */
+    private spawnHitSpark(hexColor = '#FFFFFF'): void {
+        if (this._sparkCd > 0) return;
+        this._sparkCd = 0.06;
+        const container = this.node.parent;
+        if (!container || !container.isValid) return;
+        const node = new Node('spark');
+        container.addChild(node);
+        node.addComponent(UITransform).setContentSize(24, 24);
+        node.setPosition(
+            this.node.position.x + (Math.random() * 20 - 10),
+            this.node.position.y + (Math.random() * 22 - 4),
+            0,
+        );
+        const g = node.addComponent(Graphics);
+        drawImpactSpark(g, 9);
+        if (hexColor !== '#FFFFFF') {
+            g.fillColor = colorFromHex(hexColor, 200);
+            g.circle(0, 0, 3);
+            g.fill();
+        }
+        const op = node.addComponent(UIOpacity);
+        tween(node).to(0.16, { scale: new Vec3(1.7, 1.7, 1) }, { easing: 'quadOut' }).start();
+        tween(op).to(0.16, { opacity: 0 })
+            .call(() => { if (node.isValid) node.destroy(); })
+            .start();
+    }
+
+    /** 通用扩散圆环（护盾破碎 / 爆炸等） */
+    private spawnRingBurst(hexColor: string, maxRadius: number, life = 0.3): void {
+        const container = this.node.parent;
+        if (!container || !container.isValid) return;
+        const node = new Node('ringBurst');
+        container.addChild(node);
+        node.addComponent(UITransform).setContentSize(80, 80);
+        node.setPosition(this.node.position.x, this.node.position.y, 0);
+        drawRing(node.addComponent(Graphics), 12, hexColor, 4, 230);
+        const op = node.addComponent(UIOpacity);
+        const s = maxRadius / 12;
+        tween(node).to(life, { scale: new Vec3(s, s, 1) }, { easing: 'quadOut' })
+            .call(() => { if (node.isValid) node.destroy(); })
+            .start();
+        tween(op).to(life, { opacity: 0 }).start();
     }
 
     /** 应用击退效果 */
@@ -714,32 +834,132 @@ export class Unit extends Component {
             .start();
     }
 
-    /** 远程弹道：从自身到目标的一条细线（0.12s） */
+    /** 远程弹道：激光兵走持续光束，其余（弓箭手）飞一支带箭头的实体箭 */
     private spawnProjectile(target: Unit): void {
+        if (this._config?.hasLaserFocus) {
+            this.spawnLaserBeam(target);
+        } else {
+            this.spawnArrow(target);
+        }
+    }
+
+    /** 弓箭：一支实体箭从自身飞到目标（带朝向），命中即消失 */
+    private spawnArrow(target: Unit): void {
         const container = this.node.parent;
         if (!container || !container.isValid) return;
 
-        const node = new Node('shot');
-        container.addChild(node);
-        const ut = node.addComponent(UITransform);
-        ut.setContentSize(10, 10);
-        const g = node.addComponent(Graphics);
-        g.lineWidth = 2;
-        g.strokeColor = this._side === 'player' ? colorFromHex('#7DD3FC', 220) : colorFromHex('#FCA5A5', 220);
-        g.moveTo(this.node.position.x, this.node.position.y);
-        g.lineTo(target.getX(), target.getRenderY());
-        g.stroke();
+        const fromX = this.node.position.x;
+        const fromY = this.node.position.y;
+        const toX = target.getX();
+        const toY = target.getRenderY();
 
-        const op = node.addComponent(UIOpacity);
-        tween(op)
-            .to(0.12, { opacity: 0 })
-            .call(() => {
-                if (node.isValid) node.destroy();
-            })
+        const node = new Node('arrow');
+        container.addChild(node);
+        node.addComponent(UITransform).setContentSize(28, 28);
+        node.setPosition(fromX, fromY, 0);
+        const g = node.addComponent(Graphics);
+        g.lineCap = Graphics.LineCap.ROUND;
+        g.lineWidth = 3;
+        g.strokeColor = colorFromHex('#FDE68A', 235);
+        g.moveTo(-9, 0);
+        g.lineTo(5, 0);
+        g.stroke();
+        g.fillColor = colorFromHex('#F8FAFC', 245);
+        g.moveTo(12, 0);
+        g.lineTo(4, 4);
+        g.lineTo(4, -4);
+        g.close();
+        g.fill();
+
+        node.angle = Math.atan2(toY - fromY, toX - fromX) * 180 / Math.PI;
+        const dist = Math.hypot(toX - fromX, toY - fromY);
+        const dur = Math.max(0.08, Math.min(0.26, dist / 1200));
+        tween(node)
+            .to(dur, { position: new Vec3(toX, toY, 0) }, { easing: 'sineOut' })
+            .call(() => { if (node.isValid) node.destroy(); })
             .start();
     }
 
-    /** 攻击前摇：压扁→回弹（0.12s 视觉，不影响逻辑时点） */
+    /** 激光：三层光束（外晕 / 中层 / 白核），聚焦倍率越高越粗越亮 */
+    private spawnLaserBeam(target: Unit): void {
+        const container = this.node.parent;
+        if (!container || !container.isValid) return;
+
+        const fromX = this.node.position.x;
+        const fromY = this.node.position.y;
+        const toX = target.getX();
+        const toY = target.getRenderY();
+        const power = Math.max(0, Math.min(1, this._laserFocus - 1));
+
+        const node = new Node('laser');
+        container.addChild(node);
+        node.addComponent(UITransform).setContentSize(28, 28);
+        const g = node.addComponent(Graphics);
+        g.lineCap = Graphics.LineCap.ROUND;
+
+        g.lineWidth = 10;
+        g.strokeColor = colorFromHex('#22D3EE', Math.round(70 + 70 * power));
+        g.moveTo(fromX, fromY);
+        g.lineTo(toX, toY);
+        g.stroke();
+
+        g.lineWidth = 4.4;
+        g.strokeColor = colorFromHex('#67E8F9', 225);
+        g.moveTo(fromX, fromY);
+        g.lineTo(toX, toY);
+        g.stroke();
+
+        g.lineWidth = 1.8 + power * 1.6;
+        g.strokeColor = colorFromHex('#FFFFFF', 245);
+        g.moveTo(fromX, fromY);
+        g.lineTo(toX, toY);
+        g.stroke();
+
+        // 枪口闪光 + 命中点光斑
+        g.fillColor = colorFromHex('#CFFAFE', 235);
+        g.circle(fromX, fromY, 4 + power * 2);
+        g.fill();
+        g.circle(toX, toY, 5 + power * 3);
+        g.fill();
+
+        const op = node.addComponent(UIOpacity);
+        tween(op)
+            .to(0.16, { opacity: 0 })
+            .call(() => { if (node.isValid) node.destroy(); })
+            .start();
+    }
+
+    /** 骑士首击残影：身后一道金色横向拖尾 */
+    private spawnChargeStreak(): void {
+        const container = this.node.parent;
+        if (!container || !container.isValid) return;
+        const node = new Node('chargeStreak');
+        container.addChild(node);
+        node.addComponent(UITransform).setContentSize(80, 24);
+        node.setPosition(this.node.position.x, this.node.position.y, 0);
+        const dir = this._side === 'player' ? -1 : 1;
+
+        const g = node.addComponent(Graphics);
+        g.lineCap = Graphics.LineCap.ROUND;
+        g.lineWidth = 9;
+        g.strokeColor = colorFromHex('#F59E0B', 200);
+        g.moveTo(0, 0);
+        g.lineTo(34 * dir, 0);
+        g.stroke();
+        g.lineWidth = 3.5;
+        g.strokeColor = colorFromHex('#FEF3C7', 240);
+        g.moveTo(0, 0);
+        g.lineTo(30 * dir, 0);
+        g.stroke();
+
+        const op = node.addComponent(UIOpacity);
+        tween(node).to(0.22, { position: new Vec3(this.node.position.x + 26 * dir, this.node.position.y, 0) }).start();
+        tween(op).to(0.22, { opacity: 0 })
+            .call(() => { if (node.isValid) node.destroy(); })
+            .start();
+    }
+
+    /** 攻击前摇：压扁→回弹（0.12s 视觉，不影响逻辑时点），近战额外画一道挥砍弧 */
     private playAttackSwing(): void {
         if (!this.node?.isValid || !this._config) return;
         if (this._shakeTween) {
@@ -752,6 +972,38 @@ export class Unit extends Component {
             .to(0.06, { scale: new Vec3(base, base, 1) }, { easing: 'quadIn' })
             .call(() => { this._shakeTween = null; })
             .start();
+
+        if (this._config.attackRange <= 100) this.spawnSwingArc();
+    }
+
+    /** 近战挥砍弧：身前一道白色弧形闪光（0.16s） */
+    private spawnSwingArc(): void {
+        const container = this.node.parent;
+        if (!container || !container.isValid) return;
+        const dir = this._side === 'player' ? 1 : -1;
+
+        const node = new Node('swing');
+        container.addChild(node);
+        node.addComponent(UITransform).setContentSize(64, 64);
+        node.setPosition(this.node.position.x + dir * 10, this.node.position.y, 0);
+        const g = node.addComponent(Graphics);
+        g.lineCap = Graphics.LineCap.ROUND;
+        g.lineWidth = 3.2;
+        g.strokeColor = colorFromHex('#F8FAFC', 175);
+        g.arc(0, 0, 20, -0.95, 0.95, false);
+        g.stroke();
+        g.lineWidth = 1.4;
+        g.strokeColor = colorFromHex('#93C5FD', 170);
+        g.arc(0, 0, 24, -0.8, 0.8, false);
+        g.stroke();
+        node.setScale(dir, 1, 1);
+
+        const op = node.addComponent(UIOpacity);
+        tween(node)
+            .to(0.16, { scale: new Vec3(dir * 1.25, 1.25, 1) }, { easing: 'quadOut' })
+            .call(() => { if (node.isValid) node.destroy(); })
+            .start();
+        tween(op).to(0.16, { opacity: 0 }).start();
     }
 
     public isDead(): boolean {
@@ -802,33 +1054,49 @@ export class Unit extends Component {
             .start();
     }
 
-    /** 死亡碎裂：4 块小碎片向四周迸射（≤0.3s） */
+    /** 死亡碎裂：冲击环 + 6 块带描边的身体颜色碎块 + 扬尘 */
     private spawnDeathShards(): void {
         const container = this.node.parent;
         if (!container || !container.isValid) return;
         const cx = this.node.position.x;
         const cy = this.node.position.y;
-        for (let i = 0; i < 4; i++) {
+
+        this.spawnRingBurst('#F8FAFC', 34, 0.3);
+
+        for (let i = 0; i < 6; i++) {
             const shard = new Node('shard');
             container.addChild(shard);
-            const ut = shard.addComponent(UITransform);
-            ut.setContentSize(8, 8);
+            shard.addComponent(UITransform).setContentSize(12, 12);
             shard.setPosition(cx, cy, 0);
             const g = shard.addComponent(Graphics);
             g.fillColor = this._bodyColor;
-            g.rect(-3, -3, 6, 6);
+            g.strokeColor = new Color(8, 14, 26, 220);
+            g.lineWidth = 1.6;
+            // 不规则五边形碎块，比正方形更像"被打碎"
+            const r = 3.2 + Math.random() * 1.6;
+            g.moveTo(-r, -r * 0.6);
+            g.lineTo(r * 0.2, -r);
+            g.lineTo(r, -r * 0.2);
+            g.lineTo(r * 0.5, r);
+            g.lineTo(-r * 0.8, r * 0.5);
+            g.close();
             g.fill();
+            g.stroke();
+
             const op = shard.addComponent(UIOpacity);
-            const angle = (Math.PI * 2 * i) / 4 + Math.random() * 0.6;
-            const dist = 18 + Math.random() * 14;
+            const angle = (Math.PI * 2 * i) / 6 + Math.random() * 0.5;
+            const dist = 20 + Math.random() * 16;
+            const ex = cx + Math.cos(angle) * dist;
+            const ey = cy + Math.sin(angle) * dist - 8;
             tween(shard)
-                .to(0.3, {
-                    position: new Vec3(cx + Math.cos(angle) * dist, cy + Math.sin(angle) * dist, 0),
+                .to(0.32, {
+                    position: new Vec3(ex, ey, 0),
                     scale: new Vec3(0.2, 0.2, 1),
+                    angle: (Math.random() * 2 - 1) * 220,
                 }, { easing: 'quadOut' })
                 .call(() => { if (shard.isValid) shard.destroy(); })
                 .start();
-            tween(op).to(0.3, { opacity: 0 }).start();
+            tween(op).to(0.32, { opacity: 0 }).start();
         }
     }
 
@@ -845,32 +1113,52 @@ export class Unit extends Component {
 
     private spawnShockwave(onComplete: () => void): void {
         if (!this.node?.isValid) return;
+        const container = this.node.parent;
+        if (!container || !container.isValid) return;
 
         const waveNode = new Node('Shockwave');
-        this.node.parent!.addChild(waveNode);
-
+        container.addChild(waveNode);
         waveNode.setPosition(this.node.position.x, this._renderY, 0);
+        waveNode.addComponent(UITransform).setContentSize(Unit.STOMP_RANGE * 2, Unit.STOMP_RANGE * 2);
 
         const g = waveNode.addComponent(Graphics);
-        g.lineWidth = 3;
-        g.strokeColor = Color.WHITE;
-        g.circle(0, 0, 12.5);
-        g.stroke();
+        drawStompRing(g, 12.5);
 
         const op = waveNode.addComponent(UIOpacity);
-        op.opacity = 220;
+        op.opacity = 235;
 
         const targetScale = (Unit.STOMP_RANGE * 2) / 25;
 
         tween(waveNode)
-            .to(0.3, { scale: new Vec3(targetScale, targetScale, 1) }, { easing: 'quadOut' })
+            .to(0.32, { scale: new Vec3(targetScale, targetScale, 1) }, { easing: 'quadOut' })
             .call(() => {
                 onComplete();
                 if (waveNode.isValid) waveNode.destroy();
             })
             .start();
 
-        tween(op).to(0.3, { opacity: 0 }).start();
+        tween(op).to(0.32, { opacity: 0 }).start();
+
+        // 扬尘：6 块小土块向两侧蹦出（与冲击环同寿命）
+        for (let i = 0; i < 6; i++) {
+            const dust = new Node('dust');
+            container.addChild(dust);
+            dust.addComponent(UITransform).setContentSize(12, 12);
+            dust.setPosition(this.node.position.x, this._renderY - 6, 0);
+            const dg = dust.addComponent(Graphics);
+            dg.fillColor = colorFromHex('#E7C48A', 210);
+            dg.circle(0, 0, 3 + Math.random() * 2);
+            dg.fill();
+            const dop = dust.addComponent(UIOpacity);
+            const dir = i < 3 ? 1 : -1;
+            const ex = this.node.position.x + dir * (30 + Math.random() * 55);
+            const ey = this._renderY + 10 + Math.random() * 16;
+            tween(dust)
+                .to(0.32, { position: new Vec3(ex, ey, 0), scale: new Vec3(0.4, 0.4, 1) }, { easing: 'quadOut' })
+                .call(() => { if (dust.isValid) dust.destroy(); })
+                .start();
+            tween(dop).to(0.32, { opacity: 0 }).start();
+        }
     }
 
     private applyStompDamage(allUnits: Unit[]): void {
@@ -921,18 +1209,59 @@ export class Unit extends Component {
         if (!this.node?.isValid) return;
         const container = this.node.parent;
         if (!container || !container.isValid) return;
+        const cx = this.node.position.x;
+        const cy = this._renderY;
+
+        // 内核闪光
         const node = new Node('boom');
         container.addChild(node);
-        node.setPosition(this.node.position.x, this._renderY, 0);
+        node.addComponent(UITransform).setContentSize(72, 72);
+        node.setPosition(cx, cy, 0);
         const g = node.addComponent(Graphics);
-        g.fillColor = colorFromHex('#F59E0B', 190);
+        g.fillColor = colorFromHex('#F59E0B', 200);
         g.circle(0, 0, 14);
         g.fill();
+        g.fillColor = colorFromHex('#FEF3C7', 235);
+        g.circle(0, 0, 7);
+        g.fill();
         const op = node.addComponent(UIOpacity);
-        tween(node).to(0.25, { scale: new Vec3(4, 4, 1) }, { easing: 'quadOut' })
+        tween(node).to(0.26, { scale: new Vec3(4.2, 4.2, 1) }, { easing: 'quadOut' })
             .call(() => { if (node.isValid) node.destroy(); })
             .start();
-        tween(op).to(0.25, { opacity: 0 }).start();
+        tween(op).to(0.26, { opacity: 0 }).start();
+
+        // 外圈橙色冲击环
+        const ring = new Node('boomRing');
+        container.addChild(ring);
+        ring.addComponent(UITransform).setContentSize(200, 200);
+        ring.setPosition(cx, cy, 0);
+        drawRing(ring.addComponent(Graphics), 14, '#FBBF24', 5, 210);
+        const rop = ring.addComponent(UIOpacity);
+        const rs = 100 / 14;
+        tween(ring).to(0.34, { scale: new Vec3(rs, rs, 1) }, { easing: 'quadOut' })
+            .call(() => { if (ring.isValid) ring.destroy(); })
+            .start();
+        tween(rop).to(0.34, { opacity: 0 }).start();
+
+        // 迸射碎片
+        for (let i = 0; i < 8; i++) {
+            const bit = new Node('bit');
+            container.addChild(bit);
+            bit.addComponent(UITransform).setContentSize(10, 10);
+            bit.setPosition(cx, cy, 0);
+            const bg = bit.addComponent(Graphics);
+            bg.fillColor = colorFromHex(i % 2 === 0 ? '#F59E0B' : '#FCD34D');
+            bg.circle(0, 0, 2.5 + Math.random() * 1.5);
+            bg.fill();
+            const bop = bit.addComponent(UIOpacity);
+            const a = (Math.PI * 2 * i) / 8 + Math.random() * 0.4;
+            const d = 40 + Math.random() * 26;
+            tween(bit)
+                .to(0.32, { position: new Vec3(cx + Math.cos(a) * d, cy + Math.sin(a) * d, 0), scale: new Vec3(0.3, 0.3, 1) }, { easing: 'quadOut' })
+                .call(() => { if (bit.isValid) bit.destroy(); })
+                .start();
+            tween(bop).to(0.32, { opacity: 0 }).start();
+        }
     }
 
     // ==================== 视觉更新 ====================

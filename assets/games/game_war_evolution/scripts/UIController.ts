@@ -528,9 +528,11 @@ export class UIController extends Component {
 
     // ==================== 进化表现（V5） ====================
 
-    /** 全屏扫光 + 现代名横幅 */
+    /** 全屏扫光 + 光柱 + 扩散环 + 时代横幅 */
     public showEvolveBanner(age: Age, isPlayer: boolean): void {
         const parent = this._hud ?? this.node;
+        const accent = isPlayer ? '#38BDF8' : '#EF4444';
+
         const flash = createNode('Flash', parent, 720, 1280);
         flash.setSiblingIndex(parent.children.length - 1);
         const g = flash.addComponent(Graphics);
@@ -543,19 +545,64 @@ export class UIController extends Component {
             .call(() => { if (flash.isValid) flash.destroy(); })
             .start();
 
+        // 光柱：从一条细线横向绽开再淡出（「时代跃迁」的主视觉）
+        const beam = createNode('EraBeam', parent, 200, 1280);
+        beam.setSiblingIndex(parent.children.length - 1);
+        const bg = beam.addComponent(Graphics);
+        bg.fillColor = colorFromHex(accent, 38);
+        bg.rect(-100, -640, 200, 1280);
+        bg.fill();
+        bg.fillColor = colorFromHex(accent, 72);
+        bg.rect(-44, -640, 88, 1280);
+        bg.fill();
+        bg.fillColor = colorFromHex('#F8FAFC', 96);
+        bg.rect(-9, -640, 18, 1280);
+        bg.fill();
+        beam.setScale(0.12, 1, 1);
+        const beamOp = beam.addComponent(UIOpacity);
+        tween(beam).to(0.28, { scale: new Vec3(1, 1, 1) }, { easing: 'quadOut' }).start();
+        tween(beamOp)
+            .delay(0.42)
+            .to(0.5, { opacity: 0 })
+            .call(() => { if (beam.isValid) beam.destroy(); })
+            .start();
+
+        // 扩散环 ×3：错开时间，做出「冲击波一层层荡开」
+        for (let i = 0; i < 3; i++) {
+            const ring = createNode('EraRing', parent, 320, 320);
+            ring.setSiblingIndex(parent.children.length - 1);
+            ring.setPosition(0, 40, 0);
+            const rg = ring.addComponent(Graphics);
+            rg.lineWidth = 5 - i;
+            rg.strokeColor = colorFromHex(accent, 190 - i * 40);
+            rg.circle(0, 0, 40);
+            rg.stroke();
+            ring.setScale(0.25, 0.25, 1);
+            const rop = ring.addComponent(UIOpacity);
+            tween(ring)
+                .delay(i * 0.12)
+                .to(0.62, { scale: new Vec3(4.2, 4.2, 1) }, { easing: 'quadOut' })
+                .call(() => { if (ring.isValid) ring.destroy(); })
+                .start();
+            tween(rop)
+                .delay(i * 0.12)
+                .to(0.62, { opacity: 0 })
+                .start();
+        }
+
         const banner = createNode('EraBanner', parent, 560, 96);
         banner.setSiblingIndex(parent.children.length - 1);
         banner.setPosition(0, 60, 0);
-        const bg = banner.addComponent(Graphics);
-        drawRoundRect(bg, 560, 96, 20,
+        const bb = banner.addComponent(Graphics);
+        drawRoundRect(bb, 560, 96, 20,
             toColor(isPlayer ? '#0E7490' : '#7F1D1D', 235),
             toColor(isPlayer ? UI.accent : UI.danger), 3);
         createLabel(banner, `${isPlayer ? '进化' : '敌方进化'} → ${AGE_NAMES[age]}`, 32, {
             width: 520, height: 70, bold: true,
         });
-        banner.setScale(0.85, 0.85, 1);
+        banner.setScale(0.7, 0.7, 1);
         const bop = banner.addComponent(UIOpacity);
-        tween(banner).to(0.22, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
+        tween(banner).to(0.24, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
         tween(bop)
             .delay(1.1)
             .to(0.35, { opacity: 0 })
@@ -570,18 +617,41 @@ export class UIController extends Component {
         toast(this._hud ?? this.node, text, 1.6);
     }
 
-    /** 冲锋启动：屏幕上下金色扫光 + 横幅（G2 全屏可感知反馈） */
+    /** 冲锋启动：全屏金色扫光 + 横向速度线 + 横幅（G2 全屏可感知反馈） */
     public showChargeBanner(): void {
         const parent = this._hud ?? this.node;
+
         const flash = createNode('ChargeFlash', parent, 720, 1280);
         flash.setSiblingIndex(parent.children.length - 1);
         const g = flash.addComponent(Graphics);
-        g.fillColor = new Color(245, 158, 11, 60);
+        g.fillColor = new Color(245, 158, 11, 62);
         g.rect(-360, -640, 720, 1280);
         g.fill();
         const op = flash.addComponent(UIOpacity);
         tween(op).to(0.4, { opacity: 0 })
             .call(() => { if (flash.isValid) flash.destroy(); })
+            .start();
+
+        // 速度线：一片横向金线，向两侧掠出
+        const lines = createNode('ChargeSpeedLines', parent, 720, 1280);
+        lines.setSiblingIndex(parent.children.length - 1);
+        const lg = lines.addComponent(Graphics);
+        lg.lineCap = Graphics.LineCap.ROUND;
+        lg.lineWidth = 3;
+        lg.strokeColor = colorFromHex('#FDE68A', 130);
+        for (let i = 0; i < 16; i++) {
+            const y = -560 + Math.random() * 1120;
+            const x = (Math.random() * 2 - 1) * 280;
+            const len = 70 + Math.random() * 130;
+            lg.moveTo(x, y);
+            lg.lineTo(x + len * (x >= 0 ? 1 : -1), y);
+        }
+        lg.stroke();
+        lines.setScale(1.35, 1, 1);
+        const lop = lines.addComponent(UIOpacity);
+        tween(lines).to(0.3, { scale: new Vec3(1, 1, 1) }, { easing: 'quadOut' }).start();
+        tween(lop).to(0.34, { opacity: 0 })
+            .call(() => { if (lines.isValid) lines.destroy(); })
             .start();
 
         const banner = createNode('ChargeBanner', parent, 420, 84);
@@ -590,9 +660,9 @@ export class UIController extends Component {
         const bg = banner.addComponent(Graphics);
         drawRoundRect(bg, 420, 84, 18, toColor('#7C2D12', 240), toColor(UI.warning), 3);
         createLabel(banner, '全军冲锋！', 34, { width: 400, height: 64, bold: true, color: '#FDE68A' });
-        banner.setScale(0.8, 0.8, 1);
+        banner.setScale(0.6, 0.6, 1);
         const bop = banner.addComponent(UIOpacity);
-        tween(banner).to(0.18, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
+        tween(banner).to(0.2, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
         tween(bop)
             .delay(0.9)
             .to(0.3, { opacity: 0 })
