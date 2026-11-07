@@ -1027,7 +1027,8 @@ export class GateGame extends Component {
         }
 
         // 人数徽标：圆点最多 40 个，超过之后画面不再随人数变化，
-        // 用队伍上方的小胶囊补回「现在到底多少人」。
+        // 用队伍**下方**的小胶囊补回「现在到底多少人」。
+        // 放上方会和「对拼时敌人身上的金色弱点」抢同一个位置，把判定点挡掉。
         const badge = this._squadBadgeLabel;
         if (badge) {
             if (count > SQUAD_DOTS_MAX) {
@@ -1035,7 +1036,8 @@ export class GateGame extends Component {
                 const pillW = Math.max(56, 18 + text.length * 12);
                 const pillH = 26;
                 const pillX = px - pillW / 2;
-                const pillY = py + 46;
+                // 避让集火冷却条（py-66 起、高 6），再往下留 12 px 间距
+                const pillY = py - 104;
                 if (badge.string !== text) badge.string = text;
                 badge.node.active = true;
                 badge.node.setPosition(px, pillY + pillH / 2, 0);
@@ -1335,8 +1337,10 @@ export class GateGame extends Component {
         label.verticalAlign = Label.VerticalAlign.CENTER;
         label.isBold = true;
         if (maxWidth > 0) {
+            // 限宽用 SHRINK：长名字自动缩字号而不是换行。
+            // 高度必须给足（= lineHeight + 上下留白），contentSize 高度为 0 时 SHRINK 会把文字裁成 0 高 → 完全不可见。
             const ut = node.getComponent(UITransform);
-            if (ut) ut.setContentSize(maxWidth, 0);
+            if (ut) ut.setContentSize(maxWidth, label.lineHeight + 8);
             label.overflow = Label.Overflow.SHRINK;
             label.enableWrapText = false;
         }

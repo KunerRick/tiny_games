@@ -588,19 +588,39 @@ node tools/verify-gate-core.js
 | 同上 | 劣门路线 | 8/8 阵亡，13–36 s |
 | 平衡模拟（只会选门、不瞄准不集火） | 优门路线 | 29 s 阵亡 —— 这是设计意图，见 §3.5 |
 
-**浏览器复验：本轮仍未完成**，原因与 §11.2 相同（编辑器开着主干仓库，预览编译不到 worktree 的代码）。
-本轮**新加**了以下需要在真实预览里过一遍的项：
+**浏览器复验：已补完（2026-11-07 晚）**。§11.2 遗留的复验障碍（编辑器开着主干仓库、预览编译不到
+worktree 的代码）用「绕开编辑器」的办法解决：Cocos CLI 直接从 worktree 构建
+`web-desktop`（`CocosCreator --project . --build "platform=web-desktop;debug=true;buildPath=build/web-desktop"`），
+再用本地静态服务器 + 浏览器工具驱动产物页。编辑器与用户工作副本全程未被触碰。
 
-| 待验证 | 判据 |
-|--------|------|
-| 人数徽标 | 人数 > 40 时队伍上方出现深色胶囊 + 金色数字；`count` 变化时数字同步、宽度随位数变化 |
-| 门方向箭头 | 乘/加门左下角 `▲`、除/减门 `▼`；乘门绿、除门红 |
-| 门→队伍轨迹 | 过门瞬间从选中那侧的门飞出一串同色粒子，落向队伍 |
-| Boss 本体三阶段 | 1/2/3 阶段：红/橙/洋红、外环 0/1/2 层、核心单眼逐渐变大、左侧角标 1/3→3/3 |
-| Boss 阶段闪光 | 切阶段瞬间本体转白 + 一圈碎片环外扩 + 淡红压屏，0.5 s 内衰减 |
-| 背景 | 画面正中有一条虚线；两侧路肩有细碎速度线，随 `distance` 向下漂移、速度越快越密 |
-| 敌人名标签 | 长数字（如 `盾兵 1043`）在 240 px 内缩字，不压血条（间距 ≥ 4 px） |
+| 验证项 | 结果 | 证据 |
+|--------|------|------|
+| 人数徽标 | ✅ 人数 > 40 时队伍**下方**出现深色胶囊 + 金色数字，数字随 `count` 同步、宽度随位数变化 | `docs/assets/2026-11-07-gate-runner-01-run.png`、`-02-scene.png` |
+| 门方向箭头 | ✅ 乘/加门 `▲` 绿色、除/减门 `▼` 红色，副标签 `→ 结果值` 与颜色一致 | `-01-run.png`（×2→9946 / ÷2→2486） |
+| 门→队伍轨迹 | ✅ 过门瞬间从选中那侧门飞出一串同色粒子落向队伍，同时飘 `+N` | `-09-trail.png` |
+| Boss 本体三阶段 | ✅ 1/2/3 阶段：红/橙/洋红、外环 0/1/2 层、核心单眼 15/18/21 px、左侧角标 1/3→3/3 | `-06/07/08-boss-*.png` |
+| Boss 阶段闪光 | ✅ 本体转白（`0xfff1f1`）+ 44 段碎片环外扩 + 淡红压屏，0.5 s 内衰减 | `-08-boss-p3-flash.png` |
+| 背景 | ✅ 正中虚线随 `distance` 滚动；两侧路肩速度线向下漂移、高速更密更长 | `-01-run.png`、`-02-scene.png` |
+| 敌人名标签 | ✅ 长数字在 240 px 内缩字，标签在血条上方、间距 4 px | `-01-run.png`（步兵 84）、`-06-boss-p1.png`（BOSS 1000） |
+| 三选一点卡 | ✅ 三张卡全部渲染、点卡即选并给金色碎屑反馈 | `-03-cards.png` |
+| 完整一局 | ✅ 通关 → 结算面板（通关！/ 分数 / 人数·距离 / 最高分）→**点**「再来一局」重开（层恢复、面板收起）→**点**「大厅」回 Lobby | `-04-victory.png`、`-05-defeat.png` |
+| 拖出边界松手 | ✅ 从场中拖到画布外再松手：落点被夹到最左（`playerX=90`），不补发集火 | 探针 `_finishGesture` |
+| 轻触集火 | ✅ 原地点击（位移 ≤ `TAP_SLOP`）触发集火：`pulseReady` true→false、`_pulseTimer≈1.5` | 探针 |
+| 控制台 | ✅ 全程 0 error / 0 warning（含场景切换） | `browser_console_messages` |
 
-复验步骤（编辑器切到 worktree 后）：`project_refresh_assets` → 重载
-`http://127.0.0.1:7456/?scene=f2df3916-32b7-4314-9344-e7dd0e95828c` →
-探针确认 `typeof g._spawnGateTrail === 'function'` → 跑完整一局（含 3 次选卡 + Boss）→ 截图回填本节。
+**复验中发现并修掉的两个真问题**（都是本轮新加表现层引入的）：
+
+1. **限宽标签高度为 0 → 完全不可见**。`_makeLabel` 里 `ut.setContentSize(maxWidth, 0)` 配
+   `Label.Overflow.SHRINK`：宽度有了约束，但高度 0 会把文字裁成 0 高，于是**敌人名标签与人数徽标
+   一直是隐形的**（探针 `node.active === true`、`string` 正确，但屏幕上什么都没有 —— 只查
+   active/字符串会漏判）。改为 `setContentSize(maxWidth, lineHeight + 8)`，实测两处文字恢复显示。
+   教训：**SHRINK 标签必须给足高度，且"组件状态对"不等于"像素可见"，验收要看截图。**
+2. **徽标盖住弱点**。徽标原本画在队伍上方 `py + 46`，而弱点命中时金色靶心正好也在队伍上方，
+   40×44 的判定靶心被胶囊挡掉一半。改为画在队伍下方 `py - 104`（避开 `py - 66` 的集火冷却条）。
+
+修复后重新构建产物复验：`tsc` 通过、`verify-gate-core` 20/20、上述表格全部重整一遍，截图已按新序号
+重拍（`01-run` / `02-scene` / `03-cards` / `04-victory` / `05-defeat` / `06-08-boss` / `09-trail`）。
+
+复现步骤（不占用编辑器）：Cocos CLI 构建 web-desktop → `python3 -m http.server 8099 --directory build/web-desktop`
+→ 浏览器打开 `http://127.0.0.1:8099/` → `cc.director.loadScene('GateRunner')` → 探针取组件
+`s.getComponentsInChildren(cc.Component).find(c => c.constructor.name === 'GateGame')`。
