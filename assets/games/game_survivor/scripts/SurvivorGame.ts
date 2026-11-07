@@ -236,6 +236,8 @@ export class SurvivorGame extends Component {
         }
 
         if (phase === 'victory' || phase === 'defeat') {
+            // 调试快进可能从 levelup 直接翻到终局，残留的升级面板要收掉
+            if (this._upgradePanel && this._upgradePanel.visible) this._upgradePanel.hide();
             if (this._resultPanel && !this._resultPanel.visible) this._openResultPanel();
         } else if (phase === 'levelup') {
             // 逻辑暂停：面板打开期间敌人不动、不掉血，只等玩家选择
