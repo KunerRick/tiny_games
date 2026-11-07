@@ -125,6 +125,23 @@ function assertInside(core, tol = 0.5) {
     }
 }
 
+/**
+ * 任意两颗水果的重叠深度不得超过 tol（像素）。
+ * 求解器每轮只修正 80%，静止堆叠会留下亚像素残差，所以允许 1.5 px。
+ */
+function assertNoPenetration(core, tol, label) {
+    const fruits = core.fruits;
+    for (let i = 0; i < fruits.length; i++) {
+        for (let j = i + 1; j < fruits.length; j++) {
+            const a = fruits[i], b = fruits[j];
+            const d = Math.hypot(b.x - a.x, b.y - a.y);
+            const pen = a.r + b.r - d;
+            ok(pen <= tol,
+                `${label}：水果 #${a.id}(tier ${a.tier}) 与 #${b.id}(tier ${b.tier}) 重叠 ${pen.toFixed(2)} px > ${tol}`);
+        }
+    }
+}
+
 /** 交替层级竖直柱，避免同层接触被合并 —— 用于"叠放/堆塔/失败线"用例 */
 function buildColumn(core, count, x) {
     let y = PLAY_H - WALL_T;
@@ -358,6 +375,62 @@ test('12. 长跑：自动投放 500 颗不崩溃、状态合法', () => {
     assertAllFinite(core);
     assertInside(core, 1);
     console.log(`      模拟 ${(frames / 60).toFixed(0)} s / ${frames} 帧，耗时 ${ms} ms`);
+});
+
+// ==================== 13. 高等级大果堆叠 ====================
+test('13. 8–11 级大果堆叠 20 s：不穿透、不越界、不持续下陷', () => {
+    // 大果直径 182–236，660 宽最多并排两个；交替层级竖直柱 + 两侧各补一颗
+    const core = fresh(424242);
+    const x0 = PLAY_W / 2;
+    let y = PLAY_H - WALL_T;
+    for (let i = 0; i < 6; i++) {
+        const tier = i % 2 === 0 ? 7 : 8;
+        const r = tierRadius(tier);
+        y -= r;
+        core.spawnFruit(tier, x0, y);
+        y -= r;
+    }
+    core.spawnFruit(10, WALL_T + tierRadius(10) + 2, PLAY_H - WALL_T - tierRadius(10));
+    core.spawnFruit(9, PLAY_W - WALL_T - tierRadius(9) - 2, PLAY_H - WALL_T - tierRadius(9));
+
+    run(core, 3);
+    const h0 = topY(core);
+    run(core, 20);
+    const h1 = topY(core);
+    near(h1, h0, 2, `大果柱 20 s 高度漂移应 < 2px，实际 ${Math.abs(h1 - h0).toFixed(2)}`);
+    ok(maxSpeed(core) < 60, `大果堆最大速度应 < 60，实际 ${maxSpeed(core).toFixed(1)}`);
+    assertAllFinite(core);
+    assertInside(core, 1);
+    assertNoPenetration(core, 1.5, '大果堆');
+});
+
+// ==================== 14. 连续投放 100 次 + 静置 30 s ====================
+test('14. 连续投放 100 次后静置 30 s：无重叠穿透、无出界', () => {
+    const core = fresh(20261108);
+    const rnd = mulberry32(20261108);
+    let drops = 0;
+    let frames = 0;
+    while (drops < 100 && frames < 60 * 60 * 20) {
+        if (core.state === 'game_over') core.startRun((rnd() * 0xffffffff) >>> 0);
+        // 左右分区轮流投放，尽量把场地铺开而不是全堆在中间
+        if (frames % 20 === 0) {
+            const lane = drops % 3;
+            const x = lane === 0 ? 120 : lane === 1 ? PLAY_W - 120 : PLAY_W / 2;
+            core.setDropX(x + (rnd() - 0.5) * 60);
+            if (core.drop()) drops++;
+        }
+        core.step(1 / 60);
+        frames++;
+    }
+    eq(drops, 100, '应完成 100 次投放');
+
+    run(core, 30);
+    assertAllFinite(core);
+    assertInside(core, 1);
+    assertNoPenetration(core, 1.5, '100 次投放后');
+    ok(maxSpeed(core) < 60, `静置 30 s 后最大速度应 < 60，实际 ${maxSpeed(core).toFixed(1)}`);
+    ok(core.fruits.length > 0, '场上应仍有水果');
+    console.log(`      100 次投放用时 ${(frames / 60).toFixed(1)} s，静置后场上 ${core.fruits.length} 颗`);
 });
 
 // ==================== 汇总 ====================

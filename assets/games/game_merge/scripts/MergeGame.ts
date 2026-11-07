@@ -8,7 +8,7 @@
  * - 细线一律 `rect()+fill()`，不依赖 `stroke()`（踩坑手册 §4.5）。
  */
 
-import { _decorator, Color, Component, EventTouch, Graphics, Label, Node, UITransform, Vec3 } from 'cc';
+import { _decorator, Color, Component, EventTouch, Graphics, Label, Node, UIOpacity, UITransform, Vec3 } from 'cc';
 import { MergeCore } from './MergeCore';
 import {
     COLORS,
@@ -23,7 +23,7 @@ import {
 import type { MergeEvent } from './MergeCore';
 import { StorageManager } from '../../../common/managers/StorageManager';
 import { SceneManager } from '../../../common/managers/SceneManager';
-import { applySceneClearColor } from '../../../common/ui/GameUIKit';
+import { applySceneClearColor, createLabel, UI } from '../../../common/ui/GameUIKit';
 
 const { ccclass, property } = _decorator;
 
@@ -51,6 +51,114 @@ interface Ring {
     life: number;
     maxLife: number;
     color: number;
+}
+
+/** 合并残影：两颗旧果子缩小的瞬间，补「1+1 → 升级」的因果感 */
+interface Ghost {
+    x: number;
+    y: number;
+    tier: number;
+    dx: number;
+    life: number;
+    maxLife: number;
+}
+
+/** 合并飘字（复用 Label 节点，不上 tween，靠 update 推进） */
+interface FloatText {
+    node: Node;
+    opacity: UIOpacity;
+    x: number;
+    y: number;
+    life: number;
+    maxLife: number;
+}
+
+/** 剪影采样角度数：32 段在 118 px 半径下已看不出棱，兼顾微信端每帧上千 lineTo 的开销 */
+const SHAPE_SEGMENTS = 32;
+
+/** 每级水果的单位剪影（y 向上，外接半径约 1），第一次使用时生成并缓存 */
+const SHAPE_CACHE: number[][][] = [];
+
+/** 按层级给出单位剪影上的点。相邻两级轮廓必须不同 —— 只看剪影就能分辨。 */
+function shapePoint(tier: number, theta: number): { x: number; y: number } {
+    const c = Math.cos(theta);
+    const s = Math.sin(theta);
+    switch (tier) {
+        case 0: // 圆
+            return { x: c, y: s };
+        case 1: // 横椭圆
+            return { x: c * 1.1, y: s * 0.9 };
+        case 2: // 竖椭圆
+            return { x: c * 0.9, y: s * 1.1 };
+        case 3: { // 圆角方（超椭圆）
+            const p = 0.55;
+            return {
+                x: Math.sign(c) * Math.pow(Math.abs(c), p),
+                y: Math.sign(s) * Math.pow(Math.abs(s), p),
+            };
+        }
+        case 4: { // 六边形
+            const a = Math.PI / 3;
+            const m = ((theta % a) + a) % a;
+            const r = Math.cos(a / 2) / Math.cos(m - a / 2);
+            return { x: c * r, y: s * r };
+        }
+        case 5: { // 水滴：上半收尖
+            if (s > 0) {
+                const taper = 1 - 0.5 * s;
+                return { x: c * taper, y: s * 1.2 };
+            }
+            return { x: c, y: s };
+        }
+        case 6: { // 心形（参数方程归一化）
+            const hx = 16 * Math.pow(Math.sin(theta), 3);
+            const hy = 13 * Math.cos(theta) - 5 * Math.cos(2 * theta) - 2 * Math.cos(3 * theta) - Math.cos(4 * theta);
+            return { x: hx / 17, y: hy / 17 };
+        }
+        case 7: { // 五瓣花
+            const r = 0.82 + 0.18 * Math.cos(5 * theta);
+            return { x: c * r, y: s * r };
+        }
+        case 8: { // 五角星
+            const a = (Math.PI * 2) / 5;
+            const m = ((theta % a) + a) % a;
+            const r = (Math.cos(a / 2) / Math.cos(m - a / 2)) * (m < a / 2 ? 1 : 0.5);
+            return { x: c * r, y: s * r };
+        }
+        case 9: { // 八瓣花
+            const r = 0.84 + 0.16 * Math.cos(8 * theta);
+            return { x: c * r, y: s * r };
+        }
+        default: { // 十二角星 / 太阳
+            const a = (Math.PI * 2) / 12;
+            const m = ((theta % a) + a) % a;
+            const r = (Math.cos(a / 2) / Math.cos(m - a / 2)) * (m < a / 2 ? 1 : 0.68);
+            return { x: c * r, y: s * r };
+        }
+    }
+}
+
+function shapePoints(tier: number): number[][] {
+    const t = Math.max(0, Math.min(10, tier | 0));
+    let pts = SHAPE_CACHE[t];
+    if (pts) return pts;
+    pts = [];
+    for (let i = 0; i < SHAPE_SEGMENTS; i++) {
+        const p = shapePoint(t, (i / SHAPE_SEGMENTS) * Math.PI * 2);
+        pts.push([p.x, p.y]);
+    }
+    SHAPE_CACHE[t] = pts;
+    return pts;
+}
+
+/** 颜色明度增减：amount ∈ [-1, 1]，负值变暗（果皮暗边） */
+function shadeColor(hex: number, amount: number): number {
+    const r = (hex >> 16) & 0xff;
+    const g = (hex >> 8) & 0xff;
+    const b = hex & 0xff;
+    const f = amount < 0 ? 1 + amount : 1 + amount * (1 - Math.max(r, g, b) / 255);
+    const clamp255 = (v: number): number => Math.max(0, Math.min(255, Math.round(v * f)));
+    return (clamp255(r) << 16) | (clamp255(g) << 8) | clamp255(b);
 }
 
 /**
@@ -145,6 +253,10 @@ export class MergeGame extends Component {
 
     private _particles: Particle[] = [];
     private _rings: Ring[] = [];
+    private _ghosts: Ghost[] = [];
+    /** 当前活着的飘字 / 空闲复用池 */
+    private _floatTexts: FloatText[] = [];
+    private _floatPool: FloatText[] = [];
     private _shake = 0;
 
     /** 每颗水果的表现状态，按 fruit.id 索引（合并掉的水果在 _drawFruits 里被清掉） */
@@ -210,6 +322,9 @@ export class MergeGame extends Component {
         this._rings = [];
         this._views.clear();
         this._colorCache.clear();
+        this._ghosts = [];
+        this._floatTexts = [];
+        this._floatPool = [];
     }
 
     update(dt: number): void {
@@ -236,6 +351,9 @@ export class MergeGame extends Component {
         this._gameOverShown = false;
         this._particles = [];
         this._rings = [];
+        this._ghosts = [];
+        this._floatTexts = [];
+        this._floatPool = [];
         this._views.clear();
         this._shake = 0;
         this._dragX = PLAY_W / 2;
@@ -403,11 +521,21 @@ export class MergeGame extends Component {
                 case 'merge':
                     this._spawnBurst(event.x, event.y, fruitColor(event.tier), 10, 90);
                     this._spawnRing(event.x, event.y, fruitColor(event.tier), tierRadius(event.tier) * 1.6);
+                    this._spawnGhostPair(event.x, event.y, Math.max(0, event.tier - 1));
+                    this._spawnFloatText(
+                        event.x,
+                        event.y,
+                        event.combo >= 3 ? `连击 ${event.combo}  +${event.score}` : `+${event.score}`,
+                        event.combo >= 3 ? 0xffe066 : 0xffffff,
+                        event.combo >= 3 ? 28 : 24,
+                    );
                     if (event.combo >= 3) this._shake = Math.max(this._shake, 2 + event.combo);
+                    if (event.tier >= 9) this._shake = Math.max(this._shake, 3);
                     break;
                 case 'top_merge':
                     this._spawnBurst(event.x, event.y, 0xffe066, 26, 180);
                     this._spawnRing(event.x, event.y, 0xffe066, 150);
+                    this._spawnFloatText(event.x, event.y, `+${event.score}`, 0xffe066, 32);
                     this._shake = Math.max(this._shake, 10);
                     break;
                 case 'game_over':
@@ -453,11 +581,27 @@ export class MergeGame extends Component {
         g.rect(left, bottom, PLAY_W, WALL_T);
         g.fill();
 
-        // 警戒线：虚线（每条 14×3），越线时靠特效层闪烁，这里只画静态基线
-        g.fillColor = this._color(COLORS.warn, 0.75);
+        // 墙体内描边：贴内壁 2 px 亮线 + 每隔 80 px 的刻度，边界更清楚
+        g.fillColor = this._color(0x3d5378, 0.85);
+        g.rect(left + WALL_T, bottom, 2, PLAY_H);
+        g.rect(left + PLAY_W - WALL_T - 2, bottom, 2, PLAY_H);
+        g.rect(left + WALL_T, bottom, PLAY_W - WALL_T * 2, 2);
+        g.fill();
+        g.fillColor = this._color(0x4a638c, 0.7);
+        for (let y = 80; y < PLAY_H - WALL_T; y += 80) {
+            g.rect(left + WALL_T, bottom + y, 10, 2);
+            g.rect(left + PLAY_W - WALL_T - 10, bottom + y, 10, 2);
+        }
+        for (let x = WALL_T + 80; x < PLAY_W - WALL_T; x += 80) {
+            g.rect(left + x, bottom, 2, 8);
+        }
+        g.fill();
+
+        // 警戒线：静态基线压得很淡，呼吸/闪烁由特效层的动态线负责
+        g.fillColor = this._color(COLORS.warn, 0.2);
         const lineY = PLAY_H / 2 - GAME_OVER_LINE;
         for (let x = WALL_T + 6; x < PLAY_W - WALL_T - 6; x += 28) {
-            g.rect(left + x, lineY, 14, 3);
+            g.rect(left + x, lineY, 14, 2);
         }
         g.fill();
     }
@@ -547,9 +691,10 @@ export class MergeGame extends Component {
     }
 
     /**
-     * 画一颗水果（逻辑坐标入参）。
-     * 用 ellipse 而不是 circle：落地压扁时要非等比缩放。
-     * 高光与果籽都按 `angle` 绕心旋转，静止时保持原样，滚动时能明显看出在转。
+     * 画一颗水果（逻辑坐标入参）。剪影按层级变化，见 `shapePoint`。
+     *
+     * 三层结构：整剪影的深色果皮 → 缩 87% 且偏左上的果肉 → 左上高光。
+     * 果肉偏移固定（不随滚动角转），光源始终在左上，看起来才有体积而不是色块。
      */
     private _drawFruit(
         g: Graphics,
@@ -566,32 +711,65 @@ export class MergeGame extends Component {
         const ny = PLAY_H / 2 - y;
         const rx = r * scaleX;
         const ry = r * scaleY;
+        const base = fruitColor(tier);
 
-        g.fillColor = this._color(fruitColor(tier), alpha);
-        g.ellipse(nx, ny, rx, ry);
-        g.fill();
+        // 顶级果实加一圈外发光，作为「里程碑」暗示
+        if (tier >= 9) {
+            this._fillShape(g, nx, ny, rx * 1.14, ry * 1.14, tier, angle, this._color(base, 0.16 * alpha));
+        }
 
-        // 外圈：颜色加深，给圆形一点"果皮"的立体感
-        g.fillColor = this._color(0x000000, 0.12 * alpha);
-        g.ellipse(nx, ny, rx * 0.82, ry * 0.82);
-        g.fill();
-        g.fillColor = this._color(fruitColor(tier), alpha);
-        g.ellipse(nx, ny, rx * 0.72, ry * 0.72);
-        g.fill();
+        this._fillShape(g, nx, ny, rx, ry, tier, angle, this._color(shadeColor(base, -0.42), alpha));
+        this._fillShape(
+            g,
+            nx - rx * 0.035,
+            ny + ry * 0.045,
+            rx * 0.87,
+            ry * 0.87,
+            tier,
+            angle,
+            this._color(base, alpha),
+        );
 
-        // 左上高光（角度 2.35 rad ≈ 左上，angle=0 时与旧版位置一致）
+        // 左上高光（角度 2.35 rad ≈ 左上，随滚动角一起转，看得出在转）
         const ha = angle + 2.35;
         g.fillColor = this._color(0xffffff, 0.5 * alpha);
-        g.ellipse(nx + Math.cos(ha) * rx * 0.42, ny + Math.sin(ha) * ry * 0.42, r * 0.2, r * 0.16);
+        g.ellipse(nx + Math.cos(ha) * rx * 0.4, ny + Math.sin(ha) * ry * 0.4, r * 0.2, r * 0.16);
         g.fill();
 
-        // 果籽：第二个标记，滚动时才看得出"在转"；小果子省掉这枚图元
+        // 果蒂/籽：第二个标记，小果子省掉这枚图元
         if (r >= 34) {
             const sa = angle - 0.55;
             g.fillColor = this._color(0x000000, 0.22 * alpha);
-            g.circle(nx + Math.cos(sa) * rx * 0.5, ny + Math.sin(sa) * ry * 0.5, r * 0.1);
+            g.circle(nx + Math.cos(sa) * rx * 0.48, ny + Math.sin(sa) * ry * 0.48, r * 0.1);
             g.fill();
         }
+    }
+
+    /** 按层级剪影填充一个形状（支持滚动旋转与非等比缩放） */
+    private _fillShape(
+        g: Graphics,
+        cx: number,
+        cy: number,
+        rx: number,
+        ry: number,
+        tier: number,
+        angle: number,
+        color: Color,
+    ): void {
+        const pts = shapePoints(tier);
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        for (let i = 0; i < pts.length; i++) {
+            const px = pts[i][0];
+            const py = pts[i][1];
+            const x = cx + (px * cos - py * sin) * rx;
+            const y = cy + (px * sin + py * cos) * ry;
+            if (i === 0) g.moveTo(x, y);
+            else g.lineTo(x, y);
+        }
+        g.close();
+        g.fillColor = color;
+        g.fill();
     }
 
     private _drawEffects(): void {
@@ -605,25 +783,76 @@ export class MergeGame extends Component {
         const playing = !this._paused && !this._gameOverShown && this._core.state !== 'game_over';
         if (playing) {
             const px = -PLAY_W / 2 + this._core.dropX + shakeX;
-            // 落点引导线
-            g.fillColor = this._color(COLORS.dropGuide, 0.28);
-            for (let y = DROP_Y + 44; y < PLAY_H - WALL_T; y += 26) {
+            const tier = this._core.currentTier;
+            const ready = this._core.canDrop;
+            const landY = this._predictLandY(this._core.dropX, tier);
+
+            // 落点虚线：从待落水果底部一直画到落点阴影
+            g.fillColor = this._color(COLORS.dropGuide, ready ? 0.3 : 0.16);
+            for (let y = DROP_Y + 44; y < landY; y += 26) {
                 g.rect(px - 1, PLAY_H / 2 - y + shakeY, 2, 13);
             }
             g.fill();
-            // 待落水果（冷却中半透明，提示不能放）
-            const ready = this._core.canDrop;
-            this._drawFruit(g, this._core.dropX + shakeX, DROP_Y + shakeY, this._core.currentTier, ready ? 1 : 0.45);
+
+            // 落点阴影：地面上的一小片椭圆，玩家能预判"会停在哪一层"
+            g.fillColor = this._color(0x000000, ready ? 0.32 : 0.18);
+            g.ellipse(px, PLAY_H / 2 - landY - tierRadius(tier) * 0.72 + shakeY, tierRadius(tier) * 0.86, tierRadius(tier) * 0.26);
+            g.fill();
+
+            // 待落水果（半透明跟随；冷却中更淡，提示不能放）
+            this._drawFruit(g, this._core.dropX + shakeX, DROP_Y + shakeY, tier, ready ? 0.7 : 0.35);
         }
 
-        // 越线警示：警戒线闪烁
+        // 警戒线：常态缓慢呼吸，越线后加速加亮
         const above = this._core.aboveLineCount;
+        const now = Date.now();
+        const warnAlpha = above > 0
+            ? 0.45 + 0.45 * Math.abs(Math.sin(now / 120))
+            : 0.32 + 0.16 * Math.sin(now / 700);
+        g.fillColor = this._color(COLORS.warn, warnAlpha);
+        const lineY = PLAY_H / 2 - GAME_OVER_LINE;
+        for (let x = WALL_T + 6; x < PLAY_W - WALL_T - 6; x += 28) {
+            g.rect(-PLAY_W / 2 + x, lineY + shakeY, 14, above > 0 ? 5 : 3);
+        }
+        g.fill();
+
+        // 越线预警：倒计时条 + 四周红晕。判负时点仍是 2 s，这里只把剩余时间显示出来。
         if (above > 0 && playing) {
-            const pulse = 0.35 + 0.35 * Math.abs(Math.sin(Date.now() / 180));
-            g.fillColor = this._color(COLORS.warn, pulse);
-            const lineY = PLAY_H / 2 - GAME_OVER_LINE;
-            g.rect(-PLAY_W / 2 + WALL_T, lineY - 1, PLAY_W - WALL_T * 2, 5);
+            const progress = this._core.gameOverProgress;
+            const innerW = PLAY_W - WALL_T * 2 - 48;
+            const barW = Math.max(0, innerW * (1 - progress));
+            if (barW > 0) {
+                g.fillColor = this._color(COLORS.warn, 0.55);
+                g.rect(-barW / 2, lineY - 10 + shakeY, barW, 4);
+                g.fill();
+            }
+            const vig = 0.1 + 0.22 * progress;
+            g.fillColor = this._color(COLORS.warn, vig * 0.5);
+            g.rect(-PLAY_W / 2, -PLAY_H / 2, PLAY_W, 26);
+            g.rect(-PLAY_W / 2, PLAY_H / 2 - 26, PLAY_W, 26);
             g.fill();
+            g.fillColor = this._color(COLORS.warn, vig * 0.35);
+            g.rect(-PLAY_W / 2, -PLAY_H / 2, 26, PLAY_H);
+            g.rect(PLAY_W / 2 - 26, -PLAY_H / 2, 26, PLAY_H);
+            g.fill();
+        }
+
+        // 合并残影：旧层级的两个果影向两侧散开并缩小
+        for (let i = 0; i < this._ghosts.length; i++) {
+            const ghost = this._ghosts[i];
+            const t = 1 - ghost.life / ghost.maxLife;
+            const scale = 1 - 0.55 * t;
+            const alpha = Math.max(0, ghost.life / ghost.maxLife) * 0.55;
+            this._drawFruit(
+                g,
+                ghost.x + ghost.dx * (0.5 + t * 1.2) + shakeX,
+                ghost.y + shakeY,
+                ghost.tier,
+                alpha,
+                0,
+                scale,
+                scale,
+            );
         }
 
         // 合并圆环
@@ -665,9 +894,9 @@ export class MergeGame extends Component {
         const r = tierRadius(tier);
         // 预览半径 12–30：层级越高越大，但封顶以免撑破格子
         const rp = 12 + 18 * ((r - tierRadius(0)) / (tierRadius(10) - tierRadius(0)));
-        g.fillColor = this._color(fruitColor(tier));
-        g.circle(0, 0, rp);
-        g.fill();
+        // 与场内水果同一套剪影，方便玩家提前认清下一颗的形状
+        this._fillShape(g, 0, 0, rp, rp, tier, 0, this._color(shadeColor(fruitColor(tier), -0.42)));
+        this._fillShape(g, -rp * 0.035, rp * 0.045, rp * 0.87, rp * 0.87, tier, 0, this._color(fruitColor(tier)));
         g.fillColor = this._color(0xffffff, 0.5);
         g.circle(-rp * 0.32, rp * 0.34, rp * 0.2);
         g.fill();
@@ -740,6 +969,64 @@ export class MergeGame extends Component {
         this._rings.push({ x, y, r: maxR * 0.25, maxR, life: 0.35, maxLife: 0.35, color });
     }
 
+    /** 合并瞬间的两个旧果残影：向左右散开、缩小、淡出 */
+    private _spawnGhostPair(x: number, y: number, tier: number): void {
+        const r = tierRadius(tier);
+        const life = 0.22;
+        this._ghosts.push({ x, y, tier, dx: -r * 0.5, life, maxLife: life });
+        this._ghosts.push({ x, y, tier, dx: r * 0.5, life, maxLife: life });
+    }
+
+    /** 飘字：合并得分 / 连击提示。复用固定数量的 Label 节点，满池就丢弃本次飘字。 */
+    private _spawnFloatText(x: number, y: number, text: string, color: number, fontSize: number): void {
+        const parent = this.effectLayer;
+        if (!parent) return;
+        if (this._floatTexts.length >= 12) return;
+
+        let item = this._floatPool.pop();
+        if (!item) {
+            const label = createLabel(parent, '', fontSize, {
+                width: 280,
+                height: 44,
+                bold: true,
+                color: UI.white,
+            });
+            const opacity = label.node.addComponent(UIOpacity);
+            item = { node: label.node, opacity, x: 0, y: 0, life: 0, maxLife: 0 };
+        }
+        const label = item.node.getComponent(Label);
+        if (label) {
+            label.string = text;
+            label.fontSize = fontSize;
+            label.lineHeight = Math.round(fontSize * 1.25);
+            label.color = this._color(color);
+        }
+        item.x = -PLAY_W / 2 + x;
+        item.y = PLAY_H / 2 - y;
+        item.life = 0.75;
+        item.maxLife = 0.75;
+        item.opacity.opacity = 255;
+        item.node.active = true;
+        item.node.setPosition(item.x, item.y, 0);
+        this._floatTexts.push(item);
+    }
+
+    /** 预测当前 x 上水果会停下的圆心 y：取所有可能接触的水果上方与地面中最高的一层 */
+    private _predictLandY(x: number, tier: number): number {
+        const r = tierRadius(tier);
+        let landY = PLAY_H - WALL_T - r;
+        const fruits = this._core.fruits;
+        for (let i = 0; i < fruits.length; i++) {
+            const f = fruits[i];
+            const dx = x - f.x;
+            const sum = r + f.r;
+            if (Math.abs(dx) >= sum) continue;
+            const y = f.y - Math.sqrt(sum * sum - dx * dx);
+            if (y > DROP_Y && y < landY) landY = y;
+        }
+        return landY;
+    }
+
     private _updateEffects(dt: number): void {
         if (this._particles.length > 0) {
             // 原地压缩，避免每帧新建数组
@@ -764,6 +1051,33 @@ export class MergeGame extends Component {
                 this._rings[write++] = ring;
             }
             this._rings.length = write;
+        }
+        if (this._ghosts.length > 0) {
+            let write = 0;
+            for (let read = 0; read < this._ghosts.length; read++) {
+                const ghost = this._ghosts[read];
+                ghost.life -= dt;
+                if (ghost.life <= 0) continue;
+                this._ghosts[write++] = ghost;
+            }
+            this._ghosts.length = write;
+        }
+        if (this._floatTexts.length > 0) {
+            let write = 0;
+            for (let read = 0; read < this._floatTexts.length; read++) {
+                const item = this._floatTexts[read];
+                item.life -= dt;
+                if (item.life <= 0) {
+                    item.node.active = false;
+                    this._floatPool.push(item);
+                    continue;
+                }
+                const t = 1 - item.life / item.maxLife;
+                item.node.setPosition(item.x, item.y + 52 * t, 0);
+                item.opacity.opacity = Math.round(255 * Math.min(1, item.life / 0.22));
+                this._floatTexts[write++] = item;
+            }
+            this._floatTexts.length = write;
         }
         if (this._shake > 0) {
             this._shake = Math.max(0, this._shake - SHAKE_DECAY * dt);

@@ -167,6 +167,13 @@ export class MergeCore {
         }
         return n;
     }
+    /**
+     * 越线静止计时的进度 0–1（1 = 即将判负）。
+     * 只读给视图层画预警倒计时，不改变判负时点。
+     */
+    get gameOverProgress(): number {
+        return Math.min(1, this._gameOverTimer / GAME_OVER_HOLD_SEC);
+    }
 
     // ---------- 生命周期 ----------
 
