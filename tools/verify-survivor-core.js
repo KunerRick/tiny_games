@@ -308,25 +308,28 @@ check('6 玩家无敌帧生效，0.5 s 内多次接触只扣一次血', () => {
 });
 
 check('7 经验曲线与升级触发正确', () => {
-    // M1 调参后：need(level) = 6 + 3 × (level - 1)（原 6 + 4，见 SurvivorConfig 注释）
-    assert(C.xpNeed(1) === 6 && C.xpNeed(2) === 9 && C.xpNeed(3) === 12, 'xpNeed 曲线错误');
+    // 曲线公式 need(level) = XP_CURVE_BASE + XP_CURVE_STEP × (level - 1)，曲线常数本身由平衡模拟校准
+    const n1 = C.XP_CURVE_BASE;
+    const n2 = n1 + C.XP_CURVE_STEP;
+    const n3 = n2 + C.XP_CURVE_STEP;
+    assert(C.xpNeed(1) === n1 && C.xpNeed(2) === n2 && C.xpNeed(3) === n3, 'xpNeed 曲线错误');
     const core = fresh(22);
-    core.debugAddXp(6);
+    core.debugAddXp(n1);
     let s = core.getSnapshot();
-    assert(s.phase === 'levelup', '达到 6 XP 没有进入升级');
+    assert(s.phase === 'levelup', `达到 ${n1} XP 没有进入升级`);
     assert(s.player.level === 2, `等级应为 2，实际 ${s.player.level}`);
     assert(s.player.xp === 0, `升级后经验应清零，实际 ${s.player.xp}`);
-    assert(s.player.xpNeed === 9, `2 级所需经验应为 9，实际 ${s.player.xpNeed}`);
+    assert(s.player.xpNeed === n2, `2 级所需经验应为 ${n2}，实际 ${s.player.xpNeed}`);
     assert(core.getOffers().length === 3, '升级没有给出 3 张卡');
     core.chooseUpgrade(0);
-    core.debugAddXp(9);
+    core.debugAddXp(n2);
     s = core.getSnapshot();
-    assert(s.player.level === 3 && s.player.xpNeed === 12, '第二次升级曲线错误');
+    assert(s.player.level === 3 && s.player.xpNeed === n3, '第二次升级曲线错误');
 });
 
 check('8 三选一无重复卡；槽位满后不再出现新武器/新被动', () => {
     const core = fresh(23);
-    core.debugAddXp(6);
+    core.debugAddXp(C.XP_CURVE_BASE);
     const titles = core.getOffers().map((o) => o.title);
     assert(new Set(titles).size === titles.length, `出现重复卡：${titles.join(' / ')}`);
     core.chooseUpgrade(0);
@@ -588,7 +591,13 @@ check('18 HP ≤ 0 → defeat', () => {
     core.debugSpawn('chaser', 30);
     let defeat = false;
     for (let i = 0; i < Math.round(60 / DT); i++) {
+        if (core.getSnapshot().phase === 'levelup') {
+            chooseFirst(core);
+            continue;
+        }
         if (core.getSnapshot().phase !== 'running') break;
+        // 持续补怪：脱战回血会让单批敌人被刀清完，必须保持贴脸压力才能验证死亡
+        if (i % 30 === 0) core.debugSpawn('chaser', 20);
         core.step(DT, ZERO);
         for (const ev of core.drainEvents()) if (ev.type === 'defeat') defeat = true;
     }
@@ -822,8 +831,8 @@ function percentile(samples, p) {
     return arr[Math.min(arr.length - 1, Math.floor((p / 100) * arr.length))];
 }
 
-check('24 300 敌人 × 600 帧性能门槛', () => {
-    const core = coreFrom(perfState(300));
+check('24 同屏上限敌人 × 600 帧性能门槛', () => {
+    const core = coreFrom(perfState(C.ENEMY_CAP));
     const samples = timeSteps(core, 600, (i) => ({ moveX: Math.sin(i * 0.02), moveY: Math.cos(i * 0.03) }));
     const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
     const p99 = percentile(samples, 99);
@@ -833,7 +842,7 @@ check('24 300 敌人 × 600 帧性能门槛', () => {
 });
 
 check('29 4x 负载（240 步/秒）连续 60 秒', () => {
-    const save = perfState(300);
+    const save = perfState(C.ENEMY_CAP);
     const a = coreFrom(clone(save));
     const b = coreFrom(clone(save));
     const steps = 240 * 60;
@@ -951,6 +960,135 @@ check('28 篡改/越界/缺字段的存档 restore() 返回 false，不污染当
         assert(ok === false, `${name}：restore 应返回 false，实际 true`);
         assert(hashOf(target) === before, `${name}：坏档污染了当前状态`);
     }
+});
+
+// ==================== 9. 节奏表与三选一 ====================
+
+section('9. 8 分钟节奏表与三选一');
+
+check('30 节奏表：精英 2/4/6 分、兽潮每 45 s、Boss 7:30（误差 ≤ 3 s）', () => {
+    const core = fresh(2026);
+    const bot = makeReferenceBot();
+    const elite = [];
+    const wave = [];
+    const boss = [];
+    const total = Math.round(460 / DT);
+    for (let i = 0; i < total; i++) {
+        const phase = core.getSnapshot().phase;
+        if (phase === 'levelup') {
+            chooseByPriority(core);
+            continue;
+        }
+        if (phase !== 'running') break;
+        core.step(DT, bot(core));
+        const t = core.getSnapshot().time;
+        for (const ev of core.drainEvents()) {
+            if (ev.type === 'elite' && ev.data === 0) elite.push(t);
+            else if (ev.type === 'wave') wave.push(t);
+            else if (ev.type === 'boss') boss.push(t);
+        }
+        if (core.getSnapshot().phase === 'levelup') chooseByPriority(core);
+    }
+
+    assert(elite.length === 3, `精英应出现 3 次，实际 ${elite.length}`);
+    for (let i = 0; i < elite.length; i++) {
+        approx(elite[i], C.ELITE_TIMES[i], 3, `第 ${i + 1} 只精英时间戳`);
+    }
+    assert(boss.length === 1, `Boss 应出现 1 次，实际 ${boss.length}`);
+    approx(boss[0], C.BOSS_TIME, 3, 'Boss 时间戳');
+
+    const waveSpawns = Math.floor(core.getSnapshot().time / C.WAVE_INTERVAL);
+    assert(waveSpawns >= 9, `应至少经历 9 次兽潮，实际 ${waveSpawns}`);
+    for (let k = 0; k < wave.length; k++) {
+        // 兽潮提示提前 WAVE_WARN 秒
+        approx(wave[k], C.WAVE_FIRST + k * C.WAVE_INTERVAL - C.WAVE_WARN, 3, `第 ${k + 1} 次兽潮提示时间`);
+    }
+    assert(wave.length >= 9, `兽潮提示次数不足：${wave.length}`);
+    console.log(
+        `      精英 ${elite.map((t) => t.toFixed(1)).join(' / ')} s，` +
+            `Boss ${boss[0].toFixed(1)} s，兽潮提示 ${wave.length} 次`
+    );
+});
+
+check('31 三选一不退化：连续 40 次升级每次 3 张有效卡（含全满级）', () => {
+    // 不用构造存档：武器/被动槽位分别是 3/2，自然升级 25 次后全部满级，之后全靠兜底卡
+    const core = fresh(99);
+    let sawFullBuild = false;
+    for (let round = 1; round <= 40; round++) {
+        core.debugAddXp(core.getSnapshot().player.xpNeed);
+        assert(core.getSnapshot().phase === 'levelup', `第 ${round} 次升级没有进入 levelup`);
+        const offers = core.getOffers();
+        assert(offers.length === 3, `第 ${round} 次只有 ${offers.length} 张卡`);
+
+        let upgradeCards = 0;
+        for (const o of offers) {
+            const p = core.getSnapshot().player;
+            if (o.kind === 'weaponUpgrade' || o.kind === 'newWeapon') {
+                upgradeCards++;
+                assert(o.nextLevel <= C.MAX_TRACK_LEVEL, `第 ${round} 次给出满级武器卡：${o.title}`);
+                assert(o.nextLevel > o.currentLevel, `第 ${round} 次武器卡没有提升：${o.title}`);
+            } else if (o.kind === 'passiveUpgrade' || o.kind === 'newPassive') {
+                upgradeCards++;
+                assert(o.nextLevel <= C.MAX_TRACK_LEVEL, `第 ${round} 次给出满级被动卡：${o.title}`);
+                assert(o.nextLevel > o.currentLevel, `第 ${round} 次被动卡没有提升：${o.title}`);
+            } else if (o.kind === 'heal') {
+                assert(p.hp < p.maxHp, `第 ${round} 次满血却给出回血卡`);
+            } else if (o.kind === 'temper') {
+                assert(o.nextLevel > o.currentLevel, `第 ${round} 次淬炼卡没有提升`);
+            } else {
+                throw new Error(`未知卡类型：${o.kind}`);
+            }
+        }
+        if (upgradeCards === 0) sawFullBuild = true;
+        const titles = offers.map((o) => o.title);
+        assert(new Set(titles).size === 3, `第 ${round} 次出现重复卡：${titles.join(' / ')}`);
+
+        // 优先拿成长卡，尽快把构筑抽满
+        const s = core.getSnapshot();
+        let pick = 0;
+        for (let i = 0; i < offers.length; i++) {
+            const o = offers[i];
+            if (o.kind === 'weaponUpgrade' || o.kind === 'newWeapon' || o.kind === 'passiveUpgrade' || o.kind === 'newPassive') {
+                pick = i;
+                break;
+            }
+        }
+        core.chooseUpgrade(pick);
+        if (round === 40) {
+            const w = Object.values(s.weapons).reduce((a, b) => a + b, 0);
+            assert(w > 0, '四十次升级后应至少有一个武器等级');
+        }
+    }
+    assert(sawFullBuild, '40 次升级内应出现「全部满级、只剩兜底卡」的情形');
+    const p = core.getSnapshot().player;
+    assert(p.level === 41, `40 次升级后等级应为 41，实际 ${p.level}`);
+    assert(core.getSnapshot().temper >= 1, '全满级后应靠淬炼继续成长');
+});
+
+check('32 致命伤害来源：记录最后一次伤害（接触 / 远程弹）', () => {
+    const contact = coreFrom(
+        scenario({
+            player: Object.assign(clone(scenario().player), { hp: 5, maxHp: 100 }),
+            enemies: [enemyCompact('chaser', 20, 0, 999, { damage: 8 })],
+        })
+    );
+    runSeconds(contact, 0.2);
+    const s1 = contact.getRunSummary();
+    assert(contact.getSnapshot().phase === 'defeat', '接触伤害应导致阵亡');
+    assert(s1.lastHitSource === 'chaser', `致命来源应为 chaser，实际 ${s1.lastHitSource}`);
+    assert(s1.lastHitDamage === 8, `致命伤害应为 8，实际 ${s1.lastHitDamage}`);
+
+    const shot = coreFrom(
+        scenario({
+            player: Object.assign(clone(scenario().player), { hp: 5, maxHp: 100, iframe: 0 }),
+            bullets: [[2, 0, 20, 0, -200, 0, 10, 7, 0, 2, 20, 0, 0, 0, 0]],
+        })
+    );
+    runSeconds(shot, 0.2);
+    const s2 = shot.getRunSummary();
+    assert(shot.getSnapshot().phase === 'defeat', '远程弹应导致阵亡');
+    assert(s2.lastHitSource === 'bullet', `致命来源应为 bullet，实际 ${s2.lastHitSource}`);
+    assert(s2.lastHitDamage === 10, `致命伤害应为 10，实际 ${s2.lastHitDamage}`);
 });
 
 // ==================== 汇总 ====================

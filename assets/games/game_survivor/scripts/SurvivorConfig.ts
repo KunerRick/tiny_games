@@ -29,11 +29,15 @@ export const FIXED_DT = 1 / 60;
 
 // ==================== 玩家 ====================
 
-export const PLAYER_HP = 100;
+export const PLAYER_HP = 120;
 export const PLAYER_SPEED = 220;
 export const PLAYER_RADIUS = 14;
 export const PLAYER_IFRAME = 0.5;
 export const PLAYER_PICKUP = 60;
+
+/** 脱战回血：连续 4 s 未受击后按 2 HP/s 回复（走位好就能把血拉回来） */
+export const PLAYER_REGEN_DELAY = 6;
+export const PLAYER_REGEN_PER_SEC = 1;
 
 /** 受击时敌人的击退距离 */
 export const PLAYER_KNOCKBACK = 40;
@@ -44,7 +48,7 @@ export const ENEMY_CONTACT_CD = 0.8;
 // ==================== 碰撞上限 ====================
 
 /** 同屏敌人上限（含精英与 Boss） */
-export const ENEMY_CAP = 300;
+export const ENEMY_CAP = 140;
 
 /** 玩家子弹 + 敌弹共用上限 */
 export const BULLET_CAP = 120;
@@ -62,15 +66,15 @@ export const MAX_LEVEL = 99;
 // ==================== 经验曲线 ====================
 
 /**
- * need(level) = 6 + 3 × (level - 1)
+ * need(level) = 5 + 2 × (level - 1)
  *
- * 规格初稿是 6 + 4 × (level - 1)。M1 用参照策略实测（`tools/verify-survivor-core.js` 第 20 项）：
- * 4 的步长下，能活过 300 秒的跑位策略在 300 秒时普遍只有 4–5 级，低于规格的 6–14 区间；
- * 改成 3 后同一策略落在 6–8 级（5 个种子中 3 个达标），且因为升级更快、DPS 成长更早，
- * 存活率反而提高。详见 docs/specs/2026-11-02-game-survivor-design.md §8.4 的调参记录。
+ * 规格初稿是 6 + 4 × (level - 1)，M1 先降到 6 + 3；2026-11-08 用
+ * `node tools/sim-survivor-balance.js` 做 200 局无头平衡校准（参考走位 + 三选一），
+ * 定在 5 + 2：8 分钟一局大致到 18–22 级，武器能真正滚起来。
+ * 详细的整轮调参见 docs/specs/2026-11-02-game-survivor-design.md §8.4。
  */
-export const XP_CURVE_BASE = 6;
-export const XP_CURVE_STEP = 3;
+export const XP_CURVE_BASE = 5;
+export const XP_CURVE_STEP = 2;
 
 export function xpNeed(level: number): number {
     return XP_CURVE_BASE + XP_CURVE_STEP * (level - 1);
@@ -110,11 +114,11 @@ export interface KnifeLevel {
 
 /** 飞刀 5 级（§3.4.1） */
 export const KNIFE_LEVELS: KnifeLevel[] = [
-    { count: 1, damage: 10, interval: 1.00, speed: 850, pierce: 0, spread: 0 },
-    { count: 2, damage: 10, interval: 1.00, speed: 850, pierce: 0, spread: 6 },
-    { count: 2, damage: 14, interval: 1.00, speed: 850, pierce: 0, spread: 6 },
-    { count: 2, damage: 14, interval: 1.00, speed: 850, pierce: 1, spread: 6 },
-    { count: 3, damage: 14, interval: 0.85, speed: 900, pierce: 1, spread: 8 },
+    { count: 1, damage: 16, interval: 1.00, speed: 850, pierce: 0, spread: 0 },
+    { count: 2, damage: 16, interval: 1.00, speed: 850, pierce: 0, spread: 6 },
+    { count: 2, damage: 22, interval: 1.00, speed: 850, pierce: 0, spread: 6 },
+    { count: 2, damage: 22, interval: 1.00, speed: 850, pierce: 1, spread: 6 },
+    { count: 3, damage: 26, interval: 0.85, speed: 900, pierce: 1, spread: 8 },
 ];
 
 /** 飞刀索敌半径 */
@@ -135,11 +139,11 @@ export interface OrbitLevel {
 
 /** 星环 5 级（§3.4.2） */
 export const ORBIT_LEVELS: OrbitLevel[] = [
-    { count: 2, damage: 12, radius: 88, angular: 1.8 },
-    { count: 3, damage: 12, radius: 88, angular: 1.8 },
-    { count: 3, damage: 16, radius: 88, angular: 1.8 },
-    { count: 3, damage: 16, radius: 108, angular: 2.2 },
-    { count: 4, damage: 20, radius: 108, angular: 2.2 },
+    { count: 2, damage: 20, radius: 88, angular: 1.8 },
+    { count: 3, damage: 20, radius: 88, angular: 1.8 },
+    { count: 3, damage: 26, radius: 88, angular: 1.8 },
+    { count: 3, damage: 26, radius: 108, angular: 2.2 },
+    { count: 4, damage: 32, radius: 108, angular: 2.2 },
 ];
 
 /** 星环球体半径（表现） */
@@ -161,11 +165,11 @@ export interface LightningLevel {
 
 /** 落雷 5 级（§3.4.3） */
 export const LIGHTNING_LEVELS: LightningLevel[] = [
-    { targets: 1, damage: 24, interval: 2.2, range: 300, aoe: 52 },
-    { targets: 1, damage: 24, interval: 1.8, range: 300, aoe: 52 },
-    { targets: 1, damage: 34, interval: 1.8, range: 320, aoe: 52 },
-    { targets: 2, damage: 34, interval: 1.8, range: 320, aoe: 52 },
-    { targets: 2, damage: 34, interval: 1.4, range: 340, aoe: 84 },
+    { targets: 1, damage: 40, interval: 2.2, range: 300, aoe: 52 },
+    { targets: 1, damage: 40, interval: 1.8, range: 300, aoe: 52 },
+    { targets: 1, damage: 56, interval: 1.8, range: 320, aoe: 52 },
+    { targets: 2, damage: 56, interval: 1.8, range: 320, aoe: 52 },
+    { targets: 2, damage: 56, interval: 1.4, range: 340, aoe: 84 },
 ];
 
 export interface BoomerangLevel {
@@ -179,11 +183,11 @@ export interface BoomerangLevel {
 
 /** 回旋镖 5 级（§3.4.4） */
 export const BOOMERANG_LEVELS: BoomerangLevel[] = [
-    { count: 1, damage: 14, interval: 2.0, range: 240, speed: 520, width: 18 },
-    { count: 1, damage: 20, interval: 2.0, range: 240, speed: 520, width: 18 },
-    { count: 1, damage: 20, interval: 1.6, range: 240, speed: 520, width: 18 },
-    { count: 2, damage: 20, interval: 1.6, range: 240, speed: 520, width: 18 },
-    { count: 2, damage: 28, interval: 1.6, range: 280, speed: 560, width: 22 },
+    { count: 1, damage: 22, interval: 2.0, range: 240, speed: 520, width: 18 },
+    { count: 1, damage: 32, interval: 2.0, range: 240, speed: 520, width: 18 },
+    { count: 1, damage: 32, interval: 1.6, range: 240, speed: 520, width: 18 },
+    { count: 2, damage: 32, interval: 1.6, range: 240, speed: 520, width: 18 },
+    { count: 2, damage: 44, interval: 1.6, range: 280, speed: 560, width: 22 },
 ];
 
 /** 回旋镖索敌半径（超过则朝移动方向） */
@@ -223,11 +227,11 @@ export interface EnemyBase {
 
 /** 基础敌人（§3.7.1） */
 export const ENEMY_BASE: Record<EnemyKind, EnemyBase> = {
-    chaser: { hp: 14, speed: 62, radius: 13, damage: 8, xp: 1 },
-    weaver: { hp: 10, speed: 74, radius: 12, damage: 6, xp: 1 },
-    shooter: { hp: 16, speed: 48, radius: 13, damage: 8, xp: 2 },
-    bomber: { hp: 12, speed: 105, radius: 14, damage: 0, xp: 1 },
-    boss: { hp: 2400, speed: 46, radius: 46, damage: 25, xp: 0 },
+    chaser: { hp: 14, speed: 95, radius: 13, damage: 6, xp: 1 },
+    weaver: { hp: 10, speed: 108, radius: 12, damage: 5, xp: 1 },
+    shooter: { hp: 16, speed: 72, radius: 13, damage: 6, xp: 2 },
+    bomber: { hp: 12, speed: 130, radius: 14, damage: 0, xp: 1 },
+    boss: { hp: 2400, speed: 46, radius: 46, damage: 20, xp: 0 },
 };
 
 /** HP 倍率斜率：1 + t / 240 */
@@ -247,9 +251,9 @@ export const WEAVER_FREQ = 2;
 /** 远程兵 */
 export const SHOOTER_RANGE_MIN = 190;
 export const SHOOTER_RANGE_MAX = 240;
-export const SHOOTER_INTERVAL = 2.6;
+export const SHOOTER_INTERVAL = 3.2;
 export const SHOOTER_BULLET_SPEED = 260;
-export const SHOOTER_BULLET_DMG = 10;
+export const SHOOTER_BULLET_DMG = 5;
 export const SHOOTER_BULLET_RADIUS = 7;
 
 /** 自爆兵 */
@@ -260,7 +264,7 @@ export const BOMBER_DAMAGE = 18;
 
 /** 精英（§3.7.2） */
 export const ELITE_TIMES = [120, 240, 360];
-export const ELITE_HP_MULT = 8;
+export const ELITE_HP_MULT = 5;
 export const ELITE_SIZE_MULT = 1.35;
 export const ELITE_SPEED_MULT = 0.9;
 export const ELITE_DAMAGE_MULT = 1.5;
@@ -270,9 +274,9 @@ export const ELITE_GEM_VALUE = 3;
 
 // ==================== 刷新与兽潮 ====================
 
-export const SPAWN_RATE_BASE = 2;
-export const SPAWN_RATE_SLOPE = 0.032;
-export const SPAWN_RATE_MAX = 18;
+export const SPAWN_RATE_BASE = 1.1;
+export const SPAWN_RATE_SLOPE = 0.010;
+export const SPAWN_RATE_MAX = 4;
 
 export const SPAWN_RING_MIN = 620;
 export const SPAWN_RING_MAX = 780;
@@ -289,7 +293,7 @@ export const WAVE_WARN = 2;
 
 /** 兽潮数量：8 + floor(t / 60) × 3 */
 export function waveCount(time: number): number {
-    return 8 + Math.floor(time / 60) * 3;
+    return 6 + Math.floor(time / 60) * 2;
 }
 
 /** 兽潮扇区角度（120°） */
@@ -310,17 +314,17 @@ export function spawnWeights(time: number): number[] {
 // ==================== Boss ====================
 
 export const BOSS_TIME = 450;
-export const BOSS_HP = 2400;
+export const BOSS_HP = 1400;
 export const BOSS_RADIUS = 46;
-export const BOSS_SPEED = 46;
-export const BOSS_CONTACT_DMG = 25;
+export const BOSS_SPEED = 150;
+export const BOSS_CONTACT_DMG = 20;
 export const BOSS_SPAWN_DIST = 520;
 
 export const BOSS_VOLLEY_INTERVAL = 3.2;
 export const BOSS_VOLLEY_INTERVAL_ENRAGED = 2.2;
 export const BOSS_BULLET_COUNT = 12;
 export const BOSS_BULLET_SPEED = 240;
-export const BOSS_BULLET_DMG = 12;
+export const BOSS_BULLET_DMG = 11;
 export const BOSS_BULLET_RADIUS = 8;
 
 export const BOSS_SUMMON_INTERVAL = 9;
@@ -516,10 +520,26 @@ export interface SurvivorInput {
     moveY: number;
 }
 
+/** 玩家受伤来源：接触伤害按敌人类型记，远程/范围伤害单独标记 */
+export type HitSource = EnemyKind | 'bullet';
+
+export const HIT_SOURCE_NAMES: Record<HitSource, string> = {
+    chaser: '直冲兵',
+    weaver: '绕行兵',
+    shooter: '远程兵',
+    bomber: '自爆兵',
+    boss: 'Boss',
+    bullet: '远程弹',
+};
+
 export interface RunSummary {
     time: number;
     level: number;
     kills: number;
+    /** 最后一次对玩家造成伤害的来源（阵亡时即致命来源） */
+    lastHitSource: HitSource | null;
+    lastHitElite: boolean;
+    lastHitDamage: number;
 }
 
 // ==================== 类型：局内存档 ====================

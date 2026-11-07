@@ -58,6 +58,7 @@ import {
     ENEMY_SPEED_SLOPE,
     EnemyKind,
     EnemyState,
+    HitSource,
     FIXED_DT,
     GEM_CAP,
     GEM_DROP_RATE,
@@ -85,6 +86,8 @@ import {
     PASSIVE_TRACKS,
     PLAYER_HP,
     PLAYER_IFRAME,
+    PLAYER_REGEN_DELAY,
+    PLAYER_REGEN_PER_SEC,
     PLAYER_KNOCKBACK,
     PLAYER_PICKUP,
     PLAYER_RADIUS,
@@ -200,6 +203,12 @@ export class SurvivorCore {
     private _time = 0;
     private _kills = 0;
     private _phase: Phase = 'running';
+    /** 最后一次对玩家造成伤害的来源（阵亡时即致命来源，结算面板用） */
+    private _lastHitSource: HitSource | null = null;
+    private _lastHitElite = false;
+    private _lastHitDamage = 0;
+    /** 距上次受击的秒数，满 PLAYER_REGEN_DELAY 后开始脱战回血 */
+    private _noDamageTimer = 0;
 
     // --- 玩家与构筑 ---
     private _player = {
@@ -332,6 +341,10 @@ export class SurvivorCore {
         this._time = 0;
         this._kills = 0;
         this._phase = 'running';
+        this._lastHitSource = null;
+        this._lastHitElite = false;
+        this._lastHitDamage = 0;
+        this._noDamageTimer = 0;
         this._player.x = 0;
         this._player.y = 0;
         this._player.hp = PLAYER_HP;
@@ -436,7 +449,14 @@ export class SurvivorCore {
     }
 
     getRunSummary(): RunSummary {
-        return { time: this._time, level: this._player.level, kills: this._kills };
+        return {
+            time: this._time,
+            level: this._player.level,
+            kills: this._kills,
+            lastHitSource: this._lastHitSource,
+            lastHitElite: this._lastHitElite,
+            lastHitDamage: this._lastHitDamage,
+        };
     }
 
     // ==================== 调试接口 ====================
@@ -498,13 +518,23 @@ export class SurvivorCore {
             p.y = clamp(p.y, -lim, lim);
         }
         if (p.iframe > 0) p.iframe = Math.max(0, p.iframe - dt);
+        if (p.hp > 0 && p.hp < p.maxHp) {
+            this._noDamageTimer += dt;
+            if (this._noDamageTimer >= PLAYER_REGEN_DELAY) {
+                p.hp = Math.min(p.maxHp, p.hp + PLAYER_REGEN_PER_SEC * dt);
+            }
+        }
     }
 
-    private _damagePlayer(dmg: number): void {
+    private _damagePlayer(dmg: number, source: HitSource, elite = false): void {
         const p = this._player;
         if (this._phase !== 'running' || p.iframe > 0) return;
         p.hp -= dmg;
         p.iframe = PLAYER_IFRAME;
+        this._noDamageTimer = 0;
+        this._lastHitSource = source;
+        this._lastHitElite = elite;
+        this._lastHitDamage = Math.round(dmg);
         this._events.push({ type: 'hit', data: Math.round(dmg) });
         if (p.hp <= 0) {
             p.hp = 0;
@@ -847,7 +877,7 @@ export class SurvivorCore {
             // 接触玩家
             const rr = e.radius + PLAYER_RADIUS;
             if (dist * dist <= rr * rr && e.hitCooldown <= 0 && p.iframe <= 0 && e.damage > 0) {
-                this._damagePlayer(e.damage);
+                this._damagePlayer(e.damage, e.kind, e.elite);
                 e.hitCooldown = ENEMY_CONTACT_CD;
                 // 击退敌人 40 px（方向从玩家指向敌人）
                 const back = norm(e.x - p.x, e.y - p.y);
@@ -906,7 +936,7 @@ export class SurvivorCore {
         const dx = this._player.x - e.x;
         const dy = this._player.y - e.y;
         if (dx * dx + dy * dy <= BOMBER_RADIUS * BOMBER_RADIUS) {
-            this._damagePlayer(BOMBER_DAMAGE * this._dmgMult());
+            this._damagePlayer(BOMBER_DAMAGE * this._dmgMult(), 'bomber', e.elite);
         }
     }
 
@@ -1072,7 +1102,7 @@ export class SurvivorCore {
                 const rr = b.radius + PLAYER_RADIUS;
                 if (dx * dx + dy * dy <= rr * rr) {
                     b.active = false;
-                    this._damagePlayer(b.damage);
+                    this._damagePlayer(b.damage, 'bullet');
                     if (this._phase !== 'running') return;
                 }
                 continue;
@@ -1193,8 +1223,9 @@ export class SurvivorCore {
             const kinds = this._unlockedKinds(t);
             const kind = kinds[this._rng.int(kinds.length)];
             const pos = this._spawnPosition();
-            this._spawnEnemy(kind, pos.x, pos.y, true);
-            this._events.push({ type: 'elite', data: 0 });
+            if (this._spawnPriorityEnemy(kind, pos.x, pos.y, true)) {
+                this._events.push({ type: 'elite', data: 0 });
+            }
         }
 
         // 兽潮：每 45 s 一波，提前 2 s 提示
@@ -1211,13 +1242,43 @@ export class SurvivorCore {
         // Boss
         if (!this._bossSpawned && t >= BOSS_TIME) {
             const angle = this._rng.range(0, Math.PI * 2);
-            this._spawnEnemy(
+            this._spawnPriorityEnemy(
                 'boss',
                 this._player.x + Math.cos(angle) * BOSS_SPAWN_DIST,
                 this._player.y + Math.sin(angle) * BOSS_SPAWN_DIST,
                 false
             );
         }
+    }
+
+    /**
+     * 精英 / Boss 这种「必须出现」的敌人：池满时回收离玩家最远的普通怪腾一个槽位。
+     *
+     * 原实现直接用 `_spawnEnemy`，在 450 s 刷怪速率 16+/s 时敌人池长期占满，
+     * Boss 会一直等不到空槽（实测 480 s 仍未出现，胜利条件等于不存在）。
+     */
+    private _spawnPriorityEnemy(kind: EnemyKind, x: number, y: number, elite: boolean): EnemyState | null {
+        let slot = this._spawnEnemy(kind, x, y, elite);
+        if (slot) return slot;
+
+        const p = this._player;
+        let worst = -1;
+        let worstD2 = -1;
+        for (let i = 0; i < this._enemies.length; i++) {
+            const e = this._enemies[i];
+            if (!e.active || e.kind === 'boss') continue;
+            const dx = e.x - p.x;
+            const dy = e.y - p.y;
+            const d2 = dx * dx + dy * dy;
+            if (d2 > worstD2) {
+                worstD2 = d2;
+                worst = i;
+            }
+        }
+        if (worst < 0) return null;
+        this._enemies[worst].active = false;
+        this._enemyActive--;
+        return this._spawnEnemy(kind, x, y, elite);
     }
 
     private _unlockedKinds(t: number): EnemyKind[] {
@@ -1343,19 +1404,11 @@ export class SurvivorCore {
             }
         }
 
-        // 兜底：全部满级时用「淬炼 / 回复」填充
-        const fillers: UpgradeOffer[] = [
-            {
-                kind: 'temper',
-                track: '',
-                currentLevel: this._temper,
-                nextLevel: this._temper + 1,
-                title: '淬炼',
-                detail: `全部武器伤害 +${Math.round(TEMPER_DMG_BONUS * 100)}%（当前 +${Math.round(
-                    this._temper * TEMPER_DMG_BONUS * 100
-                )}%）`,
-            },
-            {
+        // 兜底：全部满级时用「淬炼 / 回复」填充。
+        // 回复只在掉血时出现（满血给回血等于空卡）；淬炼按 +1 / +2 / +3 三档，保证永远有 3 张有效卡。
+        const fillers: UpgradeOffer[] = [];
+        if (this._player.hp < this._player.maxHp) {
+            fillers.push({
                 kind: 'heal',
                 track: '',
                 currentLevel: 0,
@@ -1364,18 +1417,21 @@ export class SurvivorCore {
                 detail: `生命 ${Math.round(this._player.hp)} → ${Math.round(
                     Math.min(this._player.maxHp, this._player.hp + 30)
                 )}`,
-            },
-            {
-                kind: 'heal',
+            });
+        }
+        const temperNames = ['淬炼', '淬炼·大', '淬炼·极'];
+        for (let k = 0; k < temperNames.length && fillers.length < OFFER_COUNT; k++) {
+            const steps = k + 1;
+            const pct = Math.round(TEMPER_DMG_BONUS * 100);
+            fillers.push({
+                kind: 'temper',
                 track: '',
-                currentLevel: 0,
-                nextLevel: 60,
-                title: '回复 60',
-                detail: `生命 ${Math.round(this._player.hp)} → ${Math.round(
-                    Math.min(this._player.maxHp, this._player.hp + 60)
-                )}`,
-            },
-        ];
+                currentLevel: this._temper,
+                nextLevel: this._temper + steps,
+                title: temperNames[k],
+                detail: `全部武器伤害 +${pct * steps}%（当前 +${Math.round(this._temper * TEMPER_DMG_BONUS * 100)}%）`,
+            });
+        }
         let fi = 0;
         while (picked.length < OFFER_COUNT && fi < fillers.length) {
             const f = fillers[fi++];
@@ -1513,7 +1569,7 @@ export class SurvivorCore {
                 p.hp = Math.min(p.maxHp, p.hp + Math.max(1, offer.nextLevel || 30));
                 break;
             case 'temper':
-                this._temper++;
+                this._temper += Math.max(1, offer.nextLevel - offer.currentLevel);
                 break;
         }
     }
