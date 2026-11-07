@@ -222,16 +222,18 @@ export function drawUnitBody(g: Graphics, icon: string, fill: Color, outline?: C
 
         case 'knight': {
             // 剪影特征：盾牌 + 头盔盔缨（长枪在武器层）
-            // 盾牌（身后）
-            g.moveTo(-17, 4);
-            g.lineTo(-5, 4);
-            g.lineTo(-5, -8);
-            g.lineTo(-11, -15);
-            g.lineTo(-17, -8);
+            // 盾牌（身后）：必须明显探出躯干轮廓。只露出窄窄一条会被读成身体的一部分，
+            // 而「方盾」正是骑士真正拉开与穴居人 / 机甲差距的剪影抓手
+            g.moveTo(-23, 7);
+            g.lineTo(-7, 7);
+            g.lineTo(-7, -8);
+            g.lineTo(-15, -17);
+            g.lineTo(-23, -8);
             g.close();
             paint(g, t.light, ol);
-            g.roundRect(-12.4, -8, 2.8, 9.5, 1.2);
-            g.roundRect(-15, -3.6, 8.2, 2.8, 1.2);
+            // 盾面十字：小尺寸下靠这两笔才能读出「这是面盾」
+            g.roundRect(-16.5, -11, 3, 13, 1.3);
+            g.roundRect(-21.2, -2.4, 12.4, 3, 1.3);
             paint(g, t.shade, null);
 
             // 腿
