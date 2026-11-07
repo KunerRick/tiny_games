@@ -16,6 +16,8 @@ import { SurvivorJoystick } from './SurvivorJoystick';
 import { SurvivorRenderer } from './SurvivorRenderer';
 import { SurvivorUpgradePanel } from './SurvivorUpgradePanel';
 import { SurvivorHud } from './SurvivorHud';
+import { SurvivorResultPanel } from './SurvivorResultPanel';
+import { SceneManager } from '../../../common/managers/SceneManager';
 import { FIXED_DT } from './SurvivorConfig';
 import type { SurvivorInput } from './SurvivorConfig';
 
@@ -63,6 +65,8 @@ export class SurvivorGame extends Component {
     _upgradePanel: SurvivorUpgradePanel | null = null;
     /** 正式 HUD（时间 / 等级 / 生命 / 经验 / 构筑） */
     _hud: SurvivorHud | null = null;
+    /** 结算面板（胜利 / 失败） */
+    _resultPanel: SurvivorResultPanel | null = null;
 
     private _acc = 0;
     private _keys = new Set<KeyCode>();
@@ -81,6 +85,13 @@ export class SurvivorGame extends Component {
         if (!this.joystick) this.joystick = this._ensureJoystick();
         this._hud = this._ensureHud();
         this._upgradePanel = this._ensureUpgradePanel();
+        this._resultPanel = this._ensureResultPanel();
+        if (this._hud) {
+            this._hud.onSpeedTap = this._onHudSpeed;
+            this._hud.onPauseTap = this._onHudPause;
+            this._hud.setSpeed(this._speed);
+            this._hud.setPaused(this._paused);
+        }
         // M2 的调试读数退场：正式 HUD 接管顶栏
         if (this.debugLabel) this.debugLabel.node.active = false;
         input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
@@ -97,6 +108,7 @@ export class SurvivorGame extends Component {
         this.joystick = null;
         this._upgradePanel = null;
         this._hud = null;
+        this._resultPanel = null;
     }
 
     /**
@@ -161,6 +173,40 @@ export class SurvivorGame extends Component {
         return node ? node.getComponent(SurvivorUpgradePanel) : null;
     }
 
+    /** 结算面板压在升级面板之上（终局时升级面板已经不可能再出现） */
+    private _ensureResultPanel(): SurvivorResultPanel | null {
+        const parent = this.node.parent;
+        if (!parent) return null;
+        let node = parent.getChildByName('ResultPanel');
+        if (!node) {
+            SurvivorResultPanel.create(parent);
+            node = parent.getChildByName('ResultPanel');
+        }
+        if (node) node.setSiblingIndex(parent.children.length - 1);
+        return node ? node.getComponent(SurvivorResultPanel) : null;
+    }
+
+    /** 终局：核心停在同一帧，面板只读快照与 getRunSummary() */
+    private _openResultPanel(): void {
+        const core = this._core;
+        const panel = this._resultPanel;
+        if (!core || !panel) return;
+        this._acc = 0;
+        this.joystick?.release();
+        panel.show(core.getRunSummary(), core.getSnapshot(), {
+            onRestart: this._onResultRestart,
+            onLobby: this._onResultLobby,
+        });
+    }
+
+    private _onResultRestart = (): void => {
+        this.startRun();
+    };
+
+    private _onResultLobby = (): void => {
+        SceneManager.gotoLobby();
+    };
+
     /** 开新局（重开也走这里） */
     startRun(): void {
         const seed = this.seed || (Date.now() % 2147483647);
@@ -169,7 +215,11 @@ export class SurvivorGame extends Component {
         this._steps = 0;
         this._paused = false;
         if (this._upgradePanel) this._upgradePanel.hide();
-        if (this.renderer) this.renderer.drawBackground();
+        if (this._resultPanel) this._resultPanel.hide();
+        if (this.renderer) {
+            this.renderer.drawBackground();
+            this.renderer.resetFx();
+        }
         if (this._hud && this._core) this._hud.refresh(this._core.getSnapshot());
     }
 
@@ -185,14 +235,16 @@ export class SurvivorGame extends Component {
             this._fpsFrames = 0;
         }
 
-        if (phase === 'levelup') {
+        if (phase === 'victory' || phase === 'defeat') {
+            if (this._resultPanel && !this._resultPanel.visible) this._openResultPanel();
+        } else if (phase === 'levelup') {
             // 逻辑暂停：面板打开期间敌人不动、不掉血，只等玩家选择
             if (this._upgradePanel && !this._upgradePanel.visible) this._openUpgradePanel();
         } else if (!this._paused) {
             this._advance(dt);
         }
         this._syncView();
-        this._render();
+        this._render(dt);
 
         this._hudTimer -= dt;
         if (this._hudTimer <= 0) {
@@ -231,7 +283,8 @@ export class SurvivorGame extends Component {
             this._acc = 0;
         }
 
-        core.drainEvents();
+        const events = core.drainEvents();
+        if (this.renderer) this.renderer.pushEvents(events);
     }
 
     /** 弹出升级面板；面板选择后调用 _onOfferChosen */
@@ -300,13 +353,13 @@ export class SurvivorGame extends Component {
         world.setPosition(this._tmp);
     }
 
-    private _render(): void {
+    private _render(dt: number): void {
         const core = this._core;
         const renderer = this.renderer;
         if (!core || !renderer) return;
         const t0 = performance.now();
         const snap = core.getSnapshot();
-        renderer.render(snap);
+        renderer.render(snap, dt);
         if (this._hud) this._hud.refresh(snap);
         const ms = performance.now() - t0;
         this._lastRenderMs = ms;
@@ -340,9 +393,9 @@ export class SurvivorGame extends Component {
 
     private onKeyDown(ev: EventKeyboard): void {
         this._keys.add(ev.keyCode);
-        if (ev.keyCode === KeyCode.DIGIT_1) this._speed = SPEED_STEPS[0];
-        else if (ev.keyCode === KeyCode.DIGIT_2) this._speed = SPEED_STEPS[1];
-        else if (ev.keyCode === KeyCode.DIGIT_4) this._speed = SPEED_STEPS[2];
+        if (ev.keyCode === KeyCode.DIGIT_1) this.applySpeed(SPEED_STEPS[0]);
+        else if (ev.keyCode === KeyCode.DIGIT_2) this.applySpeed(SPEED_STEPS[1]);
+        else if (ev.keyCode === KeyCode.DIGIT_4) this.applySpeed(SPEED_STEPS[2]);
         else if (ev.keyCode === KeyCode.KEY_X) this.cycleSpeed();
         else if (ev.keyCode === KeyCode.KEY_P) this.togglePause();
         else if (ev.keyCode === KeyCode.KEY_R) this.startRun();
@@ -355,14 +408,28 @@ export class SurvivorGame extends Component {
 
     // ==================== 对外调试接口（浏览器探针 / 验收用） ====================
 
+    private _onHudSpeed = (): void => {
+        this.cycleSpeed();
+    };
+
+    private _onHudPause = (): void => {
+        this.togglePause();
+    };
+
     cycleSpeed(): void {
         const i = SPEED_STEPS.indexOf(this._speed);
-        this._speed = SPEED_STEPS[(i + 1) % SPEED_STEPS.length];
+        this.applySpeed(SPEED_STEPS[(i + 1) % SPEED_STEPS.length]);
+    }
+
+    applySpeed(mult: number): void {
+        this._speed = mult;
+        if (this._hud) this._hud.setSpeed(mult);
     }
 
     togglePause(): void {
         this._paused = !this._paused;
         this._acc = 0;
+        if (this._hud) this._hud.setPaused(this._paused);
     }
 
     /** 直接推进 N 秒逻辑（跳过等待，验收用） */
@@ -378,9 +445,10 @@ export class SurvivorGame extends Component {
             while (core.getSnapshot().phase === 'levelup' && guard++ < 32) core.chooseUpgrade(0);
             if (core.getSnapshot().phase !== 'running') break;
         }
-        core.drainEvents();
+        const events = core.drainEvents();
+        if (this.renderer) this.renderer.pushEvents(events);
         this._syncView();
-        this._render();
+        this._render(FIXED_DT);
     }
 
     /** 压测：直接刷 N 个敌人（Gate B 用） */

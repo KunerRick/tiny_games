@@ -15,6 +15,12 @@ const { ccclass } = _decorator;
 
 const CARD_W = 560;
 const CARD_H = 180;
+/** 文本区：图标占左侧 96 px */
+const TEXT_X = 44;
+const TEXT_W = 396;
+/** 图标中心 */
+const ICON_X = -216;
+const ICON_R = 30;
 /** 三张卡的中心 y（Canvas 中心为原点） */
 const CARD_YS = [250, 40, -170];
 
@@ -153,12 +159,12 @@ export class SurvivorUpgradePanel extends Component {
 
         const gfx = node.addComponent(Graphics);
 
-        // 文本节点用居中锚点，宽度 = 卡片内宽；x 取 0 才能让左对齐从卡片左边距开始
-        const tag = this._makeLabel(node, 0, 56, CARD_W - 64, 28, '', 20, TEXT_SECONDARY, false);
+        // 左侧 96 px 留给图标；文本从图标右侧起排（x=44 时左边缘在 -154）
+        const tag = this._makeLabel(node, TEXT_X, 56, TEXT_W, 28, '', 20, TEXT_SECONDARY, false);
         tag.horizontalAlign = Label.HorizontalAlign.LEFT;
-        const title = this._makeLabel(node, 0, 12, CARD_W - 64, 40, '', 30, TEXT_PRIMARY, true);
+        const title = this._makeLabel(node, TEXT_X, 12, TEXT_W, 40, '', 30, TEXT_PRIMARY, true);
         title.horizontalAlign = Label.HorizontalAlign.LEFT;
-        const detail = this._makeLabel(node, 0, -44, CARD_W - 64, 34, '', 21, TEXT_SECONDARY, false);
+        const detail = this._makeLabel(node, TEXT_X, -44, TEXT_W, 34, '', 21, TEXT_SECONDARY, false);
         detail.horizontalAlign = Label.HorizontalAlign.LEFT;
         detail.overflow = Label.Overflow.SHRINK;
 
@@ -218,6 +224,168 @@ export class SurvivorUpgradePanel extends Component {
         card.tag.color = hex(color);
         card.title.string = offer.title;
         card.detail.string = offer.detail;
+
+        this._paintIcon(g, offer, color);
+        this._paintPips(g, offer, color);
+    }
+
+    // ==================== 图标与等级点（V4） ====================
+
+    /** 图标底板 + 武器/被动的几何记号；同一套形状在 HUD 构筑行也认得出 */
+    private _paintIcon(g: Graphics, offer: UpgradeOffer, color: string): void {
+        g.fillColor = hex(color, 28);
+        g.circle(ICON_X, 0, ICON_R);
+        g.fill();
+        g.lineWidth = 2;
+        g.strokeColor = hex(color, 120);
+        g.circle(ICON_X, 0, ICON_R);
+        g.stroke();
+
+        g.fillColor = hex(color);
+        const x = ICON_X;
+        const y = 0;
+        switch (offer.track) {
+            case 'knife': {
+                // 三片刀锋
+                for (let i = -1; i <= 1; i++) {
+                    const oy = i * 12;
+                    g.moveTo(x + 16, y + oy);
+                    g.lineTo(x - 12, y + oy + 5);
+                    g.lineTo(x - 12, y + oy - 2);
+                    g.close();
+                }
+                g.fill();
+                break;
+            }
+            case 'orbit': {
+                // 中心 + 两颗环绕
+                g.circle(x, y, 5);
+                g.fill();
+                g.circle(x - 14, y + 10, 6);
+                g.circle(x + 14, y - 8, 6);
+                g.fill();
+                break;
+            }
+            case 'lightning': {
+                // 闪电折线
+                g.moveTo(x + 4, y + 18);
+                g.lineTo(x - 10, y - 2);
+                g.lineTo(x - 1, y - 2);
+                g.lineTo(x - 5, y - 18);
+                g.lineTo(x + 11, y + 4);
+                g.lineTo(x + 2, y + 4);
+                g.close();
+                g.fill();
+                break;
+            }
+            case 'boomerang': {
+                // 回旋镖（两段折角）
+                g.moveTo(x - 14, y - 12);
+                g.lineTo(x + 2, y + 14);
+                g.lineTo(x + 7, y + 8);
+                g.lineTo(x - 6, y - 8);
+                g.close();
+                g.fill();
+                break;
+            }
+            case 'haste': {
+                // 双箭头（攻速）
+                for (let i = 0; i < 2; i++) {
+                    const ox = i * 10 - 6;
+                    g.moveTo(x + ox - 8, y + 14);
+                    g.lineTo(x + ox + 6, y);
+                    g.lineTo(x + ox - 8, y - 14);
+                    g.lineTo(x + ox - 2, y);
+                    g.close();
+                }
+                g.fill();
+                break;
+            }
+            case 'swift': {
+                // 单箭头（移速）
+                g.moveTo(x + 16, y);
+                g.lineTo(x - 2, y + 14);
+                g.lineTo(x - 2, y + 5);
+                g.lineTo(x - 16, y + 5);
+                g.lineTo(x - 16, y - 5);
+                g.lineTo(x - 2, y - 5);
+                g.lineTo(x - 2, y - 14);
+                g.close();
+                g.fill();
+                break;
+            }
+            case 'pickup': {
+                // 菱形 + 外圈（拾取范围）
+                g.strokeColor = hex(color, 160);
+                g.lineWidth = 2;
+                g.circle(x, y, 20);
+                g.stroke();
+                g.fillColor = hex(color);
+                g.moveTo(x, y + 12);
+                g.lineTo(x + 12, y);
+                g.lineTo(x, y - 12);
+                g.lineTo(x - 12, y);
+                g.close();
+                g.fill();
+                break;
+            }
+            case 'vitality': {
+                // 心形（体魄）
+                g.circle(x - 7, y + 4, 9);
+                g.circle(x + 7, y + 4, 9);
+                g.fill();
+                g.moveTo(x - 15, y + 1);
+                g.lineTo(x, y - 16);
+                g.lineTo(x + 15, y + 1);
+                g.close();
+                g.fill();
+                break;
+            }
+            case 'heal': {
+                // 十字
+                g.rect(x - 6, y - 16, 12, 32);
+                g.rect(x - 16, y - 6, 32, 12);
+                g.fill();
+                break;
+            }
+            default: {
+                // 淬炼：八角星
+                for (let i = 0; i < 8; i++) {
+                    const a1 = (i / 8) * Math.PI * 2;
+                    const a2 = a1 + Math.PI / 8;
+                    const r1 = i % 2 === 0 ? 17 : 7;
+                    const px = x + Math.cos(a1) * r1;
+                    const py = y + Math.sin(a1) * r1;
+                    const qx = x + Math.cos(a2) * 7;
+                    const qy = y + Math.sin(a2) * 7;
+                    if (i === 0) g.moveTo(px, py);
+                    else g.lineTo(px, py);
+                    g.lineTo(qx, qy);
+                }
+                g.close();
+                g.fill();
+                break;
+            }
+        }
+    }
+
+    /** 等级点：5 格，点亮到「选择后」的等级；补给/淬炼不适用就不画 */
+    private _paintPips(g: Graphics, offer: UpgradeOffer, color: string): void {
+        const max = 5;
+        const isTrack = offer.kind === 'weaponUpgrade' || offer.kind === 'newWeapon' ||
+            offer.kind === 'passiveUpgrade' || offer.kind === 'newPassive';
+        if (!isTrack) return;
+        const y = 62;
+        const r = 4.5;
+        const gap = 16;
+        const right = CARD_W / 2 - 34;
+        for (let i = 0; i < max; i++) {
+            const x = right - (max - 1 - i) * gap;
+            const filled = i < offer.nextLevel;
+            g.fillColor = hex(color, filled ? 255 : 70);
+            g.circle(x, y, r);
+            g.fill();
+        }
     }
 
     // ==================== 事件 ====================

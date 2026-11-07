@@ -9,7 +9,7 @@
  * 构筑行是「升级不明显」的关键反馈：玩家选过的每一张卡都要在屏幕上留下名字。
  */
 
-import { _decorator, Color, Component, Graphics, Label, Node, UITransform } from 'cc';
+import { _decorator, Color, Component, EventTouch, Graphics, Label, Node, UITransform } from 'cc';
 import { PASSIVE_NAMES, WEAPON_NAMES, SurvivorSnapshot } from './SurvivorConfig';
 import type { PassiveTrack, WeaponTrack } from './SurvivorConfig';
 
@@ -27,6 +27,13 @@ const HP_BAR_W = 320;
 const TEXT_PRIMARY = '#F8FAFC';
 const TEXT_SECONDARY = '#94A3B8';
 
+/** 顶栏小按钮（倍速 / 暂停）：手机上没有键盘，必须给触屏入口 */
+const BTN_W = 92;
+const BTN_H = 46;
+const BTN_SPEED_X = 196;
+const BTN_PAUSE_X = 300;
+const BTN_Y = 548;
+
 function hex(hexStr: string, alpha = 255): Color {
     const c = new Color();
     c.fromHEX(hexStr);
@@ -42,6 +49,14 @@ export class SurvivorHud extends Component {
     private _level: Label | null = null;
     private _build: Label | null = null;
     private _kills: Label | null = null;
+    private _speedLabel: Label | null = null;
+    private _pauseLabel: Label | null = null;
+    private _speedBtn: Node | null = null;
+    private _pauseBtn: Node | null = null;
+
+    /** 由 SurvivorGame 赋值；按钮点击时回调 */
+    onSpeedTap: (() => void) | null = null;
+    onPauseTap: (() => void) | null = null;
 
     private _cBarBack = hex('#000000', 140);
     private _cHp = hex('#5DE89A');
@@ -81,6 +96,66 @@ export class SurvivorHud extends Component {
         this._kills.horizontalAlign = Label.HorizontalAlign.RIGHT;
         this._build = this._label(root, -80, 472, 520, 28, '', 20, TEXT_SECONDARY, false);
         this._build.horizontalAlign = Label.HorizontalAlign.LEFT;
+
+        this._speedBtn = this._makeButton(root, BTN_SPEED_X, BTN_Y, '1x');
+        this._pauseBtn = this._makeButton(root, BTN_PAUSE_X, BTN_Y, '暂停');
+        this._speedLabel = this._speedBtn.getComponentInChildren(Label);
+        this._pauseLabel = this._pauseBtn.getComponentInChildren(Label);
+        this._speedBtn.on(Node.EventType.TOUCH_END, this.onSpeedTouched, this);
+        this._pauseBtn.on(Node.EventType.TOUCH_END, this.onPauseTouched, this);
+    }
+
+    /** 顶栏小按钮：圆角底色 + 边框 + 居中文字 */
+    private _makeButton(parent: Node, x: number, y: number, text: string): Node {
+        const node = new Node('Btn');
+        node.layer = parent.layer;
+        const ut = node.addComponent(UITransform);
+        ut.setContentSize(BTN_W, BTN_H);
+        node.setPosition(x, y, 0);
+
+        const g = node.addComponent(Graphics);
+        g.fillColor = hex('#000000', 120);
+        g.roundRect(-BTN_W / 2, -BTN_H / 2, BTN_W, BTN_H, 12);
+        g.fill();
+        g.lineWidth = 1.5;
+        g.strokeColor = hex('#7FE7FF', 150);
+        g.roundRect(-BTN_W / 2, -BTN_H / 2, BTN_W, BTN_H, 12);
+        g.stroke();
+
+        const label = this._label(node, 0, 0, BTN_W - 12, BTN_H - 8, text, 22, TEXT_PRIMARY, true);
+        label.overflow = Label.Overflow.SHRINK;
+
+        parent.addChild(node);
+        return node;
+    }
+
+    onDestroy(): void {
+        // 只清引用（红线 4）
+        this._speedBtn = null;
+        this._pauseBtn = null;
+        this._speedLabel = null;
+        this._pauseLabel = null;
+        this.onSpeedTap = null;
+        this.onPauseTap = null;
+    }
+
+    private onSpeedTouched(ev: EventTouch): void {
+        ev.propagationStopped = true;
+        if (this.onSpeedTap) this.onSpeedTap();
+    }
+
+    private onPauseTouched(ev: EventTouch): void {
+        ev.propagationStopped = true;
+        if (this.onPauseTap) this.onPauseTap();
+    }
+
+    /** 由 SurvivorGame 同步按钮文字（键盘切换倍速时也要跟上） */
+    setSpeed(mult: number): void {
+        if (this._speedLabel) this._speedLabel.string = `${mult}x`;
+    }
+
+    setPaused(paused: boolean): void {
+        if (this._pauseLabel) this._pauseLabel.string = paused ? '继续' : '暂停';
     }
 
     private _label(
