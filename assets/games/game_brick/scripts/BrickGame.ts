@@ -23,6 +23,9 @@ const TAP_SLOP = 12;
 const PARTICLE_MAX = 140;
 const SHAKE_DECAY = 8;
 
+/** 关卡完成横幅停留时长（秒），之后才弹三选一 */
+const BANNER_SEC = 0.8;
+
 /** 碎屑 */
 interface Particle {
     x: number;
@@ -146,8 +149,14 @@ export class BrickGame extends Component {
     private _lastScore = -1;
     private _lastLives = -1;
     private _lastLevel = -1;
+    private _lastRemain = -1;
     private _lastCombo = -1;
     private _lastGuide = '';
+
+    /** 关卡完成横幅：先显示 BANNER_SEC，再弹三选一 */
+    private _bannerNode: Node | null = null;
+    private _bannerLabel: Label | null = null;
+    private _bannerTimer = 0;
 
     private _highScore = 0;
 
@@ -200,6 +209,16 @@ export class BrickGame extends Component {
     update(dt: number): void {
         if (this._destroyed) return;
 
+        // 关卡完成横幅：停留一小段再把三选一推上来
+        if (this._bannerTimer > 0) {
+            this._bannerTimer -= dt;
+            if (this._bannerTimer <= 0) {
+                this._bannerTimer = 0;
+                this._hideBanner();
+                this._showUpgradePanel();
+            }
+        }
+
         if (!this._paused && !this._upgradePicking && !this._gameOverShown) {
             this._core.step(dt);
             this._consumeEvents();
@@ -225,6 +244,8 @@ export class BrickGame extends Component {
         this._particles = [];
         this._shake = 0;
         this._brickDirty = true;
+        this._bannerTimer = 0;
+        this._hideBanner();
         this._hidePanel(this.pausePanel);
         this._hidePanel(this.upgradePanel);
         this._hidePanel(this.gameOverPanel);
@@ -365,6 +386,61 @@ export class BrickGame extends Component {
     }
 
     // ==================== 升级面板 ====================
+
+    /** 关卡完成横幅（运行时创建，不改 .scene） */
+    private _showLevelBanner(level: number): void {
+        const label = this._ensureBanner();
+        if (this._bannerNode) {
+            if (label) label.string = `第 ${level} 关完成`;
+            this._bannerNode.active = true;
+        }
+        this._bannerTimer = BANNER_SEC;
+    }
+
+    private _hideBanner(): void {
+        if (this._bannerNode && this._bannerNode.isValid) {
+            this._bannerNode.active = false;
+        }
+    }
+
+    private _ensureBanner(): Label | null {
+        if (this._bannerLabel) return this._bannerLabel;
+
+        const node = new Node('LevelBanner');
+        node.layer = this.node.layer;
+        const ut = node.addComponent(UITransform);
+        ut.setContentSize(520, 96);
+        node.setPosition(0, 90, 0);
+
+        // 边框用「外框实心 + 内层实心」画，不依赖 stroke（踩坑手册 §4.5）
+        const g = node.addComponent(Graphics);
+        g.fillColor = this._color(COLORS.paddle, 0.85);
+        g.roundRect(-260, -48, 520, 96, 18);
+        g.fill();
+        g.fillColor = this._color(COLORS.bg, 0.94);
+        g.roundRect(-257, -45, 514, 90, 16);
+        g.fill();
+
+        const textNode = new Node('Text');
+        textNode.layer = node.layer;
+        const textUt = textNode.addComponent(UITransform);
+        textUt.setContentSize(480, 64);
+        const label = textNode.addComponent(Label);
+        label.string = '';
+        label.fontSize = 34;
+        label.lineHeight = 44;
+        label.color = this._color(COLORS.text);
+        label.isBold = true;
+        label.horizontalAlign = Label.HorizontalAlign.CENTER;
+        label.verticalAlign = Label.VerticalAlign.CENTER;
+        node.addChild(textNode);
+
+        node.active = false;
+        this.node.addChild(node);
+        this._bannerNode = node;
+        this._bannerLabel = label;
+        return label;
+    }
 
     private _showUpgradePanel(): void {
         const choices = this._core.pendingChoices;
@@ -509,7 +585,7 @@ export class BrickGame extends Component {
                     break;
                 case 'level_clear':
                     this._brickDirty = true;
-                    this._showUpgradePanel();
+                    this._showLevelBanner(event.level);
                     break;
                 case 'game_over':
                     this._showGameOver();
@@ -649,9 +725,11 @@ export class BrickGame extends Component {
             this.livesLabel.string = `${core.lives}`;
             this._lastLives = core.lives;
         }
-        if (core.level !== this._lastLevel && this.levelLabel) {
-            this.levelLabel.string = `第 ${core.level} 关`;
+        const remain = core.aliveBrickCount;
+        if ((core.level !== this._lastLevel || remain !== this._lastRemain) && this.levelLabel) {
+            this.levelLabel.string = `第 ${core.level} 关 · 剩 ${remain}`;
             this._lastLevel = core.level;
+            this._lastRemain = remain;
         }
         if (core.combo !== this._lastCombo && this.comboLabel) {
             this.comboLabel.string = core.combo > 1 ? `连击 ${core.combo}` : '';

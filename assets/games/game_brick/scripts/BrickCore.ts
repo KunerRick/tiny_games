@@ -184,6 +184,8 @@ export class BrickCore {
 
     private _upgrades: { [id: string]: number } = {};
     private _pendingChoices: UpgradeId[] = [];
+    /** 每个升级连续出现在候选里的次数，用于「同一升级不连续三次出现」 */
+    private _offerStreak: { [id: string]: number } = {};
     private _events: CoreEvent[] = [];
 
     private _levelRng: () => number = mulberry32(1);
@@ -289,6 +291,7 @@ export class BrickCore {
         this._combo = 0;
         this._upgrades = {};
         this._pendingChoices = [];
+        this._offerStreak = {};
         this._events = [];
         this._acc = 0;
         this._sinceBrickHit = 0;
@@ -995,27 +998,39 @@ export class BrickCore {
     /** 抽 3 个不重复、未满级的升级（权重采样，无放回） */
     rollUpgrades(): UpgradeId[] {
         const pool: { id: UpgradeId; weight: number }[] = [];
+        const all: { id: UpgradeId; weight: number }[] = [];
         for (const def of UPGRADES) {
             if (this.upgradeLevel(def.id) < def.maxLevel) {
-                pool.push({ id: def.id, weight: def.weight });
+                const item = { id: def.id, weight: def.weight };
+                all.push(item);
+                // 已在最近两次连续候选里出现过 → 本轮跳过，避免同一升级三连
+                if ((this._offerStreak[def.id] || 0) < 2) {
+                    pool.push(item);
+                }
             }
         }
+        // 过滤后不够 3 张（接近全满级）就放开限制，宁可重复也不能少于 3 张
+        const source = pool.length >= 3 ? pool : all;
         const picked: UpgradeId[] = [];
-        const count = Math.min(3, pool.length);
+        const count = Math.min(3, source.length);
         for (let i = 0; i < count; i++) {
             let total = 0;
-            for (const item of pool) total += item.weight;
+            for (const item of source) total += item.weight;
             let roll = this._upgradeRng() * total;
             let idx = 0;
-            for (let j = 0; j < pool.length; j++) {
-                roll -= pool[j].weight;
+            for (let j = 0; j < source.length; j++) {
+                roll -= source[j].weight;
                 if (roll <= 0) {
                     idx = j;
                     break;
                 }
             }
-            picked.push(pool[idx].id);
-            pool.splice(idx, 1);
+            picked.push(source[idx].id);
+            source.splice(idx, 1);
+        }
+        // 更新连续出现计数：本轮出现的 +1，没出现的清零
+        for (const def of UPGRADES) {
+            this._offerStreak[def.id] = picked.indexOf(def.id) >= 0 ? (this._offerStreak[def.id] || 0) + 1 : 0;
         }
         return picked;
     }

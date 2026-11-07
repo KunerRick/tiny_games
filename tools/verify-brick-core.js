@@ -622,6 +622,37 @@ test('清空砖块进入 level_clear 并给出 3 个不重复候选', () => {
     ok(core.popEvents().some(e => e.type === 'level_clear'));
 });
 
+test('存活砖块计数与场上的砖块一致（HUD「剩 N」的数据源）', () => {
+    const core = new BrickCore({ seed: 77 });
+    core.launch();
+    eq(core.aliveBrickCount, aliveBricks(core).length);
+    const before = core.aliveBrickCount;
+    const target = aliveBricks(core)[0];
+    core.debugKillBrick(target.id);
+    eq(core.aliveBrickCount, before - 1);
+    eq(core.aliveBrickCount, core.bricks.filter(b => b.alive).length);
+    // 清空后归零
+    for (const b of core.bricks) core.debugKillBrick(b.id);
+    eq(core.aliveBrickCount, 0);
+});
+
+test('同一升级不会连续三轮出现在候选里', () => {
+    const core = new BrickCore({ seed: 4242 });
+    const history = [];
+    for (let round = 0; round < 30; round++) {
+        const ids = core.rollUpgrades();
+        eq(ids.length, 3);
+        eq(new Set(ids).size, 3);
+        history.push(ids);
+    }
+    for (let i = 2; i < history.length; i++) {
+        for (const id of history[i]) {
+            const threeInARow = history[i - 2].includes(id) && history[i - 1].includes(id);
+            ok(!threeInARow, `${id} 连续三轮出现在候选里（第 ${i - 1}~${i + 1} 轮）`);
+        }
+    }
+});
+
 test('候选只包含未满级升级', () => {
     const core = new BrickCore({ seed: 99 });
     for (const def of Config.UPGRADES) {

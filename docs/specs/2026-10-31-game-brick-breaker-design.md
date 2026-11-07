@@ -297,6 +297,21 @@ BrickBreaker (Canvas)
 - [ ] `npx tsc --noEmit` 通过
 - [ ] `node tools/check-wechat-build.js` 9 项通过
 
+### 7.1 本轮体验优化记录（2026-11-08）
+
+针对「关卡进度感弱 / 砖块血量不可读 / 手感无据可查」三个问题，做了一轮以**可读性**为主的收敛，全部改动落在纯逻辑层 + 运行时表现，不碰 `.scene`。
+
+| 编号 | 问题 | 改动 | 落点 |
+|------|------|------|------|
+| G1 | HUD 只有关卡号，玩家不知道「还剩多少砖」 | `levelLabel` 改为 `第 N 关 · 剩 M`，数据源是新增的 `BrickCore.aliveBrickCount` getter（只统计 `alive && brick`） | `BrickCore.ts`、`BrickGame.ts` |
+| G2 | 清关瞬间直接弹三选一，缺少「这一关过了」的确认感 | 清关先出 **0.8 s 关卡横幅**（`第 N 关完成`，520×96 双描边圆角面板，运行时创建），倒计时结束再 `_showUpgradePanel()`；`startNewRun` 复位计时并隐藏 | `BrickGame.ts`（`_showLevelBanner` / `_hideBanner` / `_ensureBanner`、`BANNER_SEC`） |
+| G3 | 球拍手感（弹射角、限速、水平锁死）一直没有量化依据 | 浏览器实测标定：挡板边缘偏移 −70…+70 映射到 60/48/36/24/12/0° 弹射角；球速在 25 级封顶 **900**；横向锁死时防呆推力生效（`vy 0 → 119`）；反弹后合速度守恒（800 进 800 出） | `verify-brick-core.js` 原有力度/反弹用例 + 本轮实测 |
+| G4 | 升级池里同一张卡连续出现，三选一没有可选择性 | `rollUpgrades()` 引入 `_offerStreak`：同一升级**连续两次**进候选后，下一次从池里剔除；若剔除后不足 3 张（接近全满级）则放开设限，宁可重复也不少于 3 张 | `BrickCore.ts` |
+
+回归：`node tools/verify-brick-core.js` **52/52 通过**（新增「存活砖块计数与场上砖块一致」「同一升级不会连续三轮出现」两项），`tsc --noEmit` 通过。
+
+浏览器复验（Cocos CLI 构建 web-desktop + 本地静态服务）：HUD 从 `第 1 关 · 剩 21` 递减到 `第 2 关 · 剩 19`；清关时横幅 `第 1 关完成` 停留约 0.8 s 后自动切三选一；点选「爆炸球」后等级 1 生效并进入第 2 关；实机对局分数 182 / 剩 6 / 生命 2 显示正常，console **0 error**。截图见 `docs/assets/2026-11-08-brick-banner.png`、`2026-11-08-brick-upgrade.png`、`2026-11-08-brick-play.png`。
+
 ---
 
 ## 8. 后续可做（v2）
