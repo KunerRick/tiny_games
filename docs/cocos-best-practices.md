@@ -276,6 +276,31 @@ restartGame(): void {
 }
 ```
 
+**变体陷阱：缓存的节点引用「非 null 但已销毁」**（2026-11-07 战争进化实测）
+
+`onLoad()` 里把节点缓存到普通字段（`this._backNode = btn.node`），`onDestroy()` 用 `?.off(...)` 解绑——`?.` 只挡 `null`／`undefined`，**挡不住"对象还在、内部已被拆空"**。
+场景卸载时引擎先销毁子节点，`Node._eventProcessor` 已被置 null，`node.off()` 内部访问它就是
+`TypeError: Cannot read properties of null (reading 'off')`，而且**每帧重复抛**（一次返回大厅刷出 1200+ 条）。
+
+```typescript
+// ❌ 看上去安全，实际会崩
+onDestroy() {
+    this._backNode?.off(Node.EventType.TOUCH_END, this.onLobby, this);
+}
+
+// ✅ 严格模式 isValid：正在销毁的对象也判为无效
+import { isValid } from 'cc';
+onDestroy() {
+    if (isValid(this._backNode, true)) {
+        this._backNode!.off(Node.EventType.TOUCH_END, this.onLobby, this);
+    }
+    this._backNode = null;
+}
+```
+
+> 更彻底的做法是干脆不在 `onDestroy()` 里解绑：节点整体销毁时引擎会连同事件监听一起回收。
+> 保留解绑只在"组件可能被单独 `removeComponent` 而节点存活"时才必要——那种情况请判 `isValid` 后解绑。
+
 ### 4.5 `_cleanupGame()` 与 `onDestroy()` 职责分离
 
 同一个组件中，**"同一场景内重新开始"** 和 **"场景销毁返回大厅"** 的清理逻辑必须分开：

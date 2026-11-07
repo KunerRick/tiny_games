@@ -18,6 +18,7 @@
 | 构建微信小游戏、或开发者工具报编译错误 / 一打开就崩 | [`tech/wechat-build-pitfalls.md`](./tech/wechat-build-pitfalls.md) + `node tools/check-wechat-build.js`（9 项预检）+ `node tools/replay-wechat-bundle.js`（包装器复现器） |
 | 新增游戏或场景 | [`../AGENTS.md`](../AGENTS.md) 的 **项目结构 + 游戏注册** |
 | 查某游戏的设计/计划/场景配置 | 下文的 **按游戏分类** |
+| 规划剩余 8 款的玩法/美术/复核开工顺序 | [`plans/2026-11-07-remaining-games-polish-plan.md`](./plans/2026-11-07-remaining-games-polish-plan.md) |
 
 ---
 

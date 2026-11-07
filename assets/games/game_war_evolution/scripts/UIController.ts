@@ -1,15 +1,87 @@
-import { _decorator, Component, Node, Label, Button, ProgressBar, tween, Tween, Vec3, Color } from 'cc';
-import { Age, UnitConfig, AGE_NAMES, getNextAgeConfig, getUnitsByAge } from './GameConfig';
+import {
+    _decorator, Component, Node, Label, Button, ProgressBar, UITransform, tween, Vec3, Color, Graphics,
+    UIOpacity,
+} from 'cc';
+import {
+    Age, AIDifficulty, AI_DIFFICULTY_NAMES, AGE_NAMES, UnitConfig, getUnitsByAge,
+} from './GameConfig';
+import {
+    UI, createButton, createLabel, createNode, createRoundRect, drawRoundRect, toColor, toast, UiButton,
+} from '../../../common/ui/GameUIKit';
+import { drawUnitSilhouette, colorFromHex } from './UnitArt';
 
 const { ccclass, property } = _decorator;
 
+export interface HudState {
+    gold: number;
+    kills: number;
+    age: Age;
+    playerHP: number;
+    playerMaxHP: number;
+    enemyHP: number;
+    enemyMaxHP: number;
+    exp: number;
+    expRequired: number;
+    goldRequired: number;
+    canEvolve: boolean;
+    canBuyExp: boolean;
+    buyExpCost: number;
+    buyExpLeft: number;
+    evolveTitle: string;
+    evolveSub: string;
+    chargeState: 'ready' | 'active' | 'cooldown';
+    chargeRemain: number;
+    difficulty: AIDifficulty;
+}
+
+/** 一条运行时绘制的进度条（避免每帧重画整块 HUD） */
+class HudBar {
+    public readonly node: Node;
+    private _g: Graphics;
+    private _w: number;
+    private _h: number;
+    private _radius: number;
+    private _ratio = -1;
+    private _color = '';
+
+    constructor(parent: Node, name: string, w: number, h: number, x: number, y: number, radius: number) {
+        const node = createNode(name, parent, w, h);
+        node.setPosition(x, y, 0);
+        this.node = node;
+        this._w = w;
+        this._h = h;
+        this._radius = radius;
+        this._g = node.addComponent(Graphics);
+        this.redraw(0, UI.textMuted);
+    }
+
+    public redraw(ratio: number, colorHex: string): void {
+        const r = Math.max(0, Math.min(1, ratio));
+        if (Math.abs(r - this._ratio) < 0.001 && colorHex === this._color) return;
+        this._ratio = r;
+        this._color = colorHex;
+        drawRoundRect(this._g, this._w, this._h, this._radius, toColor('#0B1220', 220), toColor('#27364F'), 2);
+        if (r > 0) {
+            const fw = Math.max(2, (this._w - 4) * r);
+            const g = this._g;
+            g.fillColor = toColor(colorHex);
+            g.roundRect(-this._w / 2 + 2, -this._h / 2 + 2, fw, this._h - 4,
+                Math.min(this._radius, (this._h - 4) / 2));
+            g.fill();
+        }
+    }
+}
+
 /**
  * UI 控制器
- * 管理顶部信息栏、底部产兵按钮、结算面板
+ * 顶部信息栏、底部产兵/进化/冲锋按钮、结算面板、进化仪式
+ *
+ * 场景里原有的 topBar / bottomBar 是旧版小字排版，运行时隐藏，
+ * 由本组件用 GameUIKit 重新搭建（计划 V4）。
  */
 @ccclass('UIController')
 export class UIController extends Component {
-    // ======== 顶部栏 — 血条 ========
+    // ======== 场景绑定（保留用于兼容旧场景；运行时隐藏旧节点） ========
     @property(ProgressBar)
     playerHP: ProgressBar | null = null;
 
@@ -17,12 +89,11 @@ export class UIController extends Component {
     enemyHP: ProgressBar | null = null;
 
     @property(Label)
-    hpPlayerLabel: Label | null = null;     // 数字 "5000"
+    hpPlayerLabel: Label | null = null;
 
     @property(Label)
-    hpEnemyLabel: Label | null = null;      // 数字 "5000"
+    hpEnemyLabel: Label | null = null;
 
-    // ======== 顶部栏 — 信息 ========
     @property(Label)
     goldLabel: Label | null = null;
 
@@ -30,9 +101,8 @@ export class UIController extends Component {
     ageLabel: Label | null = null;
 
     @property(Label)
-    killLabel: Label | null = null;         // "击杀: 0/800"
+    killLabel: Label | null = null;
 
-    // ======== 底部栏 ========
     @property(Button)
     unitButton0: Button | null = null;
 
@@ -42,7 +112,6 @@ export class UIController extends Component {
     @property(Button)
     evolveButton: Button | null = null;
 
-    // 按钮内的文字子节点（每个按钮有 name + cost 两个 Label）
     @property(Label)
     unitName0: Label | null = null;
 
@@ -85,161 +154,311 @@ export class UIController extends Component {
     enemyEvolveLabel: Label | null = null;
 
     // ======== 运行时 ========
-    // 回调
     private _onUnitSpawn: ((configId: string) => void) | null = null;
     private _onEvolve: (() => void) | null = null;
     private _onRestart: (() => void) | null = null;
     private _onLobby: (() => void) | null = null;
+    private _onCharge: (() => void) | null = null;
+    private _onToggleDifficulty: (() => void) | null = null;
 
-    onLoad() {
-        // 绑定按钮事件（handler 必须具名，红线 5）
-        this.bindButton(this.unitButton0, this.onUnitButton0);
-        this.bindButton(this.unitButton1, this.onUnitButton1);
-        this.bindButton(this.evolveButton, this.onEvolveButton);
-        this.bindButton(this.restartButton, this.onRestartButton);
-        this.bindButton(this.lobbyButton, this.onLobbyButton);
-
-        // 初始隐藏结算面板
-        if (this.gameOverPanel) {
-            this.gameOverPanel.active = false;
-        }
-
-        // 初始隐藏 AI 进化提示
-        if (this.enemyEvolveNotice) {
-            this.enemyEvolveNotice.active = false;
-        }
-    }
-
-    private onUnitButton0(): void {
-        this._onUnitSpawn?.('__btn0__');
-    }
-
-    private onUnitButton1(): void {
-        this._onUnitSpawn?.('__btn1__');
-    }
-
-    private onEvolveButton(): void {
-        this._onEvolve?.();
-    }
-
-    private onRestartButton(): void {
-        this._onRestart?.();
-    }
-
-    private onLobbyButton(): void {
-        this._onLobby?.();
-    }
-
-    private bindButton(btn: Button | null, handler: (this: UIController) => void): void {
-        if (!btn) return;
-        btn.node.on(Node.EventType.TOUCH_END, handler, this);
-    }
-
-    // ======== 外部设置回调 ========
+    // HUD 节点
+    private _hud: Node | null = null;
+    private _playerHpBar: HudBar | null = null;
+    private _enemyHpBar: HudBar | null = null;
+    private _expBar: HudBar | null = null;
+    private _hpPlayerText: Label | null = null;
+    private _hpEnemyText: Label | null = null;
+    private _goldText: Label | null = null;
+    private _ageText: Label | null = null;
+    private _killText: Label | null = null;
+    private _expText: Label | null = null;
+    private _difficultyBtn: UiButton | null = null;
+    private _chargeBtn: UiButton | null = null;
+    private _unitBtns: UiButton[] = [];
+    private _unitIcons: Graphics[] = [];
+    private _unitBars: HudBar[] = [];
+    private _unitNameLabels: Label[] = [];
+    private _unitCostLabels: Label[] = [];
+    private _evolveBtn: UiButton | null = null;
+    private _evolveSubLabel: Label | null = null;
 
     private _unitConfigs: UnitConfig[] = [];
     private _currentAge: Age = Age.PRIMITIVE;
+    private _chargeState: HudState['chargeState'] = 'ready';
+    private _evolveNoticeTimer: number = 0;
+
+    onLoad() {
+        // 旧版 HUD 隐藏（新 HUD 由本组件运行时搭建）
+        const topBar = this.node.getChildByName('topBar');
+        if (topBar) topBar.active = false;
+        const bottomBar = this.node.getChildByName('bottomBar');
+        if (bottomBar) bottomBar.active = false;
+
+        this.buildHud();
+        this.restyleResultPanel();
+
+        // 结算面板按钮：场景里只有 Button 组件、没有配置 clickEvents，
+        // 必须自己绑定具名方法（红线 3 / 5）
+        if (this.restartButton) {
+            this.restartButton.node.on(Node.EventType.TOUCH_END, this.onRestartTap, this);
+        }
+        if (this.lobbyButton) {
+            this.lobbyButton.node.on(Node.EventType.TOUCH_END, this.onLobbyTap, this);
+        }
+
+        if (this.gameOverPanel) this.gameOverPanel.active = false;
+        if (this.enemyEvolveNotice) this.enemyEvolveNotice.active = false;
+    }
+
+    // ======== 运行时按钮事件（具名，红线 5） ========
+    private onUnitBtn0(): void { this._onUnitSpawn?.('__btn0__'); }
+    private onUnitBtn1(): void { this._onUnitSpawn?.('__btn1__'); }
+    private onEvolveTap(): void { this._onEvolve?.(); }
+    private onChargeTap(): void { this._onCharge?.(); }
+    private onDifficultyTap(): void { this._onToggleDifficulty?.(); }
+    private onRestartTap(): void { this._onRestart?.(); }
+    private onLobbyTap(): void { this._onLobby?.(); }
 
     public setCallbacks(
         onUnitSpawn: (configId: string) => void,
         onEvolve: () => void,
         onRestart: () => void,
         onLobby: () => void,
+        onCharge?: () => void,
+        onToggleDifficulty?: () => void,
     ): void {
         this._onUnitSpawn = onUnitSpawn;
         this._onEvolve = onEvolve;
         this._onRestart = onRestart;
         this._onLobby = onLobby;
+        this._onCharge = onCharge ?? null;
+        this._onToggleDifficulty = onToggleDifficulty ?? null;
     }
 
-    /** 更新产兵按钮 — 显示当前时代的兵种 */
-    public setupUnitButtons(age: Age): void {
-        this._currentAge = age;
-        this._unitConfigs = getUnitsByAge(age);
-
-        this.updateButton(this.unitButton0, this.unitName0, this.unitCost0, 0);
-        this.updateButton(this.unitButton1, this.unitName1, this.unitCost1, 1);
-    }
-
-    private updateButton(
-        btn: Button | null, nameLbl: Label | null, costLbl: Label | null, idx: number,
-    ): void {
-        if (!btn) return;
-        if (idx < this._unitConfigs.length) {
-            const cfg = this._unitConfigs[idx];
-            btn.node.active = true;
-            if (nameLbl) nameLbl.string = cfg.name;
-            if (costLbl) costLbl.string = `${cfg.cost}g`;
-        } else {
-            btn.node.active = false;
-        }
-    }
-
-    // 实际 spawn 回调会根据按钮序号查找对应的 configId
     public getUnitConfigByIndex(idx: number): UnitConfig | undefined {
         return this._unitConfigs[idx];
     }
 
-    // ======== 状态更新 ========
+    // ==================== HUD 搭建 ====================
 
-    public updateTopBar(
-        gold: number,
-        age: Age,
-        exp: number,
-        expRequired: number,
-        playerHP: number,
-        playerMaxHP: number,
-        enemyHP: number,
-        enemyMaxHP: number,
-        kills: number,
-    ): void {
+    private buildHud(): void {
+        const hud = createNode('Hud', this.node, 720, 1200);
+        hud.setSiblingIndex(0);
+        this._hud = hud;
+
+        // ---------- 顶部面板 ----------
+        const panel = createRoundRect(hud, 'TopPanel', 700, 180, 20, UI.panel, UI.panelStroke, 2);
+        panel.node.setPosition(0, 600, 0);
+
+        // 城堡血条（左右各 300×22）
+        this._playerHpBar = new HudBar(hud, 'PlayerHp', 300, 22, -175, 648, 11);
+        this._enemyHpBar = new HudBar(hud, 'EnemyHp', 300, 22, 175, 648, 11);
+        createLabel(hud, 'VS', 20, { width: 60, height: 30, color: UI.textMuted, bold: true, x: 0, y: 648 });
+        this._hpPlayerText = createLabel(hud, '', 18, { width: 300, height: 26, x: -175, y: 648, bold: true });
+        this._hpEnemyText = createLabel(hud, '', 18, { width: 300, height: 26, x: 175, y: 648, bold: true });
+
         // 金币
-        if (this.goldLabel) this.goldLabel.string = `${gold}`;
+        const coin = createNode('Coin', hud, 24, 24);
+        coin.setPosition(-306, 600, 0);
+        const cg = coin.addComponent(Graphics);
+        cg.fillColor = colorFromHex('#F59E0B');
+        cg.circle(0, 0, 10);
+        cg.fill();
+        cg.fillColor = colorFromHex('#FDE68A');
+        cg.circle(-2, 2, 4);
+        cg.fill();
+        this._goldText = createLabel(hud, '0', 24, {
+            width: 160, height: 34, x: -215, y: 600, bold: true, align: 'left',
+        });
 
-        // 时代
-        if (this.ageLabel) this.ageLabel.string = AGE_NAMES[age];
+        // 时代 / 击杀 / 难度
+        this._ageText = createLabel(hud, '', 24, { width: 200, height: 34, x: -50, y: 600, bold: true, color: UI.accent });
+        this._killText = createLabel(hud, '', 20, { width: 150, height: 32, x: 105, y: 600, color: UI.textDim });
+        this._difficultyBtn = createButton(hud, {
+            w: 130, h: 48, text: '难度 普通', fontSize: 20, fill: '#1E293B', textColor: UI.textDim,
+            onTap: () => this.onDifficultyTap(),
+        });
+        this._difficultyBtn.node.setPosition(280, 600, 0);
 
-        // 击杀/进化进度
-        if (this.killLabel) {
-            this.killLabel.string = `击杀: ${kills}`;
+        // 进化/经验进度条
+        this._expBar = new HudBar(hud, 'ExpBar', 620, 16, 0, 556, 8);
+        this._expText = createLabel(hud, '', 16, { width: 620, height: 22, x: 0, y: 556, color: UI.text, bold: true });
+
+        // ---------- 底部：冲锋 ----------
+        this._chargeBtn = createButton(hud, {
+            w: 300, h: 64, text: '全军冲锋', fontSize: 24, fill: UI.primary, textColor: UI.white,
+            onTap: () => this.onChargeTap(),
+        });
+        this._chargeBtn.node.setPosition(0, -350, 0);
+
+        // ---------- 底部：兵种 + 进化 ----------
+        const xs = [-240, 0, 240];
+        for (let i = 0; i < 2; i++) {
+            const btn = createButton(hud, {
+                w: 210, h: 120, text: '', fontSize: 22, fill: '#1B2740', stroke: '#2B3B55',
+                onTap: i === 0 ? () => this.onUnitBtn0() : () => this.onUnitBtn1(),
+            });
+            btn.node.setPosition(xs[i], -470, 0);
+            // 图标层
+            const iconNode = createNode('icon', btn.node, 56, 56);
+            iconNode.setPosition(0, 32, 0);
+            const icon = iconNode.addComponent(Graphics);
+            const nameLbl = createLabel(btn.node, '', 22, { width: 190, height: 28, x: 0, y: 2, bold: true });
+            const costLbl = createLabel(btn.node, '', 20, { width: 190, height: 26, x: 0, y: -28, color: UI.textDim });
+            const bar = new HudBar(btn.node, 'afford', 170, 8, 0, -50, 4);
+            this._unitBtns.push(btn);
+            this._unitIcons.push(icon);
+            this._unitBars.push(bar);
+            this._unitNameLabels.push(nameLbl);
+            this._unitCostLabels.push(costLbl);
         }
 
-        // HP ProgressBar
-        if (this.playerHP) this.playerHP.progress = Math.max(0, playerHP / playerMaxHP);
-        if (this.enemyHP) this.enemyHP.progress = Math.max(0, enemyHP / enemyMaxHP);
+        this._evolveBtn = createButton(hud, {
+            w: 210, h: 120, text: '', fontSize: 22, fill: '#1B2740', stroke: '#2B3B55',
+            onTap: () => this.onEvolveTap(),
+        });
+        this._evolveBtn.node.setPosition(xs[2], -470, 0);
+        // 按钮自带 label 就是标题，居中会压住下面的副标题 → 上移到 y=26
+        this._evolveBtn.label.node.setPosition(0, 26, 0);
+        this._evolveSubLabel = createLabel(this._evolveBtn.node, '', 17, {
+            width: 190, height: 52, x: 0, y: -20, color: UI.textDim, overflow: 'shrink',
+        });
 
-        // HP 数字
-        if (this.hpPlayerLabel) this.hpPlayerLabel.string = `${playerHP}`;
-        if (this.hpEnemyLabel) this.hpEnemyLabel.string = `${enemyHP}`;
+        // WarEvo.onLoad 可能早于本组件 onLoad，提前调用的 setupUnitButtons 落在空数组上，
+        // 这里用已经记录的 _currentAge 重新填一次（否则初始时代按钮是空白的）
+        this.setupUnitButtons(this._currentAge);
+    }
 
-        // 进化按钮状态文字
-        const next = getNextAgeConfig(age);
-        if (this.evolveCostLabel) {
-            if (next) {
-                if (exp >= next.expRequired) {
-                    this.evolveCostLabel.string = '可进化';
-                } else {
-                    this.evolveCostLabel.string = `50g→20exp  ${exp}/${next.expRequired}`;
-                }
-            } else {
-                this.evolveCostLabel.string = '已满级';
-            }
+    /** 重排结算面板（V1：放大、加失败原因建议） */
+    private restyleResultPanel(): void {
+        if (!this.gameOverPanel) return;
+        const panelBg = this.gameOverPanel.getChildByName('panelBg');
+        if (panelBg) {
+            const ut = panelBg.getComponent(UITransform);
+            if (ut) ut.setContentSize(580, 560);
         }
-        if (this.evolveNameLabel) {
-            if (next) {
-                this.evolveNameLabel.string = exp >= next.expRequired ? '进化' : '购买经验';
-            } else {
-                this.evolveNameLabel.string = '已满级';
-            }
+        if (this.resultLabel) {
+            this.resultLabel.fontSize = 44;
+            this.resultLabel.node.setPosition(0, 200, 0);
+            const ut = this.resultLabel.node.getComponent(UITransform);
+            if (ut) ut.setContentSize(540, 70);
+        }
+        if (this.statsLabel) {
+            this.statsLabel.fontSize = 22;
+            this.statsLabel.lineHeight = 34;
+            this.statsLabel.node.setPosition(0, 10, 0);
+            const ut = this.statsLabel.node.getComponent(UITransform);
+            if (ut) ut.setContentSize(500, 300);
+        }
+        if (this.restartButton) {
+            const ut = this.restartButton.node.getComponent(UITransform);
+            if (ut) ut.setContentSize(200, 64);
+            this.restartButton.node.setPosition(-120, -210, 0);
+        }
+        if (this.lobbyButton) {
+            const ut = this.lobbyButton.node.getComponent(UITransform);
+            if (ut) ut.setContentSize(200, 64);
+            this.lobbyButton.node.setPosition(120, -210, 0);
         }
     }
 
-    public setEvolveButtonEnabled(enabled: boolean): void {
-        if (!this.evolveButton) return;
-        this.evolveButton.interactable = enabled;
+    // ==================== 按钮绑定（场景旧按钮；如已隐藏则不触发） ====================
+
+    // ==================== 状态更新 ====================
+
+    /** 更新产兵按钮 — 显示当前时代的兵种（图标 + 名称 + 费用 + 攒钱进度） */
+    public setupUnitButtons(age: Age): void {
+        this._currentAge = age;
+        this._unitConfigs = getUnitsByAge(age);
+
+        for (let i = 0; i < this._unitBtns.length; i++) {
+            const btn = this._unitBtns[i];
+            const icon = this._unitIcons[i];
+            const cfg = this._unitConfigs[i];
+            if (!cfg) {
+                btn.node.active = false;
+                continue;
+            }
+            btn.node.active = true;
+            // 兵种图标（中性色，便于与战场上的阵营色区分）
+            drawUnitSilhouette(icon, cfg.icon ?? 'default', colorFromHex('#E2E8F0'));
+            if (this._unitNameLabels[i]) this._unitNameLabels[i].string = cfg.name;
+            if (this._unitCostLabels[i]) this._unitCostLabels[i].string = `${cfg.cost}g · ${cfg.desc}`;
+        }
+        if (this._evolveBtn) this._evolveBtn.node.active = true;
     }
 
-    // ======== 结算面板 ========
+    public updateHud(state: HudState): void {
+        if (!this._hud) return;
+
+        this._playerHpBar?.redraw(state.playerHP / Math.max(1, state.playerMaxHP), '#38BDF8');
+        this._enemyHpBar?.redraw(state.enemyHP / Math.max(1, state.enemyMaxHP), '#EF4444');
+        if (this._hpPlayerText) this._hpPlayerText.string = `${Math.max(0, Math.ceil(state.playerHP))} / ${Math.round(state.playerMaxHP)}`;
+        if (this._hpEnemyText) this._hpEnemyText.string = `${Math.max(0, Math.ceil(state.enemyHP))} / ${Math.round(state.enemyMaxHP)}`;
+
+        if (this._goldText) this._goldText.string = `${Math.floor(state.gold)}`;
+        if (this._ageText) this._ageText.string = AGE_NAMES[state.age];
+        if (this._killText) this._killText.string = `击杀 ${state.kills}`;
+
+        if (this._difficultyBtn) {
+            this._difficultyBtn.setText(`难度 ${AI_DIFFICULTY_NAMES[state.difficulty]}`);
+        }
+
+        // 经验 / 金币进度
+        const expRatio = state.expRequired > 0 ? Math.min(1, state.exp / state.expRequired) : 1;
+        this._expBar?.redraw(expRatio, state.canEvolve ? '#22C55E' : '#38BDF8');
+        if (this._expText) {
+            if (state.expRequired > 0) {
+                this._expText.string = state.canEvolve
+                    ? '可进化！点击右下角「进化」'
+                    : `经验 ${Math.floor(state.exp)}/${state.expRequired}　金币 ${Math.floor(state.gold)}/${state.goldRequired}`;
+            } else {
+                this._expText.string = '已到最高时代';
+            }
+        }
+
+        // 兵种按钮：买得起高亮 + 攒钱进度
+        for (let i = 0; i < this._unitBtns.length; i++) {
+            const cfg = this._unitConfigs[i];
+            if (!cfg) continue;
+            const afford = state.gold >= cfg.cost;
+            this._unitBtns[i].setColor(afford ? '#1E3A5F' : '#18202F', afford ? UI.white : UI.textMuted);
+            if (this._unitCostLabels[i]) {
+                this._unitCostLabels[i].color = toColor(afford ? UI.accent : UI.textMuted);
+            }
+            this._unitBars[i].redraw(Math.min(1, state.gold / cfg.cost), afford ? '#38BDF8' : '#475569');
+        }
+
+        // 进化 / 购买经验按钮
+        if (this._evolveBtn) {
+            this._evolveBtn.setText(state.evolveTitle);
+            if (this._evolveSubLabel) this._evolveSubLabel.string = state.evolveSub;
+            const enabled = state.canEvolve || state.canBuyExp;
+            this._evolveBtn.setColor(
+                state.canEvolve ? '#166534' : (state.canBuyExp ? '#1E3A5F' : '#18202F'),
+                enabled ? UI.white : UI.textMuted,
+            );
+        }
+
+        // 冲锋按钮
+        if (this._chargeBtn) {
+            if (state.chargeState === 'ready') {
+                this._chargeBtn.setText('全军冲锋');
+                this._chargeBtn.setColor('#2563EB', UI.white);
+            } else if (state.chargeState === 'active') {
+                this._chargeBtn.setText(`冲锋中 ${Math.ceil(state.chargeRemain)}s`);
+                this._chargeBtn.setColor('#B45309', UI.white);
+            } else {
+                this._chargeBtn.setText(`冲锋冷却 ${Math.ceil(state.chargeRemain)}s`);
+                this._chargeBtn.setColor('#18202F', UI.textMuted);
+            }
+            this._chargeState = state.chargeState;
+        }
+    }
+
+    public getChargeState(): HudState['chargeState'] { return this._chargeState; }
+
+    // ==================== 结算面板 ====================
 
     public showGameOver(
         result: 'win' | 'lose' | 'draw',
@@ -251,15 +470,24 @@ export class UIController extends Component {
         bestTime: number,
         isNewKillRecord: boolean,
         isNewTimeRecord: boolean,
+        reason: string,
+        advice: string,
+        difficulty: string,
     ): void {
         if (!this.gameOverPanel) return;
         if (this.resultLabel) {
-            if (result === 'win') this.resultLabel.string = '胜利！';
-            else if (result === 'lose') this.resultLabel.string = '失败...';
-            else this.resultLabel.string = '平局！';
+            if (result === 'win') {
+                this.resultLabel.string = '胜利！';
+                this.resultLabel.color = toColor(UI.success);
+            } else if (result === 'lose') {
+                this.resultLabel.string = '失败...';
+                this.resultLabel.color = toColor(UI.danger);
+            } else {
+                this.resultLabel.string = '平局';
+                this.resultLabel.color = toColor(UI.warning);
+            }
         }
         if (this.statsLabel) {
-            // 格式化时间显示
             const formatTime = (seconds: number): string => {
                 if (!isFinite(seconds)) return '--:--';
                 const mins = Math.floor(seconds / 60);
@@ -267,28 +495,23 @@ export class UIController extends Component {
                 return `${mins}:${secs < 10 ? '0' + secs : secs}`;
             };
 
-            // 构建多行文本
-            let statsText = '';
-
-            // 击杀记录
-            statsText += `本局击杀: ${kills}\n`;
-            if (isNewKillRecord) {
-                statsText += `最高记录: ${maxKills}  ← 新纪录！\n\n`;
-            } else {
-                statsText += `最高记录: ${maxKills}\n\n`;
+            let text = '';
+            if (result === 'lose') {
+                text += `失败原因：${reason}\n`;
+                text += `下次试试：${advice}\n\n`;
+            } else if (result === 'win') {
+                text += `你摧毁了敌方城堡，用时 ${formatTime(gameTime)}\n`;
+                if (isNewTimeRecord) text += '最快通关纪录已刷新！\n';
+                text += '\n';
             }
 
-            // 时间记录（只有胜利时显示）
+            text += `难度：${difficulty}　时代：${AGE_NAMES[age]}\n`;
+            text += `击杀：${kills}（最高 ${maxKills}${isNewKillRecord ? '，新纪录！' : ''}）\n`;
+            text += `剩余金币：${Math.floor(totalGold)}\n`;
             if (result === 'win') {
-                statsText += `本局用时: ${formatTime(gameTime)}\n`;
-                if (isNewTimeRecord) {
-                    statsText += `最快通关: ${formatTime(bestTime)}  ← 新纪录！`;
-                } else {
-                    statsText += `最快通关: ${formatTime(bestTime)}`;
-                }
+                text += `最快通关：${formatTime(bestTime)}`;
             }
-
-            this.statsLabel.string = statsText;
+            this.statsLabel.string = text;
         }
         this.gameOverPanel.active = true;
     }
@@ -296,90 +519,111 @@ export class UIController extends Component {
     /** 重置所有提示状态（重新开始时调用） */
     public resetAll(): void {
         this.resetEnemyEvolveNotice();
+        if (this.gameOverPanel) this.gameOverPanel.active = false;
     }
 
     public hideGameOver(): void {
-        if (this.gameOverPanel) {
-            this.gameOverPanel.active = false;
-        }
+        if (this.gameOverPanel) this.gameOverPanel.active = false;
     }
 
-    // ======== 进化提示（AI + 玩家） ========
+    // ==================== 进化表现（V5） ====================
 
-    private _evolveNoticeTimer: number = 0;
+    /** 全屏扫光 + 现代名横幅 */
+    public showEvolveBanner(age: Age, isPlayer: boolean): void {
+        const parent = this._hud ?? this.node;
+        const flash = createNode('Flash', parent, 720, 1280);
+        flash.setSiblingIndex(parent.children.length - 1);
+        const g = flash.addComponent(Graphics);
+        g.fillColor = isPlayer ? new Color(56, 189, 248, 70) : new Color(239, 68, 68, 60);
+        g.rect(-360, -640, 720, 1280);
+        g.fill();
+        const op = flash.addComponent(UIOpacity);
+        op.opacity = 255;
+        tween(op).to(0.45, { opacity: 0 })
+            .call(() => { if (flash.isValid) flash.destroy(); })
+            .start();
+
+        const banner = createNode('EraBanner', parent, 560, 96);
+        banner.setSiblingIndex(parent.children.length - 1);
+        banner.setPosition(0, 60, 0);
+        const bg = banner.addComponent(Graphics);
+        drawRoundRect(bg, 560, 96, 20,
+            toColor(isPlayer ? '#0E7490' : '#7F1D1D', 235),
+            toColor(isPlayer ? UI.accent : UI.danger), 3);
+        createLabel(banner, `${isPlayer ? '进化' : '敌方进化'} → ${AGE_NAMES[age]}`, 32, {
+            width: 520, height: 70, bold: true,
+        });
+        banner.setScale(0.85, 0.85, 1);
+        const bop = banner.addComponent(UIOpacity);
+        tween(banner).to(0.22, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
+        tween(bop)
+            .delay(1.1)
+            .to(0.35, { opacity: 0 })
+            .call(() => { if (banner.isValid) banner.destroy(); })
+            .start();
+    }
+
+    // ==================== 轻提示 / 冲锋表现 ====================
+
+    /** 底部浮层提示 */
+    public showToast(text: string): void {
+        toast(this._hud ?? this.node, text, 1.6);
+    }
+
+    /** 冲锋启动：屏幕上下金色扫光 + 横幅（G2 全屏可感知反馈） */
+    public showChargeBanner(): void {
+        const parent = this._hud ?? this.node;
+        const flash = createNode('ChargeFlash', parent, 720, 1280);
+        flash.setSiblingIndex(parent.children.length - 1);
+        const g = flash.addComponent(Graphics);
+        g.fillColor = new Color(245, 158, 11, 60);
+        g.rect(-360, -640, 720, 1280);
+        g.fill();
+        const op = flash.addComponent(UIOpacity);
+        tween(op).to(0.4, { opacity: 0 })
+            .call(() => { if (flash.isValid) flash.destroy(); })
+            .start();
+
+        const banner = createNode('ChargeBanner', parent, 420, 84);
+        banner.setSiblingIndex(parent.children.length - 1);
+        banner.setPosition(0, 60, 0);
+        const bg = banner.addComponent(Graphics);
+        drawRoundRect(bg, 420, 84, 18, toColor('#7C2D12', 240), toColor(UI.warning), 3);
+        createLabel(banner, '全军冲锋！', 34, { width: 400, height: 64, bold: true, color: '#FDE68A' });
+        banner.setScale(0.8, 0.8, 1);
+        const bop = banner.addComponent(UIOpacity);
+        tween(banner).to(0.18, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
+        tween(bop)
+            .delay(0.9)
+            .to(0.3, { opacity: 0 })
+            .call(() => { if (banner.isValid) banner.destroy(); })
+            .start();
+    }
+
+    // ==================== 旧进化提示节点（保留兼容） ====================
 
     /** 重置进化提示状态（重新开始时调用） */
     public resetEnemyEvolveNotice(): void {
         if (this.enemyEvolveNotice) {
-            Tween.stopAllByTarget(this.enemyEvolveNotice);
             this.enemyEvolveNotice.active = false;
-            this.enemyEvolveNotice.setScale(1, 1, 1);
         }
         this._evolveNoticeTimer = 0;
     }
 
     public showEnemyEvolveNotice(age: Age): void {
-        if (!this.enemyEvolveNotice || !this.enemyEvolveLabel) return;
-
-        // 停止旧的动画
-        Tween.stopAllByTarget(this.enemyEvolveNotice);
-
-        this.enemyEvolveLabel.string = `敌方进化到 ${AGE_NAMES[age]}！`;
-        this.enemyEvolveNotice.active = true;
-        this._evolveNoticeTimer = 2.0; // 显示 2 秒
-
-        // 淡入效果
-        this.enemyEvolveNotice.setScale(0.8, 0.8, 1);
-        tween(this.enemyEvolveNotice)
-            .to(0.2, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
-            .start();
+        // 统一走横幅表现
+        this.showEvolveBanner(age, false);
     }
 
-    /** 玩家进化提示（运行时动态创建，无需场景节点） */
     public showPlayerEvolveNotice(age: Age): void {
-        // 创建临时标签
-        const noticeNode = new Node('PlayerEvolveNotice');
-        this.node.addChild(noticeNode);
-
-        const label = noticeNode.addComponent(Label);
-        label.string = `进化到 ${AGE_NAMES[age]}！`;
-        label.fontSize = 28;
-        label.color = new Color(100, 255, 100);
-        label.isBold = true;
-        label.horizontalAlign = Label.HorizontalAlign.CENTER;
-        label.verticalAlign = Label.VerticalAlign.CENTER;
-
-        // 定位（位于 enemyEvolveNotice 下方）
-        noticeNode.setPosition(0, 100, 0);
-
-        // 入场 → 停留 → 消失 → 销毁
-        noticeNode.setScale(0.8, 0.8, 1);
-        tween(noticeNode)
-            .to(0.2, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
-            .delay(1.5)
-            .to(0.3, { scale: new Vec3(0.8, 0.8, 1) })
-            .call(() => {
-                if (noticeNode.isValid) {
-                    noticeNode.destroy();
-                }
-            })
-            .start();
+        this.showEvolveBanner(age, true);
     }
 
     update(dt: number): void {
-        // 处理进化提示计时器
         if (this._evolveNoticeTimer > 0) {
             this._evolveNoticeTimer -= dt;
             if (this._evolveNoticeTimer <= 0 && this.enemyEvolveNotice) {
-                // 淡出效果
-                tween(this.enemyEvolveNotice)
-                    .to(0.3, { scale: new Vec3(0.8, 0.8, 1) })
-                    .call(() => {
-                        if (this.enemyEvolveNotice) {
-                            this.enemyEvolveNotice.active = false;
-                        }
-                    })
-                    .start();
+                this.enemyEvolveNotice.active = false;
             }
         }
     }

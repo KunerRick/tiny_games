@@ -1,18 +1,35 @@
-import { Age, AgeConfig, UnitConfig, AI_CONFIG, getAgeConfig, getAvailableUnits, getNextAgeConfig, BUY_EXP } from './GameConfig';
+import {
+    Age,
+    AIDifficulty,
+    AI_DIFFICULTY,
+    AIDifficultyConfig,
+    UnitConfig,
+    BUY_EXP,
+    EVOLVE_BONUS_GOLD,
+    getAvailableUnits,
+    getBuyExpCost,
+    getNextAgeConfig,
+} from './GameConfig';
 import { Unit } from './Unit';
 import { Castle } from './Castle';
 
 /**
  * AI 对手控制器
  * 非 Cocos 组件，由 WarEvo 创建并驱动
+ *
+ * 难度（G4）：收入倍率 / 出兵间隔 / 进化延迟；玩家进化后 AI 有追赶窗口，
+ * 避免「玩家未来时代、AI 还在原始」的单边碾压。
  */
 export class AI {
     private _gold: number = 100;            // AI 金币
     private _exp: number = 0;               // AI 经验
     private _currentAge: Age = Age.PRIMITIVE;
     private _spawnTimer: number = 0;
-    private _spawnInterval: number = 2.0;
     private _gameTime: number = 0;
+    private _buyExpCount: number = 0;       // 本时代已购买经验次数（G1）
+    private _difficulty: AIDifficulty;
+    private _config: AIDifficultyConfig;
+    private _catchUpAt: number = -1;        // 追赶窗口到期时间点（-1 = 无）
 
     // 外部引用
     private _spawnFn: (configId: string, side: 'enemy') => Unit | null;
@@ -23,136 +40,145 @@ export class AI {
         spawnFn: (configId: string, side: 'enemy') => Unit | null,
         castle: Castle,
         onEvolve?: (age: Age) => void,
+        difficulty: AIDifficulty = AIDifficulty.NORMAL,
     ) {
         this._spawnFn = spawnFn;
         this._castle = castle;
         this._onEvolve = onEvolve ?? null;
+        this._difficulty = difficulty;
+        this._config = AI_DIFFICULTY[difficulty] ?? AI_DIFFICULTY[AIDifficulty.NORMAL];
     }
 
     public getGold(): number { return this._gold; }
     public getExp(): number { return this._exp; }
     public getCurrentAge(): Age { return this._currentAge; }
+    public getDifficulty(): AIDifficulty { return this._difficulty; }
+    public getIncomeMultiplier(): number { return this._config.incomeMul; }
 
     /** 由 WarEvo 每帧调用 */
     public tick(dt: number): void {
         this._gameTime += dt;
 
-        // 金币由 WarEvo.update 通过 addGold 统一增长（避免与 WarEvo 重复给金币）
-        // AI 额外击杀奖励通过 addKillReward 获得
-
-        // 产兵
         this._spawnTimer -= dt;
         if (this._spawnTimer <= 0) {
             this._spawnTimer = this.getSpawnInterval();
             this.trySpawnUnit();
         }
 
-        // 买经验（用多余金币加速进化）
         this.tryBuyExp();
-
-        // 进化
+        this.tryCatchUp();
         this.tryEvolve();
     }
 
     /** 获得击杀奖励 */
-    public addKillReward(goldAmount: number): void {
+    public addKillReward(goldAmount: number, expAmount: number): void {
         this._gold += goldAmount;
-        this._exp += goldAmount;  // 经验 = 击杀金币（简化）
+        this._exp += expAmount;
     }
 
-    /** 手动加金币（如基础收入以外的场合） */
+    /** 手动加金币 */
     public addGold(amount: number): void {
         this._gold += amount;
+    }
+
+    /**
+     * 玩家进化后调用：开启追赶窗口（G4）。
+     * 窗口到期时补足经验，困难档还会补齐进化所需的金币。
+     */
+    public notifyPlayerEvolved(playerAge: Age): void {
+        if (playerAge <= this._currentAge) return;
+        if (this._catchUpAt > 0) return; // 已有窗口，不重复叠加
+        this._catchUpAt = this._gameTime + this._config.catchUpDelay;
     }
 
     // ==================== 内部逻辑 ====================
 
     private getSpawnInterval(): number {
-        // 前期出兵快，后期随时代变慢（因为造更贵的兵）
-        const base = AI_CONFIG.SPAWN_INTERVAL_MIN +
-            Math.random() * (AI_CONFIG.SPAWN_INTERVAL_MAX - AI_CONFIG.SPAWN_INTERVAL_MIN);
-        return base;
+        const min = this._config.spawnIntervalMin;
+        const max = this._config.spawnIntervalMax;
+        return min + Math.random() * (max - min);
     }
-    /** 产兵 */
+
     private trySpawnUnit(): void {
         const available = getAvailableUnits(this._currentAge);
-        // 保留 50 金币余额，只考虑买得起的兵
-        const affordable = available.filter(u => this._gold >= u.cost + 50);
+        // 与玩家同一经济口径：不留固定储备（旧版留 50，等于把出兵速度砍到 1/4）
+        const affordable = available.filter(u => this._gold >= u.cost);
         if (affordable.length === 0) return;
 
-        // 60% 概率造最贵的兵，40% 概率随机
+        // 经验够了但金币不够：进入攒钱期，优先把进化打出来
+        const next = getNextAgeConfig(this._currentAge);
+        if (next && this._exp >= next.expRequired
+            && this._gold < next.goldRequired + next.goldReserve
+            && this._castle.getHP() > this._castle.getMaxHP() * 0.5) {
+            return;
+        }
+
         let chosen: UnitConfig;
         if (Math.random() < 0.6) {
-            chosen = affordable.reduce((a, b) => a.cost > b.cost ? a : b);
+            chosen = affordable.reduce((a, b) => (a.cost < b.cost ? a : b));
         } else {
             chosen = affordable[Math.floor(Math.random() * affordable.length)];
         }
 
-        // 生产
         this._gold -= chosen.cost;
         this._spawnFn(chosen.id, 'enemy');
     }
 
-    /**
-     * AI 买经验逻辑
-     * 在保证安全余额的前提下，用多余金币加速进化
-     */
+    /** 买经验：价格递增 + 每时代限购（与玩家同一套规则） */
     private tryBuyExp(): void {
         const next = getNextAgeConfig(this._currentAge);
-        if (!next) return; // 已满级
+        if (!next) return;
 
         const expNeeded = next.expRequired - this._exp;
-        if (expNeeded <= 0) return; // 经验已经够了
+        if (expNeeded <= 0) return;
+        if (this._buyExpCount >= BUY_EXP.MAX_PER_AGE) return;
 
-        // 每个时代至少等 30 秒才开始买经验，让 AI 先建基础部队
-        const minBuyTime = (this._currentAge + 1) * 30;
-        if (this._gameTime < minBuyTime) return;
+        // 每个时代至少等一小段时间，让 AI 先建基础部队
+        if (this._gameTime < (this._currentAge + 1) * this._config.firstBuyExpDelay) return;
 
-        // 城堡血量低于 50% 时不买经验 → 被压制了，优先出兵防御
+        // 城堡血量低于 50% 时不买经验 → 优先出兵防御
         if (this._castle.getHP() < this._castle.getMaxHP() * 0.5) return;
 
-        // 计算安全余额：至少保留 goldReserve 或 100 金
-        const reserve = Math.max(next.goldReserve, 100);
-        const excessGold = this._gold - reserve;
-        if (excessGold < BUY_EXP.COST) return; // 多余金币不够买一次
+        const cost = getBuyExpCost(this._buyExpCount);
+        // 与玩家侧的经验购买门槛同量级（玩家：余额 ≥ 150 才考虑），否则 AI 永远买不起
+        if (this._gold < cost + 60) return;
 
-        // 计算需要买几次 + 能买几次
-        const buysNeeded = Math.ceil(expNeeded / BUY_EXP.GAIN);
-        const maxBuys = Math.floor(excessGold / BUY_EXP.COST);
-        const actualBuys = Math.min(maxBuys, buysNeeded);
-        if (actualBuys <= 0) return;
-
-        this._gold -= actualBuys * BUY_EXP.COST;
-        this._exp += actualBuys * BUY_EXP.GAIN;
+        this._gold -= cost;
+        this._exp += BUY_EXP.GAIN;
+        this._buyExpCount++;
     }
 
-    /** AI 进化（同时检查经验和金币门槛） */
-    private tryEvolve(): void {
+    /** 追赶窗口：玩家领先时代时，到期补经验（困难档补金币） */
+    private tryCatchUp(): void {
+        if (this._catchUpAt <= 0 || this._gameTime < this._catchUpAt) return;
+        this._catchUpAt = -1;
+
         const next = getNextAgeConfig(this._currentAge);
-        if (!next) return; // 已满级
+        if (!next) return;
 
-        // 延迟：每个时代至少 20 秒后才考虑进化
-        const minTime = (this._currentAge + 1) * 20;
-        if (this._gameTime < minTime) return;
+        const missingExp = Math.max(0, next.expRequired - this._exp);
+        this._exp += Math.ceil(missingExp * this._config.catchUpExpBonus);
 
-        // 检查经验和金币（AI 进化需要保留一定余额用于后续出兵）
-        if (this._exp >= next.expRequired && this._gold >= next.goldRequired + next.goldReserve) {
-            // 进化！
-            this._gold -= next.goldRequired;
-            this._gold += 200; // 进化奖励
-            this._currentAge = next.age;
-            // 通知外部进化事件
-            this._onEvolve?.(this._currentAge);
+        // 困难档同时补足进化金币缺口，确保追赶真的落地
+        if (this._difficulty === AIDifficulty.HARD) {
+            const need = next.goldRequired + next.goldReserve;
+            if (this._gold < need) this._gold = need;
         }
     }
-}
 
-/** 根据 AI 当前时代返回收入倍率 */
-export function getAIIncomeMultiplier(age: Age): number {
-    switch (age) {
-        case Age.PRIMITIVE: return 1.0;
-        case Age.MEDIEVAL:   return 1.2;
-        case Age.FUTURE:     return 1.4;
-        default:             return 1.0;
+    /** AI 进化（经验 + 金币双门槛，与玩家一致） */
+    private tryEvolve(): void {
+        const next = getNextAgeConfig(this._currentAge);
+        if (!next) return;
+
+        if (this._gameTime < (this._currentAge + 1) * this._config.evolveDelay) return;
+
+        if (this._exp >= next.expRequired && this._gold >= next.goldRequired + next.goldReserve) {
+            this._gold -= next.goldRequired;
+            this._gold += EVOLVE_BONUS_GOLD;
+            this._currentAge = next.age;
+            this._buyExpCount = 0;
+            this._onEvolve?.(this._currentAge);
+        }
     }
 }
