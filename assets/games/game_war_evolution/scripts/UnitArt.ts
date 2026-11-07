@@ -4,13 +4,19 @@
  * 零贴图（计划 §0.1 铁律 2）：所有兵种都用 Graphics 现画。
  *
  * 画法（卡通贴纸风，参考《皇室战争》小尺寸图标的辨识度）：
- *   1. 统一的厚深色描边（3.2，四肢 +2.4），保证任何背景上都有硬轮廓；
- *   2. 三色分层：本体色 → 暗部（压暗 38%）→ 高光（提亮 45%），靠明度而非撞色出体积；
+ *   1. 统一的厚深色描边（3.2，四肢 +2.8），保证任何背景上都有硬轮廓；
+ *   2. 三色分层：本体色 → 暗部（压暗 40%）→ 高光（提亮 50%），靠明度而非撞色出体积；
  *   3. 夸张比例：头 / 武器显著大于写实比例，缩到 20 个 CSS 像素仍能认出是谁；
  *   4. 朝向由外层节点镜像（Unit.buildVisual），绘制坐标一律「面向右」（+x 为前）。
  *
  * 坐标系：以单位中心为原点，地面 y=-26，头顶 y=+26（尽量吃满 56×56 的画布，
  * 同样的单位尺寸下图形更大、更好认）。外层节点再按 UnitConfig.scale 缩放。
+ *
+ * 分层（攻击动作需要武器能单独转）：
+ *   drawUnitBody()    画躯干 / 头 / 腿等不动的一切，挂在剪影节点上；
+ *   drawUnitWeapon()  只画武器，坐标原点就是「手 / 肩关节」，静止姿态即 +x 朝前；
+ *   getWeaponPose()   给出关节位置与挥击角度，由 Unit 每帧按攻击进度驱动。
+ *   武器节点是剪影节点的子节点，因此自动继承敌方的镜像 —— 动作无需区分朝向。
  *
  * 设计原则：先保证「关掉颜色、只看黑色剪影」能一眼分清六个兵种，
  * 再往里堆明暗与细节 —— 战场上实际只有 20 来个 CSS 像素。
@@ -93,11 +99,52 @@ function eye(g: Graphics, x: number, y: number, r = 2.4): void {
     dot(g, x + r * 0.28, y - r * 0.12, r * 0.56, new Color(12, 18, 30, 255));
 }
 
+// ==================== 攻击动作参数 ====================
+
 /**
- * 六种兵种的剪影（近战 / 远程 / 重型外形差异明显，关掉颜色也能分清 —— 美术原则 A2）
+ * 武器的关节与挥击参数（角度相对静止姿态，单位度，正 = 逆时针）。
+ * 关节坐标在「身体坐标系」里（面向右）；hitShift 是挥出瞬间沿身前方向的位移。
+ */
+export interface WeaponPose {
+    /** 关节（手 / 肩）在身体坐标系中的位置 */
+    pivotX: number;
+    pivotY: number;
+    /** 蓄力：反向拉开多少度 / 后退多少像素 */
+    windAngle: number;
+    windShift: number;
+    /** 挥出：越过静止姿态多少度 / 前送多少像素 */
+    hitAngle: number;
+    hitShift: number;
+    /** 武器尖端到关节的距离（0 = 该兵种不放枪口火花） */
+    tipLen: number;
+}
+
+const WEAPON_POSES: Record<string, WeaponPose> = {
+    // 大棒：从肩上抡到身前（-78° 是整段弧线的关键，幅度小了像抽搐）
+    caveman: { pivotX: 10, pivotY: -2, windAngle: 40, windShift: -1, hitAngle: -78, hitShift: 4, tipLen: 0 },
+    // 长鼻：抬起再朝前甩下
+    mammoth: { pivotX: 21, pivotY: 1, windAngle: 28, windShift: -1, hitAngle: -34, hitShift: 0, tipLen: 0 },
+    // 骑士枪：回抽 → 前刺（位移为主，角度只做一点点）
+    knight: { pivotX: 3, pivotY: 1, windAngle: -7, windShift: -6, hitAngle: 3, hitShift: 10, tipLen: 24 },
+    // 弓：拉弦时弓身微微后仰，撒放瞬间回弹
+    archer: { pivotX: 13, pivotY: 0, windAngle: -16, windShift: -2, hitAngle: 5, hitShift: 3, tipLen: 18 },
+    // 机甲：垂着的拳头抡到身前（90° 上勾拳）
+    mech: { pivotX: 12.75, pivotY: 0, windAngle: 16, windShift: -2, hitAngle: 88, hitShift: 4, tipLen: 0 },
+    // 激光炮：几乎不动，靠后坐（枪口上跳 + 后退）
+    laser: { pivotX: 4, pivotY: -3, windAngle: 0, windShift: 1, hitAngle: 6, hitShift: -4, tipLen: 24 },
+};
+
+export function getWeaponPose(icon: string): WeaponPose | null {
+    return WEAPON_POSES[icon] ?? null;
+}
+
+// ==================== 兵种绘制 ====================
+
+/**
+ * 六种兵种的「身体」部分（躯干 / 头 / 腿 / 装备本体），不含会动的武器。
  * 所有图形一律「面向右」绘制；敌方由外层节点 setScale(-1, 1, 1) 镜像。
  */
-export function drawUnitSilhouette(g: Graphics, icon: string, fill: Color, outline?: Color): void {
+export function drawUnitBody(g: Graphics, icon: string, fill: Color, outline?: Color): void {
     g.clear();
     g.lineJoin = Graphics.LineJoin.ROUND;
     const ol = outline ?? OUTLINE;
@@ -105,12 +152,7 @@ export function drawUnitSilhouette(g: Graphics, icon: string, fill: Color, outli
 
     switch (icon) {
         case 'caveman': {
-            // 剪影特征：巨大的头 + 肩上斜扛的大棒
-            // 棍棒（先画，被身体压住一部分）
-            limb(g, 10, -2, 21, 15, 6, hex('#A9723F'));
-            dot(g, 22, 17, 7.6, hex('#B8834E'));
-            dot(g, 22, 17, 5.6, hex('#C99A63'));
-
+            // 剪影特征：巨大的头 + 肩上的大棒（棒子在武器层）
             // 腿
             g.roundRect(-9, -26, 8, 15, 4);
             g.roundRect(1.5, -26, 8, 15, 4);
@@ -149,7 +191,7 @@ export function drawUnitSilhouette(g: Graphics, icon: string, fill: Color, outli
         }
 
         case 'mammoth': {
-            // 剪影特征：低矮的拱背 + 朝前的长鼻与象牙（一律朝右）
+            // 剪影特征：低矮的拱背 + 前探的头（长鼻 / 象牙在武器层）
             // 关键：头必须「凸」出身体轮廓，否则整只读起来只是一坨椭圆
             // 腿（三条，后腿更粗）
             g.roundRect(-15, -26, 8, 16, 4);
@@ -171,11 +213,6 @@ export function drawUnitSilhouette(g: Graphics, icon: string, fill: Color, outli
             // 下颌压暗
             g.ellipse(15, -1.5, 7, 3.6);
             paint(g, t.shade, null);
-            // 长鼻：向右下方甩出两段，粗到能在小尺寸里看见
-            limb(g, 21, 1, 25, -6, 6, t.shade);
-            limb(g, 25, -6, 23, -14, 5, t.shade);
-            // 象牙（朝前上方翘，浅色才跳得出来）
-            limb(g, 19, -3, 28, 4, 4, hex('#F7EBD2'));
             // 眼睛 + 大耳朵（耳朵向后展开，拉开剪影）
             eye(g, 18, 7, 2.3);
             g.ellipse(5, 9, 4.8, 6.4);
@@ -184,7 +221,7 @@ export function drawUnitSilhouette(g: Graphics, icon: string, fill: Color, outli
         }
 
         case 'knight': {
-            // 剪影特征：骑士枪 + 盾牌 + 头盔盔缨（最「人形」的一个，靠装备区分）
+            // 剪影特征：盾牌 + 头盔盔缨（长枪在武器层）
             // 盾牌（身后）
             g.moveTo(-17, 4);
             g.lineTo(-5, 4);
@@ -221,19 +258,11 @@ export function drawUnitSilhouette(g: Graphics, icon: string, fill: Color, outli
             g.lineTo(6, 18);
             g.close();
             paint(g, hex('#DC2626'), ol, 2.4);
-
-            // 骑士枪（粗、带护手，指向正前方）
-            limb(g, 3, 1, 25, 8, 4.6, hex('#B9C6D8'));
-            g.moveTo(25, 8);
-            g.lineTo(19, 12.5);
-            g.lineTo(20, 3.5);
-            g.close();
-            paint(g, hex('#EEF2F7'), ol, 2.4);
             break;
         }
 
         case 'archer': {
-            // 剪影特征：尖兜帽 + 身前一张大弓（弓的弧线是唯一的识别点，必须够大）
+            // 剪影特征：尖兜帽（大弓在武器层）
             // 腿
             g.roundRect(-7.5, -26, 6, 12, 3);
             g.roundRect(1.5, -26, 6, 12, 3);
@@ -262,39 +291,18 @@ export function drawUnitSilhouette(g: Graphics, icon: string, fill: Color, outli
             // 阴影里的脸 + 一只眼
             dot(g, 1.5, 6.5, 4.6, t.shade);
             dot(g, 3, 6.8, 1.4, hex('#FDE68A'));
-
-            // 大弓：半径 15，占据身前整个半圆
-            g.lineCap = Graphics.LineCap.ROUND;
-            g.lineJoin = Graphics.LineJoin.ROUND;
-            g.lineWidth = 5.4;
-            g.strokeColor = ol;
-            g.arc(13, 0, 15, -1.28, 1.28, false);
-            g.stroke();
-            g.lineWidth = 3;
-            g.strokeColor = hex('#B4784E');
-            g.arc(13, 0, 15, -1.28, 1.28, false);
-            g.stroke();
-            // 弓弦
-            g.lineWidth = 1.4;
-            g.strokeColor = hex('#E2E8F0', 225);
-            g.moveTo(17.4, 14.4);
-            g.lineTo(17.4, -14.4);
-            g.stroke();
-            // 搭在弦上的箭
-            limb(g, -2, 0, 20, 0, 2.2, hex('#E2E8F0'));
             break;
         }
 
         case 'mech': {
-            // 剪影特征：方头 + 宽肩甲 + 单条发光眼缝（唯一「直角」很多的造型）
+            // 剪影特征：方头 + 宽肩甲 + 单条发光眼缝（前臂在武器层）
             // 腿（粗，机械感靠直角）
             g.roundRect(-10, -26, 8, 15, 2.5);
             g.roundRect(2, -26, 8, 15, 2.5);
             paint(g, t.shade, ol);
 
-            // 手臂（垂在身侧，末端拳套）
+            // 后侧手臂（垂在身侧，末端拳套）
             g.roundRect(-16, -12, 6.5, 13, 2.5);
-            g.roundRect(9.5, -12, 6.5, 13, 2.5);
             paint(g, t.base, ol);
 
             // 躯干 + 胸口能量核
@@ -320,7 +328,7 @@ export function drawUnitSilhouette(g: Graphics, icon: string, fill: Color, outli
         }
 
         case 'laser': {
-            // 剪影特征：细高身形 + 超长炮管（长度几乎等于身高）
+            // 剪影特征：细高身形 + 天线（炮管在武器层）
             limb(g, -3.4, -26, -4, -9, 4, t.shade);
             limb(g, 3.4, -26, 4, -9, 4, t.shade);
 
@@ -331,15 +339,6 @@ export function drawUnitSilhouette(g: Graphics, icon: string, fill: Color, outli
             paint(g, hex('#7DD3FC'), null);
             g.roundRect(-3.6, -8, 3.4, 10, 1.6);
             paint(g, t.light, null);
-
-            // 炮管（从身体中段向右伸到 x=27）
-            g.roundRect(4, -3, 22, 7.5, 3.4);
-            paint(g, t.light, ol);
-            g.roundRect(20, -1.6, 6, 4.8, 2.2);
-            paint(g, hex('#A5F3FC'), null);
-            // 炮身散热槽
-            g.roundRect(8, 0.6, 8, 2.2, 1.1);
-            paint(g, t.shade, null);
 
             // 天线 + 尖端能量（细杆不描边，否则缩到 20px 会变成一团黑疙瘩）
             limb(g, -1, 14, -1, 19, 1.6, hex('#CBD5E1'), null);
@@ -355,6 +354,107 @@ export function drawUnitSilhouette(g: Graphics, icon: string, fill: Color, outli
             break;
         }
     }
+}
+
+/**
+ * 只画武器。坐标原点 = 关节（手 / 肩），静止姿态下武器就朝当前画的方向摆放，
+ * 攻击时由 Unit 旋转该节点即可 —— 不需要在绘制里做旋转。
+ *
+ * @param ox / oy 关节偏移：武器节点用 0,0；合成静态剪影（UI 图标）时传关节坐标。
+ */
+export function drawUnitWeapon(g: Graphics, icon: string, fill: Color,
+    outline?: Color, ox = 0, oy = 0): void {
+    g.clear();
+    g.lineJoin = Graphics.LineJoin.ROUND;
+    const ol = outline ?? OUTLINE;
+    const t = tones(fill);
+
+    switch (icon) {
+        case 'caveman': {
+            // 大棒：从手握处向后上方翘起，末端一个球
+            limb(g, ox, oy, ox + 11, oy + 17, 6, hex('#A9723F'));
+            dot(g, ox + 12, oy + 19, 7.6, hex('#B8834E'));
+            dot(g, ox + 12, oy + 19, 5.6, hex('#C99A63'));
+            break;
+        }
+
+        case 'mammoth': {
+            // 长鼻：向右下方甩出两段，粗到能在小尺寸里看见
+            limb(g, ox, oy, ox + 4, oy - 7, 6, t.shade);
+            limb(g, ox + 4, oy - 7, ox + 2, oy - 15, 5, t.shade);
+            // 象牙（朝前上方翘，浅色才跳得出来）
+            limb(g, ox - 2, oy - 4, ox + 7, oy + 3, 4, hex('#F7EBD2'));
+            break;
+        }
+
+        case 'knight': {
+            // 骑士枪（粗、带护手，指向正前方）
+            limb(g, ox, oy, ox + 22, oy + 7, 4.6, hex('#B9C6D8'));
+            g.moveTo(ox + 22, oy + 7);
+            g.lineTo(ox + 16, oy + 11.5);
+            g.lineTo(ox + 17, oy + 2.5);
+            g.close();
+            paint(g, hex('#EEF2F7'), ol, 2.4);
+            break;
+        }
+
+        case 'archer': {
+            // 大弓：半径 15，占据身前整个半圆（弓的弧线是唯一的识别点，必须够大）
+            g.lineCap = Graphics.LineCap.ROUND;
+            g.lineJoin = Graphics.LineJoin.ROUND;
+            g.lineWidth = 5.4;
+            g.strokeColor = ol;
+            g.arc(ox, oy, 15, -1.28, 1.28, false);
+            g.stroke();
+            g.lineWidth = 3;
+            g.strokeColor = hex('#B4784E');
+            g.arc(ox, oy, 15, -1.28, 1.28, false);
+            g.stroke();
+            // 弓弦
+            g.lineWidth = 1.4;
+            g.strokeColor = hex('#E2E8F0', 225);
+            g.moveTo(ox + 4.4, oy + 14.4);
+            g.lineTo(ox + 4.4, oy - 14.4);
+            g.stroke();
+            // 搭在弦上的箭
+            limb(g, ox - 15, oy, ox + 7, oy, 2.2, hex('#E2E8F0'));
+            break;
+        }
+
+        case 'mech': {
+            // 前臂：从关节垂下来（蓄力后抡到身前）
+            g.roundRect(ox - 3.25, oy - 12, 6.5, 13, 2.5);
+            paint(g, t.base, ol);
+            break;
+        }
+
+        case 'laser': {
+            // 炮管（从关节向右伸到 x+26）
+            g.roundRect(ox, oy - 3.75, 22, 7.5, 3.4);
+            paint(g, t.light, ol);
+            g.roundRect(ox + 16, oy - 1.6, 6, 4.8, 2.2);
+            paint(g, hex('#A5F3FC'), null);
+            // 炮身散热槽
+            g.roundRect(ox + 4, oy + 0.6, 8, 2.2, 1.1);
+            paint(g, t.shade, null);
+            break;
+        }
+
+        default:
+            break;
+    }
+}
+
+/**
+ * 合成剪影（身体 + 静止姿态的武器），供不需要动作的地方使用（如底部兵种按钮图标）。
+ * 需要挥动武器的单位走 drawUnitBody + drawUnitWeapon 双节点。
+ */
+export function drawUnitSilhouette(g: Graphics, icon: string, fill: Color, outline?: Color): void {
+    drawUnitBody(g, icon, fill, outline);
+    const pose = getWeaponPose(icon);
+    if (!pose) return;
+    // Graphics 没有变换栈，把关节坐标当偏移传进去即可画出静止姿态
+    drawUnitWeapon(g, icon, fill, outline, pose.pivotX, pose.pivotY);
 }
 
 /** 单位脚下的椭圆阴影（两层，内深外浅） */
@@ -455,6 +555,23 @@ export function drawStompRing(g: Graphics, radius: number): void {
     g.strokeColor = hex('#FFF3D6', 240);
     g.circle(0, 0, radius - 6);
     g.stroke();
+}
+
+/** 枪口 / 弓臂火花：三道短射线 + 中心亮点（由调用方旋转到武器方向） */
+export function drawMuzzleFlash(g: Graphics, size = 12): void {
+    g.clear();
+    g.lineCap = Graphics.LineCap.ROUND;
+    g.lineWidth = 2.4;
+    g.strokeColor = hex('#FDE68A', 235);
+    for (let i = -1; i <= 1; i++) {
+        const a = (i * Math.PI) / 7;
+        g.moveTo(Math.cos(a) * size * 0.2, Math.sin(a) * size * 0.2);
+        g.lineTo(Math.cos(a) * size, Math.sin(a) * size);
+        g.stroke();
+    }
+    g.fillColor = hex('#FFF7E0', 245);
+    g.circle(0, 0, size * 0.28);
+    g.fill();
 }
 
 /** 通用圆环（技能 / 命中用，调用方自行缩放淡出） */

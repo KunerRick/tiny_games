@@ -2,12 +2,22 @@ import {
     _decorator, Component, Sprite, Color, Label, UITransform, tween, Tween, Vec3, Node, Graphics, UIOpacity,
 } from 'cc';
 import { UnitConfig, UnitState, WORLD, UNIT_COLORS, UNIT_ROW } from './GameConfig';
-import { drawUnitSilhouette, drawShadow, drawChargeAura, drawShieldBubble, drawImpactSpark, drawStompRing, drawRing, colorFromHex } from './UnitArt';
+import {
+    drawUnitBody, drawUnitWeapon, getWeaponPose, WeaponPose, drawMuzzleFlash,
+    drawShadow, drawChargeAura, drawShieldBubble, drawImpactSpark, drawStompRing, drawRing, colorFromHex,
+} from './UnitArt';
 
 const { ccclass, property } = _decorator;
 
 /** 伤害飘字寿命（秒） */
 const DAMAGE_FLOAT_LIFE = 0.55;
+
+/** 攻击动作的三段分界（占整个动作时长的比例）：蓄力 → 挥出 → 收势 */
+const ATTACK_WINDUP_END = 0.34;
+const ATTACK_STRIKE_END = 0.52;
+
+const easeOutQuad = (x: number): number => 1 - (1 - x) * (1 - x);
+const easeInQuad = (x: number): number => x * x;
 
 /**
  * 单位组件
@@ -62,7 +72,12 @@ export class Unit extends Component {
     // ---- 表现层 ----
     private _renderY: number = WORLD.BATTLE_Y;    // 分行后的渲染 y（逻辑坐标不变）
     private _silhouetteNode: Node | null = null;  // 剪影节点（两侧镜像靠它）
-    private _silhouette: Graphics | null = null;  // 兵种剪影
+    private _silhouette: Graphics | null = null;  // 兵种身体
+    private _weaponNode: Node | null = null;      // 武器节点（关节为原点，攻击时直接转它）
+    private _weapon: Graphics | null = null;      // 兵种武器
+    private _weaponPose: WeaponPose | null = null;
+    private _atkTimer: number = 0;                // 攻击动作剩余时间（由 tick 驱动，不挂补间）
+    private _atkDur: number = 0.26;
     private _shadow: Graphics | null = null;      // 脚下阴影
     private _chargeRing: Graphics | null = null;  // 冲锋光环
     private _chargeNode: Node | null = null;      // 冲锋光环节点（脉冲用）
@@ -80,7 +95,6 @@ export class Unit extends Component {
     private _flashTween: Tween<Node> | null = null;
     private _fadeTween: Tween<Node> | null = null;
     private _isFading: boolean = false;
-    private _shakeTween: Tween<Node> | null = null;
     private _knockbackTween: Tween<Node> | null = null;
     private _floatTween: Tween<Node> | null = null;
 
@@ -219,7 +233,20 @@ export class Unit extends Component {
         shapeNode.setScale(this._side === 'player' ? 1 : -1, 1, 1);
         this._silhouetteNode = shapeNode;
         this._silhouette = shapeNode.addComponent(Graphics);
-        drawUnitSilhouette(this._silhouette, this._config.icon ?? 'default', this._bodyColor);
+        drawUnitBody(this._silhouette, this._config.icon ?? 'default', this._bodyColor);
+
+        // 武器层：独立子节点，原点就是关节。攻击时直接转这个节点即可挥动武器；
+        // 它是剪影节点的子节点，所以自动继承敌方的镜像，动作不需要区分朝向。
+        this._weaponPose = getWeaponPose(this._config.icon ?? 'default');
+        if (this._weaponPose) {
+            const weaponNode = new Node('weapon');
+            weaponNode.setParent(shapeNode);
+            weaponNode.addComponent(UITransform).setContentSize(64, 64);
+            weaponNode.setPosition(this._weaponPose.pivotX, this._weaponPose.pivotY, 0);
+            this._weaponNode = weaponNode;
+            this._weapon = weaponNode.addComponent(Graphics);
+            drawUnitWeapon(this._weapon, this._config.icon ?? 'default', this._bodyColor);
+        }
 
         // 机甲护盾泡（有护盾时显示，打破时消失）
         let nextIndex = 2;
@@ -336,6 +363,62 @@ export class Unit extends Component {
         if (this._shieldNode && this._shieldNode.active) {
             const s = 1 + Math.sin(this._visualPhase * 3.4) * 0.045;
             this._shieldNode.setScale(s, s, 1);
+        }
+
+        this.applyAttackPose(dt);
+    }
+
+    /**
+     * 攻击动作：蓄力（武器后拉 / 身体后仰）→ 挥出（过冲）→ 收势。
+     *
+     * 全部在 tick 里按时间求值写进节点，不挂补间：
+     *   ① 同屏 20 个单位各挂一条攻击补间就超掉美术原则 A5 的「单屏 ≤ 20 补间」；
+     *   ② 武器与身体是两级节点，补间会互相抢占同一属性，求值没有这个问题。
+     *
+     * 角度用「自由度」写：武器节点在镜像后的父节点里，同一个角度会自动左右对称；
+     * 身体倾斜是直接写剪影节点的旋转，镜像会把角度翻向，所以要按阵营取反。
+     */
+    private applyAttackPose(dt: number): void {
+        const pose = this._weaponPose;
+        const shape = this._silhouetteNode;
+        if (!shape || !shape.isValid) return;
+
+        let angle = 0;
+        let shift = 0;
+        let lean = 0;
+
+        if (this._atkTimer > 0) {
+            this._atkTimer = Math.max(0, this._atkTimer - dt);
+            const p = 1 - this._atkTimer / this._atkDur; // 0 → 1
+            if (pose) {
+                if (p < ATTACK_WINDUP_END) {
+                    const k = easeOutQuad(p / ATTACK_WINDUP_END);
+                    angle = pose.windAngle * k;
+                    shift = pose.windShift * k;
+                    lean = -2.5 * k;
+                } else if (p < ATTACK_STRIKE_END) {
+                    const k = easeInQuad((p - ATTACK_WINDUP_END) / (ATTACK_STRIKE_END - ATTACK_WINDUP_END));
+                    angle = pose.windAngle + (pose.hitAngle - pose.windAngle) * k;
+                    shift = pose.windShift + (pose.hitShift - pose.windShift) * k;
+                    lean = -2.5 + 8 * k;
+                } else {
+                    const k = easeOutQuad((p - ATTACK_STRIKE_END) / (1 - ATTACK_STRIKE_END));
+                    angle = pose.hitAngle * (1 - k);
+                    shift = pose.hitShift * (1 - k);
+                    lean = 5.5 * (1 - k);
+                }
+            }
+        }
+
+        // 待机呼吸：±1.1px 的轻微起伏，相位按单位 id 错开，避免全屏同频抖动
+        const bob = Math.sin(this._visualPhase * 2.6 + this._unitId * 1.7) * 1.1;
+        shape.setPosition(0, bob, 0);
+        const leanSign = this._side === 'player' ? -1 : 1;
+        shape.angle = lean * leanSign;
+
+        if (this._weaponNode && this._weaponNode.isValid && pose) {
+            this._weaponNode.angle = angle;
+            this._weaponNode.setPosition(pose.pivotX + shift, pose.pivotY, 0);
         }
     }
 
@@ -584,11 +667,7 @@ export class Unit extends Component {
             damage = Math.floor(damage * cfg.closeRangePenalty);
         }
 
-        // 远程单位先画弹道，再结算伤害
-        if (cfg.attackRange > 100) {
-            this.spawnProjectile(target);
-        }
-
+        // 远程弹道延到「挥出」那一刻才出现，否则箭还在弓弦上就先飞出去了
         target.takeDamage(damage, this, allUnits);
         if (isChargeHit) {
             this._chargeUsed = true;
@@ -596,7 +675,10 @@ export class Unit extends Component {
         }
         this._attackCooldown = (1.0 / cfg.attackSpeed) / this._attackSpeedMul;
 
-        this.playAttackSwing();
+        this.playAttackMotion(this._attackCooldown);
+        if (cfg.attackRange > 100) {
+            this.spawnProjectile(target, this._atkDur * ATTACK_WINDUP_END);
+        }
     }
 
     /**
@@ -612,7 +694,7 @@ export class Unit extends Component {
 
         this._attackCooldown = (1.0 / this._config!.attackSpeed) / this._attackSpeedMul;
         this._pendingCastleAttack = true;
-        this.playAttackSwing();
+        this.playAttackMotion(this._attackCooldown);
     }
 
     private _pendingCastleAttack: boolean = false;
@@ -784,7 +866,12 @@ export class Unit extends Component {
         return this._chargeUsed;
     }
 
-    /** 受击闪白：用剪影重绘实现（Graphics 的 color 不做顶点染色） */
+    /**
+     * 受击闪白：用剪影重绘实现（Graphics 的 color 不做顶点染色）。身体与武器两层都要重绘。
+     *
+     * 只提亮「填充」、保留深色描边：整只（含描边）刷白会糊成一个白团，
+     * 恰好盖住挥击命中那一帧的动作，玩家反而看不出谁挨了打。
+     */
     private triggerHitFlash(): void {
         if (!this._silhouette || !this._silhouette.isValid || !this._config) return;
 
@@ -793,14 +880,22 @@ export class Unit extends Component {
             this._flashTween = null;
         }
 
-        drawUnitSilhouette(this._silhouette, this._config.icon ?? 'default', Color.WHITE.clone(),
-            new Color(255, 255, 255, 220));
+        const icon = this._config.icon ?? 'default';
+        const white = new Color(255, 246, 232, 255);
+        drawUnitBody(this._silhouette, icon, white);
+        if (this._weapon && this._weapon.isValid) {
+            drawUnitWeapon(this._weapon, icon, white);
+        }
 
         this._flashTween = tween(this.node)
             .delay(0.08)
             .call(() => {
                 if (this._silhouette && this._silhouette.isValid && this._config) {
-                    drawUnitSilhouette(this._silhouette, this._config.icon ?? 'default', this._bodyColor);
+                    const id = this._config.icon ?? 'default';
+                    drawUnitBody(this._silhouette, id, this._bodyColor);
+                    if (this._weapon && this._weapon.isValid) {
+                        drawUnitWeapon(this._weapon, id, this._bodyColor);
+                    }
                 }
                 this._flashTween = null;
             })
@@ -835,16 +930,16 @@ export class Unit extends Component {
     }
 
     /** 远程弹道：激光兵走持续光束，其余（弓箭手）飞一支带箭头的实体箭 */
-    private spawnProjectile(target: Unit): void {
+    private spawnProjectile(target: Unit, delay = 0): void {
         if (this._config?.hasLaserFocus) {
-            this.spawnLaserBeam(target);
+            this.spawnLaserBeam(target, delay);
         } else {
-            this.spawnArrow(target);
+            this.spawnArrow(target, delay);
         }
     }
 
     /** 弓箭：一支实体箭从自身飞到目标（带朝向），命中即消失 */
-    private spawnArrow(target: Unit): void {
+    private spawnArrow(target: Unit, delay = 0): void {
         const container = this.node.parent;
         if (!container || !container.isValid) return;
 
@@ -874,14 +969,21 @@ export class Unit extends Component {
         node.angle = Math.atan2(toY - fromY, toX - fromX) * 180 / Math.PI;
         const dist = Math.hypot(toX - fromX, toY - fromY);
         const dur = Math.max(0.08, Math.min(0.26, dist / 1200));
+
+        if (delay > 0) {
+            const op = node.addComponent(UIOpacity);
+            op.opacity = 0;
+            tween(op).delay(delay).to(0.02, { opacity: 255 }).start();
+        }
         tween(node)
+            .delay(delay)
             .to(dur, { position: new Vec3(toX, toY, 0) }, { easing: 'sineOut' })
             .call(() => { if (node.isValid) node.destroy(); })
             .start();
     }
 
     /** 激光：三层光束（外晕 / 中层 / 白核），聚焦倍率越高越粗越亮 */
-    private spawnLaserBeam(target: Unit): void {
+    private spawnLaserBeam(target: Unit, delay = 0): void {
         const container = this.node.parent;
         if (!container || !container.isValid) return;
 
@@ -923,10 +1025,21 @@ export class Unit extends Component {
         g.fill();
 
         const op = node.addComponent(UIOpacity);
-        tween(op)
-            .to(0.16, { opacity: 0 })
-            .call(() => { if (node.isValid) node.destroy(); })
-            .start();
+        if (delay > 0) {
+            // 延迟出膛：先隐藏，到「挥出」那一刻瞬间点亮再淡出
+            op.opacity = 0;
+            tween(op)
+                .delay(delay)
+                .to(0.001, { opacity: 255 })
+                .to(0.16, { opacity: 0 })
+                .call(() => { if (node.isValid) node.destroy(); })
+                .start();
+        } else {
+            tween(op)
+                .to(0.16, { opacity: 0 })
+                .call(() => { if (node.isValid) node.destroy(); })
+                .start();
+        }
     }
 
     /** 骑士首击残影：身后一道金色横向拖尾 */
@@ -959,25 +1072,64 @@ export class Unit extends Component {
             .start();
     }
 
-    /** 攻击前摇：压扁→回弹（0.12s 视觉，不影响逻辑时点），近战额外画一道挥砍弧 */
-    private playAttackSwing(): void {
+    /**
+     * 发起一次攻击动作：近战在挥出瞬间画一道挥砍弧，远程在枪口 / 弓臂端点喷一簇火星。
+     * 动作时长按攻击间隔收口（0.18–0.40s），攻速越慢挥得越舒展。
+     */
+    private playAttackMotion(cooldown: number): void {
         if (!this.node?.isValid || !this._config) return;
-        if (this._shakeTween) {
-            this._shakeTween.stop();
-            this._shakeTween = null;
-        }
-        const base = this._config.scale;
-        this._shakeTween = tween(this.node)
-            .to(0.06, { scale: new Vec3(base * 1.12, base * 0.86, 1) }, { easing: 'quadOut' })
-            .to(0.06, { scale: new Vec3(base, base, 1) }, { easing: 'quadIn' })
-            .call(() => { this._shakeTween = null; })
-            .start();
+        this._atkDur = Math.max(0.18, Math.min(0.40, cooldown * 0.7));
+        this._atkTimer = this._atkDur;
 
-        if (this._config.attackRange <= 100) this.spawnSwingArc();
+        // 特效锚在「挥出」那一刻，而不是循环起点 —— 否则武器还在蓄力就先冒火花了
+        const strikeDelay = this._atkDur * ATTACK_WINDUP_END;
+        if (this._config.attackRange > 100) {
+            this.spawnMuzzleFlash(strikeDelay);
+        } else {
+            this.spawnSwingArc(strikeDelay);
+        }
     }
 
-    /** 近战挥砍弧：身前一道白色弧形闪光（0.16s） */
-    private spawnSwingArc(): void {
+    /** 枪口 / 弓臂火花：按挥出瞬间的武器朝向落在尖端，0.12s 扩散淡出 */
+    private spawnMuzzleFlash(delay: number): void {
+        const pose = this._weaponPose;
+        const container = this.node.parent;
+        if (!pose || !container || !container.isValid) return;
+
+        const dir = this._side === 'player' ? 1 : -1;
+        const scale = this._config!.scale;
+        const a = (pose.hitAngle * Math.PI) / 180;
+        const localX = pose.pivotX + pose.hitShift + Math.cos(a) * pose.tipLen;
+        const localY = pose.pivotY + Math.sin(a) * pose.tipLen;
+
+        const node = new Node('muzzle');
+        container.addChild(node);
+        node.addComponent(UITransform).setContentSize(32, 32);
+        node.setPosition(
+            this.node.position.x + localX * dir * scale,
+            this.node.position.y + localY * scale,
+            0,
+        );
+        node.angle = pose.hitAngle * dir;
+        drawMuzzleFlash(node.addComponent(Graphics), 11);
+
+        const op = node.addComponent(UIOpacity);
+        op.opacity = 0;
+        node.setScale(0.6, 0.6, 1);
+        tween(node)
+            .delay(delay)
+            .to(0.12, { scale: new Vec3(1.3, 1.3, 1) }, { easing: 'quadOut' })
+            .call(() => { if (node.isValid) node.destroy(); })
+            .start();
+        tween(op)
+            .delay(delay)
+            .to(0.03, { opacity: 255 })
+            .to(0.12, { opacity: 0 })
+            .start();
+    }
+
+    /** 近战挥砍弧：挥出瞬间在身前扫出一道白色弧形闪光（0.16s） */
+    private spawnSwingArc(delay: number): void {
         const container = this.node.parent;
         if (!container || !container.isValid) return;
         const dir = this._side === 'player' ? 1 : -1;
@@ -996,14 +1148,20 @@ export class Unit extends Component {
         g.strokeColor = colorFromHex('#93C5FD', 170);
         g.arc(0, 0, 24, -0.8, 0.8, false);
         g.stroke();
-        node.setScale(dir, 1, 1);
+        node.setScale(dir * 0.85, 0.85, 1);
 
         const op = node.addComponent(UIOpacity);
+        op.opacity = 0;
         tween(node)
+            .delay(delay)
             .to(0.16, { scale: new Vec3(dir * 1.25, 1.25, 1) }, { easing: 'quadOut' })
             .call(() => { if (node.isValid) node.destroy(); })
             .start();
-        tween(op).to(0.16, { opacity: 0 }).start();
+        tween(op)
+            .delay(delay)
+            .to(0.03, { opacity: 220 })
+            .to(0.13, { opacity: 0 })
+            .start();
     }
 
     public isDead(): boolean {
@@ -1032,8 +1190,12 @@ export class Unit extends Component {
             .to(0.25, { position: new Vec3(startX, endY, 0) }, { easing: 'quadOut' })
             .call(() => {
                 if (this._silhouette && this._silhouette.isValid && this._config) {
-                    drawUnitSilhouette(this._silhouette, this._config.icon ?? 'default',
-                        new Color(70, 75, 85, 255));
+                    const icon = this._config.icon ?? 'default';
+                    const ash = new Color(70, 75, 85, 255);
+                    drawUnitBody(this._silhouette, icon, ash);
+                    if (this._weapon && this._weapon.isValid) {
+                        drawUnitWeapon(this._weapon, icon, ash);
+                    }
                 }
             })
             .delay(0.15)
