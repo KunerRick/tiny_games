@@ -31,6 +31,8 @@ import {
     COLOR_BG,
     COLOR_HIGHLIGHT,
     COLOR_SLOT_STROKE,
+    COLOR_SLOT_DASH,
+    COLOR_SLOT_HINT,
     COLOR_TABLE,
     COLOR_TEXT_PRIMARY,
     COLOR_TEXT_SECONDARY,
@@ -40,11 +42,15 @@ import {
     HINT_COOLDOWN_SEC,
     HINT_SEC,
     MAX_RECYCLES,
+    REBOUND_SEC,
     SAVE_THROTTLE_SEC,
     STOCK_COL,
     TAP_SLOP,
     TOP_ROW_Y,
     WASTE_COL,
+    WIN_FX_SEC,
+    WIN_FX_STEP,
+    WIN_FX_SWEEP,
     colLeftX,
 } from './SolitaireConfig';
 import {
@@ -110,15 +116,29 @@ interface Settings {
     limitRedeal: boolean;
 }
 
+/** 某一抽牌模式下的最佳成绩（0 = 还没赢过） */
+interface ModeBest {
+    time: number;
+    moves: number;
+    score: number;
+}
+
 interface Stats {
     played: number;
     won: number;
-    bestTime: number;
-    bestMoves: number;
-    bestScore: number;
+    /**
+     * 按抽牌模式分开记最佳成绩，key 为 '1' / '3'。
+     * 抽 1 与抽 3 的难度差一个量级，共用一份最佳值等于抽 3 永远刷不出记录（计划 §2.1.8 G1）。
+     */
+    best: { [draw: string]: ModeBest };
     streak: number;
     bestStreak: number;
 }
+
+function emptyModeBest(): ModeBest {
+    return { time: 0, moves: 0, score: 0 };
+}
+
 
 @ccclass('SolitaireGame')
 export class SolitaireGame extends Component {
@@ -221,6 +241,10 @@ export class SolitaireGame extends Component {
     private _won = false;
     private _menuOpen = false;
 
+    /** 胜利流光进行中；结束后才弹 winPanel（计划 §2.1.8 G2） */
+    private _winPanelPending = false;
+    private _winFxElapsed = 0;
+
     private _hudTick = 0;
     private _lastScore = -1;
     private _lastMoves = -1;
@@ -241,6 +265,9 @@ export class SolitaireGame extends Component {
     private _hintKind: 'move' | 'draw' | null = null;
     private _hintPulseAt = 0;
     private _hintPhase = 0;
+
+    /** 空槽提示图形层（7 个 K + 4 个 A，运行时创建，只用于视觉引导） */
+    private _slotHintLayer: Node | null = null;
 
     /** 玩法说明面板：首次进入自动弹出，顶栏「?」可再次打开 */
     private _helpPanel: Node | null = null;
@@ -263,7 +290,13 @@ export class SolitaireGame extends Component {
     private _toastLabel: Label | null = null;
 
     private _settings: Settings = { drawCount: 1, autoAce: true, vibrate: true, limitRedeal: false };
-    private _stats: Stats = { played: 0, won: 0, bestTime: 0, bestMoves: 0, bestScore: 0, streak: 0, bestStreak: 0 };
+    private _stats: Stats = {
+        played: 0,
+        won: 0,
+        best: { '1': emptyModeBest(), '3': emptyModeBest() },
+        streak: 0,
+        bestStreak: 0,
+    };
 
     // ==================== 生命周期 ====================
 
@@ -317,6 +350,7 @@ export class SolitaireGame extends Component {
         }
 
         this._pulseHint(dt);
+        this._tickWinFx(dt);
         this._expireTimers();
     }
 
@@ -336,6 +370,7 @@ export class SolitaireGame extends Component {
         this._bg = null;
         this._fx = null;
         this._helpPanel = null;
+        this._slotHintLayer = null;
         this._toastBanner = null;
         this._toastLabel = null;
         this._stockBadge = null;
@@ -392,6 +427,7 @@ export class SolitaireGame extends Component {
         this._hintPile = -1;
         this._hintTo = -1;
         this._drag = null;
+        this._cancelWinFx();
         this._clearFx();
 
         if (this.winPanel) this.winPanel.active = false;
@@ -491,10 +527,12 @@ export class SolitaireGame extends Component {
         // 上排便位：牌堆 / 废牌堆 / 4 个收牌区
         this._strokeSlot(g, colLeftX(STOCK_COL), TOP_ROW_Y);
         this._strokeSlot(g, colLeftX(WASTE_COL), TOP_ROW_Y);
-        for (let f = 0; f < 4; f++) this._strokeSlot(g, colLeftX(FOUNDATION_COLS[f]), TOP_ROW_Y);
+        // 收牌区与空列用虚线：一眼分辨「这里可以放牌，但要放对点数」
+        for (let f = 0; f < 4; f++) this._strokeSlotDashed(g, colLeftX(FOUNDATION_COLS[f]), TOP_ROW_Y);
 
         // 7 列空位
-        for (let p = 0; p < 7; p++) this._strokeSlot(g, colLeftX(p), COLUMN_TOP_Y);
+        for (let p = 0; p < 7; p++) this._strokeSlotDashed(g, colLeftX(p), COLUMN_TOP_Y);
+        this._ensureSlotHints();
     }
 
     private _strokeSlot(g: Graphics, left: number, top: number): void {
@@ -509,6 +547,84 @@ export class SolitaireGame extends Component {
         g.strokeColor = this._hex(COLOR_SLOT_STROKE);
         g.roundRect(x, y, CARD_W, CARD_H, 10);
         g.stroke();
+    }
+
+    /**
+     * 虚线空槽（计划 §3.1.8 V2）：收牌区与空列只接受特定点数，
+     * 用虚线把它们和「牌堆 / 废牌堆」的实线槽区分开。
+     * Graphics 没有虚线 API，这里沿四条边手动画短段，圆角处留空。
+     */
+    private _strokeSlotDashed(g: Graphics, left: number, top: number): void {
+        const local = this._designToLocal(left, top);
+        const x = local.x - CARD_W / 2;
+        const y = local.y - CARD_H / 2;
+        g.fillColor = this._hexAlpha('#000000', 40);
+        g.roundRect(x, y, CARD_W, CARD_H, 10);
+        g.fill();
+
+        g.lineWidth = 2;
+        g.strokeColor = this._hex(COLOR_SLOT_DASH);
+        const r = 14;
+        const dash = 9;
+        const gap = 7;
+        const dashLine = (x1: number, y1: number, x2: number, y2: number): void => {
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const len = Math.sqrt(dx * dx + dy * dy);
+            if (len <= 0) return;
+            const ux = dx / len;
+            const uy = dy / len;
+            for (let d = 0; d < len; d += dash + gap) {
+                const e = Math.min(len, d + dash);
+                g.moveTo(x1 + ux * d, y1 + uy * d);
+                g.lineTo(x1 + ux * e, y1 + uy * e);
+            }
+        };
+        dashLine(x + r, y, x + CARD_W - r, y);
+        dashLine(x + r, y + CARD_H, x + CARD_W - r, y + CARD_H);
+        dashLine(x, y + r, x, y + CARD_H - r);
+        dashLine(x + CARD_W, y + r, x + CARD_W, y + CARD_H - r);
+        g.stroke();
+    }
+
+    /**
+     * 空槽提示图形（计划 §3.1.8 V2）：列槽放 K、收牌区放 A。
+     * 加在背景层，被上面的牌自然盖住，不需要随牌面显隐去维护。
+     */
+    private _ensureSlotHints(): void {
+        if (this._slotHintLayer || !this.bgLayer) return;
+        const layer = new Node('SlotHints');
+        layer.layer = this.bgLayer.layer;
+        this.bgLayer.addChild(layer);
+        this._slotHintLayer = layer;
+
+        for (let p = 0; p < 7; p++) this._makeSlotHint(colLeftX(p), COLUMN_TOP_Y, 'K');
+        for (let f = 0; f < FOUNDATION_COLS.length; f++) {
+            this._makeSlotHint(colLeftX(FOUNDATION_COLS[f]), TOP_ROW_Y, 'A');
+        }
+    }
+
+    private _makeSlotHint(left: number, top: number, text: string): void {
+        const parent = this._slotHintLayer;
+        if (!parent) return;
+        const local = this._designToLocal(left, top);
+        const node = new Node('SlotHint');
+        node.layer = parent.layer;
+        const ut = node.addComponent(UITransform);
+        ut.setContentSize(CARD_W, CARD_H);
+        ut.setAnchorPoint(0.5, 0.5);
+        node.setPosition(local.x, local.y, 0);
+
+        const label = node.addComponent(Label);
+        label.string = text;
+        label.fontSize = 40;
+        label.lineHeight = 44;
+        label.isBold = true;
+        label.color = this._hexAlpha(COLOR_SLOT_HINT, 42);
+        label.horizontalAlign = HorizontalTextAlignment.CENTER;
+        label.verticalAlign = VerticalTextAlignment.CENTER;
+
+        parent.addChild(node);
     }
 
     private _hex(color: string): Color {
@@ -687,9 +803,23 @@ export class SolitaireGame extends Component {
         if (moved) {
             this._vibrate();
             this._afterAction();
-        } else {
+        } else if (tapLike) {
             this._render(false);
-            if (tapLike) this._shakePile(drag.from);
+            this._shakePile(drag.from);
+        } else {
+            // 非法落点：别让牌组「啪」地瞬移回原位，飘回去才看得出是被拒绝了
+            this._reboundDrag(drag);
+        }
+    }
+
+    /** 非法落点回弹（计划 §3.1.8 V3）：状态没变，只是把牌组缓动回原布局 */
+    private _reboundDrag(drag: DragState): void {
+        for (const key of drag.keys) {
+            const view = this._views.get(key);
+            const place = this._layoutByKey.get(key);
+            if (!view || !place) continue;
+            const local = this._designToLocal(place.left, place.top);
+            view.moveTo(local.x, local.y, REBOUND_SEC);
         }
     }
 
@@ -806,7 +936,11 @@ export class SolitaireGame extends Component {
 
     private _onHintClicked(): void {
         const now = Date.now() / 1000;
-        if (now < this._hintCooldownUntil) return;
+        if (now < this._hintCooldownUntil) {
+            // 冷却期内不换建议、也不再弹 Toast：同一局面反复点只会把当前高亮续亮一点
+            if (this._hintKind !== null) this._hintUntil = Math.max(this._hintUntil, now + 1.2);
+            return;
+        }
         this._hintCooldownUntil = now + HINT_COOLDOWN_SEC;
 
         const hint = this._core.hint();
@@ -1200,6 +1334,7 @@ export class SolitaireGame extends Component {
         if (!this._core.undo()) return;
         this._won = false;
         this._running = true;
+        this._cancelWinFx();
         if (this.winPanel) this.winPanel.active = false;
         this._hintUntil = 0;
         this._clearFx();
@@ -1263,7 +1398,7 @@ export class SolitaireGame extends Component {
         if (this._won) return;
         this._won = true;
         this._running = false;
-        this._clearFx();
+        this._clearHint();
 
         this._stats.won += 1;
         this._stats.streak += 1;
@@ -1271,18 +1406,72 @@ export class SolitaireGame extends Component {
         const time = Math.floor(this._elapsed);
         const moves = this._core.state.moves;
         const score = this._core.state.score;
-        if (this._stats.bestTime === 0 || time < this._stats.bestTime) this._stats.bestTime = time;
-        if (this._stats.bestMoves === 0 || moves < this._stats.bestMoves) this._stats.bestMoves = moves;
-        if (score > this._stats.bestScore) this._stats.bestScore = score;
+        // G1：最佳成绩只跟同一种抽牌模式比，抽 1 的成绩不会压住抽 3
+        const best = this._modeBest(this._settings.drawCount);
+        if (best.time === 0 || time < best.time) best.time = time;
+        if (best.moves === 0 || moves < best.moves) best.moves = moves;
+        if (score > best.score) best.score = score;
         this._saveStats();
 
         if (this.winStatsLabel) {
             this.winStatsLabel.string =
                 `用时 ${this._formatTime(time)}   步数 ${moves}   分数 ${score}`;
         }
-        if (this.winPanel) this.winPanel.active = true;
+
+        // G2：先让 4 个收牌堆依次流光亮起，结束后（_tickWinFx）再弹结算面板
+        this._winPanelPending = true;
+        this._winFxElapsed = 0;
+        if (this._hintUntil <= 0) this._clearFx();
         this._vibrate();
         this._saveNow();
+    }
+
+    /**
+     * 胜利过渡：4 个收牌堆从左到右依次闪一圈光，约 1.4 s 后再弹结算面板。
+     * 直接在最后一手后弹面板太突兀，玩家来不及看清「牌全归位了」。
+     */
+    private _tickWinFx(dt: number): void {
+        if (!this._winPanelPending) return;
+        this._winFxElapsed += dt;
+        const t = this._winFxElapsed;
+        const g = this._fx;
+
+        if (g && t < WIN_FX_SEC) {
+            g.clear();
+            for (let f = 0; f < FOUNDATION_COLS.length; f++) {
+                const age = t - f * WIN_FX_STEP;
+                if (age <= 0) continue;
+                // 0 → 1 → 0 的呼吸包络，避免发光「啪」地出现又消失
+                const alpha = Math.sin(Math.min(1, age / WIN_FX_SWEEP) * Math.PI);
+                if (alpha <= 0.02) continue;
+                const local = this._designToLocal(colLeftX(FOUNDATION_COLS[f]), TOP_ROW_Y);
+                const x = local.x - CARD_W / 2;
+                const y = local.y - CARD_H / 2;
+                const pad = 4 + 10 * alpha;
+                g.fillColor = this._hexAlpha(COLOR_HIGHLIGHT, 80 * alpha);
+                g.roundRect(x, y, CARD_W, CARD_H, 10);
+                g.fill();
+                g.lineWidth = 3 + 5 * alpha;
+                g.strokeColor = this._hexAlpha(COLOR_HIGHLIGHT, 220 * alpha);
+                g.roundRect(x - pad, y - pad, CARD_W + pad * 2, CARD_H + pad * 2, 14);
+                g.stroke();
+            }
+        }
+
+        if (t >= WIN_FX_SEC) {
+            this._winPanelPending = false;
+            this._clearFx();
+            if (this.winPanel) this.winPanel.active = true;
+            this._vibrate();
+        }
+    }
+
+    /** 撤销 / 开新局时把未播完的胜利过渡收掉，否则面板会在新局里突然弹出来 */
+    private _cancelWinFx(): void {
+        if (!this._winPanelPending) return;
+        this._winPanelPending = false;
+        this._winFxElapsed = 0;
+        this._clearFx();
     }
 
     // ==================== HUD ====================
@@ -1379,11 +1568,15 @@ export class SolitaireGame extends Component {
         if (this.menuStatsLabel) {
             const s = this._stats;
             const rate = s.played > 0 ? Math.round((s.won / s.played) * 100) : 0;
+            const b1 = this._modeBest(1);
+            const b3 = this._modeBest(3);
+            const line = (b: ModeBest): string =>
+                `最快 ${b.time > 0 ? this._formatTime(b.time) : '—'} · 最少 ${b.moves > 0 ? b.moves : '—'} 步`;
             this.menuStatsLabel.string =
                 `胜局 ${s.won} / ${s.played}（${rate}%）\n` +
                 `最长连胜 ${s.bestStreak}\n` +
-                `最快 ${s.bestTime > 0 ? this._formatTime(s.bestTime) : '—'}\n` +
-                `最少步数 ${s.bestMoves > 0 ? s.bestMoves : '—'}`;
+                `抽 1：${line(b1)}\n` +
+                `抽 3：${line(b3)}`;
         }
     }
 
@@ -1501,18 +1694,52 @@ export class SolitaireGame extends Component {
         if (!raw) return;
         try {
             const parsed = JSON.parse(raw);
+            const best: { [draw: string]: ModeBest } = { '1': emptyModeBest(), '3': emptyModeBest() };
+            if (parsed.best && typeof parsed.best === 'object') {
+                for (const key of ['1', '3']) {
+                    const m = parsed.best[key];
+                    if (m && typeof m === 'object') {
+                        best[key] = {
+                            time: Number(m.time) || 0,
+                            moves: Number(m.moves) || 0,
+                            score: Number(m.score) || 0,
+                        };
+                    }
+                }
+            } else {
+                // 旧存档只有一份共用最佳值：归到玩家当前模式下，另一模式从 0 重新记
+                const legacyTime = Number(parsed.bestTime) || 0;
+                const legacyMoves = Number(parsed.bestMoves) || 0;
+                const legacyScore = Number(parsed.bestScore) || 0;
+                if (legacyTime > 0 || legacyMoves > 0 || legacyScore > 0) {
+                    best[String(this._settings.drawCount)] = {
+                        time: legacyTime,
+                        moves: legacyMoves,
+                        score: legacyScore,
+                    };
+                }
+            }
             this._stats = {
                 played: Number(parsed.played) || 0,
                 won: Number(parsed.won) || 0,
-                bestTime: Number(parsed.bestTime) || 0,
-                bestMoves: Number(parsed.bestMoves) || 0,
-                bestScore: Number(parsed.bestScore) || 0,
+                best,
                 streak: Number(parsed.streak) || 0,
                 bestStreak: Number(parsed.bestStreak) || 0,
             };
         } catch (err) {
             // 忽略
         }
+    }
+
+    /** 取某个抽牌模式的最佳记录（缺就补一份空记录） */
+    private _modeBest(draw: number): ModeBest {
+        const key = draw === 3 ? '3' : '1';
+        let rec = this._stats.best[key];
+        if (!rec) {
+            rec = emptyModeBest();
+            this._stats.best[key] = rec;
+        }
+        return rec;
     }
 
     private _saveStats(): void {

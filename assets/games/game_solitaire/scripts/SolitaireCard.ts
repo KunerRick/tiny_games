@@ -24,9 +24,9 @@ import { Card, Suit, isRed } from './SolitaireCore';
 const { ccclass } = _decorator;
 
 const CORNER_RADIUS = 10;
-const CENTER_SUIT_R = 23;
-const CORNER_SUIT_R = 7;
-const RANK_FONT_SIZE = 28;
+const CENTER_SUIT_R = 27;
+const CORNER_SUIT_R = 8;
+const RANK_FONT_SIZE = 30;
 const RANK_TOP_INSET = 6;
 const RANK_LEFT_INSET = 8;
 
@@ -91,7 +91,7 @@ export class SolitaireCard extends Component {
     setLifted(on: boolean): void {
         if (this._lifted === on) return;
         this._lifted = on;
-        this.node.setScale(on ? 1.04 : 1, on ? 1.04 : 1, 1);
+        this.node.setScale(on ? 1.05 : 1, on ? 1.05 : 1, 1);
         this._draw();
     }
 
@@ -233,8 +233,12 @@ export class SolitaireCard extends Component {
         g.clear();
 
         if (this._lifted) {
+            // 两层错位阴影：单层太薄，牌在深色台面上"浮"不起来（计划 §3.1.8 V3）
+            g.fillColor = hexColor('#000000', 45);
+            g.roundRect(left + 6, bottom - 8, CARD_W, CARD_H, CORNER_RADIUS);
+            g.fill();
             g.fillColor = hexColor('#000000', 70);
-            g.roundRect(left + 3, bottom - 3, CARD_W, CARD_H, CORNER_RADIUS);
+            g.roundRect(left + 3, bottom - 4, CARD_W, CARD_H, CORNER_RADIUS);
             g.fill();
         }
 
@@ -272,13 +276,25 @@ export class SolitaireCard extends Component {
         }
     }
 
-    /** 牌背：内描边 + 中央菱形徽记（不越出圆角，避免无裁剪时溢出） */
+    /**
+     * 牌背：内描边 + 两层同心框 + 中央菱形徽记（不越出圆角，避免无裁剪时溢出）。
+     * 纯色背在缩略图里和空槽分不清，加图案后「这是扣着的一张牌」一眼可读。
+     */
     private _drawBackPattern(g: Graphics): void {
         const inset = 10;
         g.lineWidth = 2;
         g.strokeColor = hexColor('#1F4A6D', 200);
         g.roundRect(-CARD_W / 2 + inset, -CARD_H / 2 + inset, CARD_W - inset * 2, CARD_H - inset * 2, CORNER_RADIUS - 4);
         g.stroke();
+
+        // 同心框：越靠里越淡，形成「布纹」而不是一整块蓝色
+        for (let i = 1; i <= 2; i++) {
+            const pad = inset + i * 9;
+            g.lineWidth = 1.5;
+            g.strokeColor = hexColor('#7FB4D8', 120 - i * 35);
+            g.roundRect(-CARD_W / 2 + pad, -CARD_H / 2 + pad, CARD_W - pad * 2, CARD_H - pad * 2, CORNER_RADIUS - 4);
+            g.stroke();
+        }
 
         g.fillColor = hexColor('#1F4A6D', 170);
         const cx = 0;

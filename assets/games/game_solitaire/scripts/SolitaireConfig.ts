@@ -84,8 +84,17 @@ export const REBOUND_SEC = 0.14;
 export const REBOUND_SHAKE_X = 6;
 /** 提示高亮持续时长（秒） */
 export const HINT_SEC = 4;
-/** 连续点击提示的最小间隔（秒） */
-export const HINT_COOLDOWN_SEC = 1.5;
+/** 连续点击提示的最小间隔（秒；计划 §2.1.8 G3：3 s 内重复点击只续亮当前提示） */
+export const HINT_COOLDOWN_SEC = 3;
+
+// ==================== 胜利过渡 ====================
+
+/** 4 个收牌堆依次亮起的间隔（秒） */
+export const WIN_FX_STEP = 0.18;
+/** 单个收牌堆「亮起 → 收暗」的时长（秒） */
+export const WIN_FX_SWEEP = 0.5;
+/** 胜利流光总时长，结束后才弹结算面板（秒） */
+export const WIN_FX_SEC = 1.4;
 
 // ==================== 牌堆重洗 ====================
 
@@ -128,8 +137,13 @@ export const COLOR_SLOT_STROKE = '#3C4A73';
 export const COLOR_CARD_FACE = '#FDFBF7';
 export const COLOR_CARD_EDGE = '#D8D2C4';
 export const COLOR_CARD_BACK = '#2C5F8A';
-export const COLOR_RED = '#D9483B';
-export const COLOR_BLACK = '#1F2937';
+/** 红 / 黑都往两端再拉一点，牌面在深色台面缩略图下也能一眼分花色 */
+export const COLOR_RED = '#E23A2E';
+export const COLOR_BLACK = '#111827';
 export const COLOR_TEXT_PRIMARY = '#F8FAFC';
 export const COLOR_TEXT_SECONDARY = '#94A3B8';
 export const COLOR_HIGHLIGHT = '#38BDF8';
+/** 空槽虚线（比描边更弱一档，避免和牌框抢视觉） */
+export const COLOR_SLOT_DASH = '#4B5B87';
+/** 空槽里的浅色提示图形（K / A） */
+export const COLOR_SLOT_HINT = '#FFFFFF';
