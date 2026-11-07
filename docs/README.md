@@ -14,6 +14,7 @@
 | 要验证真实交互（点击/流程/报错） | [`tech/browser-verify-cocos-preview.md`](./tech/browser-verify-cocos-preview.md) |
 | 写"等一会儿再做下一拍"的回合/动画链路 | [`tech/cocos-scheduler-and-tween-pitfalls.md`](./tech/cocos-scheduler-and-tween-pitfalls.md) |
 | 用 Graphics 画网格/细线却整片不显示 | [`tech/cocos-graphics-lines-pitfall.md`](./tech/cocos-graphics-lines-pitfall.md) |
+| 要给 Graphics 画的角色/部件加动作（挥砍、旋转、镜像） | [`tech/cocos-graphics-animation-layering.md`](./tech/cocos-graphics-animation-layering.md) |
 | 显示 emoji/符号图标（尤其要在微信上跑） | [`tech/wechat-text-rendering.md`](./tech/wechat-text-rendering.md) |
 | 构建微信小游戏、或开发者工具报编译错误 / 一打开就崩 | [`tech/wechat-build-pitfalls.md`](./tech/wechat-build-pitfalls.md) + `node tools/check-wechat-build.js`（9 项预检）+ `node tools/replay-wechat-bundle.js`（包装器复现器） |
 | 新增游戏或场景 | [`../AGENTS.md`](../AGENTS.md) 的 **项目结构 + 游戏注册** |
@@ -30,6 +31,7 @@
 - [`tech/mcp-scene-authoring-pitfalls.md`](./tech/mcp-scene-authoring-pitfalls.md) — MCP 操作场景/预制体：按钮绑定类型、Button 组件、渲染组件冲突
 - [`tech/cocos-scheduler-and-tween-pitfalls.md`](./tech/cocos-scheduler-and-tween-pitfalls.md) — 排期/补间陷阱：自排期回调被引擎静默丢弃、`update()` 泵 + 看门狗范式
 - [`tech/cocos-graphics-lines-pitfall.md`](./tech/cocos-graphics-lines-pitfall.md) — Graphics 画细线：`stroke()` 整片不渲染（路径/顶点都在）时改用 `rect() + fill()`
+- [`tech/cocos-graphics-animation-layering.md`](./tech/cocos-graphics-animation-layering.md) — Graphics 动态部件：无变换栈所以拆子节点、镜像挂在父节点、tick 求值代替补间、特效跟动作相位、闪白留描边
 - [`tech/wechat-text-rendering.md`](./tech/wechat-text-rendering.md) — 微信文本渲染：变体选择符 VS16 导致图标方框、图标单一来源规约
 - [`tech/wechat-build-pitfalls.md`](./tech/wechat-build-pitfalls.md) — 微信小游戏构建产物：开发者工具「编译报错」的时序根因、**「能编译但一打开就崩」的包装器/项目类型根因**、日志与缓存取证、预检脚本与声明纪律
 - [`tech/dev-toolchain-notes.md`](./tech/dev-toolchain-notes.md) — 文本编码（PowerShell 陷阱）、`tsc` 版本注意事项、提交前检查

@@ -343,6 +343,7 @@ node tools/sync-build-scenes.js --all            # 顺带修其它平台的构�
 ## 相关文档
 
 - [Cocos Creator 最佳实践（完整版）](./docs/cocos-best-practices.md)
+- [Graphics 动态部件（分层 / 镜像 / 程序化动作）](./docs/tech/cocos-graphics-animation-layering.md)
 - [文档索引与定位指南](./docs/README.md)
 - [排期/补间陷阱（自排期回调被丢弃 → 回合卡死）](./docs/tech/cocos-scheduler-and-tween-pitfalls.md)
 - [微信文本渲染（变体选择符 VS16 → 图标方框）](./docs/tech/wechat-text-rendering.md)
