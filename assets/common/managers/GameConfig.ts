@@ -28,6 +28,7 @@ export const GAME_LIST: GameConfig[] = [
     { id: 'tower_defense', name: '守卫塔楼', icon: 'default', sceneName: 'TowerDefense', description: '沿路径布塔，撑过 10 波进攻' },
     { id: 'pool', name: '台球', icon: 'default', sceneName: 'Pool', description: '拉杆瞄准，把球全部打进袋' },
     { id: 'wordle', name: '成语猜猜', icon: 'default', sceneName: 'Wordle', description: '六次机会猜出四字成语' },
+    { id: 'bubble', name: '泡泡龙', icon: 'default', sceneName: 'Bubble', description: '瞄准弹射同色泡泡，三连消除清空盘面' },
 ];
 
 export function getGameById(id: string): GameConfig | undefined {
