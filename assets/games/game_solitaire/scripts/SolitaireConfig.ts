@@ -130,20 +130,24 @@ export const SAVE_VERSION = 1;
 export const SAVE_THROTTLE_SEC = 0.5;
 
 // ==================== 配色 ====================
-
-export const COLOR_BG = '#0B1020';
-export const COLOR_TABLE = '#151E33';
-export const COLOR_SLOT_STROKE = '#3C4A73';
+//
+// 与 `common/ui/UITheme.ts` 的语义令牌对齐（本文件要在 Node 侧裸编译，不能 import cc，
+// 所以在这里抄一份十六进制值，改动时两边同步）：
+//   BG/文本/描边/主色 = COLOR.BG_SCENE / TEXT_* / PANEL_BORDER / PRIMARY
+// 牌面仍是奶油白——真实扑克牌该有的样子，深色主题只换周围的「桌面」。
+export const COLOR_BG = '#0B1220';
+export const COLOR_TABLE = '#111B2E';
+export const COLOR_SLOT_STROKE = '#3A4658';
 export const COLOR_CARD_FACE = '#FDFBF7';
 export const COLOR_CARD_EDGE = '#D8D2C4';
-export const COLOR_CARD_BACK = '#2C5F8A';
+export const COLOR_CARD_BACK = '#1D4ED8';
 /** 红 / 黑都往两端再拉一点，牌面在深色台面缩略图下也能一眼分花色 */
 export const COLOR_RED = '#E23A2E';
 export const COLOR_BLACK = '#111827';
-export const COLOR_TEXT_PRIMARY = '#F8FAFC';
-export const COLOR_TEXT_SECONDARY = '#94A3B8';
-export const COLOR_HIGHLIGHT = '#38BDF8';
+export const COLOR_TEXT_PRIMARY = '#F3F4F6';
+export const COLOR_TEXT_SECONDARY = '#9CA3AF';
+export const COLOR_HIGHLIGHT = '#3B82F6';
 /** 空槽虚线（比描边更弱一档，避免和牌框抢视觉） */
-export const COLOR_SLOT_DASH = '#4B5B87';
+export const COLOR_SLOT_DASH = '#2A3342';
 /** 空槽里的浅色提示图形（K / A） */
 export const COLOR_SLOT_HINT = '#FFFFFF';

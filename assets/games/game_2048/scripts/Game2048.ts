@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, director, Button, Label, Color } from 'cc';
+import { _decorator, Component, Node, director, Button, Graphics, Label, Color, Sprite, UITransform } from 'cc';
 import { SceneManager } from '../../../common/managers/SceneManager';
 import { StorageManager as CommonStorageManager } from '../../../common/managers/StorageManager';
 import { GridSize, TileData, Direction, DEFAULT_GRID_SIZE } from './GameConfig';
@@ -8,7 +8,13 @@ import { InputHandler } from './InputHandler';
 import { GameGrid } from './GameGrid';
 import { SettingsPanel } from './SettingsPanel';
 import { GameOverPanel } from './GameOverPanel';
-import { createLabel, designPos } from '../../../common/ui/GameUIKit';
+import {
+    createLabel, designPos, drawBackSkin, drawFrame, ensureChild, ensureScaleButton,
+} from '../../../common/ui/GameUIKit';
+import {
+    COLOR, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_TITLE,
+    applyFontAndColor, hex,
+} from '../../../common/ui/UITheme';
 
 const { ccclass, property } = _decorator;
 
@@ -78,30 +84,210 @@ export class Game2048 extends Component {
         const hint = createLabel(this.node, '滑动屏幕合并相同数字 · 凑出 2048', 20, {
             width: 680,
             height: 28,
-            color: '#64748B',
+            color: COLOR.TEXT_DISABLED,
         });
         hint.node.setPosition(designPos(360, 940));
 
+        this._applyUnifiedTheme();
+    }
+
+    // ------------------------------------------------------------------
+    // 统一视觉：场景里的节点是早期手摆的米色皮肤（#8F7A66 / #CDC1B4 / #F8F5F0），
+    // 和全站深色科技风不是一套。这里在运行时统一改色改框，不动场景文件：
+    //   • 背景 → COLOR.BG_SCENE
+    //   • 返回 → 与 BackButton / createBackButton 同款「圆盘 + ‹」
+    //   • 卡片 / 面板 → SURFACE + PANEL_BORDER 细描边
+    //   • 主按钮 → PRIMARY，次按钮 → SURFACE
+    // 幂等：drawFrame / drawBackSkin 都按子节点名字复用。
+    // ------------------------------------------------------------------
+
+    /** 按 `a/b/c` 路径取子节点（找不到返回 null，不抛） */
+    private pick(path: string): Node | null {
+        let cur: Node | null = this.node;
+        for (const part of path.split('/')) {
+            if (!cur) return null;
+            cur = cur.getChildByName(part);
+        }
+        return cur;
+    }
+
+    private _applyUnifiedTheme(): void {
+        // 画布底色
+        const bg = this.pick('bg')?.getComponent(Sprite);
+        if (bg) bg.color = hex(COLOR.BG_SCENE);
+
+        // 顶部标题
+        const title = this.pick('gameContainer/header/title')?.getComponent(Label);
+        if (title) applyFontAndColor(title, FONT_TITLE, COLOR.TEXT_PRIMARY);
+
+        // 返回：统一成圆形 ‹（场景里是 100×40 的圆角条）
+        const backNode = this.pick('gameContainer/header/backButton');
+        if (backNode) {
+            const ui = backNode.getComponent(UITransform);
+            if (ui) ui.setContentSize(64, 64);
+            const sp = backNode.getComponent(Sprite);
+            if (sp) sp.enabled = false;
+            for (const child of backNode.children) {
+                if (child?.isValid && child.getComponent(Label)) child.active = false;
+            }
+            drawBackSkin(backNode, 64);
+            ensureScaleButton(backNode);
+        }
+
+        // 设置按钮
+        const settingsNode = this.pick('gameContainer/header/settingsButton');
+        if (settingsNode) this.skinActionButton(settingsNode, 'secondary', 100, 44);
+
+        // 分数卡片
+        for (const name of ['gameContainer/scorePanel/scoreCard', 'gameContainer/scorePanel/bestScoreCard']) {
+            const card = this.pick(name);
+            if (!card) continue;
+            const ui = card.getComponent(UITransform);
+            const sp = card.getComponent(Sprite);
+            if (sp) sp.enabled = false;
+            if (!ui) continue;
+            drawFrame(card, {
+                width: ui.width, height: ui.height, radius: 12,
+                fill: COLOR.SURFACE, fillAlpha: 255,
+                border: COLOR.PANEL_BORDER, borderAlpha: 210, borderWidth: 2,
+            });
+        }
         this._polishScoreCards();
+
+        // 底部主按钮
+        const newGame = this.pick('gameContainer/footer/newGameButton');
+        if (newGame) this.skinActionButton(newGame, 'primary', 240, 64);
+
+        this._themePanels();
+    }
+
+    /** 设置 / 结算两个弹窗：遮罩、面板底、文字、滑条、按钮 */
+    private _themePanels(): void {
+        for (const panel of ['settingsPanel', 'gameOverPanel']) {
+            const overlay = this.pick(`${panel}/bg`)?.getComponent(Sprite);
+            if (overlay) overlay.color = new Color(0, 0, 0, 190);
+
+            const content = this.pick(`${panel}/content`);
+            if (content) {
+                const ui = content.getComponent(UITransform);
+                const sp = content.getComponent(Sprite);
+                if (sp) sp.enabled = false;
+                if (ui) {
+                    drawFrame(content, {
+                        width: ui.width, height: ui.height, radius: 20,
+                        fill: COLOR.PANEL_BG, fillAlpha: 255,
+                        border: COLOR.PRIMARY, borderAlpha: 95, borderWidth: 2,
+                        accent: COLOR.PRIMARY, accentAlpha: 220,
+                    });
+                }
+            }
+        }
+
+        // ---- 设置面板 ----
+        this.paintLabel('settingsPanel/content/titleLabel', FONT_TITLE, COLOR.TEXT_PRIMARY);
+        this.paintLabel('settingsPanel/content/gridSizeLabel', FONT_BODY, COLOR.TEXT_SECONDARY);
+        this.paintLabel('settingsPanel/content/gridSizeValue', FONT_DISPLAY, COLOR.PRIMARY);
+        this.paintLabel('settingsPanel/content/sliderContainer/minLabel', FONT_CAPTION, COLOR.TEXT_SECONDARY);
+        this.paintLabel('settingsPanel/content/sliderContainer/maxLabel', FONT_CAPTION, COLOR.TEXT_SECONDARY);
+
+        const track = this.pick('settingsPanel/content/sliderContainer/slider')?.getComponent(Sprite);
+        if (track) track.color = hex(COLOR.SLOT_EMPTY_BG);
+        this.skinSliderHandle();
+
+        const cancel = this.pick('settingsPanel/content/buttonContainer/cancelButton');
+        if (cancel) this.skinActionButton(cancel, 'secondary', 200, 64);
+        const start = this.pick('settingsPanel/content/buttonContainer/startButton');
+        if (start) this.skinActionButton(start, 'primary', 200, 64);
+
+        // ---- 结算面板 ----
+        this.paintLabel('gameOverPanel/content/titleLabel', FONT_DISPLAY, COLOR.PRIMARY);
+        this.paintLabel('gameOverPanel/content/scoreLabel', FONT_BODY, COLOR.TEXT_SECONDARY);
+        this.paintLabel('gameOverPanel/content/bestScoreLabel', FONT_BODY, COLOR.TEXT_SECONDARY);
+        this.paintLabel('gameOverPanel/content/scoreValue', FONT_DISPLAY, COLOR.TEXT_PRIMARY);
+        this.paintLabel('gameOverPanel/content/bestScoreValue', FONT_DISPLAY, COLOR.TEXT_PRIMARY);
+
+        const restart = this.pick('gameOverPanel/content/restartButton');
+        if (restart) this.skinActionButton(restart, 'primary', 400, 88);
+        const backToLobby = this.pick('gameOverPanel/content/backButton');
+        if (backToLobby) this.skinActionButton(backToLobby, 'secondary', 240, 60);
     }
 
     /**
-     * 分数卡片的字色是 #776E65，配深棕卡面几乎看不清（对比度约 1.1:1）。
-     * 预制体不便改，这里在运行时统一提亮，并把标题号稍微放大。
+     * 滑条手柄：场景里是 40×40 的方形贴图，放在深色滑轨上像个没对齐的色块。
+     * 换成同尺寸圆点（主色填充 + 白色细环），与全站的圆形控件语言一致。
+     */
+    private skinSliderHandle(): void {
+        const node = this.pick('settingsPanel/content/sliderContainer/slider/Handle');
+        if (!node) return;
+        const sp = node.getComponent(Sprite);
+        if (sp) sp.enabled = false;
+        const ui = node.getComponent(UITransform);
+        const d = ui ? Math.min(ui.width, ui.height) : 40;
+        const dot = ensureChild(node, '__handleDot', d, d);
+        dot.setSiblingIndex(node.children.length - 1);
+        const g = dot.getComponent(Graphics) ?? dot.addComponent(Graphics);
+        g.clear();
+        g.fillColor = hex(COLOR.PRIMARY);
+        g.circle(0, 0, d / 2 - 2);
+        g.fill();
+        g.strokeColor = hex('#FFFFFF', 220);
+        g.lineWidth = 2;
+        g.circle(0, 0, d / 2 - 2);
+        g.stroke();
+    }
+
+    private paintLabel(path: string, token: typeof FONT_BODY, colorHex: string): void {
+        const label = this.pick(path)?.getComponent(Label);
+        if (label) applyFontAndColor(label, token, colorHex);
+    }
+
+    /**
+     * 把场景按钮换成令牌皮肤：隐藏九宫格 Sprite，改画圆角底板，过渡改 SCALE。
+     * 保留原有 Button 组件与挂在节点上的 TOUCH_END 监听，点击行为不变。
+     */
+    private skinActionButton(node: Node, variant: 'primary' | 'secondary', w: number, h: number): void {
+        const ui = node.getComponent(UITransform);
+        if (!ui) return;
+        ui.setContentSize(w, h);
+        const sp = node.getComponent(Sprite);
+        if (sp) sp.enabled = false;
+
+        drawFrame(node, {
+            width: w, height: h, radius: Math.min(16, h / 2),
+            fill: variant === 'primary' ? COLOR.PRIMARY : COLOR.SURFACE,
+            fillAlpha: 255,
+            border: variant === 'primary' ? COLOR.PRIMARY_DARK : COLOR.PANEL_BORDER,
+            borderAlpha: 220, borderWidth: 2,
+        });
+        ensureScaleButton(node);
+
+        for (const child of node.children) {
+            const label = child?.getComponent(Label);
+            if (label) applyFontAndColor(label, FONT_BODY, '#FFFFFF');
+        }
+    }
+
+    /**
+     * 分数卡片的字号/字色统一走令牌。
+     * 原先字色 #776E65 配奶油卡面几乎看不清（对比度约 1.1:1）。
      */
     private _polishScoreCards(): void {
-        const light = new Color(245, 239, 230, 255);
         const titles = ['scoreTitle', 'bestScoreTitle'];
         const values = ['scoreLabel', 'bestScoreLabel'];
         const stack: Node[] = [this.node];
         while (stack.length > 0) {
             const node = stack.pop()!;
             if (!node || !node.isValid) continue;
-            if (titles.indexOf(node.name) >= 0 || values.indexOf(node.name) >= 0) {
+            const isTitle = titles.indexOf(node.name) >= 0;
+            const isValue = values.indexOf(node.name) >= 0;
+            if (isTitle || isValue) {
                 const label = node.getComponent(Label);
                 if (label) {
-                    label.color = light;
-                    label.fontSize = titles.indexOf(node.name) >= 0 ? 20 : 36;
+                    applyFontAndColor(
+                        label,
+                        isTitle ? FONT_BODY : FONT_TITLE,
+                        isTitle ? COLOR.TEXT_SECONDARY : COLOR.TEXT_PRIMARY,
+                    );
                 }
             }
             for (const child of node.children) stack.push(child);

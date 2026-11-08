@@ -4,6 +4,7 @@ import {
     Node,
     Button,
     Label,
+    Sprite,
     EventTouch,
     Vec2,
     Vec3,
@@ -20,9 +21,18 @@ import {
     createLabel,
     createNode,
     designPos,
+    drawDivider,
     drawRoundRect,
+    ensureChild,
     toColor,
 } from '../../../common/ui/GameUIKit';
+import {
+    COLOR, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_TITLE,
+    applyFontAndColor, hex,
+} from '../../../common/ui/UITheme';
+import {
+    findPath, paintLabel, skinBackButton, skinButton, skinCard, skinOverlay,
+} from '../../../common/ui/SceneSkin';
 
 const { ccclass, property } = _decorator;
 
@@ -108,6 +118,58 @@ export class SnakeGame extends Component {
         this._initGame();
         this._bindButtons();
         this._initJoystick();
+        this._applyUnifiedTheme();
+    }
+
+    // ------------------------------------------------------------------
+    // 统一视觉：场景里的顶栏 / 结算面板是早期手摆的（纯黑顶栏、#16213E 卡片、
+    // #00D9FF 按钮），与全站深色科技风不同一套。运行时换皮，不动场景文件：
+    //   • 游戏区 → COLOR.BG_SCENE；顶栏 → SURFACE + 底部分割线
+    //   • 返回 → 与 BackButton 同款「圆盘 + ‹」
+    //   • 结算面板 → PANEL_BG + 主色描边 / 强调条；主按钮 PRIMARY，次按钮 SURFACE
+    // 全部幂等，节点缺失时静默跳过。
+    // ------------------------------------------------------------------
+
+    private _applyUnifiedTheme(): void {
+        // 游戏区底色
+        const area = findPath(this.node, 'gameArea')?.getComponent(Sprite);
+        if (area) area.color = hex(COLOR.BG_SCENE);
+
+        // 顶栏：原纯黑 → 面板灰 + 全宽分割线
+        const topBar = findPath(this.node, 'UI_Overlay/topBar');
+        const barBg = topBar?.getChildByName('bg')?.getComponent(Sprite);
+        if (barBg) barBg.color = hex(COLOR.SURFACE, 240);
+        if (topBar) {
+            const ui = topBar.getComponent(UITransform);
+            const w = ui ? ui.width : 720;
+            const h = ui ? ui.height : 80;
+            const line = ensureChild(topBar, '__topDivider', w, 4);
+            line.setPosition(0, -h / 2 + 1, 0);
+            drawDivider(line, w, COLOR.PANEL_BORDER, 235);
+        }
+
+        skinBackButton(this.node, 'UI_Overlay/topBar/backBtn', 60);
+
+        paintLabel(this.node, 'UI_Overlay/topBar/scorePanel/currentScore', FONT_TITLE, COLOR.TEXT_PRIMARY);
+        paintLabel(this.node, 'UI_Overlay/topBar/scorePanel/bestScore', FONT_BODY, COLOR.TEXT_SECONDARY);
+
+        // 连击：琥珀色，跳出来的时候像「奖励」而不是普通文本
+        if (this.comboLabel) applyFontAndColor(this.comboLabel, FONT_BODY, COLOR.WARNING);
+
+        // 结算面板
+        skinOverlay(this.node, 'UI_Overlay/gameOverPanel/bg', 190);
+        // 卡片自带一条旧强调条（accentBarGfx）：drawFrame 会按同名复用并重画，不必另处理
+        skinCard(this.node, 'UI_Overlay/gameOverPanel/card', {
+            fill: COLOR.PANEL_BG, border: COLOR.PRIMARY, borderAlpha: 95,
+            radius: 20, accent: COLOR.PRIMARY,
+        });
+
+        paintLabel(this.node, 'UI_Overlay/gameOverPanel/card/title', FONT_TITLE, COLOR.PRIMARY);
+        paintLabel(this.node, 'UI_Overlay/gameOverPanel/card/scoreDisplay/finalScore', FONT_DISPLAY, COLOR.TEXT_PRIMARY);
+        paintLabel(this.node, 'UI_Overlay/gameOverPanel/card/scoreDisplay/bestScore', FONT_CAPTION, COLOR.TEXT_SECONDARY);
+        paintLabel(this.node, 'UI_Overlay/gameOverPanel/card/scoreDisplay/scoreDesc', FONT_CAPTION, COLOR.TEXT_SECONDARY);
+        skinButton(this.node, 'UI_Overlay/gameOverPanel/card/restartBtn', 'primary', 280, 72);
+        skinButton(this.node, 'UI_Overlay/gameOverPanel/card/backBtn', 'secondary', 200, 56);
     }
 
     private _bindButtons(): void {
@@ -258,13 +320,17 @@ export class SnakeGame extends Component {
         const hint = createNode('StartHint', this.node, 380, 84);
         hint.setPosition(designPos(360, 500));
         const g = hint.addComponent(Graphics);
-        drawRoundRect(g, 380, 84, 42, toColor('#0A1120', 235), toColor('#38BDF8'), 2);
-        createLabel(hint, '滑动屏幕开始', 28, {
+        drawRoundRect(
+            g, 380, 84, 42,
+            toColor(COLOR.SLOT_EMPTY_BG, 240), toColor(COLOR.INFO), 2,
+        );
+        const hintText = createLabel(hint, '滑动屏幕开始', FONT_TITLE.fontSize, {
             width: 350,
             height: 76,
-            color: '#E2F5FF',
+            color: COLOR.TEXT_PRIMARY,
             bold: true,
         });
+        applyFontAndColor(hintText, FONT_TITLE, COLOR.TEXT_PRIMARY);
 
         const op = hint.addComponent(UIOpacity);
         op.opacity = 255;
@@ -409,6 +475,12 @@ export class SnakeGame extends Component {
 
     private _onSnakeDeath(): void {
         this._isPlaying = false;
+
+        // 进场提示是后加的节点，层级高于结算面板；没滑过就死（理论上不会）时也要收掉
+        if (this._startHint && this._startHint.isValid) {
+            this._startHint.destroy();
+        }
+        this._startHint = null;
 
         if (this.gameOverPanel) {
             this.gameOverPanel.active = true;

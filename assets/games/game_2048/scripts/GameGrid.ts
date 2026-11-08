@@ -1,12 +1,15 @@
-import { _decorator, Component, Node, Prefab, instantiate, Size, Graphics, Color } from 'cc';
+import { _decorator, Component, Node, Prefab, instantiate, Size, Graphics } from 'cc';
 import { TileData, GridSize, MoveResult, Direction, generateTileId } from './GameConfig';
 import { Tile } from './Tile';
+import { COLOR, hex } from '../../../common/ui/UITheme';
 
 const { ccclass, property } = _decorator;
 
-const GRID_BG_COLOR = new Color(187, 173, 160);
-const CELL_BG_COLOR = new Color(205, 193, 180);
-const CELL_CORNER_RADIUS = 6;
+// 与全站统一：凹坑底 + 稍亮一档的格子 + 描边，深色底上才有层次
+const GRID_BG_COLOR = hex(COLOR.SLOT_EMPTY_BG);
+const GRID_BORDER_COLOR = hex(COLOR.PANEL_BORDER);
+const CELL_BG_COLOR = hex(COLOR.PANEL_BG);
+const CELL_CORNER_RADIUS = 8;
 
 @ccclass('GameGrid')
 export class GameGrid extends Component {
@@ -54,6 +57,12 @@ export class GameGrid extends Component {
         g.fillColor = GRID_BG_COLOR;
         g.roundRect(bgX, bgY, bgW, bgH, r);
         g.fill();
+
+        // 外描边：深底 + 深底相邻时（相机清屏色也是深蓝）没有边界，加一圈细线才分得清棋盘
+        g.strokeColor = GRID_BORDER_COLOR;
+        g.lineWidth = 2;
+        g.roundRect(bgX, bgY, bgW, bgH, r);
+        g.stroke();
 
         g.fillColor = CELL_BG_COLOR;
         for (let row = 0; row < n; row++) {

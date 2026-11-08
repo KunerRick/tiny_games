@@ -166,14 +166,16 @@ export function getUpgradeDef(id: UpgradeId): UpgradeDef {
 // ==================== 表现色板 ====================
 
 export const COLORS = {
-    bg: 0x151e33,
-    grid: 0x1e2a44,
-    brickHp3: 0x4ea8ff,
-    brickHp2: 0x7c6cff,
-    brickHp1: 0xffb547,
-    bomb: 0xff6b6b,
+    // 与 `common/ui/UITheme.ts` 的语义令牌对齐（本文件要在 Node 侧裸编译，不 import cc）：
+    // 底色 = BG_SCENE，砖块按血量取 PRIMARY / PASSIVE / WARNING，炸弹 = DANGER
+    bg: 0x0b1220,
+    grid: 0x18202f,
+    brickHp3: 0x3b82f6,
+    brickHp2: 0xa855f7,
+    brickHp1: 0xf59e0b,
+    bomb: 0xef4444,
     ball: 0xffffff,
-    paddle: 0x6ee7ff,
+    paddle: 0x38bdf8,
     laser: 0xff6bd6,
     text: 0xffffff,
 };

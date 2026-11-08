@@ -482,39 +482,40 @@ export const WEAK_GLOW_R = 40;
 export const BOSS_PHASE_FLASH_SEC = 0.5;
 
 export const COLORS = {
-    bg: 0x151e33,
-    bgLine: 0x1e2a44,
-    road: 0x1a2440,
-    roadEdge: 0x2a3a5c,
-    ally: 0x6ee7ff,
-    allyDark: 0x2b9fbf,
-    enemy: 0xff6b6b,
-    enemyDark: 0x9b2b2b,
-    boss: 0xff4d6d,
+    // 与 `common/ui/UITheme.ts` 的语义令牌对齐（本文件需 Node 侧裸编译，不 import cc）
+    bg: 0x0b1220,
+    bgLine: 0x18202f,
+    road: 0x172033,
+    roadEdge: 0x2a3342,
+    ally: 0x38bdf8,
+    allyDark: 0x1d4ed8,
+    enemy: 0xef4444,
+    enemyDark: 0x991b1b,
+    boss: 0xe11d48,
     text: 0xffffff,
-    textDim: 0x8ea3c8,
+    textDim: 0x9ca3af,
     /** 门：变多=绿、变少=红（配合门上的方向箭头，不看数字也能读出趋势） */
     mul: 0x22c55e,
     div: 0xef4444,
-    add: 0x6ee7b7,
-    sub: 0xffa94d,
+    add: 0x4ade80,
+    sub: 0xf59e0b,
     gateInk: 0xffffff,
-    success: 0x6ee7b7,
-    danger: 0xff6b6b,
+    success: 0x22c55e,
+    danger: 0xef4444,
     /** 集火 / 完美连击 / 弱点的高亮色 */
-    gold: 0xffd166,
-    goldDark: 0xb08a2e,
+    gold: 0xf59e0b,
+    goldDark: 0xb45309,
     /** 人数徽标 / 状态小胶囊 */
-    badge: 0x0f172a,
+    badge: 0x0b1220,
     /** 升级卡 */
-    card: 0x1b2a4a,
-    cardEdge: 0x4ea8ff,
+    card: 0x263041,
+    cardEdge: 0x3b82f6,
     cardInk: 0xffffff,
-    cardDesc: 0x9fb6dc,
+    cardDesc: 0x9ca3af,
 };
 
 /** Boss 三阶段的配色（越长越危险） */
-export const BOSS_PHASE_COLORS = [0xff4d6d, 0xff7a3d, 0xff2d55];
+export const BOSS_PHASE_COLORS = [0xef4444, 0xf97316, 0xdc2626];
 
 /** 门操作对应的色板 */
 export function gateOpColor(kind: GateOpKind): number {

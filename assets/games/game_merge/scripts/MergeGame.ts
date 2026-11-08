@@ -23,6 +23,12 @@ import {
 import type { MergeEvent } from './MergeCore';
 import { StorageManager } from '../../../common/managers/StorageManager';
 import { SceneManager } from '../../../common/managers/SceneManager';
+import {
+    COLOR, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_TITLE,
+} from '../../../common/ui/UITheme';
+import {
+    addDialogBackdrop, findPath, paintLabel, skinButton, skinOverlay,
+} from '../../../common/ui/SceneSkin';
 import { applySceneClearColor, createLabel, UI } from '../../../common/ui/GameUIKit';
 
 const { ccclass, property } = _decorator;
@@ -302,6 +308,57 @@ export class MergeGame extends Component {
         this.startNewRun();
         this._hidePanel(this.pausePanel);
         this._hidePanel(this.gameOverPanel);
+        this._applyUnifiedTheme();
+    }
+
+    // ------------------------------------------------------------------
+    // 统一视觉：HUD 与两个弹窗是场景手摆的（#96a6be 标题、#344e70 按钮、
+    // #9ee2fe 面板标签），按全站令牌换皮。逐帧绘制层保持 Graphics 自绘。
+    // ------------------------------------------------------------------
+    private _applyUnifiedTheme(): void {
+        const root = this.node;
+
+        paintLabel(root, 'HudTop/ScoreTitle', FONT_BODY, COLOR.TEXT_SECONDARY);
+        paintLabel(root, 'HudTop/BestTitle', FONT_BODY, COLOR.TEXT_SECONDARY);
+        paintLabel(root, 'HudTop/NextTitle', FONT_BODY, COLOR.TEXT_SECONDARY);
+        paintLabel(root, 'HudTop/ScoreLabel', FONT_DISPLAY, COLOR.TEXT_PRIMARY);
+        paintLabel(root, 'HudTop/BestLabel', FONT_DISPLAY, COLOR.TEXT_PRIMARY);
+        paintLabel(root, 'HudTop/ComboLabel', FONT_BODY, COLOR.WARNING);
+        paintLabel(root, 'HudTop/GuideLabel', FONT_CAPTION, COLOR.TEXT_DISABLED);
+
+        skinButton(root, 'PauseButton', 'secondary', 88, 56);
+
+        // 暂停
+        this._themeDialog('PausePanel', [
+            ['ResumeButton', 'primary', 320, 80],
+            ['RestartButton', 'secondary', 320, 80],
+            ['LobbyButton', 'secondary', 320, 80],
+        ]);
+        paintLabel(root, 'PausePanel/Title', FONT_DISPLAY, COLOR.PRIMARY);
+
+        // 结算
+        this._themeDialog('GameOverPanel', [
+            ['RestartButton', 'primary', 320, 80],
+            ['LobbyButton', 'secondary', 320, 80],
+        ]);
+        paintLabel(root, 'GameOverPanel/Title', FONT_DISPLAY, COLOR.PRIMARY);
+        paintLabel(root, 'GameOverPanel/ScoreTitle', FONT_CAPTION, COLOR.TEXT_SECONDARY);
+        paintLabel(root, 'GameOverPanel/BestTitle', FONT_CAPTION, COLOR.TEXT_SECONDARY);
+        paintLabel(root, 'GameOverPanel/GameOverScoreLabel', FONT_DISPLAY, COLOR.TEXT_PRIMARY);
+        paintLabel(root, 'GameOverPanel/GameOverBestLabel', FONT_TITLE, COLOR.TEXT_PRIMARY);
+    }
+
+    /** 弹窗通用换皮：遮罩 + 按包围盒补卡片底 + 按钮组 */
+    private _themeDialog(
+        name: string,
+        buttons: [string, 'primary' | 'secondary' | 'danger' | 'success', number, number][],
+    ): void {
+        const root = this.node;
+        skinOverlay(root, `${name}/Dim`, 205);
+        addDialogBackdrop(findPath(root, name), { accent: COLOR.PRIMARY });
+        for (const [btn, variant, w, h] of buttons) {
+            skinButton(root, `${name}/${btn}`, variant, w, h);
+        }
     }
 
     onDestroy(): void {

@@ -46,6 +46,10 @@ import {
 import type { GateEvent, GatePair, Enemy } from './GateCore';
 import { StorageManager } from '../../../common/managers/StorageManager';
 import { SceneManager } from '../../../common/managers/SceneManager';
+import { COLOR, FONT_BODY, FONT_CAPTION, FONT_DISPLAY } from '../../../common/ui/UITheme';
+import {
+    addDialogBackdrop, findPath, paintLabel, skinButton, skinOverlay,
+} from '../../../common/ui/SceneSkin';
 
 const { ccclass, property } = _decorator;
 
@@ -230,6 +234,40 @@ export class GateGame extends Component {
         this._createLabelPools();
         this._bindStatic();
         this.startNewRun();
+        this._applyUnifiedTheme();
+    }
+
+    // ------------------------------------------------------------------
+    // 统一视觉：HUD 与两个弹窗按全站令牌换皮（场景是早期手摆的 #8ea3c8 标题、
+    // #2a3a5c 按钮、无底板的弹窗）。玩法层 Graphics 自绘色已由 GateConfig 对齐。
+    // ------------------------------------------------------------------
+    private _applyUnifiedTheme(): void {
+        const root = this.node;
+
+        paintLabel(root, 'HudTop/CountTitle', FONT_BODY, COLOR.TEXT_SECONDARY);
+        paintLabel(root, 'HudTop/CountLabel', FONT_DISPLAY, COLOR.TEXT_PRIMARY);
+        paintLabel(root, 'HudTop/DistanceLabel', FONT_BODY, COLOR.TEXT_SECONDARY);
+        paintLabel(root, 'HudTop/HintLabel', FONT_CAPTION, COLOR.TEXT_DISABLED);
+
+        skinButton(root, 'PauseButton', 'secondary', 88, 56);
+
+        // 暂停
+        skinOverlay(root, 'PausePanel/Dim', 205);
+        addDialogBackdrop(findPath(root, 'PausePanel'), { accent: COLOR.PRIMARY });
+        paintLabel(root, 'PausePanel/Title', FONT_DISPLAY, COLOR.PRIMARY);
+        skinButton(root, 'PausePanel/ResumeButton', 'primary', 320, 80);
+        skinButton(root, 'PausePanel/RestartButton', 'secondary', 320, 80);
+        skinButton(root, 'PausePanel/LobbyButton', 'secondary', 320, 80);
+
+        // 结算（标题颜色由运行时按胜/负写入 COLORS.success / danger，不在这里覆盖）
+        skinOverlay(root, 'ResultPanel/Dim', 205);
+        addDialogBackdrop(findPath(root, 'ResultPanel'), { accent: COLOR.PRIMARY });
+        paintLabel(root, 'ResultPanel/ResultTitle', FONT_DISPLAY, COLOR.TEXT_PRIMARY);
+        paintLabel(root, 'ResultPanel/ScoreValue', FONT_DISPLAY, COLOR.TEXT_PRIMARY);
+        paintLabel(root, 'ResultPanel/CountLine', FONT_CAPTION, COLOR.TEXT_SECONDARY);
+        paintLabel(root, 'ResultPanel/BestValue', FONT_CAPTION, COLOR.TEXT_SECONDARY);
+        skinButton(root, 'ResultPanel/RestartButton', 'primary', 320, 80);
+        skinButton(root, 'ResultPanel/LobbyButton', 'secondary', 320, 80);
     }
 
     onDestroy(): void {

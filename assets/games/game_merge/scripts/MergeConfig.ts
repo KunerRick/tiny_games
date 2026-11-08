@@ -144,11 +144,13 @@ export const FRUIT_COLORS: number[] = [
 ];
 
 export const COLORS = {
-    bg: 0x151e33,
-    grid: 0x1e2a44,
-    wall: 0x2a3a5c,
-    dropGuide: 0x6ee7ff,
-    warn: 0xff6b6b,
+    // 与 `common/ui/UITheme.ts` 对齐（本文件需 Node 侧裸编译，不 import cc）：
+    // 底色 = BG_SCENE，墙体 = SLOT_EMPTY_BORDER，引导线 = PRIMARY 系青，警戒 = DANGER
+    bg: 0x0b1220,
+    grid: 0x18202f,
+    wall: 0x2a3342,
+    dropGuide: 0x38bdf8,
+    warn: 0xef4444,
     text: 0xffffff,
 };
 

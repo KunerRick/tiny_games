@@ -74,6 +74,13 @@ import {
 } from './SolitaireLayout';
 import { SolitaireCard } from './SolitaireCard';
 import { StorageManager } from '../../../common/managers/StorageManager';
+import { drawDivider, ensureChild } from '../../../common/ui/GameUIKit';
+import {
+    COLOR, FONT_CAPTION, FONT_DISPLAY, FONT_TITLE,
+} from '../../../common/ui/UITheme';
+import {
+    paintLabel, skinBackButton, skinButton, skinCard, skinOverlay,
+} from '../../../common/ui/SceneSkin';
 
 const { ccclass, property } = _decorator;
 
@@ -321,8 +328,70 @@ export class SolitaireGame extends Component {
         this._refreshMenuLabels();
 
         this._running = !this._won;
+        this._applyUnifiedTheme();
         game.on(Game.EVENT_HIDE, this._onAppHide, this);
         game.on(Game.EVENT_SHOW, this._onAppShow, this);
+    }
+
+    // ------------------------------------------------------------------
+    // 统一视觉：顶栏 / 底栏 / 两个弹窗都是场景里手摆的（#2c5f8a 主按钮、
+    // #334155 次按钮、#1e293b 面板），按全站令牌换皮：
+    //   • 返回 → 圆盘 ‹（直径 56，比 48 更好点）
+    //   • 主按钮 PRIMARY / 次按钮 SURFACE / 收牌 SUCCESS
+    //   • 面板 PANEL_BG + 主色强调条，胜利面板用绿色
+    // 全部幂等，节点缺失静默跳过。牌桌与牌面本身不在此改。
+    // ------------------------------------------------------------------
+    private _applyUnifiedTheme(): void {
+        const root = this.boardNode;
+        if (!root) return;
+
+        const topBar = root.getChildByName('TopBar');
+        if (topBar) {
+            const ui = topBar.getComponent(UITransform);
+            const w = ui ? ui.width : DESIGN_W;
+            const h = ui ? ui.height : 96;
+            const line = ensureChild(topBar, '__topDivider', w, 4);
+            line.setPosition(0, -h / 2 + 1, 0);
+            drawDivider(line, w, COLOR.PANEL_BORDER, 235);
+        }
+
+        skinBackButton(root, 'TopBar/BackButton', 56);
+        paintLabel(root, 'TopBar/TitleLabel', FONT_TITLE, COLOR.TEXT_PRIMARY);
+        paintLabel(root, 'TopBar/ModeLabel', FONT_CAPTION, COLOR.TEXT_SECONDARY);
+        paintLabel(root, 'TopBar/RedealLabel', FONT_CAPTION, COLOR.TEXT_SECONDARY);
+        paintLabel(root, 'TopBar/ScoreLabel', FONT_CAPTION, COLOR.TEXT_PRIMARY);
+        paintLabel(root, 'TopBar/TimeLabel', FONT_CAPTION, COLOR.TEXT_PRIMARY);
+        paintLabel(root, 'TopBar/MovesLabel', FONT_CAPTION, COLOR.TEXT_PRIMARY);
+
+        // 底栏：新局是主操作，收牌是「一键完成」，其余为次级操作
+        skinButton(root, 'BottomBar/NewGameBtn', 'primary', 104, 64);
+        skinButton(root, 'BottomBar/UndoBtn', 'secondary', 104, 64);
+        skinButton(root, 'BottomBar/HintBtn', 'secondary', 104, 64);
+        skinButton(root, 'BottomBar/MenuBtn', 'secondary', 104, 64);
+        skinButton(root, 'BottomBar/CollectBtn', 'success', 104, 64);
+
+        // 胜利面板
+        skinOverlay(root, 'WinPanel/Bg', 200);
+        skinCard(root, 'WinPanel/Panel', {
+            fill: COLOR.PANEL_BG, border: COLOR.SUCCESS, borderAlpha: 110,
+            radius: 22, accent: COLOR.SUCCESS,
+        });
+        paintLabel(root, 'WinPanel/Panel/TitleLabel', FONT_DISPLAY, COLOR.SUCCESS);
+        paintLabel(root, 'WinPanel/Panel/StatsLabel', FONT_CAPTION, COLOR.TEXT_SECONDARY);
+        skinButton(root, 'WinPanel/Panel/WinNewBtn', 'primary', 220, 64);
+
+        // 设置面板
+        skinOverlay(root, 'MenuPanel/Bg', 200);
+        skinCard(root, 'MenuPanel/Panel', {
+            fill: COLOR.PANEL_BG, border: COLOR.PRIMARY, borderAlpha: 95,
+            radius: 22, accent: COLOR.PRIMARY,
+        });
+        paintLabel(root, 'MenuPanel/Panel/TitleLabel', FONT_TITLE, COLOR.TEXT_PRIMARY);
+        paintLabel(root, 'MenuPanel/Panel/StatsLabel', FONT_CAPTION, COLOR.TEXT_SECONDARY);
+        for (const name of ['DrawModeBtn', 'VibrateBtn', 'AutoAceBtn', 'RedealBtn']) {
+            skinButton(root, `MenuPanel/Panel/${name}`, 'secondary', 440, 64);
+        }
+        skinButton(root, 'MenuPanel/Panel/CloseBtn', 'secondary', 220, 64);
     }
 
     start(): void {

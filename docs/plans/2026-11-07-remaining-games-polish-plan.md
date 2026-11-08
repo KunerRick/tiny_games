@@ -1,7 +1,7 @@
 # 剩余八款游戏优化计划（玩法收敛 → 美术优化 → 效果复核）
 
 - 日期：2026-11-07
-- 状态：**待开工**（本文件是后续开工的参照基线）
+- 状态：**已完成（8/8 签收）**；小小先锋 2026-11-08 完成 G1–G4 / V2–V4 与第二轮「视觉统一改造」（V5–V8，含技能特效层），仅 V1（布阵面板整体重排）留待后续
 - 范围：本轮全量体验优化（commit `4fea448`）**未实质改动**的 8 款游戏 —— 战争进化、小小先锋、午夜幸存者、砖块远征、合合大作战、数值冲刺、方块坠落、纸牌接龙
 - 不在范围：已按 GameUIKit 统一过 UI/交互的 10 款（2048、贪吃蛇、扫雷、数独、成语填字、五子棋、小店日记、缤纷消除、守卫塔楼、台球），除非复核中发现回归
 - 相关文档：[`docs/cocos-best-practices.md`](../cocos-best-practices.md)、[`docs/tech/browser-verify-cocos-preview.md`](../tech/browser-verify-cocos-preview.md)、[`docs/tech/cocos-scheduler-and-tween-pitfalls.md`](../tech/cocos-scheduler-and-tween-pitfalls.md)、[`docs/plans/2026-11-05-game-catalog-and-roadmap.md`](./2026-11-05-game-catalog-and-roadmap.md)
@@ -298,6 +298,101 @@ Unit
 | G4 | 死锁兜底 | 技能无合法目标、AI 无合法动作、场上仅剩治疗单位等情况必须有超时/跳过；补看门狗 | 100 回合自动对局不卡死 |
 | G5 | 数值通关验证 | 用 P0 四职业各跑一局完整路线，记录每关耗时与战损；校准敌人成长曲线 | 4 局中至少 3 局可通关；单局 ≤ 25 分钟 |
 
+##### 小小先锋 本轮范围（2026-11-08）
+
+- **现状问题**：布阵阶段每个单位都要「点兵牌 → 点格子」两步，新一局进战斗点击量大；战斗只有 1x，
+  敌方回合逐步演出偏慢；战败直接清档回职业选择页，前面几关的成长全部作废；单位是「色块 + emoji」，
+  四个职业关掉颜色后难以区分，Boss 与普通敌人只差血量。
+- **本轮只做**：
+  - 玩法：G1 布阵面板新增「**推荐站位**」与「**沿用上局**」两个按钮（规则式：战士前排 row1、
+    弓/法后排 row0、牧师后排中列；无存档阵型时「沿用上局」禁用并写明原因）；G2 战斗 HUD 增加
+    **1x / 2x** 倍速切换（只缩放 AI 拍点时钟与战斗演出时长，不改回合规则）；G3 战败面板新增
+    「**重试本关（保留 30% 金币）**」主按钮 +「结束本局」次按钮，重试保留路线/技能/等级进度；
+    G4 复核现有 AI 看门狗（敌方回合断链 2s 强制推进）与自动跳过，不足处补用例。
+  - 美术：V2 四职业 **Graphics 剪影**（战士=盾、弓手=三角、法师=菱形、牧师=十字，厚描边 +
+    职业色，单位底色压暗让剪影成为主体）；V3 Boss 体型放大（≈1.5× 单位、约 1.2 格）+ 红色预警环，
+    精英加尖刺环；V4 路线图节点按类型固定配色（战斗=蓝、精英=橙、商店=金、休息=绿、事件=紫、Boss=红）。
+- **明确不做**：新玩法模式、重做布阵面板整体布局（V1，需 MCP 改场景，留到单独一轮）、音频、
+  贴图美术、跨局养成。
+- **目标单局时长**：15–25 分钟（普通路线）。
+- **验收用例**：
+  1. 从职业选择进入第一场战斗，只点「推荐站位 → 确认布阵」即可开打（≤ 2 次点击）；
+  2. 布阵阶段可见「沿用上局」；上一局有阵型时点击可一次复原，无阵型时禁用且有说明；
+  3. 战斗中点 2x：敌方回合推进明显加快，回合数/伤害/胜负判定不变，再点回 1x 正常；
+  4. 战败面板出现「重试本关」：点击后回到同一节点重打，金币变为战败前的 30%，等级/技能/路线进度保留；
+     点「结束本局」走原结算流程；
+  5. 四职业在灰度截图（或去色观察）下仍可按剪影区分；Boss 明显大于普通敌人且带预警环；
+  6. 路线图六类节点不看文字也有区分色；
+  7. `tsc --noEmit` 通过；浏览器完整一局 console 0 error。
+- **实测记录（2026-11-08，浏览器预览 `127.0.0.1:7456`，iPhone 14 Pro 视口）**：
+  - G1：「推荐站位」一次点击完成 3 人布阵（战士 row1/col2，弓手 row0/col2，法师 row0/col1）；
+    首次战斗「沿用上局」显示为禁用态「无上局阵型」，确认布阵存档后重开战斗变为可用，
+    点击后阵型逐格复原（与上一局完全一致）。从职业选择到开打实际为「推荐站位 → 确认布阵」2 次点击。
+  - G2：点 2x 后按钮文案变 `2x`、`battleSpeed=2`、`UnitController.animationSpeed=2`；
+    3 个单位依次结束回合进入 `enemy_turn`，敌方回合在 2x 下正常推进回 `player_turn` 且回合数 +1，
+    未触发 2s 看门狗强制推进（`_aiWatchdogAt=0`）。
+  - G3：战败面板显示「重试本关（保留 30% 金币）」「结束本局」两个按钮，行动栏（结束回合/攻击/等待）
+    已一并收起；金币 100 → 点重试后为 30，回到同一节点布阵阶段，等级/路线/技能未变；
+    「结束本局」进入原「游戏结束」结算面板。战败荣誉改为**本局真正结束时结算一次**
+    （原来每次战败即发，重试会变成反复送死刷荣誉）：实测连输两次 → 重试 → 结束本局，荣誉只 +1。
+  - V2/V3：四职业剪影可辨（战士盾 / 弓手三角 / 法师菱形；牧师十字未单独截图）；
+    Boss「战争领主」为 1.55× 橙色六边形并带呼吸预警环（`BossWarningRing` opacity 170→255→90 循环，实测 239）；
+    精英敌人为 1.18× + 红色尖刺环，与普通红色圆形敌人区分明显。
+  - V4：路线图六类节点按类型着色（战斗蓝/精英橙/商店绿/休息青/事件紫/Boss 红），
+    可达=满色+呼吸，未解锁=同色系压暗，已完成=灰。
+  - 编译：`tsc --noEmit` 通过；浏览器 console 0 error / 2 warning。
+  - 截图：`docs/assets/2026-11-08-tinyvanguard-{deploy,defeat,route,boss,elite}.png`。
+  - 未覆盖：战败由注入 `onBattleEnd({victory:false})` 触发，未自然打到团灭；V1 布阵面板整体重排
+    本轮明确不做（需要 MCP 改场景节点位置）。
+- **结论**：本轮范围（G1–G4、V2–V4）已完成并通过浏览器验证，可签收；V1 留待单独一轮。
+
+##### 小小先锋 视觉统一改造（2026-11-08，第二轮：统一视觉语言 + 技能特效）
+
+- **背景问题**：上一轮只补了玩法与单位剪影，界面本身仍是原型级 —— 各面板各画各的
+  （职业选择用实心色块、商店用平铺 Sprite、结算面板几乎是空盒子），职业特色只靠一个
+  小纹章和数字体现，技能释放则只有一次闪白。用户要求「所有页面统一、突出职业特色、发挥审美重做」，
+  并「技能效果也要美化，现在都是原型」。
+- **本轮只做**：
+  - **V5 统一视觉层**：新增 `scripts/ui/GameUIKit.ts` 作为唯一绘制源 ——
+    `drawFrame`（圆角底板 + 分类色描边 + 顶部强调条 + 高光）、`stylePanel`（给场景面板套外框 /
+    四角括线，幂等）、`drawEmblem`（矢量纹章：战士盾 / 弓手弓 / 法师法杖 / 牧师十字 / 精英尖刺 /
+    Boss 王冠等 12 种）、`drawDivider`、`makeMedallion`、`makeChip`、`makeDot`、`makeStatBar`、
+    `drawRouteGlyph`。所有页面改走同一套令牌（`config/Theme.ts` 的字号 / 语义色 / 间距）。
+  - **V6 页面重做**：职业选择（2×2 卡，职业纹章 + 三条属性条与原始数值 + 选中金边/勾选角标 +
+    队伍槽位）、路线图（节点纹章 + 图例 + 进度条）、商店（标题 → 金币 → 队伍行 → 明码技能卡 →
+    反馈行，运行时重排并收紧底板）、圣泉（三张纹章卡 + 跳过）、事件（自排布 + 紫色选项）、
+    升级三选一（分类色顶条 + 图标圆盘 + 分类徽章）、天赋（9 行状态灯列表 + 可购/已满态）、
+    胜利 / 失败结算（大标题 + 分隔线 + 统计行 + 主次按钮）。
+  - **V7 战斗棋盘与单位**：棋盘铺 1px 分割线 + 更亮的半场中线 + 外框 + 四角括线；
+    半场遮罩压暗；单位阵营光晕改多维渐变圆（原来是复用单位方形贴图的 Sprite，敌人身后是一块红方块）。
+  - **V8 技能特效层**：新增 `scripts/battle/SkillFx.ts`，按技能/效果类型分派 8 类矢量特效
+    （斩击 / 火焰 / 冰霜 / 闪电 / 神圣治疗 / 护盾 / 范围爆炸 / 奥术），统一走「起手 → 命中 → 消散」
+    三段补间 + 屏幕轻微震动，替换原先的闪白占位。
+- **顺带修掉的表现层缺陷**（都是"看着像美术没做好、实际是几何/字号算错"）：
+  1. `Graphics.roundRectPath()` 的圆角矩形是**以节点原点为中心**绘制的，`anchorPoint` 不改变
+     Graphics 输出 → 属性条的填充整条左移半个槽宽（压在标签下面）。改为显式
+     `roundRect(0, -h/2, w, h, r)` + 节点贴左边缘。
+  2. 属性条 / 商店队伍行 / 卡片说明原本用 `FONT_TINY`（13px），720 设计宽缩到手机只剩 ~7px，
+     中文糊成一片；统一提到 `FONT_CAPTION`（16px）。
+  3. 商店面板 632×936、子节点还停在旧坐标 → 底部半屏空白；改为运行时按内容顺排，
+     再由 `fitPanelBackground` 收紧底板并回中。
+  4. 升级面板固定 760 高，卡片下沿到「跳过」之间空出 156px（≈85 CSS px）；改为按内容重排 +
+     高度收紧到 524，卡片说明从 2 行放宽到 3 行（原先「对 3×3 范围造成 12 点火焰伤害，并附加燃烧」
+     第 3 行被 `CLAMP` 裁掉）。
+  5. 胜利面板三行统计的场景文本是 emoji（`💰 / ⏱ / ⚔`），预览里退化成单色小符号（⚔ 显示成「×」）；
+     改为纯文字 + 行首彩色状态灯（金 / 青 / 红）。另修正左键标签锚点为 `(0, 0.5)`、
+     `setPosition` 设的是左边缘 —— 按中心算会让文字与状态灯空出 80+px。
+  6. 布阵阶段行动栏只隐藏了三个按钮、底板仍在，棋盘下方留一块空条；
+     `setActionButtonsVisible()` 一并收起外框。
+- **验收（2026-11-08，浏览器预览 `127.0.0.1:7456`，iPhone 14 Pro 视口）**：
+  - 职业选择、路线图、商店、圣泉、事件、升级、天赋、战斗、胜利、失败十个页面逐页截图核对，
+    视觉语言一致（同一套圆角/描边/顶条/纹章/字号），无孤立风格页面；
+  - 技能特效逐类触发并截图（火焰 / 范围 / 连锁），落点对齐棋盘格、无残留节点；
+  - `tsc --noEmit` 通过；浏览器 console 全程 0 error / 2 warning（引擎 `systemEvent` 弃用告警，与本轮无关）。
+- **截图**：`docs/assets/2026-11-08-tinyvanguard-ui-{class-select,route,battle,shop,rest,event,upgrade,talent,victory,defeat}.png`。
+- **未覆盖**：V1 布阵面板整体重排（仍需 MCP 改场景节点，留待单独一轮）；技能特效只覆盖战斗内单体/范围技能，
+  升级卡与天赋的图标仍用 emoji（已过 `stripVariationSelectors`，微信端不再出方框）。
+
 #### 2.1.3 午夜幸存者（P1）
 
 **目标单局时长：8 分钟（Boss 7:30）。**
@@ -487,6 +582,42 @@ Unit
 - 色彩抽样与 `GameUIKit.UI` 一致（允许阵营色例外）；
 - 同屏对象最多的场景（幸存者 300 敌人、战争进化 40 单位、砖块满屏特效）实测 ≥ 50 FPS（桌面预览基准，微信真机另记）。
 
+### 3.3 收口记录：公共皮肤层 + 逐款回填（2026-11-08）
+
+原则 A1 原先写的是「所有新绘制元素从 `GameUIKit.UI` 取色」，实际落地时发现两套 GameUIKit（`common/ui` 与 TinyVanguard 私有）并存，且部分游戏只用裸 hex。本轮先合并工具，再统一到语义令牌。
+
+#### 3.3.1 公共层
+
+| 文件 | 内容 |
+|------|------|
+| `assets/common/ui/GameUIKit.ts` | 合并后的唯一实现：基础层（createNode / createLabel / createButton / createBackButton / toast / toColor / drawRoundRect / clearChildren / stopTweens）+ 表现层（drawFrame / stylePanel / makeMedallion / makeStatBar / makeChip / makeDot / drawEmblem / drawRouteGlyph / drawDivider / drawCornerBrackets / ensureChild / ensureGfx / ensureScaleButton / makeLabel / styleButton / drawRing / drawBackSkin） |
+| `assets/common/ui/UITheme.ts` | 语义令牌：`COLOR`（BG_SCENE `#0B1220`、SURFACE `#263041`、PANEL_BG `#1E2430`、PANEL_BORDER `#3A4658`、PRIMARY / SUCCESS / DANGER / WARNING / INFO / PASSIVE、TEXT_PRIMARY / SECONDARY / DISABLED、SLOT_EMPTY_BG / BORDER）+ `FONT_DISPLAY 40/56`、`FONT_TITLE 28/40`、`FONT_BODY 20/28`、`FONT_CAPTION 16/22`、`FONT_TINY 13/18`、`FONT_ICON 32/40` |
+| `assets/common/ui/SceneSkin.ts`（**本轮新增**） | **幂等**的场景回填工具：`findPath(root, 'a/b/c')`、`paintLabel`、`skinButton(root, path, variant, w?, h?)`、`skinBackButton(root, path, d)`、`skinCard(root, path, skin)`、`skinOverlay(root, path, alpha)`、`addDialogBackdrop(panel, skin, opts)`。找不到节点时静默返回 null，可在任何游戏 `onLoad()` 末尾无脑调用 |
+| `assets/common/components/BackButton.ts` | 场景自带返回按钮统一皮肤（`drawBackSkin`）；已有自绘 Graphics 的节点（方块坠落）自动跳过 |
+
+`SkinVariant` 固定四档：`primary`（PRIMARY 填充）/ `secondary`（SURFACE 填充 + PANEL_BORDER 描边）/ `danger` / `success`。所有回填方法都先把原 Sprite 关掉再自绘，因此不受场景里旧贴图影响。
+
+> 约束：`SolitaireConfig.ts` / `BrickConfig.ts` / `MergeConfig.ts` / `GateConfig.ts` 会被 `tools/verify-*-core.js` 在 Node 里裸编译，**不能 import `cc` 依赖的 UITheme**。这些文件里保留 hex 字面量，并加注释指明对应令牌。
+
+#### 3.3.2 逐款回填
+
+每款统一配方：深色 `BG_SCENE` 场地 → 顶栏 `SURFACE 240` + 1px `PANEL_BORDER` 分隔线 → 56–72px 圆形 `‹` 返回 → 全量 `FONT_*` 令牌 → 弹窗 = `skinOverlay(205)` + 卡片（`PANEL_BG` 填充、`PRIMARY` 描边/强调条、圆角 20–22）→ 主操作 `primary`、次操作 `secondary`。
+
+| 游戏 | 本轮改动 | 验证 |
+|------|----------|------|
+| 2048 | 早前一轮已按令牌回填（顶栏 / 数字牌面 / 结算面板） | 预览截图 |
+| 贪吃蛇 | 场地底色、顶栏 + 分隔线、返回键、分数/最高分/连击字号、结算卡（PRIMARY 强调条）+ 双按钮；顺带修掉「历史最佳」金色与 56px 大分数残留、以及进场提示盖住结算面板的层级问题 | 截图（主界面 + 结算） |
+| 纸牌接龙 | `SolitaireConfig` 色板对齐令牌；顶栏/底栏字号；底栏 5 按钮（NewGame primary、Undo/Hint/Menu secondary、Collect success，均 104×64）；胜利/菜单面板换卡 + 按钮 | 截图；`verify-solitaire-core.js` 93 项全通过 |
+| 砖块远征 | `BrickConfig` 色板重排（1/2/3 血 = 琥珀/紫/蓝，炸弹红，挡板天蓝）；HUD 字号；暂停/升级/结算三个面板统一卡背与按钮；新增 `_themeDialog()` 收敛三处重复 | 截图（主界面 + 暂停 + 升级） |
+| 合合大作战 | `MergeConfig` 底色/网格/墙/引导线/警戒线对齐令牌；HUD 字号；暂停/结算面板 + 按钮 | 截图（主界面 + 结算） |
+| 数值冲刺 | `GateConfig` 色板对齐（含门色：变多绿 / 变少红 / −N 琥珀；`add` 提亮到 `#4ADE80` 与 `mul` 区分）；HUD 字号；暂停/结算面板 + 按钮 | 截图（主界面 + 结算） |
+| 战争进化 | 复核：`GameConfig.ts` 已是统一 hex 色板，`UIController` 用 `UI.*` 旧令牌但深色控件一致 → **不改** | 截图 |
+| 台球 | 复核：已是 primary/secondary 按钮 + 深色底 + 返回圆盘 → **不改** | 截图 |
+| 方块坠落 | 复核：自有皮肤且与令牌同族；底部空档是触屏用的 `ButtonLayer`（桌面手势下 `active=false`），**不是遗漏** → 不改 | 截图 |
+| 午夜幸存者 | 复核：深色 HUD 一致 → 不改 | 截图 |
+
+全部改动后 `npx tsc --noEmit` 通过，逐款 `project_refresh_assets` + 重载预览，页面 `pageerror` 为 0。
+
 ---
 
 ## 4. 阶段三：游戏效果复核
@@ -543,9 +674,11 @@ node tools/replay-wechat-bundle.js
 | 合合大作战 | ✅ | ✅ | ✅ | 本轮（`worktree-merge-polish`） | G1 高等级物理补两条无头回归（8–11 级大果堆 20 s 不穿透、连续投放 100 次后静置 30 s 无重叠/无出界），`verify-merge-core` **14/14**，物理参数经实测无需再调；G2 加 `MergeCore.gameOverProgress` 只读 getter + 越线倒计时条 / 四角红晕 / 警戒线加速呼吸（**判负时点仍 2 s**）；G3 合并飘字实测 `连击 7  ×3` 停在 HUD 下方不压分数/最大果实/预览。V1–V4 全部落地：11 级剪影（圆→椭圆→圆角方→六边形→水滴→心形→五瓣→五角星→八瓣→十二角星）+ 三层着色 + 9 级外发光；投放预览（半透明待落果 + 落点虚线 + 地面阴影 + 预测落点）；合并残影缩散 / 冲击环 / 碎屑 / 飘字 / 震动；墙体内描边 + 80 px 刻度。`tsc` 5.8.2 通过；浏览器（Cocos CLI 构建 web-desktop）真实鼠标 28 次投放 → 连击 → 判负 → 再来一局 → 暂停 → 返回大厅全通，console **0 error**。截图 `docs/assets/2026-11-08-merge-*.png`，详见设计文档 §6 |
 | 纸牌接龙 | ✅ | ✅ | ✅ | 本轮（`worktree-survivor-polish`） | G1 统计按抽牌模式拆开（`best['1']` / `best['3']`，旧存档一次性迁移到当前模式），设置面板拆两行显示；G2 胜利加 **1.4 s 过渡**：4 个收牌堆依次流光后才弹结算面板，撤销/新局会 `_cancelWinFx()` 收起；G3 提示冷却 1.5 s → **3 s**，冷却期内再点只续亮当前高亮、不刷 Toast。V1 花色 23→27 / 点数 28→30 / 红黑拉开 / 牌背双层同心框；V2 收牌区与空列改**虚线框** + 浅色 K/A 提示字形（背景层 11 个 Label）；V3 双层阴影 + 1.05 缩放 + **非法落点缓动回弹**；V4 即 G2 的流光。`verify-solitaire-core` **93/93**、`tsc` 通过；浏览器（Cocos CLI 构建 web-desktop）实测：两种模式最佳成绩互不覆盖、胜利延迟 1.6 s 弹面板、真实拖拽非法落点 300 ms 回位且 `moves` 不变、合法拖拽 `moves 0→1 / score 30`、撤销 / 再来一局 / 设置统计行全部正常，console **0 error**。截图 `docs/assets/2026-11-08-solitaire-{play,hint,win}.png`，详见设计文档 §12 |
 | 方块坠落 | ✅ | ✅ | ✅ | 本轮（`worktree-survivor-polish`） | G1 双输入回归补一条**游戏侧兜底**：`setControlMode()` 显式 `_setSoftDrop(false)`，不再依赖输入层 `disable()` 补发 `SoftDropEnd`（探针实测原逻辑切换后 10/10 仍残留软降）；G2 `setHold(type, available)` 不可用时降到 0.34 不透明度（换块后自动恢复），一次 Hold → 同块再 Hold 被忽略 → 硬降换块 → 交换四次调用全部符合预期；G3 结算补等级（`消行 27 · 等级 3`，未传参数时向后兼容）。V1 配色复核**不改色**：7 色对棋盘底对比度 4.19–10.84:1（全部 > 3:1），灰度靠形状区分；V2 消行闪光改**中间向两侧扫过**（逐帧重绘，同刻中线已褪回本色、最右侧仍纯白）+ **硬降拖影**（独立 `TrailLayer` 插在方块层下，0.14 s 淡出）+ **四行消除横幅**（金色 52 pt，0.9 s，懒创建）；V3 沿用 `TetrisSkin` 圆角卡片。`verify-tetris-core` **31/31**、`tsc` 通过；浏览器（Cocos CLI 构建 web-desktop）实测：10 次模式切换无鬼影、临时槽置灰/恢复、结算面板等级、真实鼠标点击左移/旋转/硬降/按住软降与真实拖拽横移/下拖、手势 3 局 + 按键 3 局共六局重启全部干净，console **0 error / 0 warning**。截图 `docs/assets/2026-11-08-tetris-{hold,trail,banner,gameover}.png`，详见设计文档 §13 |
-| 小小先锋 | ⬜ | ⬜ | ⬜ | — | 单独立项，最后做 |
+| 小小先锋 | ✅ G1–G4 | ✅ V2–V4 | ✅ | 2026-11-08 | V1（布阵面板整体重排，需 MCP 改场景）留待单独一轮 |
 
 状态取值：⬜ 未开始 / 🟨 进行中 / ✅ 已签收 / ⏸ 暂缓（需写原因）。
+
+> **2026-11-08 跨游戏统一回填**：新增 `common/ui/SceneSkin.ts` 公共皮肤层，并把 2048 / 贪吃蛇 / 纸牌接龙 / 砖块远征 / 合合大作战 / 数值冲刺 的场地、顶栏、返回键、字号与弹窗按同一配方收口；战争进化 / 台球 / 方块坠落 / 午夜幸存者 复核后判定已一致，未改。细节见 §3.3。
 
 ---
 

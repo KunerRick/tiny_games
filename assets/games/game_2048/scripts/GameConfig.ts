@@ -37,24 +37,30 @@ export interface MoveResult {
 }
 
 // 颜色方案
+//
+// 原先照抄了官方的米色系（#EEE4DA / #F2B179 …），放在全站深色科技风里像一张贴图：
+// 棋盘是浅棕、面板是奶油白，和别的游戏完全不是一套。改成「深底 + 冷色阶梯」：
+//   2/4 低阶 → 石板灰；8~64 → 蓝到青；128~256 → 青绿到绿；512+ → 琥珀到橙红。
+// 阶梯本身就是进度提示：颜色越暖，数值越高。
 export const TILE_COLORS: Record<number, { bg: Color; text: Color }> = {
-    2: { bg: new Color(238, 228, 218), text: new Color(119, 110, 101) },
-    4: { bg: new Color(237, 224, 200), text: new Color(119, 110, 101) },
-    8: { bg: new Color(242, 177, 121), text: new Color(249, 246, 242) },
-    16: { bg: new Color(245, 149, 99), text: new Color(249, 246, 242) },
-    32: { bg: new Color(246, 124, 95), text: new Color(249, 246, 242) },
-    64: { bg: new Color(246, 94, 59), text: new Color(249, 246, 242) },
-    128: { bg: new Color(237, 207, 114), text: new Color(249, 246, 242) },
-    256: { bg: new Color(237, 204, 97), text: new Color(249, 246, 242) },
-    512: { bg: new Color(237, 200, 80), text: new Color(249, 246, 242) },
-    1024: { bg: new Color(237, 197, 63), text: new Color(249, 246, 242) },
-    2048: { bg: new Color(237, 194, 46), text: new Color(249, 246, 242) },
+    2: { bg: new Color(51, 65, 85), text: new Color(226, 232, 240) },
+    4: { bg: new Color(62, 76, 99), text: new Color(226, 232, 240) },
+    8: { bg: new Color(29, 78, 216), text: new Color(255, 255, 255) },
+    16: { bg: new Color(37, 99, 235), text: new Color(255, 255, 255) },
+    32: { bg: new Color(2, 132, 199), text: new Color(255, 255, 255) },
+    64: { bg: new Color(8, 145, 178), text: new Color(255, 255, 255) },
+    128: { bg: new Color(13, 148, 136), text: new Color(255, 255, 255) },
+    256: { bg: new Color(22, 163, 74), text: new Color(255, 255, 255) },
+    512: { bg: new Color(202, 138, 4), text: new Color(255, 255, 255) },
+    1024: { bg: new Color(234, 88, 12), text: new Color(255, 255, 255) },
+    2048: { bg: new Color(220, 38, 38), text: new Color(255, 255, 255) },
 };
 
 export function getTileColor(value: number): { bg: Color; text: Color } {
-    return TILE_COLORS[value] || { 
-        bg: new Color(60, 58, 50), 
-        text: new Color(249, 246, 242) 
+    return TILE_COLORS[value] || {
+        // 2048 以上：紫，和任意一档都不撞色
+        bg: new Color(76, 29, 149),
+        text: new Color(255, 255, 255),
     };
 }
 

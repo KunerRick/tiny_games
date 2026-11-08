@@ -15,6 +15,12 @@ import type { UpgradeId } from './BrickConfig';
 import { StorageManager } from '../../../common/managers/StorageManager';
 import { SceneManager } from '../../../common/managers/SceneManager';
 import { applySceneClearColor } from '../../../common/ui/GameUIKit';
+import {
+    COLOR, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_TITLE, applyFontAndColor,
+} from '../../../common/ui/UITheme';
+import {
+    addDialogBackdrop, findPath, paintLabel, skinButton, skinCard, skinOverlay,
+} from '../../../common/ui/SceneSkin';
 
 const { ccclass, property } = _decorator;
 
@@ -188,6 +194,84 @@ export class BrickGame extends Component {
         this._hidePanel(this.pausePanel);
         this._hidePanel(this.upgradePanel);
         this._hidePanel(this.gameOverPanel);
+        this._applyUnifiedTheme();
+    }
+
+    // ------------------------------------------------------------------
+    // 统一视觉：HUD 与三个弹窗是场景手摆的（#eaf2ff / #ffd1d9 / #2f9e6e 等
+    // 早期调色），按全站令牌换皮：
+    //   • HUD 数值 → TEXT_PRIMARY，标题/提示 → TEXT_*；连击用 WARNING
+    //   • 暂停键 → 次级按钮；弹窗按钮主操作 primary、次操作 secondary
+    //   • 弹窗底 → PANEL_BG + 主色强调条，遮罩统一半透明黑
+    // 逐帧绘制层（背景 / 砖块 / 特效）保持 Graphics 自绘，不在此处处理。
+    // ------------------------------------------------------------------
+    private _applyUnifiedTheme(): void {
+        const root = this.node;
+
+        paintLabel(root, 'HudTop/ScoreLabel', FONT_DISPLAY, COLOR.TEXT_PRIMARY);
+        paintLabel(root, 'HudTop/LivesLabel', FONT_DISPLAY, COLOR.TEXT_PRIMARY);
+        paintLabel(root, 'HudTop/ScoreTitle', FONT_BODY, COLOR.TEXT_SECONDARY);
+        paintLabel(root, 'HudTop/LivesTitle', FONT_BODY, COLOR.TEXT_SECONDARY);
+        paintLabel(root, 'HudTop/LevelLabel', FONT_BODY, COLOR.TEXT_PRIMARY);
+        paintLabel(root, 'HudTop/ComboLabel', FONT_BODY, COLOR.WARNING);
+        paintLabel(root, 'HudTop/GuideLabel', FONT_CAPTION, COLOR.TEXT_DISABLED);
+
+        skinButton(root, 'PauseButton', 'secondary', 88, 56);
+
+        // 暂停
+        this._themeDialog('PausePanel', {
+            title: '已暂停',
+            accent: COLOR.PRIMARY,
+            buttons: [
+                ['ResumeButton', 'primary', 320, 80],
+                ['RestartButton', 'secondary', 320, 80],
+                ['LobbyButton', 'secondary', 320, 80],
+            ],
+        });
+
+        // 升级三选一
+        skinOverlay(root, 'UpgradePanel/Dim', 205);
+        addDialogBackdrop(findPath(root, 'UpgradePanel'), { accent: COLOR.PRIMARY });
+        paintLabel(root, 'UpgradePanel/Title', FONT_TITLE, COLOR.TEXT_PRIMARY);
+        for (const name of ['Card0', 'Card1', 'Card2']) {
+            const card = skinCard(root, `UpgradePanel/${name}`, {
+                fill: COLOR.SURFACE, border: COLOR.PANEL_BORDER, radius: 16,
+            });
+            if (!card) continue;
+            const text = card.getChildByName('Text')?.getComponent(Label);
+            if (text) applyFontAndColor(text, FONT_TITLE, COLOR.TEXT_PRIMARY);
+        }
+
+        // 结算
+        this._themeDialog('GameOverPanel', {
+            title: '本局结束',
+            accent: COLOR.PRIMARY,
+            buttons: [
+                ['RestartButton', 'primary', 320, 80],
+                ['LobbyButton', 'secondary', 320, 80],
+            ],
+        });
+        paintLabel(root, 'GameOverPanel/ScoreLabel', FONT_TITLE, COLOR.TEXT_PRIMARY);
+        paintLabel(root, 'GameOverPanel/BestLabel', FONT_CAPTION, COLOR.TEXT_SECONDARY);
+        paintLabel(root, 'GameOverPanel/LevelLabel', FONT_CAPTION, COLOR.TEXT_SECONDARY);
+    }
+
+    /** 弹窗通用换皮：遮罩 + 标题 + 按钮组（弹窗没有独立卡片，直接铺在遮罩上） */
+    private _themeDialog(
+        name: string,
+        cfg: {
+            title: string;
+            accent: string;
+            buttons: [string, 'primary' | 'secondary' | 'danger' | 'success', number, number][];
+        },
+    ): void {
+        const root = this.node;
+        skinOverlay(root, `${name}/Dim`, 205);
+        addDialogBackdrop(findPath(root, name), { accent: cfg.accent });
+        paintLabel(root, `${name}/Title`, FONT_DISPLAY, cfg.accent);
+        for (const [btn, variant, w, h] of cfg.buttons) {
+            skinButton(root, `${name}/${btn}`, variant, w, h);
+        }
     }
 
     onDestroy(): void {
