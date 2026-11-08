@@ -73,7 +73,8 @@ tiny_games/
 │   │   ├── game_match3/        # 场景: Match3（缤纷消除）
 │   │   ├── game_tower_defense/ # 场景: TowerDefense（守卫塔楼）
 │   │   ├── game_pool/          # 场景: Pool（台球）
-│   │   └── game_wordle/        # 场景: Wordle（成语猜猜）
+│   │   ├── game_wordle/        # 场景: Wordle（成语猜猜）
+│   │   └── game_shmup/         # 场景: Shmup（星际弹幕）
 │   ├── common/            # 公共模块
 │   │   ├── managers/      # SceneManager, StorageManager, GameConfig
 │   │   └── components/    # BackButton, SafeAreaAdapter
@@ -87,7 +88,7 @@ tiny_games/
 │   ├── assets/            # 文档配图
 │   ├── tech/              # 技术决策与踩坑详情（AGENTS.md 教训的展开）
 │   └── cocos-best-practices.md
-├── tools/                 # 本地校验/同步脚本（verify-battle-fixes.js、verify-tetris-core.js、verify-idiom-core.js、verify-gomoku-core.js、verify-idle-core.js、verify-match3-core.js、verify-td-core.js、verify-pool-core.js、verify-wordle-core.js、check-wechat-build.js、replay-wechat-bundle.js、sync-build-scenes.js）
+├── tools/                 # 本地校验/同步脚本（verify-battle-fixes.js、verify-tetris-core.js、verify-idiom-core.js、verify-gomoku-core.js、verify-idle-core.js、verify-match3-core.js、verify-td-core.js、verify-pool-core.js、verify-wordle-core.js、verify-shmup-core.js、check-wechat-build.js、replay-wechat-bundle.js、sync-build-scenes.js）
 ├── settings/              # Cocos 编辑器设置
 ├── extensions/            # 编辑器插件（tsconfig 排除；node_modules 已 gitignore）
 └── build/                 # 构建输出（gitignored）
@@ -117,6 +118,7 @@ tiny_games/
 { id: 'tower_defense', name: '守卫塔楼', icon: 'default', sceneName: 'TowerDefense', description: '沿路径布塔，撑过 10 波进攻' }
 { id: 'pool',          name: '台球',     icon: 'default', sceneName: 'Pool',        description: '拉杆瞄准，把球全部打进袋' }
 { id: 'wordle',        name: '成语猜猜', icon: 'default', sceneName: 'Wordle',      description: '六次机会猜出四字成语' }
+{ id: 'shmup',         name: '星际弹幕', icon: 'default', sceneName: 'Shmup',       description: '拖动飞船自动开火，9 波弹幕闯关' }
 ```
 
 **添加新游戏三步骤**：① `GameConfig.ts` 注册 ② 创建 `assets/games/game_xxx/scenes/Xxx.scene` ③ 场景名与 `sceneName` 一致。
@@ -258,6 +260,13 @@ node tools/verify-wordle-core.js
 # 同样需要 tsc（编译 WordleCore.ts / IdiomData.ts）
 ```
 
+星际弹幕纯逻辑自检（不启动编辑器；覆盖场地与波次配置、自动开火与火力齐射、四种弹幕图案角度、碰撞与计分、无敌帧、边界夹取与越界清理、道具掉落与封顶、波次推进与 Boss 就位、通关 / 失败终态、60 秒长跑不变量与确定性，共 34 项）：
+
+```bash
+node tools/verify-shmup-core.js
+# 同样需要 tsc（编译 ShmupCore.ts），通过时打印 SHMUP_CORE_OK
+```
+
 微信小游戏构建产物预检（**把 `build/wechatgame/` 交给微信开发者工具之前跑**，退出码 0 = 可开）：
 
 ```bash
@@ -372,4 +381,5 @@ node tools/sync-build-scenes.js --all            # 顺带修其它平台的构�
 - [缤纷消除设计（交换消除 / 特殊块 / 30 关）](./docs/specs/2026-11-05-game-match3-design.md)
 - [守卫塔楼设计（固定塔位 / 4 塔 3 级 / 10 波含 Boss）](./docs/specs/2026-11-06-game-tower-defense-design.md)
 - [成语猜猜设计（候选字池 + 每日挑战 + 战绩分享，含浏览器验收记录）](./docs/specs/2026-11-08-game-wordle-design.md)
+- [星际弹幕设计（自动开火 + 4 种弹幕图案 + 9 波含母舰，含浏览器验收记录）](./docs/specs/2026-11-08-game-shmup-design.md)
 - [品类盘点与下一批路线图](./docs/plans/2026-11-05-game-catalog-and-roadmap.md)
