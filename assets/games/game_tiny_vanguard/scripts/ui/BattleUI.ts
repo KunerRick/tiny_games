@@ -3,6 +3,7 @@ import {
   ALPHA, BATTLE_LAYOUT, BUTTON_THEME, CANVAS, CLASS_COLOR, COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_ICON, FONT_TITLE, FONT_TINY,
   applyButtonTheme, applyFont, applyFontAndColor, hex, stripVariationSelectors,
 } from '../config/Theme';
+import { drawDivider, drawFrame, ensureScaleButton, makeDot, makeMedallion, stylePanel } from './GameUIKit';
 const { ccclass, property } = _decorator;
 
 /**
@@ -249,6 +250,7 @@ export class BattleUI extends Component {
     // 按钮主题放在 show() 而非 onLoad()：面板懒初始化时 onLoad 早已执行过，
     // 且 onLoad 期间节点尚未激活，部分组件尚未就绪。
     this.applyButtonThemes();
+    this.ensureRuntimeControls();
     if (!this._eventsBound) {
       this._eventsBound = true;
       this.bindEvents();
@@ -266,6 +268,11 @@ export class BattleUI extends Component {
     applyButtonTheme(this.waitButton?.getComponent(Button) ?? null, 'secondary');
     applyButtonTheme(this.endTurnButton?.getComponent(Button) ?? null, 'primary');
     applyButtonTheme(this.confirmDeployButton?.getComponent(Button) ?? null, 'primary');
+    // 统一按钮外观：深底 + 强调色描边 + 强调色顶条，与全局面板语言一致
+    this.decorateActionButton(this.confirmDeployButton, COLOR.PRIMARY);
+    this.decorateActionButton(this.attackButton, COLOR.DANGER);
+    this.decorateActionButton(this.waitButton, COLOR.INFO);
+    this.decorateActionButton(this.endTurnButton, COLOR.PRIMARY);
     // 单场胜利面板的“继续”按钮（场景节点，P2 建的）
     const continueBtn = this.victoryPanel?.getChildByName('ContinueBtn');
     applyButtonTheme(continueBtn?.getComponent(Button) ?? null, 'primary');
@@ -395,6 +402,167 @@ export class BattleUI extends Component {
     this._onContinueVictory = callback;
   }
 
+  // ── 战斗体验：布阵减负 / 倍速 / 战败重试（2026-11-08） ──────────────
+  private _onRecommendDeploy: (() => void) | null = null;
+  private _onReuseDeploy: (() => void) | null = null;
+  private _onSpeedChanged: ((mul: number) => void) | null = null;
+  private _onRetryBattle: (() => void) | null = null;
+  private _onEndRun: (() => void) | null = null;
+
+  private _runtimeControlsReady = false;
+  private _recommendDeployBtn: Node | null = null;
+  private _reuseDeployBtn: Node | null = null;
+  private _speedBtn: Node | null = null;
+  private _retryBattleBtn: Node | null = null;
+  private _endRunBtn: Node | null = null;
+  private _speedMul = 1;
+
+  setRecommendDeployCallback(cb: () => void): void { this._onRecommendDeploy = cb; }
+  setReuseDeployCallback(cb: () => void): void { this._onReuseDeploy = cb; }
+  setSpeedChangedCallback(cb: (mul: number) => void): void { this._onSpeedChanged = cb; }
+  setRetryBattleCallback(cb: () => void): void { this._onRetryBattle = cb; }
+  setEndRunCallback(cb: () => void): void { this._onEndRun = cb; }
+
+  /** 上一局是否有可用阵型：没有时按钮禁用并写明原因（避免"点了没反应"） */
+  setReuseDeployAvailable(available: boolean): void {
+    const btn = this._reuseDeployBtn?.getComponent(Button);
+    if (btn) btn.interactable = available;
+    const label = this._reuseDeployBtn?.getComponentInChildren(Label);
+    if (label) {
+      label.string = available ? '沿用上局' : '无上局阵型';
+      label.color = hex(available ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED);
+    }
+  }
+
+  private onRecommendDeployClicked(): void {
+    if (this._onRecommendDeploy) this._onRecommendDeploy();
+  }
+
+  private onReuseDeployClicked(): void {
+    if (this._onReuseDeploy) this._onReuseDeploy();
+  }
+
+  private onSpeedToggleClicked(): void {
+    this._speedMul = this._speedMul >= 2 ? 1 : 2;
+    this.applySpeedLabel();
+    if (this._onSpeedChanged) this._onSpeedChanged(this._speedMul);
+  }
+
+  private applySpeedLabel(): void {
+    const label = this._speedBtn?.getComponentInChildren(Label);
+    if (label) label.string = `${this._speedMul}x`;
+    const btn = this._speedBtn?.getComponent(Button);
+    if (btn) {
+      // 2x 时用警告色提示"当前在加速"，1x 回到次级按钮色
+      applyButtonTheme(btn, this._speedMul >= 2 ? 'danger' : 'secondary');
+    }
+  }
+
+  private onRetryBattleClicked(): void {
+    if (this._onRetryBattle) this._onRetryBattle();
+  }
+
+  private onEndRunClicked(): void {
+    if (this._onEndRun) this._onEndRun();
+  }
+
+  /**
+   * 运行时补齐三组控件（不依赖场景改动）：
+   * 布阵阶段的「推荐站位 / 沿用上局」、战斗中的 1x/2x、战败面板的「重试 / 结束本局」。
+   */
+  private ensureRuntimeControls(): void {
+    if (this._runtimeControlsReady) return;
+    this._runtimeControlsReady = true;
+
+    this._recommendDeployBtn = this.createRuntimeButton(
+      'RecommendDeployBtn', '推荐站位', 200, 52, 'success', this.onRecommendDeployClicked
+    );
+    this._recommendDeployBtn.setPosition(-118, -390, 0);
+
+    this._reuseDeployBtn = this.createRuntimeButton(
+      'ReuseDeployBtn', '沿用上局', 200, 52, 'secondary', this.onReuseDeployClicked
+    );
+    this._reuseDeployBtn.setPosition(118, -390, 0);
+
+    this._speedBtn = this.createRuntimeButton(
+      'BattleSpeedBtn', '1x', 88, 52, 'secondary', this.onSpeedToggleClicked
+    );
+    this._speedBtn.setPosition(280, 556, 0);
+
+    // 失败面板内的两个按钮：直接挂在面板上，随面板显隐
+    if (this.defeatPanel) {
+      this._retryBattleBtn = this.createRuntimeButton(
+        'RetryBattleBtn', '重试本关（保留 30% 金币）', 400, 58, 'primary',
+        this.onRetryBattleClicked, this.defeatPanel
+      );
+      this._retryBattleBtn.setPosition(0, -110, 0);
+
+      this._endRunBtn = this.createRuntimeButton(
+        'EndRunBtn', '结束本局', 400, 48, 'secondary',
+        this.onEndRunClicked, this.defeatPanel
+      );
+      this._endRunBtn.setPosition(0, -190, 0);
+    }
+
+    this._recommendDeployBtn.active = false;
+    this._reuseDeployBtn.active = false;
+    if (this._retryBattleBtn) this._retryBattleBtn.active = false;
+    if (this._endRunBtn) this._endRunBtn.active = false;
+    this.applySpeedLabel();
+  }
+
+  /** 纯色按钮（Sprite + Button + Label）；命名 handler，便于统一解绑 */
+  private createRuntimeButton(
+    name: string, text: string, width: number, height: number,
+    variant: 'primary' | 'secondary' | 'success' | 'danger',
+    onClick: () => void,
+    parent?: Node
+  ): Node {
+    const node = new Node(name);
+    node.addComponent(UITransform).setContentSize(width, height);
+    // 复用 ensureSolidBackground：内部已按 spriteFrame → sizeMode → contentSize 的安全顺序回写尺寸
+    this.ensureSolidBackground(node, BUTTON_THEME[variant].normal);
+    this.decorateActionButton(node, BattleUI.VARIANT_ACCENT[variant]);
+
+    const btn = node.addComponent(Button);
+    applyButtonTheme(btn, variant);
+
+    const labelNode = new Node('Label');
+    labelNode.addComponent(UITransform).setContentSize(width - 12, height - 6);
+    const label = labelNode.addComponent(Label);
+    label.string = text;
+    label.horizontalAlign = Label.HorizontalAlign.CENTER;
+    label.verticalAlign = Label.VerticalAlign.CENTER;
+    applyFontAndColor(label, FONT_BODY, COLOR.TEXT_PRIMARY);
+    node.addChild(labelNode);
+
+    node.on(Node.EventType.TOUCH_END, onClick, this);
+    (parent ?? this.node).addChild(node);
+    return node;
+  }
+
+  /** 变体 → 强调色（按钮描边/顶条用色） */
+  private static readonly VARIANT_ACCENT = {
+    primary: COLOR.PRIMARY,
+    secondary: COLOR.INFO,
+    success: COLOR.SUCCESS,
+    danger: COLOR.DANGER,
+  } as const;
+
+  /** 给已有按钮套统一外框（深底 + 强调色描边 + 顶条），幂等 */
+  private decorateActionButton(node: Node | null, accentHex: string): void {
+    if (!node?.isValid) return;
+    const ui = node.getComponent(UITransform);
+    if (!ui || ui.width <= 2 || ui.height <= 2) return;
+    drawFrame(node, {
+      width: ui.width, height: ui.height, radius: Math.min(14, ui.height / 2),
+      fill: COLOR.SURFACE, fillAlpha: 250,
+      border: accentHex, borderAlpha: 170, borderWidth: 2,
+      accent: accentHex, accentAlpha: 200,
+    });
+  }
+
+
   private onConfirmDeployClicked(): void {
     if (this._onConfirmDeploy) this._onConfirmDeploy();
   }
@@ -430,10 +598,18 @@ export class BattleUI extends Component {
     if (this.deployUnitList) this.deployUnitList.active = true;
     // 布阵阶段开启拖拽手势（P3）；离开时在 hideDeployPhase 关闭
     this.setDeployDragEnabled(true);
+    // 布阵减负：两个辅助按钮只在布阵阶段出现
+    if (this._recommendDeployBtn) this._recommendDeployBtn.active = true;
+    if (this._reuseDeployBtn) this._reuseDeployBtn.active = true;
+    if (this._speedBtn) this._speedBtn.active = true;
+    if (this._retryBattleBtn) this._retryBattleBtn.active = false;
+    if (this._endRunBtn) this._endRunBtn.active = false;
   }
 
   hideDeployPhase(): void {
     if (this.confirmDeployButton) this.confirmDeployButton.active = false;
+    if (this._recommendDeployBtn) this._recommendDeployBtn.active = false;
+    if (this._reuseDeployBtn) this._reuseDeployBtn.active = false;
     if (this.waitButton) this.waitButton.active = true;
     // 场景里 UnitNameLabel/HpLabel/EnergyLabel 带着占位文本（"你好" / "HP: 0/0" / "⚡ 0/5"），
     // 而本方法会立刻把状态面板显示出来，首个单位的真实数据要等战斗开始动画（约 1.6s）结束才写入
@@ -452,6 +628,17 @@ export class BattleUI extends Component {
     if (this.waitButton) this.waitButton.active = visible;
     if (this.endTurnButton) this.endTurnButton.active = visible;
     if (this.attackButton) this.attackButton.active = visible;
+    // 三个按钮全收起时那块 640×72 的底板还留在屏幕下方，看起来像"空白的操作条"。
+    // 容器本身跟着显隐（BATTLE_LAYOUT 里的容器 = endTurnButton 的父节点）。
+    const bar = this.endTurnButton?.parent;
+    if (bar?.isValid) bar.active = visible;
+  }
+
+  /** 本轮新增辅助控件（推荐站位 / 沿用上局 / 倍速）的统一显隐出口 */
+  private setBattleAuxButtonsVisible(visible: boolean): void {
+    if (this._recommendDeployBtn) this._recommendDeployBtn.active = visible;
+    if (this._reuseDeployBtn) this._reuseDeployBtn.active = visible;
+    if (this._speedBtn) this._speedBtn.active = visible;
   }
 
   /**
@@ -829,20 +1016,8 @@ export class BattleUI extends Component {
       ghost, DRAG_GHOST_SIZE, DRAG_GHOST_SIZE, DRAG_GHOST_BORDER, classColor, frame
     );
 
-    const icon = this._deployIcons[unitIndex] ?? '';
-    if (icon) {
-      const iconNode = new Node('IconLabel');
-      const iconUi = iconNode.addComponent(UITransform);
-      iconUi.setContentSize(DRAG_GHOST_ICON_SIZE, DRAG_GHOST_ICON_SIZE);
-      const l = iconNode.addComponent(Label);
-      l.string = stripVariationSelectors(icon);
-      applyFontAndColor(l, FONT_ICON, COLOR.TEXT_PRIMARY);
-      l.horizontalAlign = Label.HorizontalAlign.CENTER;
-      l.verticalAlign = Label.VerticalAlign.CENTER;
-      l.overflow = Label.Overflow.CLAMP;
-      iconNode.setPosition(0, 0, 0);
-      ghost.addChild(iconNode);
-    }
+    // 职业纹章：拖拽中看到的就是"落下去会变成的那个单位"（与棋盘单位同款纹章）
+    makeMedallion(ghost, 'Emblem', this._deployClassIds[unitIndex] ?? 'fallback', classColor, 22, 0, 0);
 
     // 挂在 deployUnitList 的父级下，保证与世界坐标同系
     const parent = this.deployUnitList?.parent ?? this.node;
@@ -945,32 +1120,24 @@ export class BattleUI extends Component {
       // 4 条细 Sprite 拼实线边框（项目无虚线贴图 → 方案 §3.4 的默认方案 (a)）
       BattleUI.createBorderLines(slot, SLOT_WIDTH, SLOT_HEIGHT, SLOT_BORDER_WIDTH, COLOR.PANEL_BORDER, frame);
 
-      // 图标（上半部分）
-      // 宽度避开左右边框、高度钳制后与上下边框各留 1px 间隙：
-      // Label 默认按内容自适应（emoji fallback 字体把高度撑到 35px+），会与边框接触。
-      const iconNode = new Node('IconLabel');
-      const iconUi = iconNode.addComponent(UITransform);
-      iconUi.setContentSize(SLOT_LABEL_WIDTH, SLOT_ICON_HEIGHT);
-      const iconLabel = iconNode.addComponent(Label);
-      iconLabel.string = stripVariationSelectors(unitIcons[i] || '');
-      applyFontAndColor(iconLabel, FONT_BODY, COLOR.TEXT_PRIMARY);
-      iconLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
-      iconLabel.verticalAlign = Label.VerticalAlign.CENTER;
-      iconLabel.overflow = Label.Overflow.CLAMP;
-      iconNode.setPosition(0, SLOT_ICON_Y, 0);
-      slot.addChild(iconNode);
+      // 职业纹章（横排：左纹章 + 右名字）。
+      // 旧实现用 emoji 图标 + 上下两行字，100×58 的槽位里字号被 CLAMP 压到发糊；
+      // 改成矢量纹章 + 单行名字后与职业选择卡、棋盘单位用同一套职业识别。
+      const classId = unitClassIds[i] || 'fallback';
+      const classColor = CLASS_COLOR[classId] ?? CLASS_COLOR.fallback;
+      makeMedallion(slot, 'Emblem', classId, classColor, 13, -30, 0);
 
-      // 名字（下半部分）
+      // 名字（右侧单行，固定宽度 + SHRINK，绝不截断成「法…」）
       const nameNode = new Node('NameLabel');
       const nameUi = nameNode.addComponent(UITransform);
-      nameUi.setContentSize(SLOT_LABEL_WIDTH, SLOT_NAME_HEIGHT);
+      nameUi.setContentSize(SLOT_LABEL_WIDTH - 32, 24);
       const nl = nameNode.addComponent(Label);
       nl.string = unitNames[i];
-      applyFontAndColor(nl, FONT_TINY, COLOR.TEXT_SECONDARY);
+      applyFontAndColor(nl, FONT_CAPTION, COLOR.TEXT_PRIMARY);
       nl.horizontalAlign = Label.HorizontalAlign.CENTER;
       nl.verticalAlign = Label.VerticalAlign.CENTER;
-      nl.overflow = Label.Overflow.CLAMP;
-      nameNode.setPosition(0, SLOT_NAME_Y, 0);
+      nl.overflow = Label.Overflow.SHRINK;
+      nameNode.setPosition(18, 0, 0);
       slot.addChild(nameNode);
 
       // 交互（点击兜底路径，P3 另叠加拖拽）
@@ -1077,15 +1244,13 @@ export class BattleUI extends Component {
     };
     // 图标/名字显隐：仅"空站台"隐藏（让它真的读作一个空格）
     const setContentVisible = (visible: boolean) => {
-      const icon = slot.getChildByName('IconLabel');
+      const emblem = slot.getChildByName('Emblem');
       const name = slot.getChildByName('NameLabel');
-      if (icon) icon.active = visible;
+      if (emblem) emblem.active = visible;
       if (name) name.active = visible;
     };
     const setTextColor = (c: string) => {
-      const icon = slot.getChildByName('IconLabel')?.getComponent(Label);
       const name = slot.getChildByName('NameLabel')?.getComponent(Label);
-      if (icon) icon.color = hex(c);
       if (name) name.color = hex(c);
     };
 
@@ -1301,15 +1466,24 @@ export class BattleUI extends Component {
     // 两个结算面板互斥：显示胜利面板时收起失败面板与布阵按钮
     if (this.defeatPanel) this.defeatPanel.active = false;
     if (this.confirmDeployButton) this.confirmDeployButton.active = false;
+    this.setBattleAuxButtonsVisible(false);
+    if (this._retryBattleBtn) this._retryBattleBtn.active = false;
+    if (this._endRunBtn) this._endRunBtn.active = false;
     if (this.victoryPanel) {
       this.ensurePanelOnTop(this.victoryPanel);
       this.victoryPanel.active = true;
+      this.layoutVictoryPanel(this.victoryPanel);
+      this.styleSettlePanel(this.victoryPanel, COLOR.SUCCESS, '胜利');
     }
     if (this.waitButton) {
       this.waitButton.active = false;
     }
     if (this.endTurnButton) {
       this.endTurnButton.active = false;
+    }
+    // 攻击按钮也可能正亮着（结算发生在攻击目标阶段），统一收起
+    if (this.attackButton) {
+      this.attackButton.active = false;
     }
     if (this.skillButtonContainer) {
       this.skillButtonContainer.active = false;
@@ -1346,6 +1520,202 @@ export class BattleUI extends Component {
   }
 
   /**
+   * 胜利面板重排。
+   *
+   * 场景里两个结算面板都是固定 560×620，而内容只挤在中间一条（标题 y=114、
+   * 按钮 y=-118）—— 上下各有 100+ 像素空白，读感像"内容掉进一个大空盒"。
+   * 这里按内容重算面板高度，再从上到下顺排：大标题 → 分隔线 → 三行统计 → 主按钮。
+   * 幂等：每次显示都重排，不依赖场景默认位置。
+   */
+  private layoutVictoryPanel(panel: Node): void {
+    const W = 560;
+    const PAD = 36;
+    const TITLE_H = FONT_DISPLAY.lineHeight;   // 56
+    const ROW_H = 44;
+    const BTN_H = 52;
+    const H = PAD * 2 + TITLE_H + 30 + ROW_H * 3 + 34 + BTN_H;
+
+    const ui = panel.getComponent(UITransform);
+    if (ui) ui.setContentSize(W, H);
+    const halfW = W / 2;
+    const halfH = H / 2;
+    const innerW = W - PAD * 2;
+
+    const titleY = halfH - PAD - TITLE_H / 2;
+    const dividerY = titleY - TITLE_H / 2 - 16;
+    const row1Y = dividerY - 16 - ROW_H / 2;
+    const btnY = -halfH + PAD + BTN_H / 2;
+
+    const title = panel.getChildByName('VictoryLabel');
+    if (title?.isValid) title.setPosition(0, titleY, 0);
+
+    drawDivider(panel, innerW, COLOR.SUCCESS, 120, 'settleDividerTitle').node.setPosition(0, dividerY, 0);
+
+    // 三行统计：左键（状态灯 + 名称）左对齐、右值右对齐，中间留出弹性空白。
+    // 场景里的键文本原本是「💰 金币 / ⏱ 回合 / ⚔ 伤害」，这三个 emoji 在预览里
+    // 退化成单色小符号（⚔ 直接显示成一枚「×」），与其余页面的矢量纹章语言不统一；
+    // 这里改写成纯文字 + 行首彩色状态灯（金币金 / 回合青 / 伤害红）。
+    const rows: Array<[string, string, string, string]> = [
+      ['StatsGoldKey', 'StatsGoldValue', '金币', COLOR.WARNING],
+      ['StatsTurnKey', 'StatsTurnValue', '回合', COLOR.INFO],
+      ['StatsDamageKey', 'StatsDamageValue', '伤害', COLOR.DANGER],
+    ];
+    rows.forEach(([keyName, valueName, labelText, dotHex], i) => {
+      const y = row1Y - i * ROW_H;
+      this.layoutSettleRow(panel, keyName, valueName, y, innerW, halfW, PAD, labelText, dotHex);
+      // 行间细分隔线（最后一行下方留给按钮，不画）
+      if (i < rows.length - 1) {
+        drawDivider(panel, innerW - 24, COLOR.PANEL_BORDER, 90, `settleDividerRow${i}`)
+          .node.setPosition(0, y - ROW_H / 2, 0);
+      }
+    });
+
+    const continueBtn = panel.getChildByName('ContinueBtn');
+    if (continueBtn?.isValid) {
+      const btnUi = continueBtn.getComponent(UITransform);
+      if (btnUi) btnUi.setContentSize(280, BTN_H);
+      continueBtn.setPosition(0, btnY, 0);
+    }
+  }
+
+  /** 统计行的左键 / 右值统一排版（键左对齐贴内边距，值右对齐贴内边距） */
+  private layoutSettleRow(
+    panel: Node, keyName: string, valueName: string,
+    y: number, innerW: number, halfW: number, pad: number,
+    labelText?: string, dotHex?: string
+  ): void {
+    const keyW = Math.round(innerW * 0.62);
+    const valW = Math.round(innerW * 0.34);
+    const DOT_R = 5;
+    const DOT_GAP = 14;
+    const keyInset = dotHex ? DOT_R * 2 + DOT_GAP : 0;
+
+    if (dotHex) {
+      makeDot(panel, `${keyName}Dot`, dotHex, DOT_R, -halfW + pad + DOT_R, y);
+    }
+
+    const keyNode = panel.getChildByName(keyName);
+    const key = keyNode?.getComponent(Label);
+    if (keyNode?.isValid && key) {
+      const ku = keyNode.getComponent(UITransform);
+      if (ku) ku.setContentSize(keyW - keyInset, FONT_BODY.lineHeight);
+      if (labelText) key.string = labelText;
+      key.horizontalAlign = Label.HorizontalAlign.LEFT;
+      key.verticalAlign = Label.VerticalAlign.CENTER;
+      key.overflow = Label.Overflow.SHRINK;
+      applyFontAndColor(key, FONT_BODY, COLOR.TEXT_SECONDARY);
+      // 场景里键节点锚点是 (0, 0.5)（左对齐），setPosition 设的是**左边缘**；
+      // 早先按"中心"算位置，文字被整体右移了半个框宽（与状态灯之间空出 80+ px）。
+      const kAnchorX = ku?.anchorX ?? 0;
+      keyNode.setPosition(-halfW + pad + keyInset + (keyW - keyInset) * kAnchorX, y, 0);
+    }
+
+    const valNode = panel.getChildByName(valueName);
+    const val = valNode?.getComponent(Label);
+    if (valNode?.isValid && val) {
+      const vu = valNode.getComponent(UITransform);
+      if (vu) vu.setContentSize(valW, FONT_BODY.lineHeight);
+      val.horizontalAlign = Label.HorizontalAlign.RIGHT;
+      val.verticalAlign = Label.VerticalAlign.CENTER;
+      val.overflow = Label.Overflow.SHRINK;
+      applyFontAndColor(val, FONT_BODY, COLOR.TEXT_PRIMARY);
+      valNode.setPosition(halfW - pad - valW / 2, y, 0);
+    }
+  }
+
+  /** 失败面板重排：标题 → 战绩摘要 → 「重试本关」主按钮 → 「结束本局」次按钮 */
+  private layoutDefeatPanel(panel: Node): void {
+    const W = 560;
+    const PAD = 36;
+    const TITLE_H = FONT_DISPLAY.lineHeight;   // 56
+    const SUM_H = FONT_BODY.lineHeight;        // 28
+    const BTN_H = 58;
+    const BTN2_H = 48;
+    const H = PAD * 2 + TITLE_H + 22 + SUM_H + 30 + BTN_H + 14 + BTN2_H;
+
+    const ui = panel.getComponent(UITransform);
+    if (ui) ui.setContentSize(W, H);
+    const halfH = H / 2;
+    const innerW = W - PAD * 2;
+
+    const titleY = halfH - PAD - TITLE_H / 2;
+    const dividerY = titleY - TITLE_H / 2 - 14;
+    const summaryY = dividerY - 14 - SUM_H / 2;
+    const retryY = summaryY - SUM_H / 2 - 30 - BTN_H / 2;
+    const endY = retryY - BTN_H / 2 - 14 - BTN2_H / 2;
+
+    const title = panel.getChildByName('DefeatLabel');
+    if (title?.isValid) title.setPosition(0, titleY, 0);
+
+    drawDivider(panel, innerW, COLOR.DANGER, 120, 'settleDividerTitle').node.setPosition(0, dividerY, 0);
+
+    const summary = panel.getChildByName('ScoreLabel');
+    if (summary?.isValid) {
+      const su = summary.getComponent(UITransform);
+      if (su) su.setContentSize(innerW, SUM_H);
+      const lb = summary.getComponent(Label);
+      if (lb) lb.overflow = Label.Overflow.SHRINK;
+      summary.setPosition(0, summaryY, 0);
+    }
+
+    const retry = panel.getChildByName('RetryBattleBtn');
+    if (retry?.isValid) {
+      const ru = retry.getComponent(UITransform);
+      if (ru) ru.setContentSize(Math.min(480, innerW), BTN_H);
+      retry.setPosition(0, retryY, 0);
+    }
+    const end = panel.getChildByName('EndRunBtn');
+    if (end?.isValid) {
+      const eu = end.getComponent(UITransform);
+      if (eu) eu.setContentSize(Math.min(480, innerW), BTN2_H);
+      end.setPosition(0, endY, 0);
+    }
+  }
+
+  /**
+   * 结算面板统一外观：矢量外框 + 主色标题 + 主按钮重绘。
+   * @param titleText 传了才改写标题（失败面板的标题由下方逻辑自己写）
+   */
+  private styleSettlePanel(panel: Node, accentHex: string, titleText: string | null): void {
+    if (!panel?.isValid) return;
+    stylePanel(panel, accentHex);
+    if (titleText) {
+      for (const name of ['VictoryLabel', 'Title', 'TitleLabel']) {
+        const lb = panel.getChildByName(name)?.getComponent(Label);
+        if (lb) {
+          lb.string = titleText;
+          applyFontAndColor(lb, FONT_DISPLAY, accentHex);
+          break;
+        }
+      }
+    }
+    // 实际的按钮名：胜利是 ContinueBtn，失败是 RetryBattleBtn / EndRunBtn。
+    // 旧表里写的是 'RetryBtn'（不存在的名字），失败面板的主按钮一直没被重绘。
+    const primaryNames = titleText
+      ? ['ContinueBtn']
+      : ['RetryBattleBtn', 'RetryBtn', 'EndRunBtn'];
+    for (const name of primaryNames) {
+      const btnNode = panel.getChildByName(name);
+      if (!btnNode?.isValid) continue;
+      const sp = btnNode.getComponent(Sprite);
+      if (sp) sp.enabled = false;
+      const ui = btnNode.getComponent(UITransform);
+      if (!ui || ui.width <= 2) continue;
+      const isPrimary = name !== 'EndRunBtn';
+      drawFrame(btnNode, {
+        width: ui.width, height: ui.height, radius: 14,
+        fill: titleText ? COLOR.SUCCESS : (isPrimary ? COLOR.PRIMARY : COLOR.SURFACE),
+        fillAlpha: 250,
+        border: isPrimary ? COLOR.TEXT_PRIMARY : COLOR.PANEL_BORDER,
+        borderAlpha: isPrimary ? 60 : 200,
+        borderWidth: 2,
+        sheen: true,
+      });
+      ensureScaleButton(btnNode);
+    }
+  }
+
+  /**
    * 失败面板。
    * P2 统一版式后结构与胜利/通关一致：标题 + 一行副信息 + 主按钮样式；
    * ScoreLabel 用于一行战绩摘要（原实现留空）。
@@ -1354,10 +1724,15 @@ export class BattleUI extends Component {
     // 与 showVictory 对称：两个结算面板互斥，并收起布阵按钮
     if (this.victoryPanel) this.victoryPanel.active = false;
     if (this.confirmDeployButton) this.confirmDeployButton.active = false;
+    this.setBattleAuxButtonsVisible(false);
+    if (this._retryBattleBtn) this._retryBattleBtn.active = true;
+    if (this._endRunBtn) this._endRunBtn.active = true;
     if (this.defeatPanel) {
       // 确保面板在最顶层（避免被单位遮挡）
       this.ensurePanelOnTop(this.defeatPanel);
       this.defeatPanel.active = true;
+      this.layoutDefeatPanel(this.defeatPanel);
+      this.styleSettlePanel(this.defeatPanel, COLOR.DANGER, null);
 
       const resultLabel = this.defeatPanel.getChildByName('DefeatLabel')?.getComponent(Label);
       if (resultLabel) {
@@ -1378,6 +1753,9 @@ export class BattleUI extends Component {
     if (this.waitButton) {
       this.waitButton.active = false;
     }
+    // 失败面板是模态选择（重试 / 结束本局），行动栏必须一并收起，
+    // 否则「结束回合」会露在面板下方，点了还能继续打这场已判负的战斗。
+    this.setActionButtonsVisible(false);
     if (this.skillButtonContainer) {
       this.skillButtonContainer.active = false;
     }

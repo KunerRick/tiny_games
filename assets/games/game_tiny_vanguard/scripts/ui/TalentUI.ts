@@ -1,11 +1,12 @@
 import {
-  BlockInputEvents, Button, Label, Node, Sprite, SpriteFrame, UITransform,
+  BlockInputEvents, Button, Graphics, Label, Node, Sprite, SpriteFrame, UITransform,
 } from 'cc';
 import {
   ALPHA, COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_TITLE,
   applyButtonTheme, applyFontAndColor, hex,
 } from '../config/Theme';
 import { TALENTS, TalentConfig } from '../config/GameData';
+import { drawFrame, ensureChild, ensureScaleButton } from './GameUIKit';
 
 /**
  * 荣誉天赋面板（设计 §6.2「⭐ 荣誉天赋树」）。
@@ -83,6 +84,13 @@ export class TalentUI {
     this.applyFrame(panelBg);
     panelBg.color = hex(COLOR.PANEL_BG, ALPHA.PANEL_BG);
     root.addChild(panel);
+    // 统一外框（矢量）：深底 + 主色描边 + 顶部强调条 + 四角括线
+    drawFrame(panel, {
+      width: PANEL_W, height: PANEL_H, radius: 22,
+      fill: COLOR.PANEL_BG, fillAlpha: 252,
+      border: COLOR.PRIMARY, borderAlpha: 150, borderWidth: 2,
+      accent: COLOR.PRIMARY, accentAlpha: 235, sheen: true,
+    });
 
     // 标题
     const title = this.makeLabel('Title', panel, '荣誉天赋', FONT_TITLE, COLOR.TEXT_PRIMARY, ROW_W);
@@ -107,8 +115,17 @@ export class TalentUI {
       const bg = row.addComponent(Sprite);
       this.applyFrame(bg);
       bg.color = hex(COLOR.SURFACE, ALPHA.SOLID);
+      bg.enabled = false;                        // 底板改由矢量框绘制
       row.setPosition(0, listTop - ROW_H / 2 - i * (ROW_H + ROW_GAP), 0);
       panel.addChild(row);
+      this.drawRowFrame(row, true);
+      const accent = ensureChild(row, 'RowAccent', 6, ROW_H - 14);
+      accent.setPosition(-ROW_W / 2 + 10, 0, 0);
+      const ag = accent.getComponent(Graphics) ?? accent.addComponent(Graphics);
+      ag.clear();
+      ag.fillColor = hex(COLOR.PRIMARY, 220);
+      ag.roundRect(-3, -(ROW_H - 14) / 2, 6, ROW_H - 14, 3);
+      ag.fill();
 
       // 左半区：名称（上）+ 描述（下）。宽度收到 240，右半区留给"已购/价格"
       const nameNode = this.makeLabel('Name', row, cfg.name, FONT_BODY, COLOR.TEXT_PRIMARY, 240, 'left');
@@ -141,7 +158,14 @@ export class TalentUI {
     closeUi.setContentSize(200, CONTROL.BTN_HEIGHT);
     const closeBg = close.addComponent(Sprite);
     this.applyFrame(closeBg);
-    closeBg.color = hex(COLOR.PRIMARY, ALPHA.SOLID);
+    closeBg.enabled = false;
+    drawFrame(close, {
+      width: 200, height: CONTROL.BTN_HEIGHT, radius: 14,
+      fill: COLOR.PRIMARY, fillAlpha: 245,
+      border: COLOR.TEXT_PRIMARY, borderAlpha: 60, borderWidth: 2,
+      sheen: true,
+    });
+    ensureScaleButton(close);
     close.setPosition(0, -PANEL_H / 2 + 56, 0);
     const closeBtn = close.addComponent(Button);
     applyButtonTheme(closeBtn, 'primary');
@@ -205,6 +229,19 @@ export class TalentUI {
     return n;
   }
 
+  /** 天赋行底板：可购买时亮描边 + 顶条，买不起/已满时整体压暗 */
+  private drawRowFrame(row: Node, usable: boolean): void {
+    drawFrame(row, {
+      width: ROW_W, height: ROW_H, radius: 12,
+      fill: usable ? COLOR.SURFACE : COLOR.PANEL_BG,
+      fillAlpha: 250,
+      border: usable ? COLOR.PRIMARY : COLOR.PANEL_BORDER,
+      borderAlpha: usable ? 160 : 90,
+      borderWidth: 2,
+      sheen: usable,
+    });
+  }
+
   // -------------------------------------------------------------------------
   // 刷新与交互
   // -------------------------------------------------------------------------
@@ -224,8 +261,7 @@ export class TalentUI {
       row.costLabel.string = maxed ? '已满' : `${row.cfg.cost} 荣誉`;
       row.costLabel.color = hex(maxed ? COLOR.TEXT_DISABLED : (affordable ? COLOR.WARNING : COLOR.TEXT_DISABLED));
       row.nameLabel.color = hex(usable ? COLOR.TEXT_PRIMARY : COLOR.TEXT_SECONDARY);
-      const bgColor = usable ? COLOR.SURFACE : COLOR.PANEL_BG;
-      row.bg.color = hex(bgColor, ALPHA.SOLID);
+      this.drawRowFrame(row.node, usable);
       if (row.btn) row.btn.interactable = usable;
     }
   }

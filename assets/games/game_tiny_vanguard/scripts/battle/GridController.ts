@@ -1,5 +1,5 @@
-import { _decorator, Component, Node, Sprite, Color, instantiate, Prefab, Button } from 'cc';
-import { GRID } from '../config/Theme';
+import { _decorator, Component, Node, Sprite, Color, Graphics, UITransform, instantiate, Prefab, Button } from 'cc';
+import { COLOR, GRID, hex } from '../config/Theme';
 const { ccclass, property } = _decorator;
 
 export interface GridPosition {
@@ -65,6 +65,66 @@ export class GridController extends Component {
         }
       }
     }
+
+    this.drawBoardOverlay();
+  }
+
+  /**
+   * 棋盘分割线 + 中线 + 外框。
+   *
+   * 36 个格子是同一张白色 splash 贴图染色，部署阶段又被整片刷成"淡绿 / 淡灰"，
+   * 相邻同色格直接糊成一整块矩形 —— 一眼看不出这是 6×6 的棋盘。
+   * 这里在格子之上铺一层矢量分割线（1px、极低透明度），敌方半场与玩家半场之间
+   * 再补一条更亮的中线；外框用圆角描边收边。
+   */
+  private drawBoardOverlay(): void {
+    if (!this.gridContainer) return;
+    const size = GridController.GRID_SIZE * GridController.CELL_SIZE;
+    const half = size / 2;
+
+    let overlay = this.gridContainer.getChildByName('BoardOverlay');
+    if (!overlay) {
+      overlay = new Node('BoardOverlay');
+      overlay.addComponent(UITransform).setContentSize(size, size);
+      this.gridContainer.addChild(overlay);
+    }
+    overlay.setPosition(0, 0, 0);
+
+    const g = overlay.getComponent(Graphics) ?? overlay.addComponent(Graphics);
+    g.clear();
+
+    // 细分割线：太亮会抢单位的颜色，只保留"能看出格子"的强度
+    g.strokeColor = hex(COLOR.TEXT_PRIMARY, 42);
+    g.lineWidth = 1;
+    for (let i = 1; i < GridController.GRID_SIZE; i++) {
+      const p = -half + i * GridController.CELL_SIZE;
+      g.moveTo(p, -half); g.lineTo(p, half);
+      g.moveTo(-half, p); g.lineTo(half, p);
+    }
+    g.stroke();
+
+    // 中线：玩家半场 / 敌方半场分界
+    g.strokeColor = hex(COLOR.TEXT_SECONDARY, 90);
+    g.lineWidth = 2;
+    g.moveTo(-half, 0); g.lineTo(half, 0);
+    g.stroke();
+
+    // 外框 + 四角短括线：给棋盘一个"边界感"
+    g.strokeColor = hex(COLOR.PANEL_BORDER, 220);
+    g.lineWidth = 2;
+    g.rect(-half - 1, -half - 1, size + 2, size + 2);
+    g.stroke();
+
+    g.strokeColor = hex(COLOR.TEXT_PRIMARY, 70);
+    g.lineWidth = 3;
+    const t = 18;
+    const c = half + 1;
+    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      g.moveTo(sx * c, sy * c - sy * t);
+      g.lineTo(sx * c, sy * c);
+      g.lineTo(sx * c - sx * t, sy * c);
+    }
+    g.stroke();
   }
 
   setCellClickCallback(callback: (pos: GridPosition) => void): void {

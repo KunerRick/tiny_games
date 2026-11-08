@@ -1,8 +1,9 @@
-import { _decorator, Component, Node, instantiate, Prefab, Button, Label, UITransform, Sprite, SpriteFrame } from 'cc';
+import { _decorator, Component, Node, instantiate, Prefab, Button, Label, UITransform, Graphics, Sprite, SpriteFrame } from 'cc';
 import {
-  COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, SPACE,
+  COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_TITLE, SPACE,
   applyButtonTheme, applyFontAndColor, hex, stripVariationSelectors,
 } from '../config/Theme';
+import { drawFrame, ensureChild, makeChip, stylePanel } from './GameUIKit';
 const { ccclass, property } = _decorator;
 
 export interface UpgradeOption {
@@ -73,8 +74,74 @@ export class UpgradeUI extends Component {
     this._showCalled = true;
     this.node.active = true;
     this.ensureEventsBound();
+    this.layoutPanel();
     // 按钮过渡色统一走令牌（P5），否则 hover/disabled 会是引擎默认灰
     applyButtonTheme(this.skipBtn?.getComponent(Button) ?? null, 'secondary');
+  }
+
+  /** 进度条底槽在场景里只是普通节点（没有对应的 @property），按名字取 */
+  private get progressBarBg(): Node | null {
+    return this.node?.getChildByName('ProgressBarBg') ?? null;
+  }
+
+  /**
+   * 面板纵向重排 + 按内容收紧高度。
+   *
+   * 场景里这七个节点的 Y 是手摆的：标题 336 / 卡片 40 / 跳过 -290，面板高 760。
+   * 卡片高 260，于是卡片下沿 → 跳过按钮之间空出 156px（≈85 CSS px）的大白块，
+   * 面板下半截几乎是空的。这里改成按「标题 → 进度 → 卡片 → 跳过」逐行下排，
+   * 再把节点高度收成内容高度 + 上下留白；`stylePanel` 读的是当前尺寸，必须
+   * 在改完尺寸**之后**再调一次，否则外框还停在 760。
+   */
+  private layoutPanel(): void {
+    const panelUi = this.node.getComponent(UITransform) ?? this.node.addComponent(UITransform);
+
+    const PAD_TOP = 40;
+    const PAD_BOTTOM = 30;
+    const GAP_TITLE = 12;
+    const GAP_BAR = 8;
+    const GAP_CARDS = 26;
+    const GAP_SKIP = 30;
+
+    const titleH = FONT_TITLE.lineHeight;
+    const progH = FONT_CAPTION.lineHeight;
+    const barH = this.progressBarBg?.getComponent(UITransform)?.height ?? 8;
+    const cardH = CONTROL.CARD_HEIGHT;
+    const skipH = this.skipBtn?.getComponent(UITransform)?.height ?? CONTROL.BTN_HEIGHT;
+    const total =
+      titleH + GAP_TITLE + progH + GAP_BAR + barH + GAP_CARDS + cardH + GAP_SKIP + skipH;
+    const height = Math.max(360, total + PAD_TOP + PAD_BOTTOM);
+    const top = height / 2;
+
+    // 以「距顶边距离」累加，最后换算成以面板中心为原点的 Y
+    let cursor = PAD_TOP;
+    const titleY = top - (cursor + titleH / 2);
+    cursor += titleH + GAP_TITLE;
+    const progY = top - (cursor + progH / 2);
+    cursor += progH + GAP_BAR;
+    const barY = top - (cursor + barH / 2);
+    cursor += barH + GAP_CARDS;
+    const cardsY = top - (cursor + cardH / 2);
+    cursor += cardH + GAP_SKIP;
+    const skipY = top - (cursor + skipH / 2);
+
+    if (this.titleLabel) this.titleLabel.node.setPosition(0, titleY, 0);
+    if (this.progressLabel) this.progressLabel.node.setPosition(0, progY, 0);
+    if (this.progressBarBg) this.progressBarBg.setPosition(0, barY, 0);
+    if (this.progressBarFill) this.progressBarFill.setPosition(-this.getProgressWidth() / 2, barY, 0);
+    if (this.cardContainer) {
+      this.cardContainer.setPosition(0, cardsY, 0);
+      const cardsUi = this.cardContainer.getComponent(UITransform);
+      if (cardsUi) cardsUi.setContentSize(cardsUi.width, cardH);
+    }
+    if (this.skipBtn) this.skipBtn.setPosition(0, skipY, 0);
+
+    panelUi.setContentSize(Math.max(panelUi.width, 560), height);
+    stylePanel(this.node, COLOR.PRIMARY);
+  }
+
+  private getProgressWidth(): number {
+    return this.progressBarBg?.getComponent(UITransform)?.width ?? 592;
   }
 
   hide(): void {
@@ -120,6 +187,7 @@ export class UpgradeUI extends Component {
     this._showCalled = true;
     this.node.active = true;
     this.ensureEventsBound();
+    this.layoutPanel();
     this.showCurrentUnitOptions();
   }
 
@@ -133,6 +201,7 @@ export class UpgradeUI extends Component {
     const unitName = this._unitNames[this._currentUnitIndex] || `Unit ${this._currentUnitIndex + 1}`;
     if (this.titleLabel) {
       this.titleLabel.string = `\u4E3A ${unitName} \u9009\u5F3A\u5316`;
+      applyFontAndColor(this.titleLabel, FONT_TITLE, COLOR.PRIMARY);
     }
     this.updateProgress();
     this.rebuildCards();
@@ -194,56 +263,54 @@ export class UpgradeUI extends Component {
 
     const w = CONTROL.CARD_WIDTH;
     const h = CONTROL.CARD_HEIGHT;
-    const halfH = h / 2;
 
-    // 底板（prefab 根只有 Button，Sprite 需补；补前先判空避免重复渲染组件）
-    // 贴图来源：CardPrefab 根节点没有 Sprite，其 spriteFrame 为空 —— 必须用
-    // cardBgFrame（场景绑定）或已存在的 frame 兜底，否则整张卡不绘制。
-    let bg = card.getComponent(Sprite);
-    if (!bg) bg = card.addComponent(Sprite);
-    const fallbackFrame = this.cardBgFrame ?? bg?.spriteFrame ?? null;
-    if (bg) {
-      // 赋值顺序固定为 spriteFrame → sizeMode → color → contentSize：
-      // 先设 contentSize 再设 spriteFrame 时，sizeMode 仍是默认 TRIMMED，
-      // 会把节点尺寸覆盖成贴图原始尺寸（本项目默认贴图是 2×2）。
-      if (fallbackFrame) bg.spriteFrame = fallbackFrame;
-      bg.sizeMode = Sprite.SizeMode.CUSTOM;
-      bg.color = owned ? hex(COLOR.PRIMARY_DISABLED, 240) : hex(COLOR.SURFACE, 240);
-    }
     const ui = card.getComponent(UITransform);
     if (ui) ui.setContentSize(w, h);
 
-    // 顶部分类色条
-    const bar = this.ensureChild(card, 'CategoryBar', ['cc.UITransform', 'cc.Sprite']);
-    if (bar) {
-      const barSp = bar.getComponent(Sprite);
-      if (barSp) {
-        if (fallbackFrame) barSp.spriteFrame = fallbackFrame;
-        barSp.sizeMode = Sprite.SizeMode.CUSTOM;
-        barSp.color = hex(style.color, owned ? 120 : 255);
-      }
-      const barUi = bar.getComponent(UITransform);
-      if (barUi) barUi.setContentSize(w - SPACE.SM, 4);
-      bar.setPosition(0, halfH - SPACE.SM / 2 - 2, 0);
-    }
+    // 预制体的纯色贴图让位给矢量底板（同节点渲染组件互斥，用子 Graphics 叠加）
+    const oldBg = card.getComponent(Sprite);
+    if (oldBg) oldBg.enabled = false;
+
+    // 底板：圆角 + 分类色描边 + 顶条（与职业卡/商店卡同款）
+    drawFrame(card, {
+      width: w, height: h, radius: 16,
+      fill: owned ? COLOR.SLOT_EMPTY_BG : COLOR.SURFACE,
+      fillAlpha: 250,
+      border: owned ? COLOR.PANEL_BORDER : style.color,
+      borderAlpha: owned ? 120 : 190,
+      borderWidth: 2,
+      accent: style.color,
+      accentAlpha: owned ? 110 : 255,
+      sheen: !owned,
+    });
+
+    // 图标圆盘（画在本卡 frame 之上、图标 Label 之下）
+    const disc = ensureChild(card, 'IconDiscGfx', 62, 62);
+    disc.setPosition(0, 84, 0);
+    disc.setSiblingIndex(0);
+    const dg = disc.getComponent(Graphics) ?? disc.addComponent(Graphics);
+    dg.clear();
+    dg.fillColor = hex(style.color, owned ? 24 : 44);
+    dg.circle(0, 0, 27);
+    dg.fill();
+    dg.strokeColor = hex(style.color, owned ? 80 : 205);
+    dg.lineWidth = 2;
+    dg.circle(0, 0, 27);
+    dg.stroke();
 
     // 图标
-    const iconNode = this.ensureChild(card, 'IconLabel', ['cc.UITransform', 'cc.Label']);
-    if (iconNode) {
-      const iconLabel = iconNode.getComponent(Label);
-      const iconUi = iconNode.getComponent(UITransform);
-      if (iconUi) iconUi.setContentSize(w - SPACE.LG, 56);
-      if (iconLabel) {
-        iconLabel.string = stripVariationSelectors(option.icon ?? '\u2694');
-        applyFontAndColor(iconLabel, FONT_DISPLAY, owned ? COLOR.TEXT_DISABLED : COLOR.TEXT_PRIMARY);
-        iconLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
-        iconLabel.verticalAlign = Label.VerticalAlign.CENTER;
-        iconLabel.overflow = Label.Overflow.CLAMP;   // 固定高度，避免自适应后压到名字
-      }
-      iconNode.setPosition(0, 80, 0);
-    }
+    const iconNode = card.getChildByName('IconLabel') ?? ensureChild(card, 'IconLabel', w - SPACE.LG, 56);
+    const iconUi = iconNode.getComponent(UITransform) ?? iconNode.addComponent(UITransform);
+    iconUi.setContentSize(w - SPACE.LG, 56);
+    iconNode.setPosition(0, 84, 0);
+    const iconLabel = iconNode.getComponent(Label) ?? iconNode.addComponent(Label);
+    iconLabel.string = stripVariationSelectors(option.icon ?? '\u2694');
+    applyFontAndColor(iconLabel, FONT_DISPLAY, owned ? COLOR.TEXT_DISABLED : COLOR.TEXT_PRIMARY);
+    iconLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+    iconLabel.verticalAlign = Label.VerticalAlign.CENTER;
+    iconLabel.overflow = Label.Overflow.CLAMP;
 
-    // 名字（按节点名查找，不依赖 getComponentsInChildren 的返回顺序）
+    // 名字
     const nameLabel = card.getChildByName('cardNameLabel')?.getComponent(Label);
     if (nameLabel) {
       nameLabel.string = option.name;
@@ -252,39 +319,17 @@ export class UpgradeUI extends Component {
       nameLabel.overflow = Label.Overflow.CLAMP;
       const nameUi = nameLabel.node.getComponent(UITransform);
       if (nameUi) nameUi.setContentSize(w - SPACE.LG, FONT_BODY.lineHeight);
-      nameLabel.node.setPosition(0, 18, 0);
+      nameLabel.node.setPosition(0, 24, 0);
     }
 
-    // 类型徽章：底板 + 子节点文字（同节点不可挂两个渲染组件）
-    const badge = this.ensureChild(card, 'TypeBadge', ['cc.UITransform', 'cc.Sprite']);
-    if (badge) {
-      const badgeSp = badge.getComponent(Sprite);
-      if (badgeSp) {
-        if (fallbackFrame) badgeSp.spriteFrame = fallbackFrame;
-        badgeSp.sizeMode = Sprite.SizeMode.CUSTOM;
-        badgeSp.color = hex(style.color, owned ? 90 : 230);
-      }
-      const badgeUi = badge.getComponent(UITransform);
-      if (badgeUi) badgeUi.setContentSize(96, 26);
-      badge.setPosition(0, -14, 0);
+    // 类型徽章（圆角胶囊）
+    const badgeText = owned ? `${style.badge}\u00B7\u5DF2\u5B66` : style.badge;
+    makeChip(card, 'TypeBadge', badgeText, style.color, 0, -16, 104, 26);
 
-      const badgeText = this.ensureChild(badge, 'TypeBadgeText', ['cc.UITransform', 'cc.Label']);
-      if (badgeText) {
-        const bt = badgeText.getComponent(Label);
-        const btUi = badgeText.getComponent(UITransform);
-        if (btUi) btUi.setContentSize(96, 22);
-        if (bt) {
-          bt.string = owned ? `${style.badge}\u00B7\u5DF2\u5B66` : style.badge;
-          applyFontAndColor(bt, FONT_CAPTION, COLOR.TEXT_PRIMARY);
-          bt.horizontalAlign = Label.HorizontalAlign.CENTER;
-          bt.verticalAlign = Label.VerticalAlign.CENTER;
-          bt.overflow = Label.Overflow.CLAMP;   // 徽章是固定尺寸块，文字不得撑高
-        }
-        badgeText.setPosition(0, 0, 0);
-      }
-    }
-
-    // 描述（限 2 行）
+    // 描述（最多 3 行）
+    // 之前只给 2 行（44px）：卡宽 180 减左右留白后一行只放得下 ~9 个汉字，
+    // 「对 3×3 范围造成 12 点火焰伤害，并附加燃烧」需要 3 行，第 3 行被 CLAMP 裁掉
+    // （实测描述末尾「附加燃烧」直接没了）。3 行 66px 仍能落在卡内（下沿 -130）。
     const descLabel = card.getChildByName('cardDescLabel')?.getComponent(Label);
     if (descLabel) {
       descLabel.string = option.description;
@@ -294,8 +339,8 @@ export class UpgradeUI extends Component {
       descLabel.overflow = Label.Overflow.CLAMP;
       descLabel.enableWrapText = true;
       const descUi = descLabel.node.getComponent(UITransform);
-      if (descUi) descUi.setContentSize(w - SPACE.LG, FONT_CAPTION.lineHeight * 2);
-      descLabel.node.setPosition(0, -64, 0);
+      if (descUi) descUi.setContentSize(w - SPACE.LG, FONT_CAPTION.lineHeight * 3);
+      descLabel.node.setPosition(0, -70, 0);
     }
 
     // 交互：已学不可点
@@ -314,26 +359,6 @@ export class UpgradeUI extends Component {
     const parts = card.name.split('_');
     const idx = Number(parts[parts.length - 1]);
     return Number.isFinite(idx) ? idx : 0;
-  }
-
-  /** 取子节点，不存在则创建（保持多次刷新幂等） */
-  private ensureChild(parent: Node, name: string, components: string[]): Node | null {
-    const existing = parent.getChildByName(name);
-    if (existing?.isValid) return existing;
-    const node = new Node(name);
-    // 先按声明顺序补组件；Sprite/Label 会自带 UITransform，避免重复添加
-    for (const type of components) {
-      if (type === 'cc.UITransform') {
-        if (!node.getComponent(UITransform)) node.addComponent(UITransform);
-      } else if (type === 'cc.Label') {
-        if (!node.getComponent(Label)) node.addComponent(Label);
-      } else if (type === 'cc.Sprite') {
-        if (!node.getComponent(Sprite)) node.addComponent(Sprite);
-      }
-    }
-    if (!node.getComponent(UITransform)) node.addComponent(UITransform);
-    parent.addChild(node);
-    return node;
   }
 
   private onUpgradeCardClicked(btn: Button): void {

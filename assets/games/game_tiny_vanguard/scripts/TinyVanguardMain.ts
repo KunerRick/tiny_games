@@ -1,5 +1,9 @@
-import { _decorator, Component, Node, Label, Button, Sprite, SpriteFrame, UITransform, Vec3 } from 'cc';
-import { COLOR, CLASS_COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_TINY, applyFont, applyFontAndColor, hex, applyButtonTheme, ButtonVariant, stripVariationSelectors } from './config/Theme';
+import { _decorator, Component, Node, Label, Button, Sprite, SpriteFrame, UITransform, Vec3, Graphics } from 'cc';
+import { COLOR, CLASS_COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_TINY, FONT_TITLE, applyFont, applyFontAndColor, hex, applyButtonTheme, ButtonVariant, stripVariationSelectors } from './config/Theme';
+import {
+  drawCornerBrackets, drawDivider, drawFrame, ensureChild, ensureScaleButton, ensureTransform,
+  makeChip, makeLabel, makeMedallion, makeStatBar, stylePanel,
+} from './ui/GameUIKit';
 import { RouteMapUI, RouteNode } from './ui/RouteMapUI';
 import { BattleManager, BattleResult, UnitActionPhase } from './battle/BattleManager';
 import { UpgradeUI, UpgradeOption } from './ui/UpgradeUI';
@@ -122,6 +126,10 @@ export class TinyVanguardMain extends Component {
 
   private _state: GameState = 'class_select';
   private _selectedClasses: string[] = [];
+  /** 运行时职业卡（classId → 节点），与场景里 4 个旧行按钮并行存在（旧行已隐藏） */
+  private _classCardNodes: Map<string, Node> = new Map();
+  /** 出战队伍槽位容器（职业选择页底部） */
+  private _teamSlotContainer: Node | null = null;
   private _runData: RunData = {
     currentRouteNode: 0,
     playerClasses: [],
@@ -250,10 +258,14 @@ export class TinyVanguardMain extends Component {
       setBtn(this.classSelectPanel.getChildByName('StartBtn'), 'primary');
     }
     setBtn(this.continueButton?.node ?? null, 'secondary');
+    // 续档按钮是 Canvas 根级子节点，不在任何面板的批量描边里；不补外框就只剩一块纯灰底色
+    this.decorateFlatButton(this.continueButton?.node ?? null, COLOR.INFO);
     // 商店 / 圣泉：改造后各自只剩一个"离开"按钮，商品与强化项都是运行时卡片
     // （卡片自带 Button，过渡色在 PanelCards 里统一为 secondary）
     if (this.shopPanel) {
-      setBtn(this.shopPanel.getChildByName('CloseBtn'), 'danger');
+      // 「离开」不是破坏性操作，用次级（青）而不是红色：整页只有它一个按钮，
+      // 红色会让收银台看起来像"危险确认"。
+      setBtn(this.shopPanel.getChildByName('CloseBtn'), 'secondary');
     }
     if (this.restPanel) {
       setBtn(this.restPanel.getChildByName('SkipBtn'), 'secondary');
@@ -268,6 +280,26 @@ export class TinyVanguardMain extends Component {
     // 商店/休息面板的按钮尺寸与字号不在改版 §8.1 的场景重构清单里，仍是 30/36 高、16 号字，
     // 运行时统一到令牌（高 48、正文 20），避免与战斗界面并存两套控件规格。
     this.normalizeSmallPanelButtons();
+  }
+
+  /** 给不在面板批量描边里的零散按钮补一层统一外框（幂等：已有 frameGfx 就跳过） */
+  private decorateFlatButton(node: Node | null, accentHex: string): void {
+    if (!node?.isValid) return;
+    const ui = node.getComponent(UITransform);
+    if (!ui || ui.width <= 2 || ui.height <= 2) return;
+    if (node.getChildByName('frameGfx')) return;
+    drawFrame(node, {
+      width: ui.width,
+      height: ui.height,
+      radius: Math.min(14, ui.height / 2),
+      fill: COLOR.SURFACE,
+      fillAlpha: 250,
+      border: accentHex,
+      borderAlpha: 170,
+      borderWidth: 2,
+      accent: accentHex,
+      accentAlpha: 200,
+    });
   }
 
   /**
@@ -305,6 +337,13 @@ export class TinyVanguardMain extends Component {
       for (const node of btns) {
         const ui = node.getComponent(UITransform);
         if (ui) ui.setContentSize(width, CONTROL.BTN_HEIGHT);
+        // 与战斗按钮同一套外观：深底 + 强调色描边 + 顶条
+        drawFrame(node, {
+          width, height: CONTROL.BTN_HEIGHT, radius: 14,
+          fill: COLOR.SURFACE, fillAlpha: 250,
+          border: COLOR.INFO, borderAlpha: 170, borderWidth: 2,
+          accent: COLOR.INFO, accentAlpha: 200,
+        });
       }
     }
   }
@@ -400,9 +439,10 @@ export class TinyVanguardMain extends Component {
       else if (!affordable) reason = '金币不足';
 
       cards.push({
-        // 图标用**职业**图标（不是 skillIconOf）：卡片是按职业卖的，而 skillIconOf 按
-        // 目标类型推导，三个职业的主动技会推导出同一张 ⚔ → 三张卡长得一模一样。
-        icon: classConfig.icon || (skill ? skillIconOf(skill) : '❓'),
+        // 卡片按**职业**卖：图标直接用矢量纹章（classId），
+        // 旧版 emoji 在预览/微信里经常落到后备字体渲染成方框（实测 📜 变成一块土黄色方块）。
+        icon: classConfig.icon || '',
+        emblemKind: classId,
         title: skill ? skill.name : '已全部学会',
         subtitle: `${classConfig.name} 可学 · ${price} 金币`,
         desc: enabled || !reason ? (skill?.description ?? '') : reason,
@@ -416,11 +456,12 @@ export class TinyVanguardMain extends Component {
     const teamPrice = this.shopPrice(SHOP_TEAM_PRICE);
     const teamAffordable = this._runData.gold >= teamPrice;
     cards.push({
-      icon: '📜',                                   // 📜
+      icon: '',
+      emblemKind: 'scroll',
       title: '强攻卷轴',
       subtitle: `全队永久 · ${teamPrice} 金币`,
       desc: teamAffordable
-        ? '每位英雄攻击力永久 +1（跨战斗生效）'
+        ? '全队攻击 +1（永久，跨战斗）'
         : '金币不足',
       accent: COLOR.SUCCESS,
       enabled: teamAffordable,
@@ -428,9 +469,56 @@ export class TinyVanguardMain extends Component {
     });
 
     renderCardGrid(panel.getChildByName('OfferContainer'), frame, cards, 2, CARD_W, CARD_H);
+    this.layoutShopPanel(panel);
     this.renderPanelFeedback(panel);
     // 内容尺寸变了：底板必须跟着重算，否则卡片会溢出深色底板
     this.fitPanelBackground(panel);
+    panel.setPosition(panel.position.x, 0, 0);
+    stylePanel(panel, COLOR.WARNING);
+  }
+
+  /**
+   * 商店面板纵向重排：标题 → 金币 → 队伍 → 商品 → 反馈 → 离开。
+   * 场景里六个子节点是按旧内容高度写死的固定坐标（标题 +402、离开 -398），
+   * 内容一变就留下大片空白（实测只卖 1 件时面板仍被撑到 924 高，中间空出半屏）。
+   * 这里按各自实际高度顺排，再交给 `fitPanelBackground` 收紧底板。
+   */
+  private layoutShopPanel(panel: Node): void {
+    if (!panel?.isValid) return;
+    const hOf = (n: Node | null, fallback: number): number =>
+      n?.getComponent(UITransform)?.height ?? fallback;
+
+    const title = panel.getChildByName('ShopTitle');
+    const gold = panel.getChildByName('GoldLine');
+    const party = panel.getChildByName('PartyContainer');
+    const offer = panel.getChildByName('OfferContainer');
+    const feedback = panel.getChildByName('FeedbackLabel');
+    const close = panel.getChildByName('CloseBtn');
+
+    const partyH = hOf(party, 1);
+    const hasParty = partyH > 2;
+
+    // 以 0 为"内容顶边"，逐行往下排；后续 fitPanelBackground 会把包围盒重新居中
+    let cursor = 0;
+    const place = (n: Node | null, h: number, gapAfter: number): void => {
+      if (!n?.isValid) return;
+      n.setPosition(0, cursor - h / 2, 0);
+      cursor -= h + gapAfter;
+    };
+
+    place(title, hOf(title, 50), 10);
+    place(gold, hOf(gold, 35), 22);
+    if (party?.isValid) {
+      party.active = hasParty;
+      if (hasParty) place(party, partyH, 22);
+    }
+    place(offer, hOf(offer, 180), 18);
+    if (feedback?.isValid) {
+      const fu = feedback.getComponent(UITransform);
+      if (fu) fu.setContentSize(520, 28);
+      place(feedback, 28, 12);
+    }
+    place(close, hOf(close, 48), 0);
   }
 
   /** 面板内的一行操作反馈（买入成功 / 为何不能买），替代原先只写 console 的做法 */
@@ -458,10 +546,10 @@ export class TinyVanguardMain extends Component {
       const d = unit.data;
       const progress = ensureProgress(this._runData, i);
       const need = expToNext(progress.level);
-      const classConfig = getClassById(d.classId);
       const skillNames = d.skills.map(s => s.name).join('、') || '（无）';
+      // 名字不再拼 emoji：行首已有职业色条，emoji 贴边又比正文大，反而像裁字
       rows.push({
-        name: `${classConfig?.icon ? stripVariationSelectors(classConfig.icon) + ' ' : ''}${d.name}`,
+        name: d.name,
         level: `Lv${progress.level}`,
         detail: `技能 ${d.skills.length}/${unit.maxSkillSlots} · ${skillNames} · 经验 ${progress.exp}/${need}`,
         percent: need > 0 ? progress.exp / need : 0,
@@ -567,25 +655,25 @@ export class TinyVanguardMain extends Component {
       const noFreeSlot = (this.battleManager?.playerUnits ?? []).every(u => !u.hasFreeSkillSlot);
       const options: CardSpec[] = [
         {
-          icon: '⚔', title: '淬炼',
+          icon: '', emblemKind: 'hammer', title: '淬炼',
           subtitle: '指定英雄',
-          desc: '该英雄攻击 +1、最大生命 +2（永久）',
+          desc: '攻击/生命 永久 +1/+2',
           accent: COLOR.DANGER, enabled: true,
           onPick: () => this.chooseRestOption(0),
         },
         {
-          icon: '🧹', title: '精进',
+          icon: '', emblemKind: 'spark', title: '精进',
           subtitle: '指定英雄',
-          desc: '该英雄技能栏 +1（永久）',
+          desc: '技能栏 +1（永久）',
           accent: COLOR.PRIMARY, enabled: true,
           onPick: () => this.chooseRestOption(1),
         },
         {
-          icon: '📖', title: '秘传',
+          icon: '', emblemKind: 'scroll', title: '秘传',
           subtitle: '指定英雄',
           desc: noFreeSlot
             ? '全队技能栏已满'
-            : '该英雄随机学一个本职业新技能',
+            : '随机学一个本职业技能',
           accent: COLOR.PASSIVE, enabled: !noFreeSlot,
           onPick: () => this.chooseRestOption(2),
         },
@@ -606,13 +694,40 @@ export class TinyVanguardMain extends Component {
       if (skip) skip.active = true;
     }
 
+    this.layoutRestPanel(panel, container);
+
     this.renderPanelFeedback(panel);
     this.fitPanelBackground(panel);
+    // fitPanelBackground 只保证"底板包住内容"，面板会跟着内容高度上下漂
+    // （实测圣泉 460 高的面板整体落在画布中心下方 97px）。这里统一竖向居中。
+    panel.setPosition(panel.position.x, 0, 0);
+    stylePanel(panel, COLOR.SUCCESS);
   }
 
   private setSkipLabel(text: string): void {
     const lb = this.restPanel?.getChildByName('SkipBtn')?.getComponentInChildren(Label);
     if (lb) lb.string = text;
+  }
+
+  /**
+   * 圣泉面板纵向重排：标题 → 提示 → 选项卡 → 跳过。
+   * 场景里的坐标是按旧的固定卡高写死的，卡片换高之后间距会失衡
+   * （实测标题与卡片之间空出两倍行高、底部又贴边）。这里统一按内容顺排，
+   * 再由 `fitPanelBackground` 把底板收紧到包围盒。
+   */
+  private layoutRestPanel(panel: Node, container: Node | null): void {
+    if (!panel?.isValid) return;
+    const cH = container?.getComponent(UITransform)?.height ?? OPTION_H;
+
+    const titleY = 0;
+    const descY = titleY - 52;
+    const containerY = descY - 30 - cH / 2;
+    const skipY = containerY - cH / 2 - 70;
+
+    panel.getChildByName('RestTitle')?.setPosition(0, titleY, 0);
+    panel.getChildByName('RestDesc')?.setPosition(0, descY, 0);
+    container?.setPosition(0, containerY, 0);
+    panel.getChildByName('SkipBtn')?.setPosition(0, skipY, 0);
   }
 
   private chooseRestOption(index: number): void {
@@ -761,51 +876,279 @@ export class TinyVanguardMain extends Component {
     }
   }
 
-  private resetClassSelectionVisual(): void {
-    for (let i = 0; i < CLASS_ORDER.length; i++) {
-      const btnName = `Class${i + 1}Btn`;
-      const btnNode = this.classSelectPanel.getChildByName(btnName);
-      if (!btnNode) continue;
-      this.setClassButtonVisual(btnNode, false);
-    }
-    // 同步开始按钮的可用性与文案（否则重开后文案会残留上一局的 “开始游戏 (n/3)”）
-    this.updateStartBtnInteractable();
-  }
-
   private setupClassSelectionUI(): void {
+    this.buildClassSelectUI();
     this.bindClassSelectionEvents();
     this.resetClassSelectionVisual();
   }
 
+  // -------------------------------------------------------------------------
+  // 职业选择页（统一视觉层）
+  // -------------------------------------------------------------------------
+
+  /** 职业定位标语（卡片副标题） */
+  private static readonly CLASS_ROLE: Record<string, string> = {
+    warrior: '前排坦克 · 高生命',
+    archer: '远程狙杀 · 高机动',
+    mage: '范围爆发 · 高法伤',
+    cleric: '治疗支援 · 护盾',
+  };
+
+  /**
+   * 重建职业选择页。
+   *
+   * 场景里的 4 行旧按钮只保留事件与数据（`_classId`），视觉整体隐藏，
+   * 由本方法用 GameUIKit 画成 2×2 职业卡 + 出战槽位 —— 所有页面共用同一套
+   * 圆角描边 / 纹章 / 属性条语言（用户反馈：旧版「过于简陋、像原型」）。
+   */
+  private buildClassSelectUI(): void {
+    const panel = this.classSelectPanel;
+    if (!panel?.isValid) return;
+
+    // 旧版元素隐藏（不删除：事件与尺寸逻辑仍在用）
+    for (const name of ['TitleLabel', 'DescLabel', 'Divider', 'Class1Btn', 'Class2Btn', 'Class3Btn', 'Class4Btn']) {
+      const n = panel.getChildByName(name);
+      if (n?.isValid) n.active = false;
+    }
+
+    // 背景装饰：四角括线 + 顶部光带
+    const decor = ensureChild(panel, 'HeroDecor', 600, 610);
+    decor.setSiblingIndex(0);
+    drawCornerBrackets(decor, 612, 612, COLOR.PRIMARY, 55, 22);
+    const topLine = ensureChild(panel, 'HeroTopLine', 560, 4);
+    topLine.setPosition(0, 232, 0);
+    const tl = topLine.getComponent(Graphics) ?? topLine.addComponent(Graphics);
+    tl.clear();
+    tl.fillColor = hex(COLOR.PRIMARY, 90);
+    tl.rect(-280, -1.5, 560, 3);
+    tl.fill();
+
+    // 标题区
+    makeLabel(panel, 'HeroTitle', '组建队伍', FONT_TITLE, COLOR.TEXT_PRIMARY, 'center', 400, FONT_TITLE.lineHeight)
+      .node.setPosition(0, 286, 0);
+    makeLabel(panel, 'HeroSubtitle', '选择 3 名英雄开启远征 · 点击卡片切换', FONT_CAPTION, COLOR.TEXT_SECONDARY, 'center', 560, FONT_CAPTION.lineHeight)
+      .node.setPosition(0, 254, 0);
+
+    // 2×2 职业卡
+    const CW = 292;
+    const CH = 196;
+    const GAP = 16;
+    this._classCardNodes.clear();
+    for (let i = 0; i < CLASS_ORDER.length; i++) {
+      const classId = CLASS_ORDER[i];
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const x = (col - 0.5) * (CW + GAP);
+      const y = 112 - row * (CH + 14);
+      this._classCardNodes.set(classId, this.buildClassCard(panel, classId, x, y, CW, CH));
+    }
+
+    // 出战槽位
+    this._teamSlotContainer = ensureChild(panel, 'TeamSlots', 440, 58);
+    this._teamSlotContainer.setPosition(0, -234, 0);
+
+    // 开始按钮：贴底、加宽
+    const startBtn = panel.getChildByName('StartBtn');
+    if (startBtn?.isValid) {
+      ensureTransform(startBtn, 520, 52);
+      startBtn.setPosition(0, -296, 0);
+      const lb = startBtn.getComponentInChildren(Label);
+      if (lb) applyFont(lb, FONT_BODY);
+    }
+
+    // 荣誉天赋：运行时入口可能尚未创建（ensureTalentEntry 在 onLoad 后段才跑），
+    // 这里先确保存在，再统一收进右上角，避免它落在队伍槽位上。
+    this.ensureTalentEntry();
+    const talentBtn = panel.getChildByName('TalentBtn');
+    if (talentBtn?.isValid) {
+      ensureTransform(talentBtn, 132, 34);
+      talentBtn.setPosition(226, 288, 0);
+      const lb = talentBtn.getComponentInChildren(Label);
+      if (lb) {
+        applyFont(lb, FONT_CAPTION);
+        lb.string = '🏅 荣誉';
+        lb.overflow = Label.Overflow.SHRINK;      // 固定宽度下缩放而不是截断成「… 荣」
+        lb.horizontalAlign = Label.HorizontalAlign.CENTER;
+        const lbUi = lb.node.getComponent(UITransform);
+        if (lbUi) lbUi.setContentSize(120, 28);
+        lb.node.setPosition(0, 0, 0);
+      }
+      drawFrame(talentBtn, {
+        width: 132, height: 34, radius: 17,
+        fill: COLOR.SURFACE, border: COLOR.WARNING, borderAlpha: 160,
+      });
+    }
+  }
+
+  private buildClassCard(parent: Node, classId: string, x: number, y: number, w: number, h: number): Node {
+    const cfg = getClassById(classId);
+    const accent = CLASS_COLOR[classId] ?? CLASS_COLOR.fallback;
+    const card = ensureChild(parent, `ClassCard_${classId}`, w, h);
+    card.setPosition(x, y, 0);
+    card['_classId'] = classId;
+
+    this.drawClassCardFrame(card, accent, false, w, h);
+
+    // 职业纹章
+    makeMedallion(card, 'Emblem', classId, accent, 40, -96, 30);
+
+    // 名字 + 定位
+    makeLabel(card, 'Name', cfg?.name ?? classId, FONT_TITLE, accent, 'left', 170, FONT_TITLE.lineHeight)
+      .node.setPosition(46, 60, 0);
+    makeLabel(card, 'Role', TinyVanguardMain.CLASS_ROLE[classId] ?? '', FONT_CAPTION, COLOR.TEXT_SECONDARY, 'left', 172, FONT_CAPTION.lineHeight)
+      .node.setPosition(46, 30, 0);
+
+    // 属性条（归一化：生命/10、攻击/6、防御/3）；右端附原始数值
+    const stats = cfg?.stats;
+    makeStatBar(card, 'StatHp', '生命', (stats?.hp ?? 0) / 10, COLOR.SUCCESS, -4, -22, 236, `${stats?.hp ?? 0}`);
+    makeStatBar(card, 'StatAtk', '攻击', (stats?.attack ?? 0) / 6, COLOR.DANGER, -4, -48, 236, `${stats?.attack ?? 0}`);
+    makeStatBar(card, 'StatDef', '防御', (stats?.defense ?? 0) / 3, COLOR.INFO, -4, -74, 236, `${stats?.defense ?? 0}`);
+
+    // 选中角标（默认隐藏）
+    const badge = ensureChild(card, 'SelectBadge', 30, 30);
+    badge.setPosition(118, 74, 0);
+    const bg = badge.getComponent(Graphics) ?? badge.addComponent(Graphics);
+    bg.clear();
+    bg.fillColor = hex(accent, 255);
+    bg.circle(0, 0, 13);
+    bg.fill();
+    makeLabel(badge, 'check', '✓', FONT_CAPTION, COLOR.TEXT_PRIMARY, 'center', 26, 26);
+    badge.active = false;
+
+    ensureScaleButton(card);
+    card.on(Button.EventType.CLICK, this.onClassCardClicked, this);
+    return card;
+  }
+
+  private drawClassCardFrame(card: Node, accent: string, selected: boolean, w: number, h: number): void {
+    drawFrame(card, {
+      width: w, height: h, radius: 16,
+      fill: selected ? '#2B3A52' : COLOR.SURFACE,
+      fillAlpha: 255,
+      border: selected ? accent : COLOR.PANEL_BORDER,
+      borderAlpha: selected ? 255 : 210,
+      borderWidth: selected ? 3 : 2,
+      accent,
+      accentAlpha: selected ? 255 : 150,
+    });
+
+    let glow = card.getChildByName('GlowGfx');
+    if (selected) {
+      if (!glow?.isValid) {
+        glow = new Node('GlowGfx');
+        ensureTransform(glow, w + 20, h + 20);
+        card.addChild(glow);
+        glow.setSiblingIndex(0);
+      }
+      glow.active = true;
+      const g = glow.getComponent(Graphics) ?? glow.addComponent(Graphics);
+      g.clear();
+      g.strokeColor = hex(accent, 80);
+      g.lineWidth = 6;
+      const rw = w + 10;
+      const rh = h + 10;
+      g.roundRect(-rw / 2, -rh / 2, rw, rh, 20);
+      g.stroke();
+    } else if (glow?.isValid) {
+      glow.active = false;
+    }
+
+    const badge = card.getChildByName('SelectBadge');
+    if (badge) badge.active = selected;
+  }
+
+  private onClassCardClicked(btn: Button): void {
+    const classId = btn.node['_classId'] as string;
+    if (classId) this.toggleClassSelection(classId);
+  }
+
   private onClassToggleClicked(btn: Button): void {
     const classId = btn.node['_classId'] as string;
-    if (!classId) return;
+    if (classId) this.toggleClassSelection(classId);
+  }
+
+  /** 选择/取消选择（队伍固定 3 人，满了顶掉最早选的） */
+  private toggleClassSelection(classId: string): void {
     if (this._selectedClasses.includes(classId)) {
       if (this._selectedClasses.length <= 1) return;
       this._selectedClasses = this._selectedClasses.filter(c => c !== classId);
-      this.setClassButtonVisual(btn.node, false);
     } else {
-      // 队伍固定 3 人：选满后再点第 4 个 → 顶掉**最早选**的那个（FIFO）。
-      // 既不是静默无反应（玩家会以为按钮坏了），也不用"先取消再选"两步操作。
       if (this._selectedClasses.length >= SQUAD_SIZE) {
-        const dropped = this._selectedClasses.shift();
-        const droppedNode = dropped ? this.classButtonNodeOf(dropped) : null;
-        if (droppedNode) this.setClassButtonVisual(droppedNode, false);
+        this._selectedClasses.shift();
       }
       this._selectedClasses.push(classId);
-      this.setClassButtonVisual(btn.node, true);
     }
+    this.refreshClassSelectionVisuals();
     this.updateStartBtnInteractable();
+    this.updateTeamSlots();
   }
 
-  /** 按 classId 反查职业按钮节点（供"顶掉最早选择"时复位它的外观） */
-  private classButtonNodeOf(classId: string): Node | null {
-    if (!this.classSelectPanel) return null;
+  /** 把选中态同步到四张卡（旧场景按钮与运行时卡片都刷新） */
+  private refreshClassSelectionVisuals(): void {
     for (let i = 0; i < CLASS_ORDER.length; i++) {
-      const n = this.classSelectPanel.getChildByName(`Class${i + 1}Btn`);
-      if (n && n['_classId'] === classId) return n;
+      const classId = CLASS_ORDER[i];
+      const selected = this._selectedClasses.includes(classId);
+
+      const legacy = this.classSelectPanel?.getChildByName(`Class${i + 1}Btn`);
+      if (legacy?.isValid) this.setClassButtonVisual(legacy, selected);
+
+      const card = this._classCardNodes.get(classId);
+      if (card?.isValid) {
+        const accent = CLASS_COLOR[classId] ?? CLASS_COLOR.fallback;
+        this.drawClassCardFrame(card, accent, selected, 292, 196);
+      }
     }
-    return null;
+  }
+
+  /** 底部三个出战槽位 */
+  private updateTeamSlots(): void {
+    const container = this._teamSlotContainer;
+    if (!container?.isValid) return;
+    container.destroyAllChildren();
+
+    const slotW = 132;
+    const slotH = 58;
+    for (let i = 0; i < SQUAD_SIZE; i++) {
+      const classId = this._selectedClasses[i];
+      const slot = new Node(`TeamSlot_${i}`);
+      ensureTransform(slot, slotW, slotH);
+      slot.setPosition((i - 1) * (slotW + 14), 0, 0);
+      container.addChild(slot);
+
+      const accent = classId ? (CLASS_COLOR[classId] ?? CLASS_COLOR.fallback) : COLOR.PANEL_BORDER;
+      drawFrame(slot, {
+        width: slotW, height: slotH, radius: 12,
+        fill: classId ? COLOR.SURFACE : COLOR.SLOT_EMPTY_BG,
+        border: accent,
+        borderAlpha: classId ? 210 : 120,
+        borderWidth: 2,
+      });
+
+      if (classId) {
+        const cfg = getClassById(classId);
+        makeMedallion(slot, 'Emblem', classId, accent, 18, -40, 0, accent);
+        makeLabel(slot, 'Name', cfg?.name ?? classId, FONT_CAPTION, COLOR.TEXT_PRIMARY, 'left', 72, FONT_CAPTION.lineHeight)
+          .node.setPosition(24, 0, 0);
+      } else {
+        const placeholder = ensureChild(slot, 'Empty', 26, 26);
+        placeholder.setPosition(-40, 0, 0);
+        const g = placeholder.getComponent(Graphics) ?? placeholder.addComponent(Graphics);
+        g.clear();
+        g.strokeColor = hex(COLOR.TEXT_DISABLED, 150);
+        g.lineWidth = 2;
+        g.circle(0, 0, 11);
+        g.stroke();
+        makeLabel(slot, 'Name', '空位', FONT_CAPTION, COLOR.TEXT_DISABLED, 'left', 72, FONT_CAPTION.lineHeight)
+          .node.setPosition(24, 0, 0);
+      }
+    }
+  }
+
+  private resetClassSelectionVisual(): void {
+    this.refreshClassSelectionVisuals();
+    this.updateTeamSlots();
+    // 同步开始按钮的可用性与文案（否则重开后文案会残留上一局的 “开始游戏 (n/3)”）
+    this.updateStartBtnInteractable();
   }
 
   /**
@@ -925,6 +1268,12 @@ export class TinyVanguardMain extends Component {
       this.battleUI.setEndTurnCallback(() => this.battleManager.endCurrentUnitTurn());
       this.battleUI.setVictoryContinueCallback(() => this.onVictoryContinue());
       this.battleUI.setAttackCallback(() => this.battleManager.onAttackSelected());
+      // 2026-11-08 战斗体验：布阵减负 / 倍速 / 战败重试
+      this.battleUI.setRecommendDeployCallback(() => this.onRecommendDeploy());
+      this.battleUI.setReuseDeployCallback(() => this.onReuseDeploy());
+      this.battleUI.setSpeedChangedCallback((mul) => this.battleManager.setBattleSpeed(mul));
+      this.battleUI.setRetryBattleCallback(() => this.onRetryBattle());
+      this.battleUI.setEndRunCallback(() => this.onRunComplete(false));
     }
     if (this.battleManager) {
       this.battleManager.setDamageDealtCallback((targetNode, amount) => {
@@ -995,6 +1344,8 @@ export class TinyVanguardMain extends Component {
     }
     this.battleUI.show();
     this.battleUI.showDeployPhase();
+    // 没有上局阵型时，"沿用上局"必须显式禁用并说明原因（避免点击无反馈的假象）
+    this.battleUI.setReuseDeployAvailable(!!this._runData.deployLayout);
 
     const unitNames = this._runData.playerClasses.map(c => {
       const config = getClassById(c);
@@ -1083,6 +1434,53 @@ export class TinyVanguardMain extends Component {
   private onWaitClicked(): void {
     this.battleManager.waitCurrentUnit();
     this.updateBattleUI();
+  }
+
+  /** G1：一键推荐站位（前排战士、其余居中错开），仍可手动调整后再确认 */
+  private onRecommendDeploy(): void {
+    if (!this.battleManager.recommendDeployLayout()) return;
+    this.updateBattleUI();
+  }
+
+  /** G1：沿用上一场确认过的阵型；没有存档阵型时按钮本身已禁用 */
+  private onReuseDeploy(): void {
+    if (!this._runData.deployLayout) {
+      this.battleUI.showAutoSkipNotice('暂无上局阵型');
+      return;
+    }
+    if (!this.battleManager.applySavedDeployLayout(this._runData.deployLayout)) return;
+    this.updateBattleUI();
+  }
+
+  /**
+   * G3：战败重试本关 —— 保留 30% 金币，其余进度（关卡/等级/技能/天赋）不变。
+   * 失败面板改为玩家主动选择（重试 / 结束本局），不再 2 秒后自动结算。
+   */
+  private onRetryBattle(): void {
+    const node = this._currentNode;
+    if (!node || this._state !== 'battle') return;
+
+    this._runData.gold = Math.floor(this._runData.gold * 0.3);
+    SaveManager.saveRun(this._runData);
+    this.updateGoldDisplay();
+
+    // 收起旧战斗的视觉残留，再按同一节点/同一难度重开
+    this.battleUI.hide();
+    if (this.battleManager?.node) this.battleManager.node.active = false;
+    if (this.battleManager?.gridController?.node) {
+      this.battleManager.gridController.node.active = false;
+    }
+    switch (node.type) {
+      case 'elite':
+        this.startBattle(true, false);
+        break;
+      case 'boss':
+        this.startBattle(false, true);
+        break;
+      default:
+        this.startBattle(false, false);
+        break;
+    }
   }
 
   private updateBattlePhaseUI(phase: import('./battle/BattleManager').BattlePhase, unit: UnitController | null, actionPhase: UnitActionPhase | null): void {
@@ -1195,13 +1593,13 @@ export class TinyVanguardMain extends Component {
       // 不自动跳转，等待玩家点击胜利面板的"继续"按钮
       // Boss 战的胜利处理在 onVictoryContinue 中判断
     } else {
-      this._runData.honor += Math.max(1, this._battleCount * 5);
+      // 战败荣誉**不在这里发**：本轮新增「重试本关」后，每次战败都发会变成
+      // "反复送死刷荣誉"；改到真正结束本局（onRunComplete(false)）时结算一次。
       this.battleUI.clearPhase();
       // 失败面板补一行战绩摘要（P2 统一版式后不再留空）
       this.battleUI.showDefeat(`\u62B5\u8FBE\u7B2C ${this.routeNo}/${this.totalRouteLayers} \u5173 \u00B7 \u9020\u6210\u4F24\u5BB3 ${this.battleManager.totalDamageDealt}`);
-      this.scheduleOnce(() => {
-        this.onRunComplete(false);
-      }, 2.0);
+      // \u4E0D\u518D 2 \u79D2\u540E\u81EA\u52A8\u7ED3\u675F\uFF1A\u7531\u9762\u677F\u4E0A\u7684\u300C\u91CD\u8BD5\u672C\u5173 / \u7ED3\u675F\u672C\u5C40\u300D\u51B3\u5B9A\uFF0C
+      // \u5426\u5219\u73A9\u5BB6\u8FD8\u6CA1\u770B\u6E05\u6218\u62A5\u5C31\u88AB\u8E22\u56DE\u7ED3\u7B97\uFF0C"\u91CD\u8BD5"\u6839\u672C\u70B9\u4E0D\u5230\u3002
     }
   }
 
@@ -1658,6 +2056,8 @@ export class TinyVanguardMain extends Component {
       if (this.gameOverPanel) {
         this.gameOverPanel.active = true;
       }
+      // 战败荣誉只在本局真正结束时结算一次（重试不重复发放，见 onBattleEnd）
+      this._runData.honor += Math.max(1, this._battleCount * 5);
       // 标题兜底：场景若被改动仍保证文案正确（GameOverLabel 即 GameOverPanel 的标题节点）
       if (this.gameOverLabel) {
         this.gameOverLabel.string = '\u6E38\u620F\u7ED3\u675F';

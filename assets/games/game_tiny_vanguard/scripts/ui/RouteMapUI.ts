@@ -1,5 +1,6 @@
 import { _decorator, Component, Node, ScrollView, instantiate, Prefab, Button, Label, Color, Sprite, UITransform, Graphics, Vec3, tween, Tween, Event } from 'cc';
-import { ALPHA, COLOR, FONT_CAPTION, FONT_TITLE, applyFontAndColor, hex, stripVariationSelectors } from '../config/Theme';
+import { ALPHA, COLOR, FONT_BODY, FONT_CAPTION, FONT_TITLE, applyFontAndColor, hex, stripVariationSelectors } from '../config/Theme';
+import { drawRouteGlyph, makeLabel } from './GameUIKit';
 const { ccclass, property } = _decorator;
 
 // ---------------------------------------------------------------------------
@@ -15,6 +16,28 @@ const NODE_SIZE = 80;
 const CONTENT_TOP = 400;
 /** 内容区最小宽度（画布 720 留安全边距） */
 const CONTENT_MIN_W = 688;
+
+/**
+ * V4：节点类型配色（一眼识别"这层是什么"）。
+ * 与图例文案一一对应；可达时用满色 + 呼吸，不可达时压暗为同色系深色。
+ */
+const TYPE_LABEL: Record<string, string> = {
+  battle: '战斗',
+  elite: '精英',
+  shop: '商店',
+  rest: '休息',
+  event: '事件',
+  boss: 'Boss',
+};
+
+const TYPE_COLOR: Record<string, string> = {
+  battle: COLOR.PRIMARY,
+  elite: COLOR.WARNING,
+  shop: COLOR.SUCCESS,
+  rest: COLOR.INFO,
+  event: COLOR.PASSIVE,
+  boss: COLOR.DANGER,
+};
 
 
 export interface RouteNode {
@@ -176,10 +199,17 @@ export class RouteMapUI extends Component {
     }
 
     this.nodesContainer.destroyAllChildren();
-    const typeIcons: Record<string, string> = {
-      battle: '\u2694', elite: '\uD83D\uDD25', shop: '\uD83C\uDFEA',
-      rest: '\uD83D\uDCA4', event: '\uD83E\uDDEA', boss: '\uD83C\uDFC6'
-    };
+    this._nodeViews.clear();
+
+    if (this.legendLabel) {
+      // 场景里这两个 Label 用的是默认小字（13 号 ≈ 手机 7px），图例与进度几乎读不出来；
+      // 统一提到正文 / 说明字号，跟其它页面的信息层级对齐。
+      this.legendLabel.string = '战斗 \u00B7 精英 \u00B7 商店 \u00B7 休息 \u00B7 事件 \u00B7 Boss';
+      applyFontAndColor(this.legendLabel, FONT_CAPTION, COLOR.TEXT_SECONDARY);
+    }
+    if (this.progressLabel) {
+      applyFontAndColor(this.progressLabel, FONT_BODY, COLOR.TEXT_PRIMARY);
+    }
 
     for (const node of nodes) {
       const btnNode = instantiate(this.nodePrefab);
@@ -192,12 +222,12 @@ export class RouteMapUI extends Component {
       const ui = btnNode.getComponent(UITransform);
       if (ui) ui.setContentSize(NODE_SIZE, NODE_SIZE);
 
-      const label = btnNode.getComponentInChildren(Label);
-      if (label) {
-        label.string = stripVariationSelectors(typeIcons[node.type] || '?');
-        applyFontAndColor(label, FONT_TITLE, COLOR.TEXT_PRIMARY);
-        const labelUi = label.node.getComponent(UITransform);
-        if (labelUi) labelUi.setContentSize(NODE_SIZE, FONT_TITLE.lineHeight);
+      // 旧 prefab 的方块底与 emoji 文字全部让位给矢量勋章
+      const sprite = btnNode.getComponent(Sprite);
+      if (sprite) sprite.enabled = false;
+      for (const child of btnNode.children) {
+        const lb = child.getComponent(Label);
+        if (lb && child.name !== 'CheckMark') child.active = false;
       }
 
       // 已完成打勾标记（运行时补齐，避免再动 prefab）
@@ -211,6 +241,13 @@ export class RouteMapUI extends Component {
       this.nodesContainer.addChild(btnNode);
       this._nodeViews.set(node.id, btnNode);
       this.applyNodeVisual(node, btnNode);
+
+      // 节点下方的类型名：让"这一站是什么"不必靠记图标
+      const nameLb = makeLabel(
+        btnNode, 'TypeName', TYPE_LABEL[node.type] ?? node.type,
+        FONT_CAPTION, COLOR.TEXT_SECONDARY, 'center', 110, FONT_CAPTION.lineHeight
+      );
+      nameLb.node.setPosition(0, -NODE_SIZE / 2 - 14, 0);
     }
 
     this.updateProgressLabel();
@@ -251,28 +288,90 @@ export class RouteMapUI extends Component {
    */
   private applyNodeVisual(node: RouteNode, btnNode: Node): void {
     if (!btnNode?.isValid) return;
-    const sprite = btnNode.getComponent(Sprite);
-    if (!sprite) return;
 
     // 先停止并复位上一次的循环高亮动画，避免重复叠加
     Tween.stopAllByTarget(btnNode);
     btnNode.setScale(1, 1, 1);
 
     const isReachable = this.isReachable(node.id);
-    if (node.completed) {
-      sprite.color = hex(COLOR.TEXT_SECONDARY, ALPHA.SOLID);          // 已完成：灰实心
-    } else if (isReachable) {
-      sprite.color = hex(COLOR.SUCCESS, ALPHA.SOLID);                 // 可达：绿实心 + 呼吸
+    const typeHex = TYPE_COLOR[node.type] ?? COLOR.PRIMARY;
+    const state: 'done' | 'open' | 'locked' = node.completed
+      ? 'done'
+      : isReachable ? 'open' : 'locked';
+
+    // 勋章：类型色外盘 + 深色内盘 + 矢量图标
+    let artNode = btnNode.getChildByName('NodeArt');
+    if (!artNode?.isValid) {
+      artNode = new Node('NodeArt');
+      artNode.addComponent(UITransform).setContentSize(NODE_SIZE, NODE_SIZE);
+      btnNode.addChild(artNode);
+    }
+    artNode.setSiblingIndex(0);
+    const g = artNode.getComponent(Graphics) ?? artNode.addComponent(Graphics);
+    g.clear();
+
+    const R = NODE_SIZE / 2 - 4;
+    if (state === 'open') {
+      g.fillColor = hex(typeHex, 46);
+      g.circle(0, 0, R + 4);
+      g.fill();
+    }
+
+    g.fillColor = state === 'done'
+      ? hex(COLOR.TEXT_DISABLED, 255)
+      : state === 'open' ? hex(typeHex, 255) : this.darken(typeHex);
+    g.circle(0, 0, R);
+    g.fill();
+
+    g.strokeColor = state === 'open'
+      ? hex(COLOR.TEXT_PRIMARY, 210)
+      : state === 'done' ? hex(COLOR.PANEL_BORDER, 255) : hex(typeHex, 150);
+    g.lineWidth = state === 'open' ? 3.5 : 2.5;
+    g.circle(0, 0, R - 1);
+    g.stroke();
+
+    // 内盘：让图标从彩色边环中"浮"出来
+    g.fillColor = hex(COLOR.PANEL_BG, state === 'locked' ? 210 : 236);
+    g.circle(0, 0, R - 9);
+    g.fill();
+
+    drawRouteGlyph(
+      g, node.type, R * 0.46,
+      state === 'done' ? COLOR.TEXT_SECONDARY
+        : state === 'open' ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED
+    );
+
+    // 类型名颜色跟随状态（open 用类型色，紧凑但不喧宾夺主）
+    const typeName = btnNode.getChildByName('TypeName')?.getComponent(Label);
+    if (typeName) {
+      typeName.string = stripVariationSelectors(TYPE_LABEL[node.type] ?? node.type);
+      applyFontAndColor(typeName, FONT_CAPTION,
+        state === 'open' ? typeHex : (state === 'done' ? COLOR.TEXT_SECONDARY : COLOR.TEXT_DISABLED));
+    }
+
+    if (state === 'open') {
       tween(btnNode)
-        .to(0.5, { scale: new Vec3(1.08, 1.08, 1) })
+        .to(0.5, { scale: new Vec3(1.07, 1.07, 1) })
         .to(0.5, { scale: new Vec3(1.0, 1.0, 1) })
         .union()
         .repeatForever()
         .start();
-    } else {
-      // 未解锁：深色实心（不是半透明），彻底遮住线头
-      sprite.color = hex(COLOR.SURFACE, ALPHA.SOLID);
     }
+
+    const check = btnNode.getChildByName('CheckMark');
+    if (check?.isValid) check.active = node.completed;
+  }
+
+  /** 把类型色向面板底色压暗 60%，得到"未解锁"的深色版（仍为不透明实心） */
+  private darken(colorHex: string): Color {
+    const base = hex(colorHex, ALPHA.SOLID);
+    const dim = hex(COLOR.SURFACE, ALPHA.SOLID);
+    return new Color(
+      Math.round(base.r * 0.4 + dim.r * 0.6),
+      Math.round(base.g * 0.4 + dim.g * 0.6),
+      Math.round(base.b * 0.4 + dim.b * 0.6),
+      ALPHA.SOLID
+    );
   }
 
   /**

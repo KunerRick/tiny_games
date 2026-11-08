@@ -1,5 +1,6 @@
-import { _decorator, Component, Node, instantiate, Prefab, Button, Label, UITransform } from 'cc';
-import { COLOR, FONT_BODY, applyFont, applyFontAndColor } from '../config/Theme';
+import { _decorator, Component, Node, instantiate, Prefab, Button, Label, UITransform, Sprite } from 'cc';
+import { COLOR, FONT_BODY, FONT_TITLE, applyFont, applyFontAndColor } from '../config/Theme';
+import { drawFrame, ensureScaleButton, stylePanel } from './GameUIKit';
 import { EventConfig, ChoiceOption } from '../config/GameData';
 const { ccclass, property } = _decorator;
 
@@ -50,27 +51,58 @@ export class EventUI extends Component {
     this.node.active = true;
     this._onChoice = onChoice;
 
+    // 与商店/圣泉统一的外框语言（事件用紫色系区分）
+    // 面板尺寸 / 子节点位置都由内容推导：场景里的 EventUI 是固定 350×300，而标题与
+    // 描述按 300/150 的偏移摆放 —— 内容直接跑到面板外（实测标题悬浮、描述压在边框上）。
+    // 这里按内容重算面板高度、把标题/描述/选项按"上→下"顺排，再 stylePanel 描边。
+    const W = 560;
+    const PAD = 28;
+    const TITLE_H = 46;
+    const DESC_H = 56;
+    const BTN_H = 50;
+    const BTN_GAP = 10;
+    const isChoice = event.type === 'choice' && !!event.choices;
+    const count = isChoice ? event.choices!.length : (event.type === 'random' ? 1 : 0);
+    const choicesH = count > 0 ? count * BTN_H + (count - 1) * BTN_GAP : 0;
+    const H = PAD + TITLE_H + 8 + DESC_H + 24 + (choicesH > 0 ? choicesH + 24 : 0) + PAD;
+
+    const panelUi = this.node.getComponent(UITransform);
+    if (panelUi) panelUi.setContentSize(W, H);
+
+    const titleY = H / 2 - PAD - TITLE_H / 2;
     if (this.eventTitleLabel) {
       this.eventTitleLabel.string = event.name;
+      applyFontAndColor(this.eventTitleLabel, FONT_TITLE, COLOR.PASSIVE);
+      this.eventTitleLabel.overflow = Label.Overflow.SHRINK;
+      this.eventTitleLabel.node.setPosition(0, titleY, 0);
     }
+    const descY = titleY - TITLE_H / 2 - 8 - DESC_H / 2;
     if (this.eventDescLabel) {
       this.eventDescLabel.string = event.description;
+      applyFontAndColor(this.eventDescLabel, FONT_BODY, COLOR.TEXT_SECONDARY);
+      this.eventDescLabel.overflow = Label.Overflow.CLAMP;
+      this.eventDescLabel.enableWrapText = true;
+      const descUi = this.eventDescLabel.node.getComponent(UITransform);
+      if (descUi) descUi.setContentSize(W - PAD * 2, DESC_H);
+      this.eventDescLabel.node.setPosition(0, descY, 0);
     }
+    if (this.choiceContainer && choicesH > 0) {
+      this.choiceContainer.setPosition(0, descY - DESC_H / 2 - 24 - choicesH / 2, 0);
+    }
+    stylePanel(this.node, COLOR.PASSIVE);
 
     if (this.choiceContainer) {
       this.choiceContainer.destroyAllChildren();
 
       if (event.type === 'choice' && event.choices) {
-        const btnHeight = 50;
-        const gap = 10;
-        const count = event.choices.length;
-        const totalHeight = count * btnHeight + (count - 1) * gap;
-        const startY = totalHeight / 2 - btnHeight / 2;
+        const totalHeight = count * BTN_H + (count - 1) * BTN_GAP;
+        const startY = totalHeight / 2 - BTN_H / 2;
 
         for (let i = 0; i < event.choices.length; i++) {
           const choice = event.choices[i];
           const btnNode = instantiate(this.choiceButtonPrefab);
-          btnNode.setPosition(0, startY - i * (btnHeight + gap), 0);
+          btnNode.setPosition(0, startY - i * (BTN_H + BTN_GAP), 0);
+          this.applyChoiceSize(btnNode, W - PAD * 2, BTN_H);
 
           // 金币校验：选项效果含 spend_gold 且钱不够 → 置灰不可点
           // 交付校验：选项含 learn_skill 但全队技能位已满 → 也置灰。
@@ -88,6 +120,7 @@ export class EventUI extends Component {
             label.string = reason ? `${choice.description}${reason}` : choice.description;
             applyFontAndColor(label, FONT_BODY, enabled ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED);
           }
+          this.styleChoice(btnNode, enabled);
           const btn = btnNode.getComponent(Button);
           if (btn) {
             btn.transition = Button.Transition.SCALE;
@@ -120,11 +153,13 @@ export class EventUI extends Component {
 
         const confirmBtn = instantiate(this.choiceButtonPrefab);
         confirmBtn.setPosition(0, 0, 0);
+        this.applyChoiceSize(confirmBtn, W - PAD * 2, BTN_H);
         const label = confirmBtn.getComponentInChildren(Label);
         if (label) {
           label.string = '\u786E\u5B9A';
           applyFontAndColor(label, FONT_BODY, COLOR.TEXT_PRIMARY);
         }
+        this.styleChoice(confirmBtn, true);
         const btn = confirmBtn.getComponent(Button);
         if (btn) {
           btn.transition = Button.Transition.SCALE;
@@ -134,6 +169,44 @@ export class EventUI extends Component {
         this.choiceContainer.addChild(confirmBtn);
       }
     }
+  }
+
+  /** 选项按钮统一尺寸（预制体是 250 宽，长文案会被裁）：按钮与内部 Label 一起加宽 */
+  private applyChoiceSize(node: Node, w: number, h: number): void {
+    if (!node?.isValid) return;
+    const ui = node.getComponent(UITransform);
+    if (ui) ui.setContentSize(w, h);
+    const label = node.getComponentInChildren(Label);
+    if (!label?.node?.isValid) return;
+    const lui = label.node.getComponent(UITransform);
+    if (lui) lui.setContentSize(w - 24, h);
+    label.overflow = Label.Overflow.SHRINK;
+    label.enableWrapText = false;
+  }
+
+  /** 选项按钮统一外观：圆角底板 + 描边 + 顶部微光；保留预制体原有尺寸 */
+  private styleChoice(node: Node, enabled: boolean): void {
+    if (!node?.isValid) return;
+    const sp = node.getComponent(Sprite);
+    if (sp) sp.enabled = false;                       // 用矢量底板替代预制体的纯色贴图
+    const ui = node.getComponent(UITransform);
+    const w = ui?.width ?? 0;
+    const h = ui?.height ?? 0;
+    if (w > 2 && h > 2) {
+      drawFrame(node, {
+        width: w, height: h, radius: 12,
+        fill: enabled ? COLOR.SURFACE : COLOR.SLOT_EMPTY_BG,
+        fillAlpha: 250,
+        border: enabled ? COLOR.PASSIVE : COLOR.PANEL_BORDER,
+        borderAlpha: enabled ? 190 : 130,
+        borderWidth: 2,
+        // 与卡片同款顶条：可选项贴一条紫色，一眼区分"能点的那行"
+        accent: enabled ? COLOR.PASSIVE : undefined,
+        accentAlpha: 190,
+        sheen: enabled,
+      });
+    }
+    ensureScaleButton(node);
   }
 
   // 命名事件方法（禁止匿名 lambda，便于解绑）

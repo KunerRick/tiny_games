@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Sprite, Color, tween, Vec3, Label, Tween, UITransform, UIOpacity } from 'cc';
+import { _decorator, Component, Node, Sprite, Color, tween, Vec3, Label, Tween, UITransform, UIOpacity, Graphics } from 'cc';
 import { GridPosition, GridController } from './GridController';
 import { SkillConfig, getClassById, EnemyConfig, AIType, getEnemyAbilityById } from '../config/GameData';
 import { ALPHA, CLASS_COLOR, COLOR, FACTION, FONT_ICON, applyFontAndColor, hex, hpBarColor, stripVariationSelectors } from '../config/Theme';
@@ -92,6 +92,17 @@ export class UnitController extends Component {
    * 故意比 `ANIM_DEATH` 多一点：结算面板出现前让尸体先消失干净。
    */
   static readonly DEATH_ANIM_DURATION = 0.34;
+
+  /**
+   * 战斗演出倍速（1 = 正常，2 = 二倍速）。由 `BattleManager.setBattleSpeed` 写入。
+   * 所有纯观感补间（移动/突刺/抖动/蓄力/阵亡）按它缩短，**逻辑时长不变**。
+   */
+  static animationSpeed = 1;
+
+  private static scaledDuration(base: number): number {
+    const speed = UnitController.animationSpeed > 0 ? UnitController.animationSpeed : 1;
+    return base / speed;
+  }
 
   private _data: UnitData | null = null;
   private _isSelected: boolean = false;
@@ -193,8 +204,10 @@ export class UnitController extends Component {
 
     // 敌人一律用阵营色（DANGER 红）。原先用 CLASS_COLOR.fallback（蓝），
     // 与玩家战士同色 —— 棋盘上无法一眼分清敌我。
-    this.setTintColor(FACTION.ENEMY_TINT);
+    // 底色压暗（alpha 85）给剪影让位：轮廓才是第一层信息，颜色是第二层。
+    this.setTintColor(UnitController.dimBody(FACTION.ENEMY_TINT));
     this.setupFactionVisual();
+    this.setupUnitSilhouette();
     this.setupClassIcon();
     this.setupHealthBar();
   }
@@ -240,11 +253,12 @@ export class UnitController extends Component {
 
     if (isPlayer) {
       const classColor = UnitController.CLASS_COLORS[classId];
-      this.setTintColor(classColor ?? hex(CLASS_COLOR.fallback));
+      this.setTintColor(UnitController.dimBody(classColor ?? hex(CLASS_COLOR.fallback)));
     } else {
-      this.setTintColor(FACTION.ENEMY_TINT);
+      this.setTintColor(UnitController.dimBody(FACTION.ENEMY_TINT));
     }
     this.setupFactionVisual();
+    this.setupUnitSilhouette();
     this.setupClassIcon();
     this.setupHealthBar();
   }
@@ -297,9 +311,25 @@ export class UnitController extends Component {
     // 改为：绑定了就用绑定的，否则运行时补一个（与 ClassIcon 同一套路）。
     const glow = this.factionGlow ?? this.ensureRuntimeGlow();
     if (!glow) return;
+    const base = this._data?.isPlayer ? FACTION.PLAYER_GLOW : FACTION.ENEMY_GLOW;
     const glowSprite = glow.getComponent(Sprite);
     if (glowSprite) {
-      glowSprite.color = this._data?.isPlayer ? FACTION.PLAYER_GLOW : FACTION.ENEMY_GLOW;
+      glowSprite.color = base;
+    }
+    // 运行时补出来的光晕是 Graphics：三层同心圆做"柔光"，
+    // 取代此前直接拉伸单位方形贴图染色的做法（那在棋盘上就是一个生硬的红/蓝方块）。
+    const gg = glow.getComponent(Graphics);
+    if (gg) {
+      const r = UnitController.GLOW_SIZE / 2;
+      gg.clear();
+      const stops: [number, number][] = [[1, 0.26], [0.76, 0.34], [0.54, 0.44]];
+      for (const [k, a] of stops) {
+        const c = base.clone();
+        c.a = Math.round(255 * a);
+        gg.fillColor = c;
+        gg.circle(0, 0, r * k);
+        gg.fill();
+      }
     }
     glow.active = true;
   }
@@ -312,10 +342,7 @@ export class UnitController extends Component {
       glowNode = new Node('FactionGlow');
       const ui = glowNode.addComponent(UITransform);
       ui.setContentSize(UnitController.GLOW_SIZE, UnitController.GLOW_SIZE);
-      const sp = glowNode.addComponent(Sprite);
-      sp.sizeMode = Sprite.SizeMode.CUSTOM;
-      const base = this.unitSprite.getComponent(Sprite);
-      if (base?.spriteFrame) sp.spriteFrame = base.spriteFrame;
+      glowNode.addComponent(Graphics);
       this.node.addChild(glowNode);
       // 置为 node 的首个子节点 → 渲染在 unitSprite/血条之下，形成背景光圈
       glowNode.setSiblingIndex(0);
@@ -389,6 +416,399 @@ export class UnitController extends Component {
     this._hpFill.color = hpBarColor(this._data.currentHp, this._data.maxHp);
   }
 
+  /**
+   * 职业/威胁剪影（V2/V3）。
+   *
+   * 设计原则是"剪影优先"：把单位底色压暗成一块半透明阵营色，真正的识别信息由
+   * Graphics 画出的**轮廓**承担 —— 关掉颜色也能分出四职业（盾 / 三角 / 菱形 / 十字）。
+   * 敌人按威胁分层：普通=圆、精英=尖刺环、Boss=六边形 + 红色预警环。
+   */
+  private setupUnitSilhouette(): void {
+    if (!this.unitSprite || !this._data) return;
+    const classId = this._data.classId ?? '';
+    const isPlayer = this._data.isPlayer;
+    const isBoss = classId === 'war_lord';
+    const isElite = classId.startsWith('elite_');
+
+    let node = this.unitSprite.getChildByName('ClassSilhouette');
+    if (!node) {
+      node = new Node('ClassSilhouette');
+      node.addComponent(UITransform).setContentSize(64, 64);
+      this.unitSprite.addChild(node);
+    }
+    node.active = true;
+    node.setPosition(0, 0, 0);
+
+    const g = node.getComponent(Graphics) ?? node.addComponent(Graphics);
+    g.clear();
+
+    const color = isPlayer
+      ? (UnitController.CLASS_COLORS[classId] ?? hex(CLASS_COLOR.fallback))
+      : hex(isBoss ? COLOR.WARNING : COLOR.DANGER);
+    const outline = hex(COLOR.PANEL_BG, 255);
+
+    if (isPlayer) {
+      this.drawPlayerCharacter(g, classId, color, outline);
+    } else if (isBoss) {
+      this.drawBossArt(g, color, outline);
+      this.addBossWarningRing();
+    } else if (isElite) {
+      UnitController.drawSpikyRing(g, 26, 8, color, outline);
+      UnitController.drawEmblemArt(g, classId.replace('elite_', ''), 15, hex(COLOR.TEXT_PRIMARY, 235));
+    } else {
+      UnitController.drawEnemyArt(g, classId, color, outline);
+    }
+
+    // Boss / 精英放大：体型是"这是威胁"的第一眼信号（普通单位保持原尺寸）
+    const scale = isBoss ? 1.55 : isElite ? 1.18 : 1;
+    this.unitSprite.setScale(scale, scale, 1);
+  }
+
+  /**
+   * 玩家职业立绘（分层）：
+   * 底层阵营微光 → 躯干/长袍 → 头/兜帽 → 武器/盾 → 职业识别细节。
+   * 与职业选择页的纹章共用同一套「盾 / 弓 / 结晶 / 十字」语言。
+   */
+  private drawPlayerCharacter(g: Graphics, classId: string, accent: Color, outline: Color): void {
+    const body = accent.clone();
+    body.a = 235;
+    const light = accent.clone();
+    light.a = 255;
+    const glow = accent.clone();
+    glow.a = 34;
+    const dark = hex(COLOR.PANEL_BG, 225);
+
+    // 站位微光（让角色从底色圆盘中"立"起来）
+    g.fillColor = glow;
+    g.ellipse(0, -14, 25, 12);
+    g.fill();
+
+    switch (classId) {
+      case 'warrior': {
+        // 躯干 + 肩甲
+        UnitController.drawPolygon(g, [
+          { x: -15, y: -25 }, { x: 15, y: -25 }, { x: 19, y: -2 },
+          { x: 12, y: 12 }, { x: -12, y: 12 }, { x: -19, y: -2 },
+        ], body, outline, 3);
+        UnitController.drawCircle(g, -16, 7, 7, body, outline, 3);
+        UnitController.drawCircle(g, 16, 7, 7, body, outline, 3);
+        // 头盔 + 面甲
+        UnitController.drawCircle(g, 0, 18, 9, light, outline, 3);
+        g.fillColor = dark;
+        g.rect(-6, 16, 12, 4);
+        g.fill();
+        // 头盔翎羽
+        g.fillColor = light;
+        g.moveTo(0, 27); g.lineTo(-4, 34); g.lineTo(4, 34); g.close(); g.fill();
+        // 左手大盾
+        UnitController.drawPolygon(g, [
+          { x: -28, y: 3 }, { x: -17, y: 9 }, { x: -15, y: -10 },
+          { x: -22, y: -23 }, { x: -29, y: -10 },
+        ], light, outline, 3);
+        g.strokeColor = hex(COLOR.PANEL_BG, 190);
+        g.lineWidth = 2;
+        g.moveTo(-22, 4); g.lineTo(-22, -14);
+        g.stroke();
+        // 右手长剑
+        g.strokeColor = outline; g.lineWidth = 6;
+        g.moveTo(14, 12); g.lineTo(27, -16); g.stroke();
+        g.strokeColor = light; g.lineWidth = 3;
+        g.moveTo(14, 12); g.lineTo(27, -16); g.stroke();
+        g.strokeColor = light; g.lineWidth = 3;
+        g.moveTo(13, 2); g.lineTo(24, 6); g.stroke();
+        break;
+      }
+      case 'archer': {
+        // 轻甲躯干
+        UnitController.drawPolygon(g, [
+          { x: -12, y: -24 }, { x: 12, y: -24 }, { x: 14, y: -2 },
+          { x: 8, y: 11 }, { x: -8, y: 11 }, { x: -14, y: -2 },
+        ], body, outline, 3);
+        // 兜帽
+        UnitController.drawPolygon(g, [
+          { x: -13, y: -4 }, { x: -9, y: 16 }, { x: 0, y: 24 },
+          { x: 9, y: 16 }, { x: 13, y: -4 }, { x: 0, y: -10 },
+        ], light, outline, 3);
+        UnitController.drawCircle(g, 0, 6, 6, dark, outline, 2);
+        // 弓（右侧弧 + 弦）
+        g.strokeColor = light; g.lineWidth = 3.5;
+        g.arc(17, -2, 18, -Math.PI * 0.42, Math.PI * 0.42, false);
+        g.stroke();
+        g.strokeColor = hex(COLOR.TEXT_PRIMARY, 200); g.lineWidth = 1.5;
+        g.moveTo(17 + 18 * Math.cos(-Math.PI * 0.42), -2 + 18 * Math.sin(-Math.PI * 0.42));
+        g.lineTo(17 + 18 * Math.cos(Math.PI * 0.42), -2 + 18 * Math.sin(Math.PI * 0.42));
+        g.stroke();
+        // 箭
+        g.strokeColor = hex(COLOR.TEXT_PRIMARY, 230); g.lineWidth = 2;
+        g.moveTo(2, 0); g.lineTo(26, 0); g.stroke();
+        g.fillColor = hex(COLOR.TEXT_PRIMARY, 230);
+        g.moveTo(30, 0); g.lineTo(24, 4); g.lineTo(24, -4); g.close(); g.fill();
+        // 箭袋
+        g.strokeColor = light; g.lineWidth = 3;
+        g.moveTo(-16, -8); g.lineTo(-21, 10); g.stroke();
+        break;
+      }
+      case 'mage': {
+        // 长袍
+        UnitController.drawPolygon(g, [
+          { x: -21, y: -27 }, { x: 21, y: -27 }, { x: 9, y: 8 }, { x: -9, y: 8 },
+        ], body, outline, 3);
+        UnitController.drawCircle(g, 0, 16, 8, light, outline, 3);
+        // 尖帽
+        UnitController.drawPolygon(g, [
+          { x: -13, y: 22 }, { x: 13, y: 22 }, { x: 2, y: 42 },
+        ], light, outline, 3);
+        g.strokeColor = outline; g.lineWidth = 2;
+        g.moveTo(-16, 22); g.lineTo(16, 22); g.stroke();
+        // 法杖 + 法球
+        g.strokeColor = hex('#C4A57B', 255); g.lineWidth = 4;
+        g.moveTo(22, -24); g.lineTo(22, 20); g.stroke();
+        UnitController.drawCircle(g, 22, 27, 7, light, outline, 3);
+        g.fillColor = hex('#FFFFFF', 230);
+        g.circle(22, 27, 2.5); g.fill();
+        // 魔力光点
+        g.fillColor = hex(COLOR.TEXT_PRIMARY, 190);
+        g.circle(-14, 30, 2); g.fill();
+        g.circle(-19, 20, 1.5); g.fill();
+        break;
+      }
+      case 'cleric': {
+        // 长袍 + 罩帽
+        UnitController.drawPolygon(g, [
+          { x: -20, y: -27 }, { x: 20, y: -27 }, { x: 10, y: 9 }, { x: -10, y: 9 },
+        ], body, outline, 3);
+        UnitController.drawCircle(g, 0, 17, 8, light, outline, 3);
+        // 光环
+        g.strokeColor = hex(COLOR.WARNING, 235); g.lineWidth = 3;
+        g.circle(0, 32, 9); g.stroke();
+        // 胸前十字
+        g.fillColor = hex(COLOR.TEXT_PRIMARY, 240);
+        g.rect(-2.5, -14, 5, 20); g.fill();
+        g.rect(-9, -6, 18, 5); g.fill();
+        // 圣带
+        g.strokeColor = hex(COLOR.WARNING, 200); g.lineWidth = 2;
+        g.moveTo(-8, 8); g.lineTo(-2, -20); g.stroke();
+        break;
+      }
+      default: {
+        UnitController.drawCircle(g, 0, 0, 20, body, outline, 4);
+        break;
+      }
+    }
+  }
+
+  /** 普通敌人：保留阵营色圆形底，叠加兵种识别符号 */
+  private static drawEnemyArt(g: Graphics, classId: string, accent: Color, outline: Color): void {
+    const body = accent.clone();
+    body.a = 235;
+    const light = hex(COLOR.TEXT_PRIMARY, 235);
+
+    UnitController.drawCircle(g, 0, 0, 21, body, outline, 4);
+    g.fillColor = hex(COLOR.PANEL_BG, 60);
+    g.circle(0, 0, 16); g.fill();
+
+    switch (classId) {
+      case 'swordsman': {
+        g.strokeColor = light; g.lineWidth = 3;
+        g.moveTo(-10, 10); g.lineTo(10, -10);
+        g.moveTo(10, 10); g.lineTo(-10, -10);
+        g.stroke();
+        break;
+      }
+      case 'crossbowman': {
+        g.strokeColor = light; g.lineWidth = 3;
+        g.arc(-4, 0, 12, -Math.PI * 0.45, Math.PI * 0.45, false);
+        g.stroke();
+        g.moveTo(-12, 0); g.lineTo(11, 0);
+        g.stroke();
+        g.fillColor = light;
+        g.moveTo(15, 0); g.lineTo(9, 4); g.lineTo(9, -4); g.close(); g.fill();
+        break;
+      }
+      case 'shieldbearer': {
+        g.fillColor = hex(COLOR.PANEL_BG, 90);
+        UnitController.drawPolygon(g, [
+          { x: 0, y: 15 }, { x: 12, y: 9 }, { x: 9, y: -9 },
+          { x: 0, y: -16 }, { x: -9, y: -9 }, { x: -12, y: 9 },
+        ], light, outline, 2);
+        break;
+      }
+      case 'shadowblade': {
+        g.fillColor = hex(COLOR.PANEL_BG, 150);
+        UnitController.drawPolygon(g, [
+          { x: -13, y: -10 }, { x: -7, y: 10 }, { x: 0, y: 17 },
+          { x: 7, y: 10 }, { x: 13, y: -10 }, { x: 0, y: -4 },
+        ], light, outline, 2);
+        g.strokeColor = hex(COLOR.DANGER, 240); g.lineWidth = 3;
+        g.moveTo(8, -12); g.lineTo(18, 10); g.stroke();
+        break;
+      }
+      default: {
+        UnitController.drawCircle(g, 0, 0, 10, light, outline, 2);
+        break;
+      }
+    }
+  }
+
+  /** Boss：六边甲壳 + 王冠纹章（与预警环配合） */
+  private drawBossArt(g: Graphics, accent: Color, outline: Color): void {
+    const body = accent.clone();
+    body.a = 240;
+    UnitController.drawPolygon(g, UnitController.regularPoints(0, 0, 31, 6), body, outline, 5);
+    UnitController.drawPolygon(g, UnitController.regularPoints(0, 0, 23, 6), hex(COLOR.PANEL_BG, 90), hex(COLOR.PANEL_BG, 200), 3);
+    UnitController.drawEmblemArt(g, 'boss', 14, hex(COLOR.TEXT_PRIMARY, 240));
+  }
+
+  /** 复用 UI Kit 的矢量纹章（保持全局同一套图形语言） */
+  private static drawEmblemArt(g: Graphics, kind: string, radius: number, color: Color): void {
+    const prevFill = g.fillColor.clone();
+    const prevStroke = g.strokeColor.clone();
+    const prevWidth = g.lineWidth;
+    g.strokeColor = color;
+    g.fillColor = new Color(color.r, color.g, color.b, Math.round(color.a * 0.28));
+    // 与 GameUIKit.drawEmblem 同构的最小实现（避免战斗层反向依赖 UI 层）
+    switch (kind) {
+      case 'swordsman': {
+        g.lineWidth = 2.5;
+        g.moveTo(-radius * 0.8, radius * 0.8); g.lineTo(radius * 0.8, -radius * 0.8);
+        g.moveTo(radius * 0.8, radius * 0.8); g.lineTo(-radius * 0.8, -radius * 0.8);
+        g.stroke();
+        break;
+      }
+      case 'crossbowman': {
+        g.lineWidth = 2.5;
+        g.moveTo(-radius, 0); g.lineTo(radius, 0);
+        g.stroke();
+        g.fillColor = color;
+        g.moveTo(radius * 1.2, 0); g.lineTo(radius * 0.5, radius * 0.3); g.lineTo(radius * 0.5, -radius * 0.3);
+        g.close(); g.fill();
+        break;
+      }
+      case 'shieldbearer': {
+        g.lineWidth = 2.5;
+        UnitController.drawPolygon(g, [
+          { x: 0, y: radius }, { x: radius * 0.8, y: radius * 0.6 },
+          { x: radius * 0.6, y: -radius * 0.6 }, { x: 0, y: -radius },
+          { x: -radius * 0.6, y: -radius * 0.6 }, { x: -radius * 0.8, y: radius * 0.6 },
+        ], g.fillColor, color, 2.5);
+        break;
+      }
+      case 'shadowblade': {
+        g.fillColor = color;
+        g.moveTo(0, radius); g.lineTo(radius * 0.28, 0); g.lineTo(0, -radius * 0.3); g.lineTo(-radius * 0.28, 0);
+        g.close(); g.fill();
+        break;
+      }
+      case 'boss': {
+        g.fillColor = color;
+        const crown = [
+          { x: -0.85, y: 0.2 }, { x: -0.6, y: 0.8 }, { x: -0.3, y: 0.28 }, { x: 0, y: 0.92 },
+          { x: 0.3, y: 0.28 }, { x: 0.6, y: 0.8 }, { x: 0.85, y: 0.2 },
+          { x: 0.7, y: -0.3 }, { x: -0.7, y: -0.3 },
+        ].map(p => ({ x: p.x * radius, y: p.y * radius }));
+        UnitController.tracePolygon(g, crown);
+        g.close(); g.fill();
+        break;
+      }
+      default: {
+        g.lineWidth = 2.5;
+        g.circle(0, 0, radius * 0.6); g.stroke();
+        break;
+      }
+    }
+    g.fillColor = prevFill;
+    g.strokeColor = prevStroke;
+    g.lineWidth = prevWidth;
+  }
+
+  /** Boss 预警环：红色圆环 + 呼吸透明度（仅 1 个 Boss，不触及补间预算） */
+  private addBossWarningRing(): void {
+    if (!this.node?.isValid) return;
+    let ring = this.node.getChildByName('BossWarningRing');
+    if (!ring) {
+      ring = new Node('BossWarningRing');
+      ring.addComponent(UITransform).setContentSize(100, 100);
+      const g = ring.addComponent(Graphics);
+      g.strokeColor = hex(COLOR.DANGER, 230);
+      g.lineWidth = 5;
+      g.circle(0, 0, 42);
+      g.stroke();
+      const opacity = ring.addComponent(UIOpacity);
+      opacity.opacity = 170;
+      tween(opacity)
+        .to(0.7, { opacity: 255 })
+        .to(0.7, { opacity: 90 })
+        .union()
+        .repeatForever()
+        .start();
+      this.node.addChild(ring);
+      ring.setSiblingIndex(0);
+    }
+    ring.active = true;
+  }
+
+  private static dimBody(color: Color): Color {
+    const out = color.clone();
+    out.a = 85;
+    return out;
+  }
+
+  private static regularPoints(cx: number, cy: number, radius: number, sides: number): { x: number; y: number }[] {
+    const pts: { x: number; y: number }[] = [];
+    for (let i = 0; i < sides; i++) {
+      const angle = Math.PI / 2 + (i * Math.PI * 2) / sides;
+      pts.push({ x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius });
+    }
+    return pts;
+  }
+
+  private static tracePolygon(g: Graphics, pts: { x: number; y: number }[]): void {
+    if (pts.length === 0) return;
+    g.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) g.lineTo(pts[i].x, pts[i].y);
+    g.close();
+  }
+
+  private static drawPolygon(
+    g: Graphics, pts: { x: number; y: number }[], fill: Color, outline: Color, lineWidth: number
+  ): void {
+    g.fillColor = fill;
+    UnitController.tracePolygon(g, pts);
+    g.fill();
+    if (lineWidth > 0) {
+      g.strokeColor = outline;
+      g.lineWidth = lineWidth;
+      UnitController.tracePolygon(g, pts);
+      g.stroke();
+    }
+  }
+
+  private static drawCircle(
+    g: Graphics, cx: number, cy: number, radius: number, fill: Color, outline: Color, lineWidth: number
+  ): void {
+    g.fillColor = fill;
+    g.circle(cx, cy, radius);
+    g.fill();
+    if (lineWidth > 0) {
+      g.strokeColor = outline;
+      g.lineWidth = lineWidth;
+      g.circle(cx, cy, radius);
+      g.stroke();
+    }
+  }
+
+  /** 精英：双圈 + 8 根尖刺（与普通圆、Boss 六边形都能一眼区分） */
+  private static drawSpikyRing(g: Graphics, radius: number, spikes: number, fill: Color, outline: Color): void {
+    const pts: { x: number; y: number }[] = [];
+    for (let i = 0; i < spikes * 2; i++) {
+      const angle = Math.PI / 2 + (i * Math.PI) / spikes;
+      const r = i % 2 === 0 ? radius + 9 : radius - 5;
+      pts.push({ x: Math.cos(angle) * r, y: Math.sin(angle) * r });
+    }
+    UnitController.drawPolygon(g, pts, fill, outline, 4);
+    UnitController.drawCircle(g, 0, 0, radius - 10, hex(COLOR.PANEL_BG, 160), outline, 3);
+  }
+
   private setupClassIcon(): void {
     if (!this.unitSprite) return;
     const classId = this._data?.classId;
@@ -415,6 +835,9 @@ export class UnitController extends Component {
     if (iconLabel) {
       iconLabel.string = stripVariationSelectors(icon);
     }
+    // 玩家单位已用 Graphics 剪影承担识别（见 setupUnitSilhouette），
+    // 再叠一个 emoji 就是重复信息 —— 隐藏 Label；敌人本来就没有图标。
+    iconNode.active = !this._data?.isPlayer;
   }
 
   /** 网格坐标 → 节点本地坐标（棋盘 6×6，原点在棋盘中心） */
@@ -470,15 +893,16 @@ export class UnitController extends Component {
     const from = this.node.position;
     const dx = target.x - from.x;
     const dy = target.y - from.y;
-    if (duration <= 0 || (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5)) {
+    const dur = UnitController.scaledDuration(duration);
+    if (dur <= 0 || (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5)) {
       finish();
       return;
     }
     // 中途点留 18% 的余量给第二段收速，避免"冲到位再抖一下"
     const mid = new Vec3(target.x - dx * 0.18, target.y - dy * 0.18, 0);
     this._moveTween = tween(this.node)
-      .to(duration * 0.7, { position: mid }, { easing: 'quadOut' })
-      .to(duration * 0.3, { position: target }, { easing: 'sineOut' })
+      .to(dur * 0.7, { position: mid }, { easing: 'quadOut' })
+      .to(dur * 0.3, { position: target }, { easing: 'sineOut' })
       .call(finish)
       .start();
   }
@@ -501,13 +925,14 @@ export class UnitController extends Component {
     this._data.hasMoved = true;
     const target = this.positionForGrid(pos);
     this._stopMoveTween();
-    if (duration <= 0) {
+    const dur = UnitController.scaledDuration(duration);
+    if (dur <= 0) {
       this.node.setPosition(target);
       if (onComplete) onComplete();
       return;
     }
     this._moveTween = tween(this.node)
-      .to(duration, { position: target }, { easing: 'sineOut' })
+      .to(dur, { position: target }, { easing: 'sineOut' })
       .call(() => {
         this._moveTween = null;
         if (this.node?.isValid) this.node.setPosition(target);
@@ -550,11 +975,11 @@ export class UnitController extends Component {
     }
     this._lungeActive = true;
     this._lungeTween = tween(this.node)
-      .to(UnitController.ANIM_LUNGE_OUT, { position: apex }, { easing: 'quadOut' })
+      .to(UnitController.scaledDuration(UnitController.ANIM_LUNGE_OUT), { position: apex }, { easing: 'quadOut' })
       .call(() => {
         if (onImpact) onImpact();
       })
-      .to(UnitController.ANIM_LUNGE_BACK, { position: base }, { easing: 'sineInOut' })
+      .to(UnitController.scaledDuration(UnitController.ANIM_LUNGE_BACK), { position: base }, { easing: 'sineInOut' })
       .call(() => {
         this._lungeActive = false;
         this._lungeTween = null;
@@ -572,10 +997,11 @@ export class UnitController extends Component {
     this._stopShakeTween();
     const base = this.positionForGrid(this._data.gridPos);
     const dx = GridController.CELL_SIZE * 0.09 * (this._data.isPlayer ? -1 : 1);
+    const shake = UnitController.scaledDuration(UnitController.ANIM_SHAKE);
     this._shakeTween = tween(this.node)
-      .to(UnitController.ANIM_SHAKE * 0.25, { position: new Vec3(base.x + dx, base.y, 0) }, { easing: 'quadOut' })
-      .to(UnitController.ANIM_SHAKE * 0.30, { position: new Vec3(base.x - dx * 0.6, base.y, 0) }, { easing: 'sineInOut' })
-      .to(UnitController.ANIM_SHAKE * 0.45, { position: base }, { easing: 'sineOut' })
+      .to(shake * 0.25, { position: new Vec3(base.x + dx, base.y, 0) }, { easing: 'quadOut' })
+      .to(shake * 0.30, { position: new Vec3(base.x - dx * 0.6, base.y, 0) }, { easing: 'sineInOut' })
+      .to(shake * 0.45, { position: base }, { easing: 'sineOut' })
       .call(() => {
         this._shakeTween = null;
         if (this.node?.isValid) this.node.setPosition(base);
@@ -595,9 +1021,10 @@ export class UnitController extends Component {
     // 结束 → 单位被取消选中），所以收尾时按**此刻**的选中态再归一次位，避免缩放停在
     // 中间值（差了选中缩放 1.08 与常态 1.0 之间的 0.08）。
     const rest = this._isSelected ? new Vec3(1.08, 1.08, 1) : new Vec3(1, 1, 1);
+    const cast = UnitController.scaledDuration(UnitController.ANIM_CAST);
     this._castTween = tween(this.node)
-      .to(UnitController.ANIM_CAST * 0.5, { scale: new Vec3(1.12, 1.12, 1) }, { easing: 'quadOut' })
-      .to(UnitController.ANIM_CAST * 0.5, { scale: rest }, { easing: 'sineInOut' })
+      .to(cast * 0.5, { scale: new Vec3(1.12, 1.12, 1) }, { easing: 'quadOut' })
+      .to(cast * 0.5, { scale: rest }, { easing: 'sineInOut' })
       .call(() => {
         this._castTween = null;
         if (this.node?.isValid) {
@@ -632,10 +1059,11 @@ export class UnitController extends Component {
       this._deathTween.stop();
       this._deathTween = null;
     }
+    const death = UnitController.scaledDuration(UnitController.ANIM_DEATH);
     this._deathTween = tween(this.node)
-      .to(UnitController.ANIM_DEATH * 0.3, { scale: new Vec3(1.18, 1.18, 1) }, { easing: 'quadOut' })
+      .to(death * 0.3, { scale: new Vec3(1.18, 1.18, 1) }, { easing: 'quadOut' })
       .to(
-        UnitController.ANIM_DEATH * 0.7,
+        death * 0.7,
         { scale: new Vec3(0.3, 0.3, 1), position: new Vec3(base.x, base.y + 14, 0) },
         { easing: 'quadIn' }
       )
@@ -653,7 +1081,7 @@ export class UnitController extends Component {
         this._fadeTween = null;
       }
       this._fadeTween = tween(opacity)
-        .to(UnitController.ANIM_DEATH, { opacity: 0 }, { easing: 'quadIn' })
+        .to(death, { opacity: 0 }, { easing: 'quadIn' })
         .call(() => {
           this._fadeTween = null;
         })

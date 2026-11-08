@@ -1,6 +1,7 @@
 import { _decorator, Component, Node, Color, Vec3, UITransform, UIOpacity, instantiate, Prefab } from 'cc';
 import { GridController, GridPosition } from './GridController';
 import { UnitController } from './UnitController';
+import { SkillFx, gridToLocal } from './SkillFx';
 import { AIController, AIAction } from './AIController';
 import { EnemyConfig, SkillEffect, SkillConfig, ENEMIES, ELITE_ENEMIES, BOSS_CONFIG, getClassById, getEnemyAbilityById, getRandomSkillsFromPool } from '../config/GameData';
 import { GRID } from '../config/Theme';
@@ -109,6 +110,15 @@ export class BattleManager extends Component {
    */
   private static readonly AI_WATCHDOG_GRACE = 2.0;
 
+  /**
+   * 战斗演出倍速（1 = 正常，2 = 二倍速）。
+   *
+   * 只缩放「演出时间」：AI 拍点时钟按倍速累加、单位移动/攻击补间按倍速缩短、
+   * 延迟结算按倍速提前。**回合规则、伤害计算、AI 决策都不参与缩放** ——
+   * 这样 2x 只是看得快，不会改变数值结果（验收要求"无逻辑错乱"）。
+   */
+  private _speedMul = 1;
+
   /** 组件内累计时钟（秒）：给 AI 拍点/看门狗做绝对时间比较，不依赖性能时钟 */
   private _clock = 0;
   /**
@@ -129,6 +139,16 @@ export class BattleManager extends Component {
   get selectedUnit(): UnitController | null { return this._selectedUnit; }
   get turnCount(): number { return this._turnCount; }
   get totalDamageDealt(): number { return this._totalDamageDealt; }
+  get battleSpeed(): number { return this._speedMul; }
+
+  /**
+   * 切换战斗演出倍速。由 BattleUI 的 1x/2x 按钮调用。
+   * 单位补间通过 `UnitController.animationSpeed` 静态字段生效（每场重建的单位也会读最新值）。
+   */
+  setBattleSpeed(mul: number): void {
+    this._speedMul = mul >= 2 ? 2 : 1;
+    UnitController.animationSpeed = this._speedMul;
+  }
 
   setUnitPhaseChangedCallback(cb: typeof this._onUnitPhaseChanged): void {
     this._onUnitPhaseChanged = cb;
@@ -163,6 +183,8 @@ export class BattleManager extends Component {
     this._aiWatchdogAt = 0;
     // 时钟只在开局归零，保证一场之内绝对时间单调递增
     this._clock = 0;
+    // 单位每场重建：把当前的倍速写回静态字段（上局若停在 2x 会继续生效）
+    UnitController.animationSpeed = this._speedMul;
     // 本场难度（0 起）：Boss 集结的召唤物要按同一曲线缩放，故存一份
     this._difficulty = difficulty;
     // 上一场可能留下未清除的落点预览引用（跨场脏状态）
@@ -325,12 +347,14 @@ export class BattleManager extends Component {
   }
 
   /**
-   * 按存档阵型落位（§3.2）。四条校验（长度一致 / row<=1 / 单位间不冲突 /
-   * 不与敌人初始位置冲突）任一不满足即**整体回退默认阵型**，
-   * 避免"半失效"状态（部分单位落位、部分散在棋盘外）。
+   * 校验并规整一份布阵存档：长度必须与出战人数一致、只能落在己方两行、
+   * 单位之间不冲突、不与敌人初始位置冲突。任一不满足返回 null（整体作废，
+   * 避免"半失效"状态）。
    */
-  private applyDeployLayout(layout?: ({ row: number; col: number } | null)[] | null): void {
-    if (!layout || layout.length !== this._playerUnits.length) return;
+  private _normalizeLayout(
+    layout?: ({ row: number; col: number } | null)[] | null
+  ): ({ row: number; col: number } | null)[] | null {
+    if (!layout || layout.length !== this._playerUnits.length) return null;
 
     const enemyPos = new Set<string>();
     for (const e of this._enemyUnits) {
@@ -347,10 +371,19 @@ export class BattleManager extends Component {
       const { row, col } = entry;
       const key = `${row},${col}`;
       const inDeployArea = row >= 0 && row <= 1 && col >= 0 && col < GridController.GRID_SIZE;
-      if (!inDeployArea || used.has(key) || enemyPos.has(key)) return;
+      if (!inDeployArea || used.has(key) || enemyPos.has(key)) return null;
       used.add(key);
       accepted.push({ row, col });
     }
+    return accepted;
+  }
+
+  /**
+   * 按存档阵型落位（§3.2）。校验失败时整体回退，不改动任何单位。
+   */
+  private applyDeployLayout(layout?: ({ row: number; col: number } | null)[] | null): void {
+    const accepted = this._normalizeLayout(layout);
+    if (!accepted) return;
 
     for (let i = 0; i < this._playerUnits.length; i++) {
       const pos = accepted[i];
@@ -360,6 +393,74 @@ export class BattleManager extends Component {
       unit.node.active = true;
       this._deployedPositions.push(pos);
     }
+  }
+
+  /**
+   * 「沿用上局」：把上一场的阵型重新铺到当前布阵阶段。
+   * 先清空当前站位再套用，返回是否成功（无存档/校验失败 → false，UI 保留原状）。
+   */
+  applySavedDeployLayout(layout?: ({ row: number; col: number } | null)[] | null): boolean {
+    if (this._phase !== 'deploy') return false;
+    const accepted = this._normalizeLayout(layout);
+    if (!accepted) return false;
+
+    for (let i = 0; i < this._playerUnits.length; i++) {
+      if ((this._playerUnits[i].data?.gridPos.col ?? -1) >= 0) {
+        this.unplaceUnit(i, false);
+      }
+    }
+    for (let i = 0; i < this._playerUnits.length; i++) {
+      const pos = accepted[i];
+      if (pos) this.placeUnit(i, pos, false);
+    }
+    this._highlightDeployArea();
+    this._notifyDeployPlaced();
+    this._paintDeploySelection();
+    return true;
+  }
+
+  /**
+   * 「一键推荐站位」：规则式布阵，不含 AI。
+   * 战士顶前排（row 1），弓手/法师后排（row 0），牧师后排中列；
+   * 同排按「中 → 两侧」的顺序取空位，被占用时自动顺延，绝不产生冲突。
+   */
+  recommendDeployLayout(): boolean {
+    if (this._phase !== 'deploy') return false;
+
+    // 先全部撤回，保证推荐是"从零铺满"，不会与玩家手动摆的残局混在一起
+    for (let i = 0; i < this._playerUnits.length; i++) {
+      if ((this._playerUnits[i].data?.gridPos.col ?? -1) >= 0) {
+        this.unplaceUnit(i, false);
+      }
+    }
+
+    const CENTER_FIRST = [2, 1, 3, 0, 4, 5];
+    const used = new Set<string>();
+    const take = (row: number, order: number[]): GridPosition | null => {
+      for (const col of order) {
+        const key = `${row},${col}`;
+        if (!used.has(key)) {
+          used.add(key);
+          return { row, col };
+        }
+      }
+      return null;
+    };
+
+    for (let i = 0; i < this._playerUnits.length; i++) {
+      const unit = this._playerUnits[i];
+      const classId = unit?.data?.classId ?? '';
+      const row = classId === 'warrior' ? 1 : 0;
+      let pos = take(row, CENTER_FIRST);
+      // 本排满了就去另一排（3 人小队下不会发生，纯兜底）
+      if (!pos) pos = take(row === 1 ? 0 : 1, CENTER_FIRST);
+      if (pos) this.placeUnit(i, pos, false);
+    }
+
+    this._highlightDeployArea();
+    this._notifyDeployPlaced();
+    this._paintDeploySelection();
+    return this._deployedPositions.length === this._playerUnits.length;
   }
 
   /** 导出当前布阵（按 playerClasses 下标对齐；未上阵为 null），供存档持久化（§3.2） */
@@ -930,7 +1031,7 @@ export class BattleManager extends Component {
     this._autoSkipUnitRef = unit;
     // 注意这里**不**立刻置 `hasActed`：宽限期内玩家点棋盘/技能都能把它撤回来，
     // 置位挪到 `_onAutoSkipTimeout` —— 否则"想反悔"时单位已经被判过行动了
-    this.scheduleOnce(this._onAutoSkipTimeout, BattleManager.AUTO_SKIP_GRACE);
+    this.scheduleOnce(this._onAutoSkipTimeout, BattleManager.AUTO_SKIP_GRACE / this._speedMul);
   }
 
   /**
@@ -1268,7 +1369,7 @@ export class BattleManager extends Component {
       u.data?.isAlive && u.data.gridPos.row === gridPos.row && u.data.gridPos.col === gridPos.col
     );
 
-    this.executeSkillEffects(unit, targetUnit, gridPos, usedSkill.effects);
+    this.executeSkillEffects(unit, targetUnit, gridPos, usedSkill.effects, usedSkill.id);
 
     // 技能已消耗 → 这里**不**走 `_clearPendingSkill()`：不需要（也不该）恢复高亮，
     // 单位随后就结束回合，恢复一次只是白闪
@@ -1327,11 +1428,61 @@ export class BattleManager extends Component {
     return amount;
   }
 
+  /**
+   * 技能演出：只做表现，不参与结算。
+   * 坐标取单位节点的当前本地位置（单位是 BattleManager 的直接子节点），
+   * 目标已消失时退回格子坐标。
+   */
+  private playSkillFx(
+    caster: UnitController,
+    target: UnitController | null,
+    targetPos: GridPosition | null,
+    effects: SkillEffect[],
+    skillId?: string
+  ): void {
+    if (!this.node?.isValid) return;
+    const from = caster.node?.isValid ? caster.node.position : new Vec3(0, -200, 0);
+    let to: Vec3 | null = null;
+    if (target?.node?.isValid) {
+      to = target.node.position;
+    } else if (targetPos) {
+      to = gridToLocal(targetPos.row, targetPos.col);
+    }
+
+    const types = effects.map(e => e.type);
+    SkillFx.play(this.node, {
+      from: new Vec3(from.x, from.y, 0),
+      to,
+      skillId,
+      effectTypes: types,
+      hostile: this._enemyUnits.includes(caster),
+    });
+
+    // 群体效果：在受影响的单位身上补几处命中反馈，避免"只有中心闪一下"
+    const isAoe = types.includes('aoe_1radius') || types.includes('aoe_3x3') || types.includes('aoe_heal');
+    if (!isAoe || !targetPos) return;
+    const affected = [...this._playerUnits, ...this._enemyUnits].filter(u => {
+      const p = u.data?.gridPos;
+      if (!u.data?.isAlive || !p || u === caster) return false;
+      return Math.abs(p.row - targetPos.row) <= 1 && Math.abs(p.col - targetPos.col) <= 1;
+    });
+    for (const u of affected) {
+      if (!u.node?.isValid) continue;
+      const pos = new Vec3(u.node.position.x, u.node.position.y, 0);
+      this.scheduleOnce(() => {
+        if (!u.node?.isValid) return;
+        if (types.includes('aoe_heal')) SkillFx.healAt(this.node, pos);
+        else SkillFx.impactAt(this.node, pos, 'impact');
+      }, 0.18);
+    }
+  }
+
   private executeSkillEffects(
     caster: UnitController,
     target: UnitController | null,
     targetPos: GridPosition | null,
-    effects: SkillEffect[]
+    effects: SkillEffect[],
+    skillId?: string
   ): void {
     if (!caster.data) return;
 
@@ -1339,6 +1490,7 @@ export class BattleManager extends Component {
     // 效果本身仍同步结算 —— 演出只是"提示要放了"，不该让判定等动画。
     if (caster.node?.isValid) {
       caster.playCastCue();
+      this.playSkillFx(caster, target, targetPos, effects, skillId);
     }
     
     const nextSkillBuff = caster.data.buffs.find(b => b.type === 'buff_next_skill');
@@ -1758,7 +1910,7 @@ export class BattleManager extends Component {
       const usedSkill = unit.useSkill(skillIndex, !skill.preMove);
       if (!usedSkill) return;
       if (unit.data) {
-        this.executeSkillEffects(unit, unit, unit.data.gridPos, usedSkill.effects);
+        this.executeSkillEffects(unit, unit, unit.data.gridPos, usedSkill.effects, usedSkill.id);
       }
 
       if (skill.preMove) {
@@ -1957,7 +2109,7 @@ export class BattleManager extends Component {
     if (ability.targetType !== 'self' && !inRange) return false;
 
     enemy.startAbilityCooldown(ability.id, ability.cooldown ?? 1);
-    this.executeSkillEffects(enemy, target, targetPos, ability.effects);
+    this.executeSkillEffects(enemy, target, targetPos, ability.effects, ability.id);
     return true;
   }
 
@@ -2045,7 +2197,7 @@ export class BattleManager extends Component {
     const victory = allEnemiesDead;
     this.scheduleOnce(
       victory ? this._settleVictory : this._settleDefeat,
-      UnitController.DEATH_ANIM_DURATION
+      UnitController.DEATH_ANIM_DURATION / this._speedMul
     );
   }
 
@@ -2136,7 +2288,8 @@ export class BattleManager extends Component {
    * （补间回调没来 / 抛异常），看门狗也会在 2s 内强制接管。
    */
   update(dt: number): void {
-    this._clock += dt;
+    // 倍速只缩放演出时钟；AI 拍点/看门狗都按这个时钟比较，故一并加速
+    this._clock += dt * this._speedMul;
     // 成本守卫：整场战斗里绝大多数帧都走这一行就返回
     if (this._phase !== 'enemy_turn') return;
 

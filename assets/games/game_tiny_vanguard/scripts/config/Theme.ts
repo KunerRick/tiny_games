@@ -1,100 +1,24 @@
 /**
  * 小小先锋 设计令牌（Design Tokens）
  *
- * 唯一权威依据：docs/plans/2026-10-08-tiny-vanguard-ui-ux-redesign.md §3、§7
- * 风格：深色科技风 —— 深底（#1E2430 系）+ 单一蓝色主强调（#3B82F6）。
+ * 通用令牌（色板 / 字号 / 间距 / 控件尺寸 / 消毒）已于 2026-11-08 上提到
+ * `assets/common/ui/UITheme.ts`，全站共用一套；本文件只保留**本作专属**的：
+ * 棋盘与高亮（GRID）、阵营色（FACTION）、职业色（CLASS_COLOR）、
+ * 按钮过渡主题（BUTTON_THEME）、战斗分区（BATTLE_LAYOUT）。
+ *
+ * 兼容做法：把通用令牌原样再导出，这样既有的 `from '../config/Theme'` 导入无需改动；
+ * 新代码建议直接引 `assets/common/ui/UITheme`。
  *
  * 约定：
- * - 颜色一律用本文件的语义令牌，不再在业务代码里散落魔法 RGB。
+ * - 颜色一律用语义令牌，不再在业务代码里散落魔法 RGB。
  * - 字号/行高必须成对使用 FONT_* 令牌；硬性约束 lineHeight >= fontSize * 1.2。
  * - 需要 Color 实例时用 hex(...) 工厂取新对象，不要共享实例（tween(Color) 会就地改值）。
  */
-import { Button, Color, Label } from 'cc';
+import { Button } from 'cc';
+import { ALPHA, COLOR, CONTROL, SPACE, hex } from '../../../../common/ui/UITheme';
 
-// ---------------------------------------------------------------------------
-// 色板（§3.1）
-// ---------------------------------------------------------------------------
-
-/** 语义色令牌（十六进制，不含 alpha） */
-export const COLOR = {
-  /** 全屏遮罩 */
-  BG_OVERLAY: '#000000',
-  /** 面板底 */
-  PANEL_BG: '#1E2430',
-  /** 面板内次级块（列表行、卡片底） */
-  SURFACE: '#263041',
-  /** 面板描边 */
-  PANEL_BORDER: '#3A4658',
-
-  /** 主操作：继续 / 确认 */
-  PRIMARY: '#3B82F6',
-  /** 主操作按下态 */
-  PRIMARY_DARK: '#2563EB',
-  /** 禁用态底 */
-  PRIMARY_DISABLED: '#374151',
-
-  /** 可用 / 成功 / 回血 */
-  SUCCESS: '#22C55E',
-  /** 敌人 / 伤害 / 失败 */
-  DANGER: '#EF4444',
-  /** 危险态按下（DANGER 的暗版，用于按钮 pressed） */
-  DANGER_DARK: '#DC2626',
-  /** 高亮 / 金币 / 奖励 */
-  WARNING: '#F59E0B',
-  /** 能量 / 技能 */
-  INFO: '#06B6D4',
-  /**
-   * 被动技能（升级卡的"被动"分类色）。
-   * 方案 §4 问题 4 指定"技能蓝 / 被动紫 / 属性绿"；原先被动用 INFO 青，
-   * 与主动的 PRIMARY 蓝同属冷色系、相邻色相，一眼分不出分类 —— 故补这个紫。
-   */
-  PASSIVE: '#A855F7',
-
-  /** 正文 */
-  TEXT_PRIMARY: '#F3F4F6',
-  /** 次要说明 */
-  TEXT_SECONDARY: '#9CA3AF',
-  /** 不可用文字 */
-  TEXT_DISABLED: '#6B7280',
-  /**
-   * 「空站台」凹坑底色：比 `PANEL_BG` 更暗，读感像"挖掉一块的地面"。
-   * 用于兵牌槽位已被拖上阵后的状态（§3.4）。
-   */
-  SLOT_EMPTY_BG: '#141A24',
-  /** 「空站台」凹坑描边：介于凹坑与 `PANEL_BORDER` 之间，形成内凹感 */
-  SLOT_EMPTY_BORDER: '#2A3342',
-} as const;
-
-/** 语义色的标准透明度（0–255），与 COLOR 配套使用 */
-export const ALPHA = {
-  BG_OVERLAY: 180,
-  PANEL_BG: 245,
-  SOLID: 255,
-  /** 禁用/不可达元素（非半透明覆盖层，仍为实心块，只是整体压暗） */
-  DIMMED: 255,
-  /** 连线等装饰性描边 */
-  LINE: 220,
-  /** 拖拽中的"幽灵"节点（跟随手指的半透明副本） */
-  DRAG_GHOST: 200,
-  /** “空站台”凹坑底色透明度（略透，露出下方面板色，强化凹陷感） */
-  SLOT_EMPTY_BG: 225,
-} as const;
-
-/** 取一个新的 Color 实例。不要共享实例：Color 是可变的 ValueType。 */
-export function hex(hexString: string, alpha: number = ALPHA.SOLID): Color {
-  const c = new Color();
-  c.fromHEX(hexString);
-  c.a = alpha;
-  return c;
-}
-
-/** 血条填充色：按血量比例切换（§4 问题 6） */
-export function hpBarColor(current: number, max: number): Color {
-  const ratio = max > 0 ? current / max : 0;
-  if (ratio > 0.5) return hex(COLOR.SUCCESS);
-  if (ratio > 0.2) return hex(COLOR.WARNING);
-  return hex(COLOR.DANGER);
-}
+// 通用令牌再导出（色板 / 透明度 / 字号 / 间距 / 面板 / 控件 / 工具函数）
+export * from '../../../../common/ui/UITheme';
 
 // ---------------------------------------------------------------------------
 // 战斗棋盘与高亮（§4 问题 6）
@@ -109,15 +33,15 @@ export const GRID = {
   CELL_SELECTED: hex(COLOR.WARNING, 150),
   /** 移动预览格（鼠标悬停） */
   CELL_PREVIEW: hex(COLOR.WARNING, 220),
-  /** 部署区可部署格 */
-  DEPLOYABLE: hex(COLOR.SUCCESS, 180),
+  /** 部署区可部署格（淡绿薄涂：整块亮绿会盖过棋盘与单位，视觉太重） */
+  DEPLOYABLE: hex(COLOR.SUCCESS, 105),
   /** 不可部署（敌方半场）格 */
-  DEPLOY_DISABLED: hex(COLOR.TEXT_DISABLED, 110),
+  DEPLOY_DISABLED: hex(COLOR.TEXT_DISABLED, 80),
   /** 已部署格 */
   DEPLOYED: hex(COLOR.SUCCESS, 220),
   /**
    * 拖拽落点预览：可放。
-   * 不能直接用 DEPLOYABLE（180）—— 那正是部署区两行的**底色**，设上去等于零反馈。
+   * 不能直接用 DEPLOYABLE —— 那正是部署区两行的**底色**，设上去等于零反馈。
    * 用实心绿，保证相对底色可见。
    */
   DRAG_DROP_VALID: hex(COLOR.SUCCESS, 255),
@@ -199,124 +123,10 @@ export const CLASS_COLOR = {
 } as const;
 
 // ---------------------------------------------------------------------------
-// 字号阶梯（§3.2，行高 = 字号 × 1.4）
+// 战斗分区（§4 问题 5 的分区重构）
 // ---------------------------------------------------------------------------
 
-export interface FontToken {
-  readonly fontSize: number;
-  readonly lineHeight: number;
-}
-
-/** 通关/胜利大标题 */
-export const FONT_DISPLAY: FontToken = { fontSize: 40, lineHeight: 56 };
-/** 面板标题 */
-export const FONT_TITLE: FontToken = { fontSize: 28, lineHeight: 40 };
-/** 正文 / 按钮文字 */
-export const FONT_BODY: FontToken = { fontSize: 20, lineHeight: 28 };
-/** 次要说明 */
-export const FONT_CAPTION: FontToken = { fontSize: 16, lineHeight: 22 };
-/** 单位名牌 */
-export const FONT_TINY: FontToken = { fontSize: 13, lineHeight: 18 };
-/** 图标字号（emoji 图形标记，非正文；单行无换行，行高取字号 1.25 倍） */
-export const FONT_ICON: FontToken = { fontSize: 32, lineHeight: 40 };
-
-/** 硬性约束：行高至少为字号的 1.2 倍 */
-export const MIN_LINE_HEIGHT_RATIO = 1.2;
-
-/** 行高是否满足硬性约束 */
-export function lineHeightOk(fontSize: number, lineHeight: number): boolean {
-  return lineHeight >= fontSize * MIN_LINE_HEIGHT_RATIO;
-}
-
-/**
- * 统一应用字号令牌到 Label（同时写 fontSize 与 lineHeight）。
- * 用它替代手写 `label.fontSize = 40` —— 后者会留下默认 lineHeight 40 的旧值，
- * 正是「fontSize > lineHeight」这类拥挤问题的成因。
- */
-export function applyFont(label: Label | null, token: FontToken): void {
-  if (!label || !label.isValid) return;
-  label.fontSize = token.fontSize;
-  label.lineHeight = token.lineHeight;
-}
-
-/** 应用字号令牌 + 文字颜色令牌 */
-export function applyFontAndColor(
-  label: Label | null,
-  token: FontToken,
-  colorHex: string,
-  alpha: number = ALPHA.SOLID
-): void {
-  applyFont(label, token);
-  if (label && label.isValid) {
-    label.color = hex(colorHex, alpha);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 图标文本消毒
-// ---------------------------------------------------------------------------
-
-/**
- * 去掉变体选择符：U+FE0E（文本呈现符）/ U+FE0F（emoji 呈现符），两个都不可见。
- *
- * 为什么需要它：同一个 emoji 带不带 VS16 是两个不同的码点序列，字体缺 VS16
- * 字形时会把那个不可见字符渲染成一个**方框**（tofu）。项目里"部署卡片是方框、
- * 地图上却正常"就是因为两张图标表一个有 VS16、一个没有。所有要显示为图标的
- * 字符串，写进 `Label.string` 之前一律先过这里。
- */
-export function stripVariationSelectors(text: string): string {
-  if (!text) return text;
-  // 用码点转义而不是字面量：这两个字符在编辑器里不可见，写成字面量以后没人能维护
-  return text.replace(/[\uFE0E\uFE0F]/g, '');
-}
-
-// ---------------------------------------------------------------------------
-// 间距与尺寸（§3.3）
-// ---------------------------------------------------------------------------
-
-/** 间距基准 8 */
-export const SPACE = {
-  XS: 4,
-  SM: 8,
-  MD: 16,
-  LG: 24,
-  XL: 32,
-} as const;
-
-/** 画布设计分辨率 */
-export const CANVAS = { width: 720, height: 1280 } as const;
-
-/** 面板统一推荐尺寸与留白 */
-export const PANEL = {
-  /** 推荐面板宽（画布 720 留安全边距） */
-  WIDTH: 640,
-  /** 推荐面板高上限 */
-  MAX_HEIGHT: 960,
-  /** 面板内边距 */
-  PADDING: 24,
-  /** 标题与正文间距 */
-  TITLE_GAP: 16,
-  /** 面板圆角（用 Sprite/Graphics 时的参考值） */
-  RADIUS: 16,
-} as const;
-
-/** 控件尺寸 */
-export const CONTROL = {
-  /** 按钮统一高度（当前 36/40/60 混用） */
-  BTN_HEIGHT: 48,
-  /** 主按钮宽度 */
-  BTN_WIDTH: 200,
-  /** 列表行高 */
-  ROW_HEIGHT: 64,
-  /** 列表行间距 */
-  ROW_GAP: 12,
-  /** 卡片尺寸（升级三选一） */
-  CARD_WIDTH: 180,
-  CARD_HEIGHT: 260,
-  CARD_GAP: 20,
-} as const;
-
-/** 战斗界面分区高度（§4 问题 5 的分区重构） */
+/** 战斗界面分区高度 */
 export const BATTLE_LAYOUT = {
   /** 顶部 HUD：左回合 / 右金币 */
   HUD_HEIGHT: 64,
