@@ -27,6 +27,7 @@ export const GAME_LIST: GameConfig[] = [
     { id: 'match3', name: '缤纷消除', icon: 'default', sceneName: 'Match3', description: '交换相邻方块凑三连，连锁消除闯 30 关' },
     { id: 'tower_defense', name: '守卫塔楼', icon: 'default', sceneName: 'TowerDefense', description: '沿路径布塔，撑过 10 波进攻' },
     { id: 'pool', name: '台球', icon: 'default', sceneName: 'Pool', description: '拉杆瞄准，把球全部打进袋' },
+    { id: 'wordle', name: '成语猜猜', icon: 'default', sceneName: 'Wordle', description: '六次机会猜出四字成语' },
 ];
 
 export function getGameById(id: string): GameConfig | undefined {

@@ -72,7 +72,8 @@ tiny_games/
 │   │   ├── game_idle/          # 场景: Idle（小店日记）
 │   │   ├── game_match3/        # 场景: Match3（缤纷消除）
 │   │   ├── game_tower_defense/ # 场景: TowerDefense（守卫塔楼）
-│   │   └── game_pool/          # 场景: Pool（台球）
+│   │   ├── game_pool/          # 场景: Pool（台球）
+│   │   └── game_wordle/        # 场景: Wordle（成语猜猜）
 │   ├── common/            # 公共模块
 │   │   ├── managers/      # SceneManager, StorageManager, GameConfig
 │   │   └── components/    # BackButton, SafeAreaAdapter
@@ -86,7 +87,7 @@ tiny_games/
 │   ├── assets/            # 文档配图
 │   ├── tech/              # 技术决策与踩坑详情（AGENTS.md 教训的展开）
 │   └── cocos-best-practices.md
-├── tools/                 # 本地校验/同步脚本（verify-battle-fixes.js、verify-tetris-core.js、verify-idiom-core.js、verify-gomoku-core.js、verify-idle-core.js、verify-match3-core.js、verify-td-core.js、verify-pool-core.js、check-wechat-build.js、replay-wechat-bundle.js、sync-build-scenes.js）
+├── tools/                 # 本地校验/同步脚本（verify-battle-fixes.js、verify-tetris-core.js、verify-idiom-core.js、verify-gomoku-core.js、verify-idle-core.js、verify-match3-core.js、verify-td-core.js、verify-pool-core.js、verify-wordle-core.js、check-wechat-build.js、replay-wechat-bundle.js、sync-build-scenes.js）
 ├── settings/              # Cocos 编辑器设置
 ├── extensions/            # 编辑器插件（tsconfig 排除；node_modules 已 gitignore）
 └── build/                 # 构建输出（gitignored）
@@ -114,6 +115,8 @@ tiny_games/
 { id: 'idle',         name: '小店日记', icon: 'default', sceneName: 'Idle',        description: '点击经营小店，升级设施，离线也赚钱' }
 { id: 'match3',       name: '缤纷消除', icon: 'default', sceneName: 'Match3',      description: '交换相邻方块凑三连，连锁消除闯 30 关' }
 { id: 'tower_defense', name: '守卫塔楼', icon: 'default', sceneName: 'TowerDefense', description: '沿路径布塔，撑过 10 波进攻' }
+{ id: 'pool',          name: '台球',     icon: 'default', sceneName: 'Pool',        description: '拉杆瞄准，把球全部打进袋' }
+{ id: 'wordle',        name: '成语猜猜', icon: 'default', sceneName: 'Wordle',      description: '六次机会猜出四字成语' }
 ```
 
 **添加新游戏三步骤**：① `GameConfig.ts` 注册 ② 创建 `assets/games/game_xxx/scenes/Xxx.scene` ③ 场景名与 `sceneName` 一致。
@@ -248,6 +251,13 @@ node tools/verify-pool-core.js
 # 同样需要 tsc（编译 PoolConfig.ts / PoolCore.ts）
 ```
 
+成语猜猜纯逻辑自检（不启动编辑器；覆盖词库合法性、绿/黄/灰判定含重复字、答案与候选池确定性、三档难度池尺寸与干扰字唯一、候选池必含答案字、每日种子、计分、分享文本、1,000 局长跑，共 29 项）：
+
+```bash
+node tools/verify-wordle-core.js
+# 同样需要 tsc（编译 WordleCore.ts / IdiomData.ts）
+```
+
 微信小游戏构建产物预检（**把 `build/wechatgame/` 交给微信开发者工具之前跑**，退出码 0 = 可开）：
 
 ```bash
@@ -361,4 +371,5 @@ node tools/sync-build-scenes.js --all            # 顺带修其它平台的构�
 - [小店日记设计（点击 / 自动 / 离线三线收益）](./docs/specs/2026-11-05-game-idle-design.md)
 - [缤纷消除设计（交换消除 / 特殊块 / 30 关）](./docs/specs/2026-11-05-game-match3-design.md)
 - [守卫塔楼设计（固定塔位 / 4 塔 3 级 / 10 波含 Boss）](./docs/specs/2026-11-06-game-tower-defense-design.md)
+- [成语猜猜设计（候选字池 + 每日挑战 + 战绩分享，含浏览器验收记录）](./docs/specs/2026-11-08-game-wordle-design.md)
 - [品类盘点与下一批路线图](./docs/plans/2026-11-05-game-catalog-and-roadmap.md)
