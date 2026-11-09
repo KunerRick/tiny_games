@@ -147,6 +147,13 @@
 | 游戏设计 | [`specs/2026-11-06-game-tower-defense-design.md`](./specs/2026-11-06-game-tower-defense-design.md) | 9×12 ASCII 地图 + BFS 路径推导、固定塔位、4 塔 × 3 级、10 波含 Boss、金币 / 生命 / 50% 出售返还、三图难度（自动玩家 10 / 10 / 2 生命）、布局与验收清单 |
 | 回归自检 | [`../tools/verify-td-core.js`](../tools/verify-td-core.js) | 纯逻辑单测（21 项：三图合法性与路径、建造 / 升级 / 出售经济、三种索敌、溅射与减速、漏怪扣血与判负、10 波全清判胜、1,000 局随机长跑不变量、三图自动玩家通关） |
 
+### 雷霆战机（Thunder / thunder）
+
+| 类型 | 文件 | 说明 |
+|------|------|------|
+| 游戏设计 | [`specs/2026-11-08-game-thunder-design.md`](./specs/2026-11-08-game-thunder-design.md) | 10 关关卡制弹幕 + 跨局机库养成（武器 / 装甲 / 僚机 / 炸弹）、星级与金币结算、确定性掉落、复活 / 护盾 / 炸弹、UI 状态机与验收清单 |
+| 回归自检 | [`../tools/verify-thunder-core.js`](../tools/verify-thunder-core.js) | 纯逻辑单测（64 项：关卡表、存档净化、升级与属性、星级 / 奖励、齐射与僚机、护盾 / 炸弹 / 复活、波次与 Boss 胜负、确定性、1,000 次升级、10 分钟长跑、自动驾驶通关） |
+
 ### 砖块远征（Brick Breaker / brick）
 
 | 类型 | 文件 | 说明 |

@@ -103,6 +103,7 @@
 | P2-1 | `pool` | 台球 | 体育手感 | 8–10 人日 | 圆形物理（复用 merge 求解器） | ✅ 已完成（2026-11-07 合入 `develop`） |
 | P2-2 | `sokoban` | 推箱子 | 解谜机关 | 4–6 人日 | 关卡文本格式 + BFS 可解校验 | ✅ 已完成（2026-11-08 合入 `develop`） |
 | — | `shmup` | 星际弹幕（计划外） | 动作射击 | 3–4 人日 | 确定性弹幕模拟 + 波次常量表 | ✅ 已完成（2026-11-08 合入 `develop`） |
+| — | `thunder` | 雷霆战机（计划外） | 动作射击 · 关卡制养成 | 4–5 人日 | 跨局机库存档 + 关卡表 + 星级结算 | ✅ 已完成（2026-11-09） |
 | P2-3 | `rhythm` | 节拍点击 | 音乐节奏 | 10–14 人日 | 全局音频管理 + 延迟校准 | 未开始 |
 
 **不做成新游戏的**：蜘蛛纸牌 / 空当接龙 / 21 点属于纸牌内容扩展，挂在 `solitaire` 的模式选择里，不计入品类缺口。
@@ -119,6 +120,7 @@
 | P2-1 | `pool` | ✅ 已可玩 | [`specs/2026-11-06-game-pool-design.md`](../specs/2026-11-06-game-pool-design.md) | `tools/verify-pool-core.js`（24 项，含 1,000 次穿透/长跑） |
 | P2-2 | `sokoban` | ✅ 已可玩 | [`specs/2026-11-08-game-sokoban-design.md`](../specs/2026-11-08-game-sokoban-design.md) | `tools/verify-sokoban-core.js`（40 项，含 BFS 可解校验） |
 | — | `shmup` | ✅ 已可玩 | [`specs/2026-11-08-game-shmup-design.md`](../specs/2026-11-08-game-shmup-design.md) | `tools/verify-shmup-core.js`（34 项，含自动驾驶通关 + 确定性） |
+| — | `thunder` | ✅ 已可玩 | [`specs/2026-11-08-game-thunder-design.md`](../specs/2026-11-08-game-thunder-design.md) | `tools/verify-thunder-core.js`（64 项，含 10 分钟长跑 + 自动驾驶通关） |
 | P2-3 | `rhythm` | ⬜ 未开工 | — | — |
 
 ---

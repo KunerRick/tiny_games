@@ -74,7 +74,8 @@ tiny_games/
 │   │   ├── game_tower_defense/ # 场景: TowerDefense（守卫塔楼）
 │   │   ├── game_pool/          # 场景: Pool（台球）
 │   │   ├── game_wordle/        # 场景: Wordle（成语猜猜）
-│   │   └── game_shmup/         # 场景: Shmup（星际弹幕）
+│   │   ├── game_shmup/         # 场景: Shmup（星际弹幕）
+│   │   └── game_thunder/       # 场景: Thunder（雷霆战机）
 │   ├── common/            # 公共模块
 │   │   ├── managers/      # SceneManager, StorageManager, GameConfig
 │   │   └── components/    # BackButton, SafeAreaAdapter
@@ -88,7 +89,7 @@ tiny_games/
 │   ├── assets/            # 文档配图
 │   ├── tech/              # 技术决策与踩坑详情（AGENTS.md 教训的展开）
 │   └── cocos-best-practices.md
-├── tools/                 # 本地校验/同步脚本（verify-battle-fixes.js、verify-tetris-core.js、verify-idiom-core.js、verify-gomoku-core.js、verify-idle-core.js、verify-match3-core.js、verify-td-core.js、verify-pool-core.js、verify-wordle-core.js、verify-shmup-core.js、check-wechat-build.js、replay-wechat-bundle.js、sync-build-scenes.js）
+├── tools/                 # 本地校验/同步脚本（verify-battle-fixes.js、verify-tetris-core.js、verify-idiom-core.js、verify-gomoku-core.js、verify-idle-core.js、verify-match3-core.js、verify-td-core.js、verify-pool-core.js、verify-wordle-core.js、verify-shmup-core.js、verify-thunder-core.js、check-wechat-build.js、replay-wechat-bundle.js、sync-build-scenes.js）
 ├── settings/              # Cocos 编辑器设置
 ├── extensions/            # 编辑器插件（tsconfig 排除；node_modules 已 gitignore）
 └── build/                 # 构建输出（gitignored）
@@ -119,6 +120,7 @@ tiny_games/
 { id: 'pool',          name: '台球',     icon: 'default', sceneName: 'Pool',        description: '拉杆瞄准，把球全部打进袋' }
 { id: 'wordle',        name: '成语猜猜', icon: 'default', sceneName: 'Wordle',      description: '六次机会猜出四字成语' }
 { id: 'shmup',         name: '星际弹幕', icon: 'default', sceneName: 'Shmup',       description: '拖动飞船自动开火，9 波弹幕闯关' }
+{ id: 'thunder',       name: '雷霆战机', icon: 'default', sceneName: 'Thunder',     description: '关卡制养成弹幕，升级机库击破雷霆核心' }
 ```
 
 **添加新游戏三步骤**：① `GameConfig.ts` 注册 ② 创建 `assets/games/game_xxx/scenes/Xxx.scene` ③ 场景名与 `sceneName` 一致。
@@ -267,6 +269,13 @@ node tools/verify-shmup-core.js
 # 同样需要 tsc（编译 ShmupCore.ts），通过时打印 SHMUP_CORE_OK
 ```
 
+雷霆战机纯逻辑自检（不启动编辑器；覆盖 10 关关卡表、存档净化、四条升级线与属性推导、星级 / 奖励、边界夹取、火力齐射与僚机、护盾 / 炸弹 / 复活、波次推进与 Boss 胜负、确定性掉落、1,000 次升级、10 分钟长跑与第 1 关自动驾驶通关，共 64 项）：
+
+```bash
+node tools/verify-thunder-core.js
+# 同样需要 tsc（编译 ThunderCore.ts），通过时打印 THUNDER_CORE_OK
+```
+
 微信小游戏构建产物预检（**把 `build/wechatgame/` 交给微信开发者工具之前跑**，退出码 0 = 可开）：
 
 ```bash
@@ -382,4 +391,5 @@ node tools/sync-build-scenes.js --all            # 顺带修其它平台的构�
 - [守卫塔楼设计（固定塔位 / 4 塔 3 级 / 10 波含 Boss）](./docs/specs/2026-11-06-game-tower-defense-design.md)
 - [成语猜猜设计（候选字池 + 每日挑战 + 战绩分享，含浏览器验收记录）](./docs/specs/2026-11-08-game-wordle-design.md)
 - [星际弹幕设计（自动开火 + 4 种弹幕图案 + 9 波含母舰，含浏览器验收记录）](./docs/specs/2026-11-08-game-shmup-design.md)
+- [雷霆战机设计（10 关 + 机库四条升级线 + 炸弹 / 护盾 / 复活，含浏览器验收记录）](./docs/specs/2026-11-08-game-thunder-design.md)
 - [品类盘点与下一批路线图](./docs/plans/2026-11-05-game-catalog-and-roadmap.md)

@@ -31,6 +31,7 @@ export const GAME_LIST: GameConfig[] = [
     { id: 'bubble', name: '泡泡龙', icon: 'default', sceneName: 'Bubble', description: '瞄准弹射同色泡泡，三连消除清空盘面' },
     { id: 'sokoban', name: '推箱子', icon: 'default', sceneName: 'Sokoban', description: '推动箱子到目标点，20 关最强规划' },
     { id: 'shmup', name: '星际弹幕', icon: 'default', sceneName: 'Shmup', description: '拖动飞船自动开火，9 波弹幕闯关' },
+    { id: 'thunder', name: '雷霆战机', icon: 'default', sceneName: 'Thunder', description: '关卡制养成弹幕，升级机库击破雷霆核心' },
 ];
 
 export function getGameById(id: string): GameConfig | undefined {
