@@ -424,7 +424,7 @@ export class ThunderGame extends Component {
                 width: 270,
             });
             createLabel(card.node, unlocked
-                ? `最高 ${this._save.bestScore[i] ?? 0}　推荐 Lv.${lv.recommendAttack}`
+                ? `最高 ${this._save.bestScore[i] ?? 0}　推荐 Lv.${lv.recommendAttack + 1}`
                 : `通关第 ${i} 关解锁`, FONT_CAPTION.fontSize, {
                 x: 0, y: -38, color: COLOR.TEXT_SECONDARY, width: 270,
             });
@@ -508,7 +508,7 @@ export class ThunderGame extends Component {
             createLabel(row, UPGRADE_LABEL[track], FONT_TITLE.fontSize, {
                 x: -230, y: 44, color: COLOR.TEXT_PRIMARY, bold: true, width: 180,
             });
-            createLabel(row, `Lv.${lv} / ${MAX_UPGRADE[track]}`, FONT_CAPTION.fontSize, {
+            createLabel(row, `Lv.${lv + 1} / ${MAX_UPGRADE[track] + 1}`, FONT_CAPTION.fontSize, {
                 x: -110, y: 44, color: COLOR.TEXT_SECONDARY, width: 140,
             });
             createLabel(row, this._upgradeEffect(track, stats), FONT_BODY.fontSize, {
