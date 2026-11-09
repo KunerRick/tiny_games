@@ -17,6 +17,7 @@
 | 要给 Graphics 画的角色/部件加动作（挥砍、旋转、镜像） | [`tech/cocos-graphics-animation-layering.md`](./tech/cocos-graphics-animation-layering.md) |
 | 显示 emoji/符号图标（尤其要在微信上跑） | [`tech/wechat-text-rendering.md`](./tech/wechat-text-rendering.md) |
 | 构建微信小游戏、或开发者工具报编译错误 / 一打开就崩 | [`tech/wechat-build-pitfalls.md`](./tech/wechat-build-pitfalls.md) + `node tools/check-wechat-build.js`（9 项预检）+ `node tools/replay-wechat-bundle.js`（包装器复现器） |
+| 新增游戏后同步构建场景清单（MCP / 脚本 / GUI 阶梯） | [`tech/wechat-build-pitfalls.md` §9.1](./tech/wechat-build-pitfalls.md) |
 | 新增游戏或场景 | [`../AGENTS.md`](../AGENTS.md) 的 **项目结构 + 游戏注册** |
 | 查某游戏的设计/计划/场景配置 | 下文的 **按游戏分类** |
 | 规划剩余 8 款的玩法/美术/复核开工顺序 | [`plans/2026-11-07-remaining-games-polish-plan.md`](./plans/2026-11-07-remaining-games-polish-plan.md) |

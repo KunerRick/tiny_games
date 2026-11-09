@@ -285,14 +285,23 @@ node tools/check-wechat-build.js <构建目录>       # 检查其它构建输出
 node tools/replay-wechat-bundle.js               # 复现/反证：产物在「小游戏包装」下能否加载
 ```
 
-构建场景清单同步（**新增游戏后、构建之前跑**，省掉在构建面板里手动勾选场景）：
+构建场景清单同步（**新增游戏后、构建之前做**，省掉在构建面板里手动勾选场景）。按下面的阶梯选手段，**不要默认让用户去退出编辑器**：
+
+| 顺序 | 场景 | 手段 |
+|---|---|---|
+| ① 首选 | 编辑器**正在跑** | MCP `preferences_set_preferences_config` **带 `path`**：`builder` + `common.scenes`、`builder` + `BuildTaskManager.taskMap.<任务号>.options.scenes` 各写一次（编辑器自己写盘，不会被内存刷回） |
+| ② | 编辑器**没开** | `node tools/sync-build-scenes.js`（检测到编辑器在跑会拒绝写入，`--force` 可越过） |
+| ③ | `wechatgame.json` 的平台副本（MCP 够不到） | 直接改 `profiles/v2/packages/wechatgame.json` 的 `builder.common.scenes`（该文件不在编辑器内存里，改完不会被刷回） |
+| ④ 兜底 | 写完仍不生效 / 需要在面板上确认 | 用 `macos-computer-use` 技能（`~/.claude/skills/macos-computer-use/scripts/cu`）操作构建面板：`cu find CocosCreator "重新构建"` → `cu press --dry` → `cu press`，配 `cu shot` 截图核对勾选数 |
 
 ```bash
-node tools/sync-build-scenes.js                  # 同步微信小游戏的 scenes（按 GameConfig 的 GAME_LIST 生成）
-node tools/sync-build-scenes.js --check          # 只检查，有差异退出码 1
+node tools/sync-build-scenes.js --check          # 校验：三处都齐才退出码 0（编辑器在跑也能跑，只读）
 node tools/sync-build-scenes.js --all            # 顺带修其它平台的构建任务快照
-# 必须先退出编辑器（它会把内存里的旧配置刷回磁盘，覆盖改动）；脚本检测到编辑器在跑会拒绝写入
 ```
+
+**判据（写完怎么算生效）**：`--check` 退出码 0 + MCP 读回 `common.scenes` / taskMap 的项数与顺序都对得上；
+面板上是否真的勾上，用 `cu shot` 截图看「构建场景」列表条数（不看 `set` 的 `success` 就下结论）。
+⚠️ `sync-build-scenes.js` 与「退出编辑器」只是**其中一条路径**，不要再把它写成唯一做法。
 
 > MCP 的构建能力：`project_build_project` 没有 `wechatgame` 平台；但 `preferences_query/set_preferences_config`
 > **带 `path`** 时能直接读写运行中编辑器的构建配置（`builder` + `common` / `BuildTaskManager.taskMap.<id>.options.scenes`），

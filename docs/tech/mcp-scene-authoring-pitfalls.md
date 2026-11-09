@@ -392,7 +392,7 @@ pkill -f "caffeinate -di"
 
 | 现象 | 结论 |
 |------|------|
-| `scene_save_scene_as` 超时且之后场景模块失效 | 它会弹**保存对话框**——模态框一挂，场景面板的请求就全堵住，这是真正会把场景面板堵死的操作。要新场景就 `scene_create_scene`，别用 save-as |
+| `scene_save_scene_as` 超时且之后场景模块失效 | 它会弹**保存对话框**——模态框一挂，场景面板的请求就全堵住，这是真正会把场景面板堵死的操作。要新场景就 `scene_create_scene`，别用 save-as。**锁屏时这个模态框无人能关**（AX 树为空、`Esc` 也送不进去），只能等解锁后按 `Esc`，或从命令行重启编辑器 |
 | 跨场景 `copy_node` → 切场景 → `paste_node` | 粘贴**只得到空节点**（`New Node`，无子节点、无组件）。跨场景复用这条路径不通，按文档重建 |
 
 **顺带**：`scene_create_scene` 建出来的场景是**完全空的**（连 Canvas / Camera 都没有），

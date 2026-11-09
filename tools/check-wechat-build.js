@@ -186,7 +186,8 @@ if (mainConfig) {
           `assets/main/config.json 里 scenes=${JSON.stringify(manifest.scenes || {})}，uuids=${uuidCount} 项。`,
           'build/wechatgame 下只有启动脚本和空清单，一个场景都没打进去 —— 打开只会黑屏。',
           '动作：在 Cocos Creator「构建 → 微信小游戏」里确认场景列表非空（可用',
-          '      node tools/sync-build-scenes.js 按 GameConfig 生成），然后重新构建。',
+          '      node tools/sync-build-scenes.js 按 GameConfig 生成；编辑器在跑时改用 MCP',
+          '      preferences_set_preferences_config 带上 path 写清单，见 docs/tech/wechat-build-pitfalls.md §9.1），然后重新构建。',
           '      编辑器「构建」按钮是唯一的实际构建入口，MCP 无法代劳。',
         ].join('\n'),
       );

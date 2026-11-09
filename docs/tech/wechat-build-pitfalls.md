@@ -315,6 +315,7 @@ node tools/sync-build-scenes.js --all      # 顺带修其它平台（web-desktop
 （编辑器随后写出的格式还多了一段 `builder.options.wechatgame`，与 `taskOptionsMap` 并存）。
 
 所以顺序是：**退出 Cocos Creator → 跑脚本 → 打开编辑器 → 构建**。
+（这是「编辑器没开」时的一条路径；编辑器正在跑时优先走下面 §9.1 的 MCP 阶梯，不必退出。）
 脚本检测到编辑器正在跑这个项目时会直接拒绝写入（`--check` / `--dry-run` 不受影响，`--force` 可强行越过）。
 `profiles/` 在 `.gitignore` 里，脚本落盘前会留一份 `.bak`。
 
@@ -372,11 +373,55 @@ preferences_set_preferences_config({name:'builder',
 退出码 0 不代表产物可用，**必须先看 `assets/main/config.json` 的 `uuids` 非空**。结论：出微信包走构建面板，
 CLI 只适合验证「引擎能不能编译」这类不依赖资源打包的事。
 
-**不开窗也能构建的替代做法**（本次实际采用）：退出编辑器 → `node tools/sync-build-scenes.js` →
+**不开窗也能构建的替代做法**（2026-11-01 实际采用）：退出编辑器 → `node tools/sync-build-scenes.js` →
 打开编辑器 → `project_open_build_panel`（或用命令行 `open -a` 启动后再开面板）→ 点微信小游戏那行的
-**「重新构建」**。它用的是 `taskMap` 里的完整快照，也就是 `sync-build-scenes` 刚写好的那份 9 场景清单。
-面板是 web 内容、系统辅助功能抓不到按钮时，可用 CGEvent 发点击（本次用一个 20 行 Swift 小程序按屏幕点坐标点击，
-点之前先 `screencapture` 截图核对按钮位置：截图 2940×1912、逻辑屏 1470×956，**点坐标 = 图像坐标 ÷ 2**）。
+**「重新构建」**。它用的是 `taskMap` 里的完整快照，也就是 `sync-build-scenes` 刚写好的那份场景清单。
+（编辑器本来就在跑时，不必走这条路 —— 直接按 §9.1 用 MCP 写清单，然后在面板里点「重新构建」。）
+
+---
+
+## 9.1 场景清单同步：手段阶梯与「不生效」处置（2026-11-09 实测）
+
+§9 的两条路径（脚本 / MCP）不是二选一，先按下面的阶梯走，**不要一上来就让用户退出编辑器**：
+
+| 顺序 | 前提 | 手段 | 说明 |
+|---|---|---|---|
+| ① | 编辑器在跑 | MCP `preferences_set_preferences_config`，`name:'builder'` + `path:'common.scenes'`、`path:'BuildTaskManager.taskMap.<任务号>.options.scenes'` | 编辑器自己写盘；本次实测写入后磁盘立刻同步、`--check` 直接通过 |
+| ② | 编辑器没开 | `node tools/sync-build-scenes.js` | 脚本检测到编辑器在跑会拒绝写入 |
+| ③ | 任意 | 直接改 `profiles/v2/packages/wechatgame.json` 的 `builder.common.scenes` | 该文件不在编辑器内存里，改完不会被刷回（§9 实测 MCP 对 `name:'wechatgame'` 返回 `config: null`） |
+| ④ | 以上都不生效 / 需要人眼看面板 | `macos-computer-use` 技能操作面板 | 见下方「GUI 兜底」 |
+
+**判据（三件套，缺一不可）**：
+
+1. `node tools/sync-build-scenes.js --check` 退出码 0（三处清单都齐）；
+2. MCP **读回**：`common.scenes` 与 `taskMap.<id>.options.scenes` 的**项数与顺序**都和 `GAME_LIST` 一致；
+3. 真要确认面板，用 `cu shot` 截图看「构建场景」列表条数 —— `set` 返回 `updated successfully`
+   只说明「写进了编辑器内存并落盘」，**不证明构建面板/构建任务真的用它**。
+
+**GUI 兜底（第 ④ 步）——用现成的 `cu` 技能，不要再写一次性 Swift 点击器**：
+
+```bash
+CU=~/.claude/skills/macos-computer-use/scripts/cu
+$CU status                                   # 预检：前台 App / 是否锁屏
+$CU find CocosCreator "重新构建" --limit 5   # AX 树里语义定位按钮（面板是 web 内容时可能读不到）
+$CU press CocosCreator "重新构建" --dry      # 干跑：确认会点哪个元素
+$CU press CocosCreator "重新构建"            # 真点（会自动激活目标 App 并拒绝被遮挡的点击）
+$CU shot --window 构建发布 --out /tmp/build.png   # 截图核对：场景条数 / 构建结果
+```
+
+AX 树抓不到按钮时退回坐标点击：`screencapture` 截图量中心，**点坐标 = 图像坐标 ÷ scale**（Retina 下 ÷2），
+再 `cu click X Y --app CocosCreator`（必须带 `--app` 才启用遮挡守卫）。
+⚠️ 点「重新构建」= 真出包，属破坏性动作，先 `--dry` 再执行，别连点。
+
+**「MCP 写了但构建还是旧清单」的排查顺序**（按命中率排）：
+
+1. **写错任务号**：`taskMap` 里可能有多个历史任务，面板当前那条不一定是脚本/文档里的 `<任务号>` ——
+   先 `preferences_query_preferences_config({path:'BuildTaskManager', type:'local'})` 列出全部任务，
+   确认哪条是 `wechatgame` 且最新，再写它的 `options.scenes`；
+2. **只写了快照、没写面板列表**：`common.scenes`（面板勾选）与 `taskMap…options.scenes`（重新构建快照）
+   是两份，**必须都写**；
+3. **`wechatgame.json` 平台副本漏了**：这份 MCP 够不到，只能直接改文件（见阶梯 ③）；
+4. 以上都对、面板仍不刷新：关掉再打开构建面板（`project_open_build_panel`），仍不行再走 GUI 兜底。
 
 ---
 

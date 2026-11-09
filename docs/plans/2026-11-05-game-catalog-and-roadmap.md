@@ -376,7 +376,7 @@
 3. `tools/verify-<id>-core.js` 全绿
 4. Cocos 自带 `tsc --noEmit` 通过
 5. 浏览器预览实测：开局 / 核心操作 / 结算 / 重开 / 返回大厅
-6. 退出编辑器后 `node tools/sync-build-scenes.js` 同步构建场景
+6. 同步构建场景清单：编辑器在跑时用 MCP `preferences_set_preferences_config`（带 `path`，写 builder 的 `common.scenes` + taskMap 快照）；编辑器没开时 `node tools/sync-build-scenes.js`。详见 [`../tech/wechat-build-pitfalls.md`](../tech/wechat-build-pitfalls.md) §9.1
 7. `node tools/check-wechat-build.js` 9 项全绿 + 微信真机（iOS / Android）通过
 8. 无匿名事件 handler、无 `onDestroy` 访问 `@property(Node)`、无节点泄漏
 9. 图标文本经过 `stripVariationSelectors()`，`assets/` 内无 U+FE0E / U+FE0F
