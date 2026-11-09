@@ -178,8 +178,25 @@ function scenario(overrides) {
     return base;
 }
 
-let uidSeq = 5000;
+/** 同 scenario，但种子与构筑可指定（升级卡文案回归用） */
+function saveWith(seed, weapons, passives) {
+    const base = clone(fresh(seed).serialize());
+    base.player.maxHp = 9999;
+    base.player.hp = 9999;
+    base.player.pickupRadius = 1;
+    base.weapons = weapons || {};
+    base.passives = passives || {};
+    base.enemies = [];
+    base.bullets = [];
+    base.gems = [];
+    base.boss = null;
+    base.offers = [];
+    base.timers.nextWaveTime = 100000;
+    base.timers.spawnAcc = 0;
+    return base;
+}
 
+let uidSeq = 5000;
 function enemyCompact(kind, x, y, hp, extra) {
     const base = C.ENEMY_BASE[kind];
     const elite = extra && extra.elite ? 1 : 0;
@@ -248,7 +265,8 @@ check('2 不同种子 → 不同的刷怪序列', () => {
 });
 
 check('3 刷新位置距玩家 620–780 且不落在玩家 480 内', () => {
-    const core = fresh(11);
+    // 用读档构造（不触发开局怪群，开局怪群刻意放在 380–460 让玩家马上能打）
+    const core = coreFrom(scenario());
     const p = core.getSnapshot().player;
     runSteps(core, 60, ZERO, chooseFirst);
     const enemies = activeEnemies(core);
@@ -368,8 +386,8 @@ function oneEnemyCore(x, y, hp) {
 }
 
 check('10 飞刀数量/穿透/间隔正确', () => {
-    const counts = [1, 2, 2, 2, 3];
-    for (let lv = 1; lv <= 5; lv++) {
+    const counts = [1, 2, 2, 2, 3, 3, 3, 4];
+    for (let lv = 1; lv <= counts.length; lv++) {
         const core = oneEnemyCore(200, 0, 9999);
         core.debugSetWeapon('knife', lv);
         core.step(DT, ZERO);
@@ -400,13 +418,21 @@ check('10 飞刀数量/穿透/间隔正确', () => {
     approx(t1[1] - t1[0], C.KNIFE_LEVELS[0].interval, 0.03, '飞刀 Lv1 间隔');
     approx(t5[1] - t5[0], C.KNIFE_LEVELS[4].interval, 0.03, '飞刀 Lv5 间隔');
 
-    // 穿透：两个排成一列的敌人（按 uid 追踪，避免把期间自然刷出来的小怪算进来）
+    // 穿透：两个排成一列的敌人（按 uid 追踪，避免把期间自然刷出来的小怪算进来）。
+    // 扇形拉宽到 12–20° 后，索敌基准角仍取「最近敌人」的方向 ——
+    // 先放一只近处诱饵把基准角钉在 0，再把目标一列摆在 +spread/2 那条射线上
+    // （偶数把刀没有"正中"的，实际射线是基准角 ± spread/2）。
     function pierced(lv) {
-        const a = enemyCompact('chaser', 200, 0, 9999, { speed: 0 });
-        const b = enemyCompact('chaser', 320, 0, 9999, { speed: 0 });
-        const core2 = coreFrom(scenario({ enemies: [a, b] }));
+        const half = (C.KNIFE_LEVELS[lv - 1].spread * Math.PI) / 180 / 2;
+        const cx = Math.cos(half);
+        const sy = Math.sin(half);
+        // 诱饵放 240 px 且仍在目标射线的 22 px 判定之外（240 × sin 6° ≈ 25）
+        const decoy = enemyCompact('chaser', 240, 0, 9999, { speed: 0 });
+        const a = enemyCompact('chaser', cx * 260, sy * 260, 9999, { speed: 0 });
+        const b = enemyCompact('chaser', cx * 400, sy * 400, 9999, { speed: 0 });
+        const core2 = coreFrom(scenario({ enemies: [decoy, a, b] }));
         core2.debugSetWeapon('knife', lv);
-        for (let i = 0; i < 30; i++) core2.step(DT, ZERO);
+        for (let i = 0; i < 45; i++) core2.step(DT, ZERO);
         const hpOf = (uid) => {
             const e = core2.getSnapshot().enemies.find((x) => x.active && x.uid === uid);
             return e ? e.hp : 0;
@@ -539,7 +565,7 @@ function eliteScenario(time) {
     return save;
 }
 
-check('16 精英 2/4/6 分钟出现，属性倍率正确', () => {
+check('16 精英 90/120/240/360 s 出现，属性倍率正确', () => {
     for (const [i, t] of C.ELITE_TIMES.entries()) {
         const save = eliteScenario(t - 1.2);
         save.timers.nextEliteIndex = i;
@@ -549,10 +575,11 @@ check('16 精英 2/4/6 分钟出现，属性倍率正确', () => {
         assert(elites.length >= 1, `${t} s 没有出现精英`);
         const e = elites[0];
         const base = C.ENEMY_BASE[e.kind];
-        const expectHp = base.hp * (1 + save.time / 240) * C.ELITE_HP_MULT;
+        const expectHp = base.hp * C.enemyHpMult(save.time) * C.ELITE_HP_MULT;
         approx(e.maxHp, expectHp, expectHp * 0.05, `${t} s 精英 HP`);
         approx(e.radius, base.radius * C.ELITE_SIZE_MULT, 0.001, `${t} s 精英体积`);
-        assert(e.xp === C.ELITE_XP, `${t} s 精英经验应为 ${C.ELITE_XP}`);
+        // 精英收益改为固定 3 颗宝石 + 必掉补给，e.xp 不再承载经验
+        assert(e.xp === 0, `${t} s 精英 e.xp 应为 0（收益走掉落），实际 ${e.xp}`);
     }
 });
 
@@ -966,7 +993,7 @@ check('28 篡改/越界/缺字段的存档 restore() 返回 false，不污染当
 
 section('9. 8 分钟节奏表与三选一');
 
-check('30 节奏表：精英 2/4/6 分、兽潮每 45 s、Boss 7:30（误差 ≤ 3 s）', () => {
+check('30 节奏表：精英 90/120/240/360 s、兽潮每 45 s、Boss 7:30（误差 ≤ 3 s）', () => {
     const core = fresh(2026);
     const bot = makeReferenceBot();
     const elite = [];
@@ -990,7 +1017,7 @@ check('30 节奏表：精英 2/4/6 分、兽潮每 45 s、Boss 7:30（误差 ≤
         if (core.getSnapshot().phase === 'levelup') chooseByPriority(core);
     }
 
-    assert(elite.length === 3, `精英应出现 3 次，实际 ${elite.length}`);
+    assert(elite.length === C.ELITE_TIMES.length, `精英应出现 ${C.ELITE_TIMES.length} 次，实际 ${elite.length}`);
     for (let i = 0; i < elite.length; i++) {
         approx(elite[i], C.ELITE_TIMES[i], 3, `第 ${i + 1} 只精英时间戳`);
     }
@@ -1089,6 +1116,129 @@ check('32 致命伤害来源：记录最后一次伤害（接触 / 远程弹）'
     assert(shot.getSnapshot().phase === 'defeat', '远程弹应导致阵亡');
     assert(s2.lastHitSource === 'bullet', `致命来源应为 bullet，实际 ${s2.lastHitSource}`);
     assert(s2.lastHitDamage === 10, `致命伤害应为 10，实际 ${s2.lastHitDamage}`);
+});
+
+// ==================== 10. 技能表现/判定一致性 ====================
+
+section('10. 技能表现与判定一致性');
+
+check('33 落雷多目标不砸同一只敌人', () => {
+    const core = coreFrom(
+        scenario({
+            enemies: [
+                enemyCompact('chaser', 250, 0, 9999, { speed: 0 }),
+                enemyCompact('chaser', -250, 0, 9999, { speed: 0 }),
+            ],
+        })
+    );
+    core.debugSetWeapon('lightning', 4); // targets = 2
+    let pairs = 0;
+    const steps = Math.round(12 / DT);
+    for (let i = 0; i < steps; i++) {
+        core.step(DT, ZERO);
+        const xs = [];
+        for (const ev of core.drainEvents()) if (ev.type === 'lightning') xs.push(ev.x);
+        if (xs.length === 2) {
+            pairs++;
+            assert(Math.abs(xs[0] - xs[1]) > 100, `一发两雷落在同一点：${xs[0]} / ${xs[1]}`);
+        }
+    }
+    assert(pairs >= 2, `12 s 内应至少出现 2 次双目标落雷，实际 ${pairs}`);
+});
+
+check('34 回旋镖判定半径跟随 width', () => {
+    const radii = [];
+    for (const lv of [1, 5]) {
+        const core = oneEnemyCore(100, 0, 99999);
+        core.debugSetWeapon('boomerang', lv);
+        core.step(DT, ZERO);
+        const b = core.getSnapshot().bullets.find((x) => x.active && x.kind === 'boomerang');
+        assert(b, `回旋镖 Lv${lv} 没有生成`);
+        const st = C.BOOMERANG_LEVELS[lv - 1];
+        const expect = Math.max(C.BOOMERANG_HIT_RADIUS, Math.round(st.width / 2 + 4));
+        approx(b.radius, expect, 0.001, `回旋镖 Lv${lv} 判定半径`);
+        radii.push(b.radius);
+    }
+    assert(radii[1] > radii[0], `Lv5 判定半径应大于 Lv1：${radii[1]} vs ${radii[0]}`);
+});
+
+check('35 攻速被动同样加快星环转速', () => {
+    const slow = coreFrom(scenario({ enemies: [] }));
+    slow.debugSetWeapon('orbit', 1);
+    const fast = coreFrom(scenario({ enemies: [], passives: { haste: 5 } }));
+    fast.debugSetWeapon('orbit', 1);
+    runSeconds(slow, 2);
+    runSeconds(fast, 2);
+    const a0 = slow.getSnapshot().orbitAngle;
+    const a1 = fast.getSnapshot().orbitAngle;
+    assert(a0 > 0, '星环没有转起来');
+    approx(a1 / a0, 1 + C.HASTE_PER_LEVEL * 5, 0.02, '攻速对星环转速的倍率');
+});
+
+check('36 每一级升级卡的 detail 都不为空', () => {
+    const missing = [];
+    const scan = (seed, weapons, passives, track) => {
+        const core = coreFrom(saveWith(seed, weapons, passives));
+        core.debugAddXp(core.getSnapshot().player.xpNeed);
+        if (core.getSnapshot().phase !== 'levelup') return false;
+        const hit = core.getOffers().find((o) => o.track === track);
+        if (!hit) return false;
+        if (!hit.detail || !hit.detail.trim()) missing.push(`${hit.title}（${track} ${hit.currentLevel}→${hit.nextLevel}）`);
+        return true;
+    };
+    const ladders = [
+        ['weapon', ['knife', 'orbit', 'lightning', 'boomerang']],
+        ['passive', ['haste', 'swift', 'pickup', 'vitality']],
+    ];
+    for (const [kind, tracks] of ladders) {
+        for (const track of tracks) {
+            for (let cur = 0; cur < C.MAX_TRACK_LEVEL; cur++) {
+                let found = false;
+                for (let seed = 1; seed <= 120 && !found; seed++) {
+                    const w = kind === 'weapon' && cur > 0 ? { [track]: cur } : {};
+                    const p = kind === 'passive' && cur > 0 ? { [track]: cur } : {};
+                    found = scan(seed, w, p, track);
+                }
+                assert(found, `没能抽到 ${track} Lv${cur}→${cur + 1} 的升级卡`);
+            }
+        }
+    }
+    assert(missing.length === 0, `以下升级卡 detail 为空：${missing.join('；')}`);
+});
+
+check('37 新武器卡说的是"干什么"，不是「数量 0 → 1」', () => {
+    const bad = [];
+    const intro = (seed, track) => {
+        const core = coreFrom(saveWith(seed, {}, {}));
+        core.debugAddXp(core.getSnapshot().player.xpNeed);
+        if (core.getSnapshot().phase !== 'levelup') return false;
+        const hit = core.getOffers().find((o) => o.track === track);
+        if (!hit) return false;
+        if (hit.currentLevel !== 0) return false;
+        if (hit.detail.indexOf('→') >= 0 || hit.detail.indexOf(' 0 ') >= 0) bad.push(`${hit.title}：${hit.detail}`);
+        return true;
+    };
+    for (const track of ['knife', 'orbit', 'lightning', 'boomerang']) {
+        let found = false;
+        for (let seed = 1; seed <= 200 && !found; seed++) found = intro(seed, track);
+        assert(found, `没能抽到「新武器：${track}」`);
+    }
+    assert(bad.length === 0, `新武器卡仍在写从 0 起的变化：${bad.join('；')}`);
+});
+
+check('38 新武器卡文案里的数值与 1 级配置一致', () => {
+    let offer = null;
+    for (let seed = 1; seed <= 200 && !offer; seed++) {
+        const core = coreFrom(saveWith(seed, {}, {}));
+        core.debugAddXp(core.getSnapshot().player.xpNeed);
+        if (core.getSnapshot().phase !== 'levelup') continue;
+        offer = core.getOffers().find((o) => o.track === 'lightning') || null;
+    }
+    assert(offer, '没有抽到「新武器：落雷」');
+    const lv1 = C.LIGHTNING_LEVELS[0];
+    for (const n of [lv1.damage, lv1.aoe, lv1.interval]) {
+        assert(offer.detail.indexOf(String(n)) >= 0, `落雷卡没写出 ${n}：${offer.detail}`);
+    }
 });
 
 // ==================== 汇总 ====================

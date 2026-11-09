@@ -111,6 +111,7 @@
 | 类型 | 文件 | 说明 |
 |------|------|------|
 | 游戏设计（已定稿） | [`specs/2026-11-02-game-survivor-design.md`](./specs/2026-11-02-game-survivor-design.md) | 8 分钟群怪生存：4 武器 / 4 被动 / 3+2 槽、1x/2x/4x 倍速、本地局内存档、逐分钟节奏、数值与调参表、单 Graphics 性能预算与 M1/M2 双重 Go-No-Go |
+| 平衡评审（2026-11-09） | [`plans/2026-11-09-game-survivor-balance-review.md`](./plans/2026-11-09-game-survivor-balance-review.md) | 技能每级提升 / 经验宝石 / 怪物成长三条曲线对齐：全技能逐项数值、无头模拟证据、槽位溢出等 16 个代码缺陷、分三批的改法与验收带宽；**§12 为同日「表现与判定对齐」修复记录**（星环无渲染、落雷无雷、回旋镖 width 死字段、拾取刷屏、攻速对星环无效等）；**§13 为 §9 数值落地记录**（落地值、Boss HP 取舍实测、bot 测不出的验收项） |
 | 后续排期 | [`plans/2026-11-01-next-games-roadmap.md`](./plans/2026-11-01-next-games-roadmap.md) | 纸牌接龙 P0 之后启动本作（P1）的先后顺序与压测门槛 |
 
 ### 成语填字（Idiom / idiom）

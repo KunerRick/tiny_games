@@ -60,24 +60,36 @@ export const GEM_CAP = 320;
 
 export const WEAPON_SLOTS = 3;
 export const PASSIVE_SLOTS = 2;
-export const MAX_TRACK_LEVEL = 5;
+
+/**
+ * 单条武器/被动的最高级（2026-11-09 由 5 提到 8）。
+ *
+ * 5 级时一局只有 3×5 + 2×5 = 25 次有意义的升级，而宝石成长把终局拉到 26–30 级，
+ * 后面几级只能抽「淬炼」。8 级给到 40 次，等级与构筑同步见顶。
+ * 同时槽位溢出 bug 已修（见 SurvivorCore._generateOffers），8 级不会撑爆 3+2 槽。
+ */
+export const MAX_TRACK_LEVEL = 8;
 export const MAX_LEVEL = 99;
 
 // ==================== 经验曲线 ====================
 
 /**
- * need(level) = 5 + 2 × (level - 1)
+ * need(level) = 5 + 2 × (level - 1) + max(0, level - 12) × 2
  *
- * 规格初稿是 6 + 4 × (level - 1)，M1 先降到 6 + 3；2026-11-08 用
- * `node tools/sim-survivor-balance.js` 做 200 局无头平衡校准（参考走位 + 三选一），
- * 定在 5 + 2：8 分钟一局大致到 18–22 级，武器能真正滚起来。
- * 详细的整轮调参见 docs/specs/2026-11-02-game-survivor-design.md §8.4。
+ * 前段保持 5 + 2（开局成长要快，首次升级 ≤20 s），Lv12 以后每级再额外 +2。
+ * 理由（2026-11-09 平衡评审 §4.3 的对照实验）：宝石价值随时间增长后经验速率会涨到
+ * 6–8 xp/s，若曲线不变等级会冲到 40+；后段变陡让「越后期越慢」重新成立，
+ * 但不会像整体抬到 6+3 那样把前段卡死（那样 300 s 只有 7 级，通关率 15%）。
  */
 export const XP_CURVE_BASE = 5;
 export const XP_CURVE_STEP = 2;
+/** 从这一级开始后段加速（level 是「当前等级」，即跨到下一级时生效） */
+export const XP_CURVE_LATE_LEVEL = 12;
+export const XP_CURVE_LATE_STEP = 2;
 
 export function xpNeed(level: number): number {
-    return XP_CURVE_BASE + XP_CURVE_STEP * (level - 1);
+    const late = Math.max(0, level - XP_CURVE_LATE_LEVEL);
+    return XP_CURVE_BASE + XP_CURVE_STEP * (level - 1) + XP_CURVE_LATE_STEP * late;
 }
 
 // ==================== 武器类型 ====================
@@ -112,13 +124,22 @@ export interface KnifeLevel {
     spread: number;
 }
 
-/** 飞刀 5 级（§3.4.1） */
+/**
+ * 飞刀 8 级（§3.4.1；2026-11-09 平衡评审 §9.2 调整）
+ *
+ * - spread 从 6–8° 拉到 12–20°：原来 2–3 把只张开 6–8°，在 460 px 处几乎重叠，
+ *   实质是「同一目标吃多份伤害」，拉宽后才像扇形。
+ * - Lv4 补伤害 22→28：原来只加穿透，单目标 DPS 提升 0%（评审里唯一的 0% 死档）。
+ */
 export const KNIFE_LEVELS: KnifeLevel[] = [
     { count: 1, damage: 16, interval: 1.00, speed: 850, pierce: 0, spread: 0 },
-    { count: 2, damage: 16, interval: 1.00, speed: 850, pierce: 0, spread: 6 },
-    { count: 2, damage: 22, interval: 1.00, speed: 850, pierce: 0, spread: 6 },
-    { count: 2, damage: 22, interval: 1.00, speed: 850, pierce: 1, spread: 6 },
-    { count: 3, damage: 26, interval: 0.85, speed: 900, pierce: 1, spread: 8 },
+    { count: 2, damage: 16, interval: 1.00, speed: 850, pierce: 0, spread: 12 },
+    { count: 2, damage: 22, interval: 1.00, speed: 850, pierce: 0, spread: 12 },
+    { count: 2, damage: 28, interval: 1.00, speed: 850, pierce: 1, spread: 14 },
+    { count: 3, damage: 28, interval: 0.85, speed: 900, pierce: 1, spread: 16 },
+    { count: 3, damage: 34, interval: 0.85, speed: 900, pierce: 1, spread: 16 },
+    { count: 3, damage: 38, interval: 0.75, speed: 950, pierce: 2, spread: 18 },
+    { count: 4, damage: 40, interval: 0.75, speed: 950, pierce: 2, spread: 20 },
 ];
 
 /** 飞刀索敌半径 */
@@ -137,13 +158,22 @@ export interface OrbitLevel {
     angular: number;
 }
 
-/** 星环 5 级（§3.4.2） */
+/**
+ * 星环 8 级（§3.4.2；2026-11-09 平衡评审 §9.2 调整）
+ *
+ * 半径 88/108 → 64/84、角速度 1.8/2.2 → 2.8/3.6：
+ * 原配置玩家身边 0–74 px 是完整空档，且 3.5 s 转一圈的线速度（158 px/s）只比敌人快一点，
+ * 敌人能从两个球之间穿过去。收紧半径 + 提高转速后，星环才真的像「贴身旋转的刀轮」。
+ */
 export const ORBIT_LEVELS: OrbitLevel[] = [
-    { count: 2, damage: 20, radius: 88, angular: 1.8 },
-    { count: 3, damage: 20, radius: 88, angular: 1.8 },
-    { count: 3, damage: 26, radius: 88, angular: 1.8 },
-    { count: 3, damage: 26, radius: 108, angular: 2.2 },
-    { count: 4, damage: 32, radius: 108, angular: 2.2 },
+    { count: 2, damage: 20, radius: 64, angular: 2.8 },
+    { count: 3, damage: 20, radius: 64, angular: 2.8 },
+    { count: 3, damage: 24, radius: 64, angular: 2.8 },
+    { count: 3, damage: 30, radius: 74, angular: 3.0 },
+    { count: 4, damage: 30, radius: 74, angular: 3.0 },
+    { count: 4, damage: 36, radius: 84, angular: 3.2 },
+    { count: 5, damage: 36, radius: 84, angular: 3.4 },
+    { count: 5, damage: 44, radius: 84, angular: 3.6 },
 ];
 
 /** 星环球体半径（表现） */
@@ -163,13 +193,21 @@ export interface LightningLevel {
     aoe: number;
 }
 
-/** 落雷 5 级（§3.4.3） */
+/**
+ * 落雷 8 级（§3.4.3；2026-11-09 平衡评审 §9.2 调整）
+ *
+ * Lv2 补伤害 40→48（原来只缩短 0.4 s 间隔，+22% 是四把武器里最小的档位之一），
+ * AoE 从 52/84 提到 64/96：52 的半径还不如一只精英的体型，打不出「一雷一片」的观感。
+ */
 export const LIGHTNING_LEVELS: LightningLevel[] = [
-    { targets: 1, damage: 40, interval: 2.2, range: 300, aoe: 52 },
-    { targets: 1, damage: 40, interval: 1.8, range: 300, aoe: 52 },
-    { targets: 1, damage: 56, interval: 1.8, range: 320, aoe: 52 },
-    { targets: 2, damage: 56, interval: 1.8, range: 320, aoe: 52 },
-    { targets: 2, damage: 56, interval: 1.4, range: 340, aoe: 84 },
+    { targets: 1, damage: 40, interval: 2.2, range: 300, aoe: 64 },
+    { targets: 1, damage: 48, interval: 1.8, range: 300, aoe: 64 },
+    { targets: 1, damage: 56, interval: 1.8, range: 320, aoe: 64 },
+    { targets: 2, damage: 56, interval: 1.8, range: 320, aoe: 64 },
+    { targets: 2, damage: 62, interval: 1.4, range: 340, aoe: 96 },
+    { targets: 2, damage: 72, interval: 1.4, range: 340, aoe: 96 },
+    { targets: 3, damage: 72, interval: 1.2, range: 360, aoe: 96 },
+    { targets: 3, damage: 84, interval: 1.2, range: 360, aoe: 110 },
 ];
 
 export interface BoomerangLevel {
@@ -181,13 +219,21 @@ export interface BoomerangLevel {
     width: number;
 }
 
-/** 回旋镖 5 级（§3.4.4） */
+/**
+ * 回旋镖 8 级（§3.4.4）
+ *
+ * width 现在是真判定（`max(14, width/2 + 4)`，见 _throwBoomerangs），
+ * Lv8 的 26 → 判定半径 17，和飞刀（9）拉开「宽面扫过」的手感差异。
+ */
 export const BOOMERANG_LEVELS: BoomerangLevel[] = [
     { count: 1, damage: 22, interval: 2.0, range: 240, speed: 520, width: 18 },
     { count: 1, damage: 32, interval: 2.0, range: 240, speed: 520, width: 18 },
     { count: 1, damage: 32, interval: 1.6, range: 240, speed: 520, width: 18 },
     { count: 2, damage: 32, interval: 1.6, range: 240, speed: 520, width: 18 },
-    { count: 2, damage: 44, interval: 1.6, range: 280, speed: 560, width: 22 },
+    { count: 2, damage: 46, interval: 1.6, range: 280, speed: 560, width: 22 },
+    { count: 2, damage: 54, interval: 1.4, range: 280, speed: 560, width: 22 },
+    { count: 3, damage: 54, interval: 1.4, range: 300, speed: 580, width: 24 },
+    { count: 3, damage: 64, interval: 1.2, range: 300, speed: 580, width: 26 },
 ];
 
 /** 回旋镖索敌半径（超过则朝移动方向） */
@@ -198,7 +244,7 @@ export const BOOMERANG_HIT_RADIUS = 14;
 
 // ==================== 被动 ====================
 
-/** 攻速：每级攻击间隔 ÷ 1.10 */
+/** 攻速：攻击间隔 ÷ (1 + 0.10 × 等级)——加算，Lv5 = ÷1.50（不是连乘 ÷1.61） */
 export const HASTE_PER_LEVEL = 0.10;
 
 /** 移速：每级 +6% */
@@ -225,24 +271,49 @@ export interface EnemyBase {
     xp: number;
 }
 
-/** 基础敌人（§3.7.1） */
+/** 基础敌人（§3.7.1）。boss 一行是占位：Boss 实际数值走下方 BOSS_* 常量 */
 export const ENEMY_BASE: Record<EnemyKind, EnemyBase> = {
     chaser: { hp: 14, speed: 95, radius: 13, damage: 6, xp: 1 },
     weaver: { hp: 10, speed: 108, radius: 12, damage: 5, xp: 1 },
     shooter: { hp: 16, speed: 72, radius: 13, damage: 6, xp: 2 },
     bomber: { hp: 12, speed: 130, radius: 14, damage: 0, xp: 1 },
-    boss: { hp: 2400, speed: 46, radius: 46, damage: 20, xp: 0 },
+    boss: { hp: 0, speed: 0, radius: 46, damage: 0, xp: 0 },
 };
 
-/** HP 倍率斜率：1 + t / 240 */
-export const ENEMY_HP_SLOPE = 1 / 240;
+/**
+ * 敌人 HP 成长分段锚点（2026-11-09 平衡评审 §9.3）。
+ *
+ * 原来是 `1 + t / 240` 一条直线（450 s = ×2.88），前 6 分钟几乎没压力。
+ * 改成 0 / 2 / 4 / 6 / 7.5 分钟 = ×1.0 / 1.4 / 1.9 / 2.5 / 3.2，段间线性插值：
+ * 前半段温和（保证新人不秒死），后半段加速，与玩家武器 4–6 倍的成长幅度对齐。
+ */
+export const ENEMY_HP_ANCHORS: ReadonlyArray<readonly [number, number]> = [
+    [0, 1.0],
+    [120, 1.4],
+    [240, 1.9],
+    [360, 2.5],
+    [450, 3.2],
+];
 
-/** 伤害倍率斜率：1 + t / 480 */
+export function enemyHpMult(time: number): number {
+    const a = ENEMY_HP_ANCHORS;
+    if (time <= a[0][0]) return a[0][1];
+    for (let i = 1; i < a.length; i++) {
+        if (time <= a[i][0]) {
+            const [t0, m0] = a[i - 1];
+            const [t1, m1] = a[i];
+            return m0 + (m1 - m0) * ((time - t0) / (t1 - t0));
+        }
+    }
+    return a[a.length - 1][1];
+}
+
+/** 伤害倍率斜率：1 + t / 480（接触伤害；远程弹 / Boss 弹共用同一倍率） */
 export const ENEMY_DMG_SLOPE = 1 / 480;
 
-/** 速度倍率斜率：1 + min(0.25, t / 4000) */
-export const ENEMY_SPEED_SLOPE = 1 / 4000;
-export const ENEMY_SPEED_MAX_BONUS = 0.25;
+/** 速度倍率斜率：1 + min(0.30, t / 1800)——450 s 时 ×1.25，原来要 1000 s 才碰到上限 */
+export const ENEMY_SPEED_SLOPE = 1 / 1800;
+export const ENEMY_SPEED_MAX_BONUS = 0.30;
 
 /** 绕行兵横向摆动（振幅 40、频率 2 Hz 的表现化为侧向速度系数） */
 export const WEAVER_SWAY = 0.7;
@@ -262,21 +333,31 @@ export const BOMBER_FUSE = 0.5;
 export const BOMBER_RADIUS = 64;
 export const BOMBER_DAMAGE = 18;
 
-/** 精英（§3.7.2） */
-export const ELITE_TIMES = [120, 240, 360];
-export const ELITE_HP_MULT = 5;
+/**
+ * 精英（§3.7.2）
+ *
+ * - 首只在 90 s（原来 120 s），让「第一次精英」成为一局中段的一个节点。
+ * - HP ×11（原来 ×5）。原配置直冲兵 14×5×2.5 ≈ 175，玩家 Lv10 时一两秒就倒，谈不上节点。
+ */
+export const ELITE_TIMES = [90, 120, 240, 360];
+export const ELITE_HP_MULT = 11;
 export const ELITE_SIZE_MULT = 1.35;
 export const ELITE_SPEED_MULT = 0.9;
 export const ELITE_DAMAGE_MULT = 1.5;
-export const ELITE_XP = 10;
 export const ELITE_GEM_COUNT = 3;
 export const ELITE_GEM_VALUE = 3;
 
+/** 精英必掉一个补给（回血 / 磁铁 / 临时攻速，三选一随机） */
+export const ELITE_HEAL_AMOUNT = 30;
+export const ELITE_HASTE_SECONDS = 15;
+export const ELITE_HASTE_MULT = 1.5;
+
 // ==================== 刷新与兽潮 ====================
 
-export const SPAWN_RATE_BASE = 1.1;
-export const SPAWN_RATE_SLOPE = 0.010;
-export const SPAWN_RATE_MAX = 4;
+/** 刷怪率 1.2 + 0.02t，上限 6/s（约 240 s 封顶；原 1.1 + 0.01t / 上限 4 在 290 s 就封顶） */
+export const SPAWN_RATE_BASE = 1.2;
+export const SPAWN_RATE_SLOPE = 0.020;
+export const SPAWN_RATE_MAX = 6;
 
 export const SPAWN_RING_MIN = 620;
 export const SPAWN_RING_MAX = 780;
@@ -285,13 +366,24 @@ export const SPAWN_RING_MAX = 780;
 export const SPAWN_SAFE_DIST = 480;
 export const SPAWN_RETRY = 4;
 
+/**
+ * 开局怪群：开局立即在玩家 380–460 px 的环上放 4–6 只直冲兵。
+ *
+ * 评审 §2 的红线是「首次升级 ≤20 s」，原实现中位 34 s。放一圈「马上就能砍到」的怪，
+ * 让第一颗宝石在 5 s 内到手，同时不改变正常刷怪节奏。
+ */
+export const START_PACK_MIN = 4;
+export const START_PACK_MAX = 6;
+export const START_PACK_DIST_MIN = 380;
+export const START_PACK_DIST_MAX = 460;
+
 export const WAVE_FIRST = 45;
 export const WAVE_INTERVAL = 45;
 
 /** 兽潮提前多少秒提示 */
 export const WAVE_WARN = 2;
 
-/** 兽潮数量：8 + floor(t / 60) × 3 */
+/** 兽潮数量：6 + floor(t / 60) × 2 */
 export function waveCount(time: number): number {
     return 6 + Math.floor(time / 60) * 2;
 }
@@ -314,7 +406,18 @@ export function spawnWeights(time: number): number[] {
 // ==================== Boss ====================
 
 export const BOSS_TIME = 450;
-export const BOSS_HP = 1400;
+
+/**
+ * Boss HP = 2800 × (1 + 0.05 × (player.level - 1))。
+ *
+ * 原来固定 1400：玩家 Lv17 时 DPS 200–400，4–7 秒就倒，Boss 战沦为「谁先被小怪淹死」的抽奖。
+ * 按玩家等级缩放，让 Boss 战稳定落在 15–35 s 的目标区间（评审 §5.2 / §9.3）。
+ *
+ * 实测（sim 100 局，参考 bot）：2200 → 中位 12 s / 通关 42%；2800 → 中位 14 s / 通关 30%；
+ * 4000 → 中位 18 s 但通关只剩 20%，跌破 25% 下限。所以取 §9.3 建议区间的上沿。
+ */
+export const BOSS_HP = 2800;
+export const BOSS_HP_LEVEL_BONUS = 0.05;
 export const BOSS_RADIUS = 46;
 export const BOSS_SPEED = 150;
 export const BOSS_CONTACT_DMG = 20;
@@ -328,33 +431,80 @@ export const BOSS_BULLET_DMG = 11;
 export const BOSS_BULLET_RADIUS = 8;
 
 export const BOSS_SUMMON_INTERVAL = 9;
-export const BOSS_SUMMON_COUNT = 8;
+export const BOSS_SUMMON_COUNT = 5;
+
+/**
+ * Boss 在场时常规刷怪倍率：0.5 → 0.25。
+ *
+ * Boss 战难度的来源应该是 Boss 本身 + 弹幕，而不是「140 只小怪 + 每 9 s 召唤」。
+ * 倍率压低后，玩家才有空间把输出打在 Boss 身上。
+ */
+export const BOSS_PHASE_SPAWN_MULT = 0.25;
 
 export const BOSS_ENRAGE_RATIO = 0.35;
 export const BOSS_ENRAGE_SPEED_MULT = 1.25;
 
-// ==================== 宝石 ====================
+// ==================== 宝石与掉落 ====================
 
 export const GEM_DROP_RATE = 0.9;
 export const GEM_MAGNET_SPEED = 620;
 export const GEM_PICK_DIST = 20;
 export const GEM_RADIUS = 6;
 
-/** 掉落价值（§3.8） */
-export function gemValue(kind: EnemyKind): number {
-    return kind === 'shooter' ? 2 : 1;
+/**
+ * 宝石价值随时间分档：每 150 s +1 档，封顶 ×4（2026-11-09 平衡评审 §9.1）。
+ *
+ * 原来全程固定 1 / 2，经验速率在刷怪率封顶后就不再增长，等级越高升级越慢——
+ * 和「怪越来越强」完全反向。分档后「后期一颗宝石 = 前期四颗」，观感与数值都成立。
+ */
+export const GEM_TIER_SECONDS = 150;
+export const GEM_TIER_MAX = 4;
+
+export function gemTimeMult(time: number): number {
+    return Math.min(GEM_TIER_MAX, 1 + Math.floor(Math.max(0, time) / GEM_TIER_SECONDS));
 }
+
+/** 掉落价值（§3.8）：基础值 × 时间档位 */
+export function gemValue(kind: EnemyKind, time: number): number {
+    const base = kind === 'shooter' ? 2 : 1;
+    return base * gemTimeMult(time);
+}
+
+/** 地面掉落物的种类（经验宝石 / 回血 / 磁铁 / 炸弹 / 临时攻速） */
+export type PickupKind = 'xp' | 'heal' | 'magnet' | 'bomb' | 'haste';
+
+/** 存档用数字代替字符串，顺序不可改 */
+export const PICKUP_KIND_ORDER: PickupKind[] = ['xp', 'heal', 'magnet', 'bomb', 'haste'];
+
+/**
+ * 普通怪的额外掉落（与经验宝石独立掷，一次击杀最多掉一个补给）。
+ * 评审 §6 的掉落表：2% 回血 10 / 1% 磁铁 / 0.5% 炸弹（屏内敌人 100 伤害）。
+ */
+export const DROP_HEAL_RATE = 0.02;
+export const DROP_MAGNET_RATE = 0.01;
+export const DROP_BOMB_RATE = 0.005;
+export const DROP_HEAL_AMOUNT = 10;
+export const DROP_BOMB_DAMAGE = 100;
+/** 炸弹半径：覆盖屏幕可见范围（相机视野约 720×1280，取 460 足够打到屏内怪） */
+export const DROP_BOMB_RADIUS = 460;
 
 // ==================== 升级卡 ====================
 
 /** 淬炼：每层全部武器伤害 +5% */
 export const TEMPER_DMG_BONUS = 0.05;
 
-/** 卡池权重 */
-export const OFFER_WEIGHT_OWNED_WEAPON = 40;
-export const OFFER_WEIGHT_NEW_WEAPON = 20;
-export const OFFER_WEIGHT_OWNED_PASSIVE = 25;
-export const OFFER_WEIGHT_NEW_PASSIVE = 15;
+/** 卡池权重（2026-11-09 平衡评审 §9.4：原来 已有武器 40 vs 新武器 20，与真实价值相反） */
+export const OFFER_WEIGHT_OWNED_WEAPON = 30;
+export const OFFER_WEIGHT_NEW_WEAPON = 30;
+export const OFFER_WEIGHT_OWNED_PASSIVE = 20;
+export const OFFER_WEIGHT_NEW_PASSIVE = 20;
+
+/** 生命低于此比例时，回复卡以权重进入主池（原来只在池溢出时兜底，实际几乎见不到） */
+export const OFFER_HEAL_HP_RATIO = 0.5;
+export const OFFER_WEIGHT_HEAL = 25;
+
+/** 回复卡回复量 */
+export const OFFER_HEAL_AMOUNT = 30;
 
 /** 一次升级给几张卡 */
 export const OFFER_COUNT = 3;
@@ -372,6 +522,21 @@ export const COLORS = {
     bomberWarn: '#FF3B3B',
     boss: '#FF5FA2',
     gem: '#5DE89A',
+    /** 经验宝石四档：绿 / 蓝 / 紫 / 金（对应价值 ×1–×4，一眼看出「这颗值四颗」） */
+    gemTiers: ['#5DE89A', '#5DA9E8', '#B06DE8', '#F0C93C'],
+    /** 补给：回血 / 磁铁 / 炸弹 / 临时攻速 */
+    pickupHeal: '#5DE89A',
+    pickupMagnet: '#7FE7FF',
+    pickupBomb: '#F08A3C',
+    pickupHaste: '#FFE07A',
+    /** 星环球体：亮青白，和玩家（青）拉开距离又不与敌人配色冲突 */
+    orbit: '#B8F4FF',
+    /** 星环轨道提示环：低对比暗青虚线，只用来交代半径（太淡会等于没画） */
+    orbitPath: '#3C6076',
+    /** 落雷：偏蓝的冷光，和玩家青、星环亮青白都拉开 */
+    lightning: '#A9C8FF',
+    /** 回复：沿用宝石绿 */
+    heal: '#5DE89A',
     fx: '#FFFFFF',
 };
 
@@ -449,8 +614,11 @@ export interface GemState {
     active: boolean;
     x: number;
     y: number;
+    /** xp：经验值；heal：回血量；magnet：未用；bomb：伤害；haste：秒数 */
     value: number;
     magnet: boolean;
+    /** 掉落物种类，决定拾取效果与颜色 */
+    kind: PickupKind;
 }
 
 export type UpgradeKind =
@@ -482,6 +650,8 @@ export type CoreEventType =
     /** 玩家受击，data = 实际伤害 */
     | 'hit'
     | 'pickup'
+    /** 回复生命，data = 回复量（体魄 / 回复卡） */
+    | 'heal'
     /** 落雷落点，x/y/r 供渲染层画特效 */
     | 'lightning'
     /** 自爆兵爆炸，x/y/r 供渲染层画特效 */
@@ -510,6 +680,8 @@ export interface SurvivorSnapshot {
     /** 当前构筑（只读引用；HUD 展示用，核心每帧刷新快照） */
     weapons: Readonly<Partial<Record<WeaponTrack, number>>>;
     passives: Readonly<Partial<Record<PassiveTrack, number>>>;
+    /** 星环当前旋转角（弧度）；渲染层据此画球，避免自己计时导致与判定错位 */
+    orbitAngle: number;
     temper: number;
 }
 
@@ -554,7 +726,10 @@ export type CompactEnemy = number[];
  */
 export type CompactBullet = number[];
 
-/** 紧凑宝石：[x, y, value, magnet] */
+/**
+ * 紧凑宝石：[x, y, value, magnet, kind]
+ * kind 走 PICKUP_KIND_ORDER 的下标（缺省按 xp 处理，兼容旧档）
+ */
 export type CompactGem = number[];
 
 export const SAVE_VERSION = 1;
@@ -594,6 +769,8 @@ export interface RunSaveV1 {
         nextWaveTime: number;
         bossSpawned: boolean;
         bossEnrage: boolean;
+        /** 临时攻速剩余秒数（精英补给） */
+        tempHaste?: number;
     };
     enemies: CompactEnemy[];
     bullets: CompactBullet[];

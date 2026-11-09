@@ -194,6 +194,8 @@ function playOne(seed, chooser) {
     const bot = makeBot();
     let t = 0;
     let stepCount = 0;
+    let bossSeen = -1;
+    const levelAt = { 120: -1, 300: -1, 420: -1 };
     while (t < MAX_RUN_SEC) {
         const phase = core.getSnapshot().phase;
         if (phase === 'levelup') {
@@ -204,7 +206,12 @@ function playOne(seed, chooser) {
         core.step(DT, bot(core));
         stepCount++;
         t += DT;
-        if (core.getSnapshot().phase === 'levelup') chooser(core);
+        const s = core.getSnapshot();
+        if (bossSeen < 0 && s.boss && s.boss.active) bossSeen = s.time;
+        for (const k in levelAt) {
+            if (levelAt[k] < 0 && s.time >= Number(k)) levelAt[k] = s.player.level;
+        }
+        if (s.phase === 'levelup') chooser(core);
     }
     const snap = core.getSnapshot();
     const summary = core.getRunSummary();
@@ -219,6 +226,8 @@ function playOne(seed, chooser) {
         temper: snap.temper,
         hp: snap.player.hp,
         bossHp: snap.boss && snap.boss.active ? snap.boss.hp : 0,
+        bossFight: bossSeen >= 0 && snap.phase === 'victory' ? snap.time - bossSeen : 0,
+        levelAt,
         lastHit: summary.lastHitSource,
         lastHitDamage: summary.lastHitDamage,
         steps: stepCount,
@@ -254,6 +263,30 @@ function report(label, results) {
         console.log(`致命来源 ${Object.entries(src).map(([k, v]) => `${k}:${v}`).join('  ')}`);
     }
     console.log(`平均等级 ${avgLevel.toFixed(1)}  平均击杀 ${avgKills.toFixed(0)}`);
+
+    // 等级进度（§11 验收：2 min Lv5–7、6 min Lv20–26、终局 Lv26–32）
+    const avgAt = (sec) => {
+        const vals = results.map((r) => r.levelAt[sec]).filter((v) => v >= 0);
+        return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : '-';
+    };
+    console.log(`等级进度 2 min ${avgAt(120)}  /  5 min ${avgAt(300)}  /  7 min ${avgAt(420)}`);
+
+    // 阵亡时间分桶（§11 验收：4–6 min ≥20%，7 min ≤50%）
+    if (losses.length) {
+        const bucket = (lo, hi) => losses.filter((r) => r.time >= lo && r.time < hi).length;
+        console.log(`阵亡分布 ${'<2 min'} ${pct(bucket(0, 120), losses.length)}  ` +
+            `2–4 min ${pct(bucket(120, 240), losses.length)}  ` +
+            `4–6 min ${pct(bucket(240, 360), losses.length)}  ` +
+            `6–7 min ${pct(bucket(360, 420), losses.length)}  ` +
+            `≥7 min ${pct(bucket(420, Infinity), losses.length)}`);
+    }
+
+    // Boss 战时长（§11 验收：15–35 s）
+    const fights = wins.map((r) => r.bossFight).filter((v) => v > 0).sort((a, b) => a - b);
+    if (fights.length) {
+        const fq = (p) => fights[Math.min(fights.length - 1, Math.floor(p * fights.length))];
+        console.log(`Boss 战时长 中位 ${fq(0.5).toFixed(0)} s  /  p10 ${fq(0.1).toFixed(0)} s  /  p90 ${fq(0.9).toFixed(0)} s（${fights.length} 个胜局）`);
+    }
     return { wins: wins.length, total: results.length };
 }
 

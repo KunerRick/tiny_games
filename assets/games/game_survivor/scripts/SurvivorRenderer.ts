@@ -12,7 +12,7 @@
  */
 
 import { _decorator, Color, Component, Graphics, Label, Node, UITransform } from 'cc';
-import { ARENA_HALF, COLORS, SurvivorSnapshot } from './SurvivorConfig';
+import { ARENA_HALF, COLORS, ORBIT_BALL_RADIUS, ORBIT_LEVELS, SurvivorSnapshot } from './SurvivorConfig';
 import type { BulletState, CoreEvent, EnemyState, GemState } from './SurvivorConfig';
 
 const { ccclass, property } = _decorator;
@@ -27,15 +27,28 @@ const ELITE_STROKE = 2.5;
 const TRAIL_LEN = 14;
 /** 浮动文字池大小 */
 const FLOAT_POOL = 6;
+/** 星环球拖尾采样点数 */
+const ORBIT_TRAIL = 4;
+/** 星环球拖尾相邻采样点的角度间隔（弧度） */
+const ORBIT_TRAIL_STEP = 0.13;
+/** 拾取光环节流间隔（秒） */
+const PICKUP_FX_CD = 0.2;
+/** 落雷折线全长（从落点向上） */
+const BOLT_LENGTH = 520;
+/** 落雷折线段数 */
+const BOLT_SEGMENTS = 7;
 
 interface FxItem {
-    kind: 'ring' | 'burst';
+    /** ring = 扩散圆环；bolt = 落雷折线 */
+    kind: 'ring' | 'bolt';
     x: number;
     y: number;
     r: number;
     t: number;
     life: number;
     color: Color;
+    /** 折线抖动种子，保证同一次落雷每帧形状一致 */
+    seed: number;
 }
 
 interface FloatText {
@@ -75,6 +88,17 @@ export class SurvivorRenderer extends Component {
     private _cBomberWarn = new Color();
     private _cBoss = new Color();
     private _cGem = new Color();
+    /** 经验宝石四档颜色（绿 / 蓝 / 紫 / 金） */
+    private _cGemTier: Color[] = [];
+    private _cPickupHeal = new Color();
+    private _cPickupMagnet = new Color();
+    private _cPickupBomb = new Color();
+    private _cPickupHaste = new Color();
+    private _cOrbit = new Color();
+    private _cOrbitPath = new Color();
+    private _cPickupRing = new Color();
+    private _cLightning = new Color();
+    private _cHeal = new Color();
     private _cFx = new Color();
     private _cWhite = new Color(255, 255, 255, 255);
     private _cBarBack = new Color(0, 0, 0, 160);
@@ -100,6 +124,20 @@ export class SurvivorRenderer extends Component {
         this._cBomberWarn.fromHEX(COLORS.bomberWarn);
         this._cBoss.fromHEX(COLORS.boss);
         this._cGem.fromHEX(COLORS.gem);
+        this._cGemTier = COLORS.gemTiers.map((hex) => {
+            const c = new Color();
+            c.fromHEX(hex);
+            return c;
+        });
+        this._cPickupHeal.fromHEX(COLORS.pickupHeal);
+        this._cPickupMagnet.fromHEX(COLORS.pickupMagnet);
+        this._cPickupBomb.fromHEX(COLORS.pickupBomb);
+        this._cPickupHaste.fromHEX(COLORS.pickupHaste);
+        this._cOrbit.fromHEX(COLORS.orbit);
+        this._cOrbitPath.fromHEX(COLORS.orbitPath);
+        this._cPickupRing.fromHEX(COLORS.gem);
+        this._cLightning.fromHEX(COLORS.lightning);
+        this._cHeal.fromHEX(COLORS.heal);
         this._cFx.fromHEX(COLORS.fx);
         this._cElite.fromHEX(COLORS.shooter);
         this._ensureFloatPool();
@@ -118,6 +156,7 @@ export class SurvivorRenderer extends Component {
         this._trail.length = 0;
         this._lastKills = 0;
         this._hitFlash = 0;
+        this._pickupFxCd = 0;
         for (const f of this._floats) {
             f.t = f.life;
             if (f.label && f.label.node && f.label.node.isValid) f.label.node.active = false;
@@ -208,12 +247,20 @@ export class SurvivorRenderer extends Component {
     pushEvents(events: readonly CoreEvent[]): void {
         for (const ev of events) {
             if (ev.type === 'pickup') {
-                this._spawnRing(this._playerX, this._playerY, 26, 0.35, this._cGem);
+                // 后期 3.6 颗/秒，逐颗画环会糊满屏幕 → 每 0.2 s 最多一个
+                if (this._pickupFxCd <= 0) {
+                    this._pickupFxCd = PICKUP_FX_CD;
+                    this._spawnRing(this._playerX, this._playerY, 26, 0.35, this._cGem);
+                }
+            } else if (ev.type === 'heal') {
+                this._spawnRing(this._playerX, this._playerY, 34, 0.45, this._cHeal);
             } else if (ev.type === 'hit') {
                 this._hitFlash = 1;
                 this._spawnRing(this._playerX, this._playerY, 30, 0.3, this._cBomberWarn);
             } else if (ev.type === 'lightning' && ev.x !== undefined && ev.y !== undefined) {
-                this._spawnRing(ev.x, ev.y, ev.r || 52, 0.3, this._cPlayer);
+                const r = ev.r || 52;
+                this._spawnRing(ev.x, ev.y, r, 0.3, this._cLightning);
+                this._spawnBolt(ev.x, ev.y, r, this._cLightning);
             } else if (ev.type === 'explode' && ev.x !== undefined && ev.y !== undefined) {
                 this._spawnRing(ev.x, ev.y, ev.r || 64, 0.4, this._cBomberWarn);
             }
@@ -222,21 +269,33 @@ export class SurvivorRenderer extends Component {
 
     private _playerX = 0;
     private _playerY = 0;
+    private _pickupFxCd = 0;
+    private _seed = 1;
 
     private _spawnRing(x: number, y: number, r: number, life: number, color: Color): void {
         if (this._fx.length > 48) this._fx.shift();
-        this._fx.push({ kind: 'ring', x, y, r, t: 0, life, color });
+        this._fx.push({ kind: 'ring', x, y, r, t: 0, life, color, seed: 0 });
+    }
+
+    /** 落雷：从天而降的折线 + 落点白闪（之前只有一个扩散圈，和"爆炸"分不清） */
+    private _spawnBolt(x: number, y: number, r: number, color: Color): void {
+        if (this._fx.length > 48) this._fx.shift();
+        this._seed = (this._seed * 1103515245 + 12345) & 0x7fffffff;
+        this._fx.push({ kind: 'bolt', x, y, r, t: 0, life: 0.22, color, seed: this._seed });
     }
 
     // ==================== 每帧 ====================
 
-    /** 每帧：清空 + 依次画 宝石 → 敌人 → Boss → 子弹 → 特效 → 玩家 */
+    /** 每帧：清空 + 依次画 拾取圈 → 宝石 → 敌人 → Boss → 子弹 → 星环 → 特效 → 玩家 */
     render(snap: SurvivorSnapshot, dt = 1 / 60): void {
         const g = this.entityGfx;
         if (!g) return;
         this._playerX = snap.player.x;
         this._playerY = snap.player.y;
+        if (this._pickupFxCd > 0) this._pickupFxCd -= dt;
         g.clear();
+
+        this._drawPickupRing(g, snap);
 
         const gems = snap.gems;
         for (let i = 0; i < gems.length; i++) {
@@ -260,6 +319,8 @@ export class SurvivorRenderer extends Component {
             if (b.active) this._drawBullet(g, b);
         }
 
+        this._drawOrbit(g, snap);
+
         this._drawFx(g, dt);
         this._updateFloats(dt, snap);
         this._drawPlayer(snap, dt);
@@ -267,8 +328,23 @@ export class SurvivorRenderer extends Component {
 
     // ==================== 图元 ====================
 
+    /**
+     * 拾取半径提示环（很淡）。
+     * 拾取被动加的是半径，但之前完全看不见 —— 升级了也说不清"变强在哪"。
+     */
+    private _drawPickupRing(g: Graphics, snap: SurvivorSnapshot): void {
+        const r = snap.player.pickupRadius;
+        if (r <= 0) return;
+        this._cPickupRing.a = 38;
+        g.strokeColor = this._cPickupRing;
+        g.lineWidth = 2;
+        g.circle(snap.player.x, snap.player.y, r);
+        g.stroke();
+        this._cPickupRing.a = 255;
+    }
+
     private _drawGem(g: Graphics, gem: GemState, px: number, py: number): void {
-        const r = gem.value >= 2 ? GEM_R * 1.25 : GEM_R;
+        const color = this._pickupColor(gem);
         // 吸附中的宝石拉一条朝玩家的细线，让"吸过来"看得见
         if (gem.magnet) {
             const dx = px - gem.x;
@@ -276,23 +352,76 @@ export class SurvivorRenderer extends Component {
             const len = Math.hypot(dx, dy) || 1;
             const ux = dx / len;
             const uy = dy / len;
-            this._cGem.a = 90;
-            g.fillColor = this._cGem;
+            color.a = 90;
+            g.fillColor = color;
             const tail = Math.min(34, len);
             g.moveTo(gem.x - ux * tail, gem.y - uy * tail);
             g.lineTo(gem.x - ux * tail + -uy * 2.4, gem.y - uy * tail + ux * 2.4);
             g.lineTo(gem.x - ux * tail + uy * 2.4, gem.y - uy * tail - ux * 2.4);
             g.close();
             g.fill();
-            this._cGem.a = 255;
+            color.a = 255;
         }
-        g.fillColor = this._cGem;
+        g.fillColor = color;
+        if (gem.kind === 'heal') {
+            // 十字
+            const r = GEM_R * 1.35;
+            const t = GEM_R * 0.55;
+            g.rect(gem.x - t, gem.y - r, t * 2, r * 2);
+            g.fill();
+            g.rect(gem.x - r, gem.y - t, r * 2, t * 2);
+            g.fill();
+            return;
+        }
+        if (gem.kind === 'magnet') {
+            // 空心环 + 中心点
+            g.lineWidth = 3;
+            g.strokeColor = color;
+            g.circle(gem.x, gem.y, GEM_R * 1.3);
+            g.stroke();
+            g.fillColor = color;
+            g.circle(gem.x, gem.y, GEM_R * 0.45);
+            g.fill();
+            return;
+        }
+        if (gem.kind === 'bomb') {
+            // 实心圆 + 外圈尖刺感（用稍大的同色圆做描边）
+            g.circle(gem.x, gem.y, GEM_R * 1.35);
+            g.fill();
+            g.fillColor = this._cWhite;
+            g.circle(gem.x, gem.y, GEM_R * 0.45);
+            g.fill();
+            return;
+        }
+        if (gem.kind === 'haste') {
+            // 三角箭头（象征提速）
+            const r = GEM_R * 1.5;
+            g.moveTo(gem.x, gem.y + r);
+            g.lineTo(gem.x + r * 0.9, gem.y - r * 0.5);
+            g.lineTo(gem.x - r * 0.9, gem.y - r * 0.5);
+            g.close();
+            g.fill();
+            return;
+        }
+        // 经验宝石：菱形，尺寸与颜色都跟价值走
+        const r = GEM_R * (0.85 + Math.min(3, gem.value - 1) * 0.18);
         g.moveTo(gem.x, gem.y + r);
         g.lineTo(gem.x + r, gem.y);
         g.lineTo(gem.x, gem.y - r);
         g.lineTo(gem.x - r, gem.y);
         g.close();
         g.fill();
+    }
+
+    /** 经验宝石按价值分四档；补给按种类取色 */
+    private _pickupColor(gem: GemState): Color {
+        if (gem.kind === 'heal') return this._cPickupHeal;
+        if (gem.kind === 'magnet') return this._cPickupMagnet;
+        if (gem.kind === 'bomb') return this._cPickupBomb;
+        if (gem.kind === 'haste') return this._cPickupHaste;
+        const v = gem.value;
+        const tier = v >= 7 ? 3 : v >= 4 ? 2 : v >= 2 ? 1 : 0;
+        return this._cGemTier[tier] || this._cGem;
     }
 
     private _enemyColor(e: EnemyState): Color {
@@ -464,21 +593,144 @@ export class SurvivorRenderer extends Component {
             g.fill();
             return;
         }
-        g.fillColor = b.kind === 'knife' ? this._cPlayer : this._cFx;
-        const r = b.kind === 'knife' ? b.radius : b.radius * 1.6;
-        // 细长菱形，沿速度方向
+        if (b.kind === 'boomerang') {
+            this._drawBoomerang(g, b);
+            return;
+        }
+
+        // 飞刀：短拖尾 + 细长菱形（沿速度方向）
         const len = Math.hypot(b.vx, b.vy) || 1;
         const ux = b.vx / len;
         const uy = b.vy / len;
         const nx = -uy;
         const ny = ux;
-        const half = r * (b.kind === 'knife' ? 2.4 : 1.4);
+
+        for (let i = 3; i >= 1; i--) {
+            const k = 1 - i / 4;
+            this._cPlayer.a = Math.round(90 * k);
+            g.fillColor = this._cPlayer;
+            g.circle(b.x - ux * i * 9, b.y - uy * i * 9, b.radius * (0.5 + 0.45 * k));
+            g.fill();
+        }
+        this._cPlayer.a = 255;
+
+        const r = b.radius;
+        const half = r * 2.4;
+        g.fillColor = this._cPlayer;
         g.moveTo(b.x + ux * half, b.y + uy * half);
         g.lineTo(b.x + nx * r, b.y + ny * r);
         g.lineTo(b.x - ux * half, b.y - uy * half);
         g.lineTo(b.x - nx * r, b.y - ny * r);
         g.close();
         g.fill();
+    }
+
+    /**
+     * 回旋镖：两片旋转的新月刀叶（之前和飞刀一样是菱形，只靠白/青区分，分不清）。
+     * 去程白、回程青，一眼能看出"什么时候往回收"。
+     * 张开半径用 `b.radius`——它由配置里的 `width` 推导，视觉与判定一致；
+     * 再乘一个系数让它明显比飞刀"胖"，否则两种飞行物在缩放下一样大。
+     * 弧线用折线采样：`Graphics.arc()` 实测会画成整圈（缺角吃不出来），不控形。
+     */
+    private _drawBoomerang(g: Graphics, b: BulletState): void {
+        const r = Math.max(16, b.radius * 1.5);
+        const dist = Math.hypot(b.x - b.originX, b.y - b.originY);
+        const spin = (b.traveled + dist) * 0.06;
+        const color = b.returning ? this._cPlayer : this._cFx;
+        const SEG = 10;
+        const SWEEP = 2.0;
+
+        g.strokeColor = color;
+        g.lineWidth = Math.max(4, r * 0.3);
+        for (let i = 0; i < 2; i++) {
+            const a0 = spin + i * Math.PI;
+            for (let s = 0; s <= SEG; s++) {
+                const a = a0 + (SWEEP * s) / SEG;
+                const px = b.x + Math.cos(a) * r;
+                const py = b.y + Math.sin(a) * r;
+                if (s === 0) g.moveTo(px, py);
+                else g.lineTo(px, py);
+            }
+            g.stroke();
+        }
+
+        g.fillColor = this._cWhite;
+        g.circle(b.x, b.y, Math.max(2.5, r * 0.16));
+        g.fill();
+    }
+
+    // ==================== 星环 ====================
+
+    /**
+     * 星环本体。只从快照里读角度（`snap.orbitAngle`），不自己计时：
+     * 倍速 / 暂停 / 升级面板下视觉与判定才不会错位。
+     *
+     * 画法：暗青轨道环（交代半径）+ 每颗球一节拖尾 + 外光晕 + 球体 + 白色高光。
+     * 之前星环完全没有表现，玩家只能看到"敌人莫名掉血"。
+     */
+    private _drawOrbit(g: Graphics, snap: SurvivorSnapshot): void {
+        const level = snap.weapons.orbit || 0;
+        if (level <= 0) return;
+        const st = ORBIT_LEVELS[level - 1];
+        if (!st) return;
+
+        const p = snap.player;
+        const base = snap.orbitAngle;
+        const radius = st.radius;
+        const count = st.count;
+
+        // 轨道提示环：虚线。实心细环在 0.5 倍缩放下只有 1px、等于没画；
+        // 虚线段既交代了半径，又不会被误看成"伤害范围"
+        this._cOrbitPath.a = 150;
+        g.strokeColor = this._cOrbitPath;
+        g.lineWidth = 2.5;
+        const DASH = 20;
+        for (let i = 0; i < DASH; i += 2) {
+            const a0 = (i / DASH) * Math.PI * 2;
+            const a1 = ((i + 1) / DASH) * Math.PI * 2;
+            g.moveTo(p.x + Math.cos(a0) * radius, p.y + Math.sin(a0) * radius);
+            g.lineTo(p.x + Math.cos(a1) * radius, p.y + Math.sin(a1) * radius);
+        }
+        g.stroke();
+        this._cOrbitPath.a = 255;
+
+        for (let i = 0; i < count; i++) {
+            const a = base + (i * Math.PI * 2) / count;
+
+            // 拖尾：越靠后越小越淡（沿旋转的反方向）
+            for (let k = ORBIT_TRAIL; k >= 1; k--) {
+                const ta = a - k * ORBIT_TRAIL_STEP;
+                const tk = 1 - k / (ORBIT_TRAIL + 1);
+                this._cOrbit.a = Math.round(120 * tk);
+                g.fillColor = this._cOrbit;
+                g.circle(
+                    p.x + Math.cos(ta) * radius,
+                    p.y + Math.sin(ta) * radius,
+                    ORBIT_BALL_RADIUS * (0.3 + 0.6 * tk),
+                );
+                g.fill();
+            }
+
+            const bx = p.x + Math.cos(a) * radius;
+            const by = p.y + Math.sin(a) * radius;
+
+            // 外光晕
+            this._cOrbit.a = 55;
+            g.fillColor = this._cOrbit;
+            g.circle(bx, by, ORBIT_BALL_RADIUS * 1.9);
+            g.fill();
+
+            // 球体
+            this._cOrbit.a = 255;
+            g.fillColor = this._cOrbit;
+            g.circle(bx, by, ORBIT_BALL_RADIUS);
+            g.fill();
+
+            // 高光（偏左上，给出球面感）
+            g.fillColor = this._cWhite;
+            g.circle(bx - ORBIT_BALL_RADIUS * 0.32, by + ORBIT_BALL_RADIUS * 0.32, ORBIT_BALL_RADIUS * 0.36);
+            g.fill();
+        }
     }
 
     // ==================== 特效 ====================
@@ -491,17 +743,67 @@ export class SurvivorRenderer extends Component {
             if (fx.t >= fx.life) continue;
             keep.push(fx);
             const k = fx.t / fx.life;
-            const radius = fx.r * (0.35 + 0.9 * k);
-            const alpha = Math.round(190 * (1 - k));
+            const alpha = Math.round((fx.kind === 'bolt' ? 235 : 190) * (1 - k));
             if (alpha <= 0) continue;
             fx.color.a = alpha;
-            g.strokeColor = fx.color;
-            g.lineWidth = 4 * (1 - k) + 1;
-            g.circle(fx.x, fx.y, radius);
-            g.stroke();
+
+            if (fx.kind === 'bolt') {
+                this._drawBolt(g, fx, k);
+            } else {
+                const radius = fx.r * (0.35 + 0.9 * k);
+                g.strokeColor = fx.color;
+                g.lineWidth = 4 * (1 - k) + 1;
+                g.circle(fx.x, fx.y, radius);
+                g.stroke();
+            }
+
             fx.color.a = 255;
         }
         this._fx = keep;
+    }
+
+    /** 落雷折线：从上往下劈到落点，越靠近落点抖动越小；外层光 + 白色雷芯 */
+    private _drawBolt(g: Graphics, fx: FxItem, k: number): void {
+        const seg = BOLT_SEGMENTS;
+        const path = (): void => {
+            for (let i = 0; i <= seg; i++) {
+                const t = i / seg;
+                const n = Math.sin(fx.seed * 0.00013 + i * 12.9898) * 43758.5453;
+                const jitter = (n - Math.floor(n) - 0.5) * 46 * (1 - t);
+                const x = fx.x + jitter;
+                const y = fx.y + BOLT_LENGTH * (1 - t);
+                if (i === 0) g.moveTo(x, y);
+                else g.lineTo(x, y);
+            }
+        };
+
+        // 外层冷光：视野缩放约 0.5，线宽必须给到 14 左右才不是一根灰发丝
+        fx.color.a = Math.round(130 * (1 - k));
+        g.strokeColor = fx.color;
+        g.lineWidth = 14 * (1 - k) + 6;
+        path();
+        g.stroke();
+
+        // 内层冷光（实心感）
+        fx.color.a = Math.round(210 * (1 - k));
+        g.strokeColor = fx.color;
+        g.lineWidth = 6 * (1 - k) + 2.4;
+        path();
+        g.stroke();
+
+        // 白色雷芯
+        this._cWhite.a = Math.round(255 * (1 - k));
+        g.strokeColor = this._cWhite;
+        g.lineWidth = 2.8 * (1 - k) + 1.4;
+        path();
+        g.stroke();
+
+        // 落点小闪（别做成大圆盘，否则盖住 AoE 圈）
+        g.fillColor = this._cWhite;
+        g.circle(fx.x, fx.y, fx.r * 0.14 * (1 - k) + 6);
+        g.fill();
+        this._cWhite.a = 255;
+        fx.color.a = 255;
     }
 
     // ==================== 浮动文字（合并击杀数） ====================

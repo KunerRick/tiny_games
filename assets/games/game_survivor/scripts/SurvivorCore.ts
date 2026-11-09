@@ -28,6 +28,8 @@ import {
     BOSS_ENRAGE_RATIO,
     BOSS_ENRAGE_SPEED_MULT,
     BOSS_HP,
+    BOSS_HP_LEVEL_BONUS,
+    BOSS_PHASE_SPAWN_MULT,
     BOSS_RADIUS,
     BOSS_SPAWN_DIST,
     BOSS_SPEED,
@@ -42,18 +44,18 @@ import {
     ELITE_DAMAGE_MULT,
     ELITE_GEM_COUNT,
     ELITE_GEM_VALUE,
+    ELITE_HASTE_MULT,
+    ELITE_HASTE_SECONDS,
+    ELITE_HEAL_AMOUNT,
     ELITE_HP_MULT,
     ELITE_SIZE_MULT,
     ELITE_SPEED_MULT,
     ELITE_TIMES,
-    ELITE_XP,
     ENEMY_BASE,
     ENEMY_CAP,
     ENEMY_CONTACT_CD,
     ENEMY_DMG_SLOPE,
-    ENEMY_HP_SLOPE,
     ENEMY_KIND_ORDER,
-    ENEMY_RECYCLE_MARGIN,
     ENEMY_SPEED_MAX_BONUS,
     ENEMY_SPEED_SLOPE,
     EnemyKind,
@@ -74,6 +76,9 @@ import {
     MAX_LEVEL,
     MAX_TRACK_LEVEL,
     OFFER_COUNT,
+    OFFER_HEAL_AMOUNT,
+    OFFER_HEAL_HP_RATIO,
+    OFFER_WEIGHT_HEAL,
     OFFER_WEIGHT_NEW_PASSIVE,
     OFFER_WEIGHT_NEW_WEAPON,
     OFFER_WEIGHT_OWNED_PASSIVE,
@@ -93,6 +98,8 @@ import {
     PLAYER_RADIUS,
     PLAYER_SPEED,
     PICKUP_PER_LEVEL,
+    PICKUP_KIND_ORDER,
+    PickupKind,
     Phase,
     RunSaveV1,
     RunSummary,
@@ -129,6 +136,20 @@ import {
     WEAPON_TRACKS,
     WeaponTrack,
     PassiveTrack,
+    DROP_BOMB_DAMAGE,
+    DROP_BOMB_RADIUS,
+    DROP_BOMB_RATE,
+    DROP_HEAL_AMOUNT,
+    DROP_HEAL_RATE,
+    DROP_MAGNET_RATE,
+    START_PACK_DIST_MAX,
+    START_PACK_DIST_MIN,
+    START_PACK_MAX,
+    START_PACK_MIN,
+    enemyHpMult,
+    gemTimeMult,
+    gemValue,
+    spawnWeights,
     waveCount,
     xpNeed,
 } from './SurvivorConfig';
@@ -178,7 +199,9 @@ const BUCKET_CHECK_LIMIT = 32;
 /** 敌人紧凑数组固定长度 */
 const COMPACT_ENEMY_LEN = 13;
 const COMPACT_BULLET_BASE = 15;
-const COMPACT_GEM_LEN = 4;
+/** 紧凑宝石基础长度 [x, y, value, magnet]；第 5 位 kind 为可选（旧档没有） */
+const COMPACT_GEM_LEN = 5;
+const COMPACT_GEM_MIN_LEN = 4;
 
 function clamp(v: number, lo: number, hi: number): number {
     return v < lo ? lo : v > hi ? hi : v;
@@ -242,6 +265,8 @@ export class SurvivorCore {
     private _lightningCd = 0;
     private _boomerangCd = 0;
     private _orbitAngle = 0;
+    /** 临时攻速剩余秒数（精英补给） */
+    private _tempHaste = 0;
 
     // --- 关卡计时 ---
     private _spawnAcc = 0;
@@ -262,6 +287,8 @@ export class SurvivorCore {
     private _buckets: number[][] = [];
     private _near: number[] = [];
     private _candidates: number[] = [];
+    /** 落雷一发内已选中的 uid（避免多目标砸同一只） */
+    private _lightningSkip: number[] = [];
 
     constructor(seed: number) {
         this._seed = seed >>> 0;
@@ -280,6 +307,7 @@ export class SurvivorCore {
             offers: this._offers,
             weapons: this._weapons,
             passives: this._passives,
+            orbitAngle: this._orbitAngle,
             temper: this._temper,
         };
     }
@@ -332,7 +360,7 @@ export class SurvivorCore {
             });
         }
         for (let i = 0; i < GEM_CAP; i++) {
-            this._gems.push({ active: false, x: 0, y: 0, value: 0, magnet: false });
+            this._gems.push({ active: false, x: 0, y: 0, value: 0, magnet: false, kind: 'xp' });
         }
         for (let i = 0; i < HASH_COUNT; i++) this._buckets.push([]);
     }
@@ -363,6 +391,7 @@ export class SurvivorCore {
         this._lightningCd = 0;
         this._boomerangCd = 0;
         this._orbitAngle = 0;
+        this._tempHaste = 0;
         this._spawnAcc = 0;
         this._nextEliteIndex = 0;
         this._nextWaveTime = WAVE_FIRST;
@@ -380,6 +409,21 @@ export class SurvivorCore {
         for (let i = 0; i < this._enemies.length; i++) this._enemies[i].active = false;
         for (let i = 0; i < this._bullets.length; i++) this._bullets[i].active = false;
         for (let i = 0; i < this._gems.length; i++) this._gems[i].active = false;
+
+        this._spawnStartPack();
+    }
+
+    /**
+     * 开局怪群：在 380–460 px 的环上均匀放 4–6 只直冲兵。
+     * 目的是把「首次升级」从 34 s 压到 20 s 以内（评审 §2 的红线）。
+     */
+    private _spawnStartPack(): void {
+        const count = START_PACK_MIN + this._rng.int(START_PACK_MAX - START_PACK_MIN + 1);
+        for (let i = 0; i < count; i++) {
+            const angle = (i / count) * Math.PI * 2 + this._rng.range(-0.25, 0.25);
+            const dist = this._rng.range(START_PACK_DIST_MIN, START_PACK_DIST_MAX);
+            this._spawnEnemy('chaser', Math.cos(angle) * dist, Math.sin(angle) * dist, false);
+        }
     }
 
     /** 丢弃本局，用同一构造时的种子重开 */
@@ -394,6 +438,7 @@ export class SurvivorCore {
         if (this._phase !== 'running') return;
         this._events.length = 0;
         this._time += dt;
+        if (this._tempHaste > 0) this._tempHaste = Math.max(0, this._tempHaste - dt);
 
         this._updatePlayer(dt, input);
         this._updateWeapons(dt);
@@ -439,6 +484,7 @@ export class SurvivorCore {
         s.offers = this._offers;
         s.weapons = this._weapons;
         s.passives = this._passives;
+        s.orbitAngle = this._orbitAngle;
         s.temper = this._temper;
         return s;
     }
@@ -554,7 +600,9 @@ export class SurvivorCore {
     // ==================== 武器 ====================
 
     private _hasteMult(): number {
-        return 1 + HASTE_PER_LEVEL * (this._passives.haste || 0);
+        const base = 1 + HASTE_PER_LEVEL * (this._passives.haste || 0);
+        // 精英补给的临时攻速是乘算，叠在被动之上
+        return this._tempHaste > 0 ? base * ELITE_HASTE_MULT : base;
     }
 
     private _damageMult(): number {
@@ -564,11 +612,12 @@ export class SurvivorCore {
     private _updateWeapons(dt: number): void {
         const haste = this._hasteMult();
 
-        // 星环：持续旋转，按球各自冷却
+        // 星环：持续旋转，按球各自冷却。转速同样吃「攻速」——
+        // 否则攻速对星环流是空卡（卡面也没法一句话说清"对星环无效"）
         const orbitLv = this._weapons.orbit || 0;
         if (orbitLv > 0) {
             const st = ORBIT_LEVELS[orbitLv - 1];
-            this._orbitAngle += st.angular * dt;
+            this._orbitAngle += st.angular * haste * dt;
             this._updateOrbit(st, st.count);
         }
 
@@ -675,9 +724,12 @@ export class SurvivorCore {
     private _strikeLightning(st: (typeof LIGHTNING_LEVELS)[number]): void {
         const p = this._player;
         const mult = this._damageMult();
+        const skip = this._lightningSkip;
+        skip.length = 0;
         for (let t = 0; t < st.targets; t++) {
-            const enemy = this._pickWeightedEnemy(p.x, p.y, st.range);
+            const enemy = this._pickWeightedEnemy(p.x, p.y, st.range, skip);
             if (!enemy) return;
+            skip.push(enemy.uid);
             const cx = enemy.x;
             const cy = enemy.y;
             this._events.push({ type: 'lightning', x: cx, y: cy, r: st.aoe });
@@ -715,7 +767,8 @@ export class SurvivorCore {
             b.vx = Math.cos(angle) * st.speed;
             b.vy = Math.sin(angle) * st.speed;
             b.damage = Math.round(st.damage * mult);
-            b.radius = BOOMERANG_HIT_RADIUS;
+            // 判定半径跟着「宽度」走（width 之前是死字段，升级完全无感）
+            b.radius = Math.max(BOOMERANG_HIT_RADIUS, Math.round(st.width / 2 + 4));
             b.pierce = -1;
             b.life = 99;
             b.traveled = 0;
@@ -728,7 +781,7 @@ export class SurvivorCore {
     // ==================== 敌人 ====================
 
     private _hpMult(): number {
-        return 1 + this._time * ENEMY_HP_SLOPE;
+        return enemyHpMult(this._time);
     }
 
     private _dmgMult(): number {
@@ -760,7 +813,10 @@ export class SurvivorCore {
         slot.kind = kind;
         slot.x = clamp(x, -ARENA_HALF + ARENA_MARGIN, ARENA_HALF - ARENA_MARGIN);
         slot.y = clamp(y, -ARENA_HALF + ARENA_MARGIN, ARENA_HALF - ARENA_MARGIN);
-        slot.maxHp = isBoss ? BOSS_HP : base.hp * hpMult * (elite ? ELITE_HP_MULT : 1);
+        // Boss 血量随玩家等级缩放：固定值会让成型构筑 4–7 秒打完，Boss 战变成抽奖
+        slot.maxHp = isBoss
+            ? BOSS_HP * (1 + BOSS_HP_LEVEL_BONUS * Math.max(0, this._player.level - 1))
+            : base.hp * hpMult * (elite ? ELITE_HP_MULT : 1);
         slot.hp = slot.maxHp;
         slot.speed = isBoss ? BOSS_SPEED : base.speed * spdMult * (elite ? ELITE_SPEED_MULT : 1);
         slot.radius = isBoss ? BOSS_RADIUS : base.radius * (elite ? ELITE_SIZE_MULT : 1);
@@ -768,7 +824,8 @@ export class SurvivorCore {
         slot.damage = isBoss
             ? BOSS_CONTACT_DMG
             : Math.round(base.damage * dmgMult * (elite ? ELITE_DAMAGE_MULT : 1));
-        slot.xp = isBoss ? 0 : elite ? ELITE_XP : base.xp;
+        // 精英的收益走固定 3 颗宝石 + 必掉补给，不再用 e.xp
+        slot.xp = isBoss ? 0 : elite ? 0 : base.xp;
         slot.elite = elite && !isBoss;
         slot.uid = this._uidCounter++;
         slot.hitCooldown = 0;
@@ -826,7 +883,14 @@ export class SurvivorCore {
                 e.shootTimer -= dt;
                 if (e.shootTimer <= 0) {
                     e.shootTimer = SHOOTER_INTERVAL;
-                    this._spawnEnemyBullet(e, dir, SHOOTER_BULLET_SPEED, SHOOTER_BULLET_DMG, SHOOTER_BULLET_RADIUS);
+                    // 远程弹与接触伤害同源缩放：否则后期远程兵相对变弱、接触伤害相对变强
+                    this._spawnEnemyBullet(
+                        e,
+                        dir,
+                        SHOOTER_BULLET_SPEED,
+                        Math.round(SHOOTER_BULLET_DMG * this._dmgMult()),
+                        SHOOTER_BULLET_RADIUS
+                    );
                 }
             } else if (e.kind === 'bomber') {
                 if (e.phase > 0) {
@@ -864,15 +928,11 @@ export class SurvivorCore {
                 }
             }
 
-            // 夹紧与回收
+            // 夹紧在竞技场内。注意：夹紧之后坐标永远到不了 ±(ARENA_HALF + 200)，
+            // 所以这里**没有**「越界回收」——敌人不会离场，只会在墙边堆积（ENEMY_CAP 兜底）。
             const lim = ARENA_HALF - ARENA_MARGIN;
             e.x = clamp(e.x, -lim, lim);
             e.y = clamp(e.y, -lim, lim);
-            if (Math.abs(e.x) > ARENA_HALF + ENEMY_RECYCLE_MARGIN || Math.abs(e.y) > ARENA_HALF + ENEMY_RECYCLE_MARGIN) {
-                e.active = false;
-                this._enemyActive--;
-                continue;
-            }
 
             // 接触玩家
             const rr = e.radius + PLAYER_RADIUS;
@@ -912,13 +972,14 @@ export class SurvivorCore {
     }
 
     private _bossVolley(e: EnemyState): void {
+        const dmg = Math.round(BOSS_BULLET_DMG * this._dmgMult());
         for (let i = 0; i < BOSS_BULLET_COUNT; i++) {
             const angle = (i * Math.PI * 2) / BOSS_BULLET_COUNT;
             this._spawnEnemyBullet(
                 e,
                 { x: Math.cos(angle), y: Math.sin(angle) },
                 BOSS_BULLET_SPEED,
-                BOSS_BULLET_DMG,
+                dmg,
                 BOSS_BULLET_RADIUS
             );
         }
@@ -965,17 +1026,37 @@ export class SurvivorCore {
         }
 
         if (e.elite) {
+            const gemMultTime = gemTimeMult(this._time); // 精英宝石价值与普通怪同档位提升
             for (let i = 0; i < ELITE_GEM_COUNT; i++) {
                 const angle = this._rng.range(0, Math.PI * 2);
-                this._dropGem(e.x + Math.cos(angle) * 18, e.y + Math.sin(angle) * 18, ELITE_GEM_VALUE);
+                this._dropGem(
+                    e.x + Math.cos(angle) * 18,
+                    e.y + Math.sin(angle) * 18,
+                    ELITE_GEM_VALUE * gemMultTime,
+                    'xp'
+                );
             }
+            // 精英必掉一个补给：回血 30 / 磁铁 / 临时攻速 15 s（三选一）
+            const roll = this._rng.next();
+            if (roll < 0.4) this._dropGem(e.x, e.y - 24, ELITE_HEAL_AMOUNT, 'heal');
+            else if (roll < 0.7) this._dropGem(e.x, e.y - 24, 0, 'magnet');
+            else this._dropGem(e.x, e.y - 24, ELITE_HASTE_SECONDS, 'haste');
             this._events.push({ type: 'elite', data: 1 });
-        } else if (this._rng.next() < GEM_DROP_RATE) {
-            this._dropGem(e.x, e.y, e.xp > 0 ? e.xp : 1);
+            return;
+        }
+        if (this._rng.next() < GEM_DROP_RATE) {
+            this._dropGem(e.x, e.y, gemValue(e.kind, this._time), 'xp');
+        }
+        // 额外补给（与经验宝石独立掷，一次击杀最多一个）
+        const r = this._rng.next();
+        if (r < DROP_BOMB_RATE) this._dropGem(e.x, e.y, DROP_BOMB_DAMAGE, 'bomb');
+        else if (r < DROP_BOMB_RATE + DROP_MAGNET_RATE) this._dropGem(e.x, e.y, 0, 'magnet');
+        else if (r < DROP_BOMB_RATE + DROP_MAGNET_RATE + DROP_HEAL_RATE) {
+            this._dropGem(e.x, e.y, DROP_HEAL_AMOUNT, 'heal');
         }
     }
 
-    private _dropGem(x: number, y: number, value: number): void {
+    private _dropGem(x: number, y: number, value: number, kind: PickupKind): void {
         let slot: GemStatePool | null = null;
         for (let i = 0; i < this._gems.length; i++) {
             const g = this._gems[(this._gemCursor + i) % this._gems.length];
@@ -986,8 +1067,8 @@ export class SurvivorCore {
             }
         }
         if (!slot) {
-            // 上限溢出：直接结算经验，不生成对象
-            this._addXp(value);
+            // 上限溢出：经验直接结算，其它补给就地生效（不生成对象）
+            this._applyPickup(kind, value);
             return;
         }
         slot.active = true;
@@ -995,6 +1076,46 @@ export class SurvivorCore {
         slot.y = y;
         slot.value = value;
         slot.magnet = false;
+        slot.kind = kind;
+    }
+
+    /** 立即生效的拾取效果（池满时的兜底，以及拾取后的统一处理） */
+    private _applyPickup(kind: PickupKind, value: number): void {
+        const p = this._player;
+        if (kind === 'xp') {
+            this._addXp(value);
+            return;
+        }
+        if (kind === 'heal') {
+            const before = p.hp;
+            p.hp = Math.min(p.maxHp, p.hp + value);
+            if (p.hp > before) this._events.push({ type: 'heal', data: Math.round(p.hp - before) });
+            return;
+        }
+        if (kind === 'magnet') {
+            // 吸附全屏宝石：标记后由 _updateGems 拉过去
+            for (let i = 0; i < this._gems.length; i++) {
+                const g = this._gems[i];
+                if (g.active && g.kind === 'xp') g.magnet = true;
+            }
+            return;
+        }
+        if (kind === 'bomb') {
+            // 屏内敌人受一次伤害
+            const r2 = DROP_BOMB_RADIUS * DROP_BOMB_RADIUS;
+            for (let i = 0; i < this._enemies.length; i++) {
+                const en = this._enemies[i];
+                if (!en.active) continue;
+                const dx = en.x - p.x;
+                const dy = en.y - p.y;
+                if (dx * dx + dy * dy <= r2) this._damageEnemy(en, value);
+                if (this._phase !== 'running') return;
+            }
+            this._events.push({ type: 'explode', x: p.x, y: p.y, r: DROP_BOMB_RADIUS });
+            return;
+        }
+        // haste：临时攻速（取较长的剩余时间）
+        this._tempHaste = Math.max(this._tempHaste, value);
     }
 
     private _addXp(value: number): void {
@@ -1029,8 +1150,8 @@ export class SurvivorCore {
             if (g.magnet) {
                 if (dist <= GEM_PICK_DIST) {
                     g.active = false;
-                    this._addXp(g.value);
-                    this._events.push({ type: 'pickup', data: g.value });
+                    this._applyPickup(g.kind, g.value);
+                    this._events.push({ type: 'pickup', data: g.kind === 'xp' ? g.value : 0 });
                     continue;
                 }
                 const d = norm(dx, dy);
@@ -1174,7 +1295,7 @@ export class SurvivorCore {
         return near.length;
     }
 
-    private _pickWeightedEnemy(x: number, y: number, range: number): EnemyState | null {
+    private _pickWeightedEnemy(x: number, y: number, range: number, skip?: number[]): EnemyState | null {
         const cand = this._candidates;
         cand.length = 0;
         let total = 0;
@@ -1182,6 +1303,8 @@ export class SurvivorCore {
         for (let i = 0; i < enemies.length; i++) {
             const e = enemies[i];
             if (!e.active) continue;
+            // 多目标时排除本发已选中的 uid，否则两发雷可能砸同一只（第二发完全浪费）
+            if (skip && skip.length > 0 && skip.indexOf(e.uid) >= 0) continue;
             const dx = e.x - x;
             const dy = e.y - y;
             const d2 = dx * dx + dy * dy;
@@ -1206,9 +1329,9 @@ export class SurvivorCore {
     private _updateSpawns(dt: number): void {
         const t = this._time;
 
-        // 常规刷新（Boss 在场时减半）
+        // 常规刷新（Boss 在场时 ×0.25：Boss 战的压力应该来自 Boss 与弹幕，不是人海）
         let rate = Math.min(SPAWN_RATE_MAX, SPAWN_RATE_BASE + SPAWN_RATE_SLOPE * t);
-        if (this._bossSpawned && this._bossIndex >= 0) rate *= 0.5;
+        if (this._bossSpawned && this._bossIndex >= 0) rate *= BOSS_PHASE_SPAWN_MULT;
         this._spawnAcc += rate * dt;
         let guard = 0;
         while (this._spawnAcc >= 1 && guard++ < 40) {
@@ -1306,7 +1429,7 @@ export class SurvivorCore {
     }
 
     private _spawnRandomEnemy(t: number): void {
-        const w = spawnWeightsSafe(t);
+        const w = spawnWeights(t);
         const roll = this._rng.next() * (w[0] + w[1] + w[2] + w[3]);
         let kind: EnemyKind = 'chaser';
         if (roll < w[0]) kind = 'chaser';
@@ -1340,17 +1463,22 @@ export class SurvivorCore {
     private _generateOffers(): UpgradeOffer[] {
         const pool: { offer: UpgradeOffer; weight: number }[] = [];
 
-        let weaponCount = 0;
+        // 先统计已拥有数量，再决定「能不能开新槽」。
+        // 原实现在循环里边遍历边累加 weaponCount：当已有武器排在空槽之前时，
+        // 空槽看到的计数还没到位 → 抽出第 4 把武器（3+2 槽规则的 P0 bug）。
+        let ownedWeapons = 0;
+        for (let i = 0; i < WEAPON_TRACKS.length; i++) {
+            if ((this._weapons[WEAPON_TRACKS[i]] || 0) > 0) ownedWeapons++;
+        }
         for (let i = 0; i < WEAPON_TRACKS.length; i++) {
             const track = WEAPON_TRACKS[i];
             const lv = this._weapons[track] || 0;
-            if (lv > 0) weaponCount++;
             if (lv > 0 && lv < MAX_TRACK_LEVEL) {
                 pool.push({
                     offer: this._weaponOffer(track, lv, lv + 1, 'weaponUpgrade'),
                     weight: OFFER_WEIGHT_OWNED_WEAPON,
                 });
-            } else if (lv === 0 && weaponCount < WEAPON_SLOTS) {
+            } else if (lv === 0 && ownedWeapons < WEAPON_SLOTS) {
                 pool.push({
                     offer: this._weaponOffer(track, 0, 1, 'newWeapon'),
                     weight: OFFER_WEIGHT_NEW_WEAPON,
@@ -1358,22 +1486,29 @@ export class SurvivorCore {
             }
         }
 
-        let passiveCount = 0;
+        let ownedPassives = 0;
+        for (let i = 0; i < PASSIVE_TRACKS.length; i++) {
+            if ((this._passives[PASSIVE_TRACKS[i]] || 0) > 0) ownedPassives++;
+        }
         for (let i = 0; i < PASSIVE_TRACKS.length; i++) {
             const track = PASSIVE_TRACKS[i];
             const lv = this._passives[track] || 0;
-            if (lv > 0) passiveCount++;
             if (lv > 0 && lv < MAX_TRACK_LEVEL) {
                 pool.push({
                     offer: this._passiveOffer(track, lv, lv + 1, 'passiveUpgrade'),
                     weight: OFFER_WEIGHT_OWNED_PASSIVE,
                 });
-            } else if (lv === 0 && passiveCount < PASSIVE_SLOTS) {
+            } else if (lv === 0 && ownedPassives < PASSIVE_SLOTS) {
                 pool.push({
                     offer: this._passiveOffer(track, 0, 1, 'newPassive'),
                     weight: OFFER_WEIGHT_NEW_PASSIVE,
                 });
             }
+        }
+
+        // 半血以下把「回复」放进主池（原来只在池溢出时兜底，正常局几乎永远看不到）
+        if (this._player.hp <= this._player.maxHp * OFFER_HEAL_HP_RATIO) {
+            pool.push({ offer: this._healOffer(), weight: OFFER_WEIGHT_HEAL });
         }
 
         const picked: UpgradeOffer[] = [];
@@ -1408,16 +1543,7 @@ export class SurvivorCore {
         // 回复只在掉血时出现（满血给回血等于空卡）；淬炼按 +1 / +2 / +3 三档，保证永远有 3 张有效卡。
         const fillers: UpgradeOffer[] = [];
         if (this._player.hp < this._player.maxHp) {
-            fillers.push({
-                kind: 'heal',
-                track: '',
-                currentLevel: 0,
-                nextLevel: 30,
-                title: '回复 30',
-                detail: `生命 ${Math.round(this._player.hp)} → ${Math.round(
-                    Math.min(this._player.maxHp, this._player.hp + 30)
-                )}`,
-            });
+            fillers.push(this._healOffer());
         }
         const temperNames = ['淬炼', '淬炼·大', '淬炼·极'];
         for (let k = 0; k < temperNames.length && fillers.length < OFFER_COUNT; k++) {
@@ -1439,6 +1565,18 @@ export class SurvivorCore {
         }
 
         return picked;
+    }
+
+    private _healOffer(): UpgradeOffer {
+        const p = this._player;
+        return {
+            kind: 'heal',
+            track: '',
+            currentLevel: 0,
+            nextLevel: OFFER_HEAL_AMOUNT,
+            title: `回复 ${OFFER_HEAL_AMOUNT}`,
+            detail: `生命 ${Math.round(p.hp)} → ${Math.round(Math.min(p.maxHp, p.hp + OFFER_HEAL_AMOUNT))}`,
+        };
     }
 
     private _replaceOffer(
@@ -1492,7 +1630,28 @@ export class SurvivorCore {
         };
     }
 
+    /** 新武器卡的一句话介绍（数值取自 1 级配置，避免文案与数值漂移） */
+    private _weaponIntro(track: WeaponTrack): string {
+        if (track === 'knife') {
+            const l = KNIFE_LEVELS[0];
+            return `自动飞刀：伤害 ${l.damage}，间隔 ${l.interval}s`;
+        }
+        if (track === 'orbit') {
+            const l = ORBIT_LEVELS[0];
+            return `绕身星环：${l.count} 球 · 伤害 ${l.damage} · 半径 ${l.radius}`;
+        }
+        if (track === 'lightning') {
+            const l = LIGHTNING_LEVELS[0];
+            return `在敌人头顶落雷：伤害 ${l.damage} · 范围 ${l.aoe} · 间隔 ${l.interval}s`;
+        }
+        const l = BOOMERANG_LEVELS[0];
+        return `飞出折返：伤害 ${l.damage} · 距离 ${l.range} · 间隔 ${l.interval}s`;
+    }
+
     private _weaponDetail(track: WeaponTrack, cur: number, next: number): string {
+        // 新武器卡不写「数量 0 → 1 · 伤害 0 → 40」这种从 0 起的变化，
+        // 直接说这把武器干什么、开局什么强度——玩家第一次见到时才看得懂
+        if (cur === 0) return this._weaponIntro(track);
         const parts: string[] = [];
         if (track === 'knife') {
             const a = cur > 0 ? KNIFE_LEVELS[cur - 1] : null;
@@ -1501,24 +1660,32 @@ export class SurvivorCore {
             if (!a || a.damage !== b.damage) parts.push(`伤害 ${a ? a.damage : 0} → ${b.damage}`);
             if (a && a.interval !== b.interval) parts.push(`间隔 ${a.interval} → ${b.interval}s`);
             if (a && a.pierce !== b.pierce) parts.push(`穿透 ${a.pierce} → ${b.pierce}`);
+            if (a && a.spread !== b.spread) parts.push(`扇形 ${a.spread}° → ${b.spread}°`);
+            if (a && a.speed !== b.speed) parts.push(`速度 ${a.speed} → ${b.speed}`);
         } else if (track === 'orbit') {
             const a = cur > 0 ? ORBIT_LEVELS[cur - 1] : null;
             const b = ORBIT_LEVELS[next - 1];
             if (!a || a.count !== b.count) parts.push(`球数 ${a ? a.count : 0} → ${b.count}`);
             if (!a || a.damage !== b.damage) parts.push(`伤害 ${a ? a.damage : 0} → ${b.damage}`);
             if (a && a.radius !== b.radius) parts.push(`半径 ${a.radius} → ${b.radius}`);
+            if (a && a.angular !== b.angular) parts.push(`转速 ${a.angular} → ${b.angular} rad/s`);
         } else if (track === 'lightning') {
             const a = cur > 0 ? LIGHTNING_LEVELS[cur - 1] : null;
             const b = LIGHTNING_LEVELS[next - 1];
             if (!a || a.targets !== b.targets) parts.push(`目标 ${a ? a.targets : 0} → ${b.targets}`);
             if (!a || a.damage !== b.damage) parts.push(`伤害 ${a ? a.damage : 0} → ${b.damage}`);
+            if (a && a.interval !== b.interval) parts.push(`间隔 ${a.interval} → ${b.interval}s`);
+            if (a && a.range !== b.range) parts.push(`索敌 ${a.range} → ${b.range}`);
             if (a && a.aoe !== b.aoe) parts.push(`范围 ${a.aoe} → ${b.aoe}`);
         } else if (track === 'boomerang') {
             const a = cur > 0 ? BOOMERANG_LEVELS[cur - 1] : null;
             const b = BOOMERANG_LEVELS[next - 1];
             if (!a || a.count !== b.count) parts.push(`数量 ${a ? a.count : 0} → ${b.count}`);
             if (!a || a.damage !== b.damage) parts.push(`伤害 ${a ? a.damage : 0} → ${b.damage}`);
+            if (a && a.interval !== b.interval) parts.push(`间隔 ${a.interval} → ${b.interval}s`);
             if (a && a.range !== b.range) parts.push(`距离 ${a.range} → ${b.range}`);
+            if (a && a.speed !== b.speed) parts.push(`速度 ${a.speed} → ${b.speed}`);
+            if (a && a.width !== b.width) parts.push(`判定宽 ${a.width} → ${b.width}`);
         }
         return parts.join(' · ');
     }
@@ -1557,7 +1724,9 @@ export class SurvivorCore {
                 if (track === 'vitality') {
                     const gain = VITALITY_PER_LEVEL * (offer.nextLevel - before);
                     p.maxHp += gain;
+                    const healed = Math.min(p.maxHp, p.hp + gain) - p.hp;
                     p.hp = Math.min(p.maxHp, p.hp + gain);
+                    if (healed > 0) this._events.push({ type: 'heal', data: Math.round(healed) });
                 } else if (track === 'swift') {
                     p.speed = PLAYER_SPEED * (1 + SWIFT_PER_LEVEL * offer.nextLevel);
                 } else if (track === 'pickup') {
@@ -1565,9 +1734,12 @@ export class SurvivorCore {
                 }
                 break;
             }
-            case 'heal':
+            case 'heal': {
+                const before = p.hp;
                 p.hp = Math.min(p.maxHp, p.hp + Math.max(1, offer.nextLevel || 30));
+                if (p.hp > before) this._events.push({ type: 'heal', data: Math.round(p.hp - before) });
                 break;
+            }
             case 'temper':
                 this._temper += Math.max(1, offer.nextLevel - offer.currentLevel);
                 break;
@@ -1615,7 +1787,7 @@ export class SurvivorCore {
         for (let i = 0; i < this._gems.length; i++) {
             const g = this._gems[i];
             if (!g.active) continue;
-            gems.push([g.x, g.y, g.value, g.magnet ? 1 : 0]);
+            gems.push([g.x, g.y, g.value, g.magnet ? 1 : 0, PICKUP_KIND_ORDER.indexOf(g.kind)]);
         }
 
         return {
@@ -1648,6 +1820,7 @@ export class SurvivorCore {
                 nextWaveTime: this._nextWaveTime,
                 bossSpawned: this._bossSpawned,
                 bossEnrage: this._bossEnrage,
+                tempHaste: this._tempHaste,
             },
             enemies,
             bullets,
@@ -1677,6 +1850,8 @@ export class SurvivorCore {
 
     restore(save: RunSaveV1): boolean {
         if (!save || save.v !== SAVE_VERSION) return false;
+        // 兼容旧版本写出的「超槽」存档（槽位溢出 bug 修复前的产物）：按槽位截断，保留等级高的
+        this._truncateOverSlot(save);
         if (!this._validateSave(save)) return false;
 
         this._seed = save.seed >>> 0;
@@ -1697,7 +1872,8 @@ export class SurvivorCore {
         p.facing = save.player.facing;
         p.level = save.player.level;
         p.xp = save.player.xp;
-        p.xpNeed = save.player.xpNeed;
+        // 不信任存档里的 xpNeed：经验曲线改过之后旧档会与 xpNeed(level) 不一致
+        p.xpNeed = xpNeed(p.level);
 
         this._weapons = {};
         for (const k in save.weapons) this._weapons[k as WeaponTrack] = save.weapons[k];
@@ -1709,6 +1885,7 @@ export class SurvivorCore {
         this._nextWaveTime = save.timers.nextWaveTime;
         this._bossSpawned = !!save.timers.bossSpawned;
         this._bossEnrage = !!save.timers.bossEnrage;
+        this._tempHaste = Math.max(0, save.timers.tempHaste || 0);
         this._waveWarned = this._time >= this._nextWaveTime - WAVE_WARN;
 
         for (let i = 0; i < this._enemies.length; i++) this._enemies[i].active = false;
@@ -1734,6 +1911,8 @@ export class SurvivorCore {
             g.y = c[1];
             g.value = c[2];
             g.magnet = c[3] === 1;
+            // 旧档没有第 5 位，缺省按经验宝石处理
+            g.kind = PICKUP_KIND_ORDER[c[4]] || 'xp';
         }
 
         this._offers = save.offers.map((o) => Object.assign({}, o));
@@ -1805,6 +1984,22 @@ export class SurvivorCore {
         for (let i = COMPACT_BULLET_BASE; i < c.length; i++) b.hitUids.push(c[i]);
     }
 
+    /**
+     * 旧档兼容：槽位溢出 bug 会写出 4 武器 / 3 被动的存档。
+     * 直接判坏档会让玩家丢进度，这里按槽位数截断（等级高的优先保留）。
+     */
+    private _truncateOverSlot(save: RunSaveV1): void {
+        const trim = (rec: Record<string, number>, tracks: string[], slots: number): void => {
+            const keys: string[] = [];
+            for (const k in rec) if (tracks.indexOf(k) >= 0) keys.push(k);
+            if (keys.length <= slots) return;
+            keys.sort((a, b) => (rec[b] || 0) - (rec[a] || 0));
+            for (let i = slots; i < keys.length; i++) delete rec[keys[i]];
+        };
+        if (save.weapons) trim(save.weapons, WEAPON_TRACKS, WEAPON_SLOTS);
+        if (save.passives) trim(save.passives, PASSIVE_TRACKS, PASSIVE_SLOTS);
+    }
+
     private _validateSave(save: RunSaveV1): boolean {
         if (!isFiniteNumber(save.seed) || !isFiniteNumber(save.rngState)) return false;
         if (!isFiniteNumber(save.time) || save.time < 0 || save.time > 86400) return false;
@@ -1860,8 +2055,11 @@ export class SurvivorCore {
         if (!Array.isArray(save.gems) || save.gems.length > SAVE_MAX_GEMS) return false;
         for (let i = 0; i < save.gems.length; i++) {
             const c = save.gems[i];
-            if (!Array.isArray(c) || c.length !== COMPACT_GEM_LEN) return false;
-            for (let k = 0; k < COMPACT_GEM_LEN; k++) if (!isFiniteNumber(c[k])) return false;
+            if (!Array.isArray(c) || c.length < COMPACT_GEM_MIN_LEN || c.length > COMPACT_GEM_LEN) return false;
+            for (let k = 0; k < c.length; k++) if (!isFiniteNumber(c[k])) return false;
+            if (c.length > COMPACT_GEM_MIN_LEN) {
+                if (c[4] < 0 || c[4] >= PICKUP_KIND_ORDER.length) return false;
+            }
         }
         if (!Array.isArray(save.offers) || save.offers.length > OFFER_COUNT) return false;
         if (save.phase === 'levelup' && save.offers.length !== OFFER_COUNT) return false;
@@ -1909,22 +2107,8 @@ interface GemStatePool {
     y: number;
     value: number;
     magnet: boolean;
+    kind: PickupKind;
 }
-
-/** 组合权重（避免在热路径里重复构造数组） */
-function spawnWeightsSafe(t: number): number[] {
-    if (t < 60) return WEIGHTS_EARLY;
-    if (t < 120) return WEIGHTS_1;
-    if (t < 240) return WEIGHTS_2;
-    if (t < 360) return WEIGHTS_3;
-    return WEIGHTS_4;
-}
-
-const WEIGHTS_EARLY = [100, 0, 0, 0];
-const WEIGHTS_1 = [70, 30, 0, 0];
-const WEIGHTS_2 = [50, 25, 25, 0];
-const WEIGHTS_3 = [40, 25, 20, 15];
-const WEIGHTS_4 = [35, 20, 20, 25];
 
 // 主色表只用于渲染层；这里显式引用避免 tree-shaking 删掉配置导出
 export const SURVIVOR_COLORS = COLORS;
