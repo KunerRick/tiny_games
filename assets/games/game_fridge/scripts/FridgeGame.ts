@@ -178,7 +178,6 @@ export class FridgeGame extends Component {
         const renderMs = nowMs() - t1;
 
         this._perf?.sample(dt, logicMs, renderMs, snap);
-        this._hud?.setFps(this._perf ? this._perf._fps : 0);
     }
 
     // ==================== 输入 ====================

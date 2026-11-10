@@ -42,6 +42,8 @@ export class FridgePerf extends Component {
     private _bg: Graphics | null = null;
     private _toggleLabel: Label | null = null;
     private _safeTop = 0;
+    /** 上次写进「帧率」按钮的读数，避免每帧重建字符串（面板开合也算变化） */
+    private _shownKey = '';
 
     private _winTime = 0;
     private _winFrames = 0;
@@ -97,7 +99,7 @@ export class FridgePerf extends Component {
     setVisible(v: boolean): void {
         this.visible = v;
         if (this._panel && this._panel.isValid) this._panel.active = v;
-        if (this._toggleLabel) this._toggleLabel.string = v ? '帧率 ✓' : '帧率';
+        this._updateToggleText();
         if (v) this._refreshText();
     }
 
@@ -126,6 +128,7 @@ export class FridgePerf extends Component {
             this._winFrameMax = 0;
             this._winLogic = 0;
             this._winRender = 0;
+            this._updateToggleText();
         }
 
         if (!this.visible) return;
@@ -142,21 +145,46 @@ export class FridgePerf extends Component {
         const node = new Node('PerfToggle');
         node.layer = this.node.layer;
         const ut = node.addComponent(UITransform);
-        ut.setContentSize(96, 40);
+        ut.setContentSize(112, 40);
         node.setPosition(0, 604, 0);
         this.node.addChild(node);
         this._toggleNode = node;
 
         const gfx = node.addComponent(Graphics);
         gfx.fillColor = new Color(24, 30, 46, 200);
-        gfx.roundRect(-48, -20, 96, 40, 10);
+        gfx.roundRect(-56, -20, 112, 40, 10);
         gfx.fill();
 
-        const label = this._makeLabel(node, 0, 20, 16, Label.HorizontalAlign.CENTER, 92);
-        label.string = '帧率';
+        // 文字在按钮里水平、垂直都居中：帧率读数就写在这颗按钮上，
+        // 不再在顶栏右侧另起一行（之前「帧率」和数字分居两处，看着散）
+        const labelNode = new Node('Text');
+        labelNode.layer = this.node.layer;
+        const lut = labelNode.addComponent(UITransform);
+        lut.setContentSize(104, 40);
+        lut.setAnchorPoint(0.5, 0.5);
+        labelNode.setPosition(0, 0, 0);
+        const label = labelNode.addComponent(Label);
+        label.fontSize = 17;
+        label.lineHeight = 22;
+        label.color = new Color(210, 230, 240, 255);
+        label.horizontalAlign = Label.HorizontalAlign.CENTER;
+        label.verticalAlign = Label.VerticalAlign.CENTER;
+        label.overflow = Label.Overflow.NONE;
+        node.addChild(labelNode);
         this._toggleLabel = label;
+        this._updateToggleText();
 
         node.on(Node.EventType.TOUCH_END, this.onToggleClicked, this);
+    }
+
+    /** 「帧率 59」/「帧率 59 ✓」，0 表示还没采到样本 */
+    private _updateToggleText(): void {
+        const v = this._fps;
+        const key = `${v}|${this.visible ? 1 : 0}`;
+        if (key === this._shownKey) return;
+        this._shownKey = key;
+        if (!this._toggleLabel) return;
+        this._toggleLabel.string = (v > 0 ? `帧率 ${v}` : '帧率') + (this.visible ? ' ✓' : '');
     }
 
     private _buildPanel(): void {

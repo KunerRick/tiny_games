@@ -38,7 +38,6 @@ export class FridgeHud extends Component {
     private _pipGfx: Graphics | null = null;
     private _stats: Label | null = null;
     private _sub: Label | null = null;
-    private _fps: Label | null = null;
     private _items: Label | null = null;
     private _hint: Label | null = null;
     private _dead: Label | null = null;
@@ -58,7 +57,6 @@ export class FridgeHud extends Component {
     private _treasureKey = '';
 
     private _safeTop = 0;
-    private _fpsValue = -1;
     private _best = 0;
     private _wasDead = false;
     private _newRecord = false;
@@ -82,9 +80,7 @@ export class FridgeHud extends Component {
         this._buildPips();
         this._stats = this._makeLabel('Stats', -340, STATS_Y, 20, Label.HorizontalAlign.LEFT, 420);
         this._sub = this._makeLabel('Sub', -340, STATS_Y - 28, 16, Label.HorizontalAlign.LEFT, 520);
-        this._fps = this._makeLabel('Fps', 340, STATS_Y, 16, Label.HorizontalAlign.RIGHT, 120);
-        this._fps.string = 'FPS —';
-        this._items = this._makeLabel('Items', -340, -300, 20, Label.HorizontalAlign.LEFT, 680);
+        this._items = this._makeLabel('Items', 0, -300, 20, Label.HorizontalAlign.CENTER, 680);
         this._hint = this._makeLabel('Hint', 0, -370, 18, Label.HorizontalAlign.CENTER, 680);
         this._hint.string = '左半屏拖动移动 · 右半屏拖动瞄准（松手自动瞄准）';
         this._dead = this._makeLabel('Dead', 0, 40, 34, Label.HorizontalAlign.CENTER, 640);
@@ -107,7 +103,6 @@ export class FridgeHud extends Component {
         this._pipGfx = null;
         this._stats = null;
         this._sub = null;
-        this._fps = null;
         this._items = null;
         this._hint = null;
         this._dead = null;
@@ -130,13 +125,7 @@ export class FridgeHud extends Component {
         this._applySafeTop();
     }
 
-    /** 常驻帧率读数；0 表示还没采到样本 */
-    setFps(fps: number): void {
-        const v = Math.max(0, Math.round(fps));
-        if (v === this._fpsValue) return;
-        this._fpsValue = v;
-        if (this._fps) this._fps.string = v > 0 ? `FPS ${v}` : 'FPS —';
-    }
+    /** 常驻帧率读数由 FridgePerf 的「帧率」按钮显示，这里不再单独占一行 */
 
     refresh(snap: FridgeSnapshot): void {
         this._drawPips(snap.player.hp, snap.player.maxHp);
@@ -407,7 +396,6 @@ export class FridgeHud extends Component {
         const top = this._safeTop;
         if (this._stats) this._stats.node.setPosition(-340, STATS_Y - top, 0);
         if (this._sub) this._sub.node.setPosition(-340, STATS_Y - 28 - top, 0);
-        if (this._fps) this._fps.node.setPosition(340, STATS_Y - top, 0);
         if (this._pipGfx) this._redrawPips();
     }
 
