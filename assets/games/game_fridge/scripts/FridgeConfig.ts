@@ -141,6 +141,14 @@ export interface PlayerState extends PlayerStats {
     /** 当前朝向（单位向量），渲染与自动瞄准兜底用 */
     facingX: number;
     facingY: number;
+    /** 本房间伤害倍率（硬糖「咬碎」用，换房重置） */
+    roomDmgMul: number;
+    /** 自冻剩余时间（冰块技能：不能移动） */
+    rootT: number;
+    /** 保鲜膜：本层是否已触发过「免死」 */
+    deathWardUsed: boolean;
+    /** 存档点：本房间是否已经复活过 */
+    savepointUsedRoom: number;
 }
 
 export interface Enemy {
@@ -167,6 +175,21 @@ export interface Enemy {
     windup: number;
     /** Boss 冲刺剩余时间 */
     dashT: number;
+    /** M3 状态效果：减速 / 冻结 / 中毒 / 燃烧 */
+    slowT: number;
+    slowMul: number;
+    freezeT: number;
+    poisonT: number;
+    poisonDps: number;
+    burnT: number;
+    burnDps: number;
+    /** 冷热交替：最近一次命中属性与连续次数 */
+    lastElem: 'fire' | 'ice' | null;
+    elemCount: number;
+    /** 过热核心：连续被同一目标命中的层数 */
+    overheat: number;
+    /** Boss 专用计时（拉拽 / 全场冻结等） */
+    special: number;
 }
 
 export interface Bullet {
@@ -183,6 +206,10 @@ export interface Bullet {
     pierce: number;
     /** 剩余反弹次数 */
     bounces: number;
+    /** 剩余穿墙次数（bug 补丁） */
+    wallPierce: number;
+    /** 子弹来源（渲染与分裂用） */
+    kind: 'tear' | 'split' | 'explosion';
     /** 已命中的敌人 id（防止贯穿弹重复打同一个） */
     hitIds: number[];
 }
@@ -211,7 +238,49 @@ export type CoreEvent =
     /** 宝箱三选一弹窗打开 */
     | { type: 'treasure'; roomId: number }
     /** 通关（M2 只到第 1 层） */
-    | { type: 'won' };
+    | { type: 'won' }
+    /** 爆炸（渲染层画一圈扩散） */
+    | { type: 'boom'; x: number; y: number; r: number }
+    /** 新协同被点亮（HUD 顶部弹提示） */
+    | { type: 'synergy'; name: string }
+    /** 主动槽使用（HUD / 渲染反馈） */
+    | { type: 'active'; name: string; x: number; y: number }
+    /** 商店 / 祭坛封面打开（HUD 弹面板） */
+    | { type: 'shop'; roomId: number }
+    | { type: 'altar'; roomId: number }
+    /** 秘密房被炸开（小地图揭示） */
+    | { type: 'secret'; x: number; y: number }
+    /** 炸弹落地 / 爆炸（渲染层画引信与爆炸环） */
+    | { type: 'bomb'; x: number; y: number; r: number }
+    /** Boss 击破：核心三选一弹窗（M4） */
+    | { type: 'core'; roomId: number; options: string[] }
+    /** 踏入传送口，进入下一层（M4） */
+    | { type: 'floor'; floor: number };
+
+/** 商店货位（规格 §8.3：道具 12–18 币 / 半心 4 币 / 炸弹 3 币） */
+export type ShopOffer =
+    | { kind: 'item'; id: string; price: number }
+    | { kind: 'heart'; price: number }
+    | { kind: 'bomb'; price: number };
+
+export interface ShopState {
+    offers: ShopOffer[];
+    /** 与 offers 同序：已买走 / 已售罄 */
+    sold: boolean[];
+}
+
+export interface AltarState {
+    itemId: string;
+    used: boolean;
+}
+
+/** 已放置、正在倒计时的炸弹 */
+export interface PlacedBomb {
+    x: number;
+    y: number;
+    /** 剩余引信秒数 */
+    t: number;
+}
 
 /** 渲染 / HUD 只读快照 */
 export interface FridgeSnapshot {
@@ -227,6 +296,8 @@ export interface FridgeSnapshot {
     items: string[];
     cores: string[];
     activeItem: string | null;
+    /** 当前角色 id（HUD 显示技能名 / 主动槽） */
+    charId: string;
     /** 当前自动瞄准目标 id（渲染准星用，-1 = 无） */
     aimTargetId: number;
     aimX: number;
@@ -240,6 +311,25 @@ export interface FridgeSnapshot {
     locked: boolean;
     map: unknown | null;
     pendingTreasure: { offered: string[]; rerolled: boolean } | null;
+    /** 商店货架（非 null 时世界冻结；买完 / 离开置空） */
+    pendingShop: ShopState | null;
+    /** 祭坛献祭（非 null 时世界冻结） */
+    pendingAltar: AltarState | null;
+    /** 已放置的炸弹（引信倒计时中） */
+    bomb: PlacedBomb | null;
+    /** 本房间朝向未发现秘密房的墙（幸运越高裂纹越明显，dir 为房间方向） */
+    secretHints: Array<{ dir: string; strength: number }>;
+    /** 冻土协同留下的冰面（M3，只读） */
+    iceFields: Array<{ x: number; y: number; t: number; r: number }>;
+    /** Boss 核心三选一（M4：非 null 时世界冻结） */
+    pendingCore: string[] | null;
+    /** 通往下一层的传送口（M4：Boss 层选完核心后出现） */
+    stairs: { x: number; y: number } | null;
+    /** 跑局模式与诅咒（M4） */
+    mode: 'normal' | 'daily' | 'heat';
+    heatCurses: string[];
+    /** 本局累计获得的冰箱贴（结算前按失败折半） */
+    magnets: number;
 }
 
 // ==================== 道具表（规格 §8.3，共 40 个） ====================
@@ -301,6 +391,48 @@ export const ITEM_BY_ID: Record<string, ItemDef> = (() => {
     for (const it of ITEMS) map[it.id] = it;
     return map;
 })();
+
+// ==================== 标签协同（规格 §8.2，共 14 条） ====================
+
+export interface SynergyDef {
+    id: string;
+    name: string;
+    a: ItemTag;
+    b: ItemTag;
+    desc: string;
+}
+
+export const SYNERGIES: SynergyDef[] = [
+    { id: 'caramel_burst', name: '焦糖爆裂', a: 'fire', b: 'explosive', desc: '火球命中时 60px 爆炸，50% 伤害' },
+    { id: 'frost_chain', name: '霜链', a: 'ice', b: 'chain', desc: '冰弹连锁 2 个目标，各 40% 伤害并减速' },
+    { id: 'elastic_needle', name: '弹力针', a: 'bounce', b: 'pierce', desc: '贯穿弹撞墙反弹，可反复命中' },
+    { id: 'hunting_split', name: '追猎分裂', a: 'split', b: 'homing', desc: '分裂出的子弹自动追踪' },
+    { id: 'poison_blaze', name: '毒雾爆燃', a: 'poison', b: 'fire', desc: '中毒目标被点燃时 80px 爆燃' },
+    { id: 'cluster_bomb', name: '子母雷', a: 'explosive', b: 'split', desc: '爆炸后再分裂 3 个小弹' },
+    { id: 'fresh_cover', name: '保鲜罩', a: 'shield', b: 'heal', desc: '每房间开始获得 1 点护盾' },
+    { id: 'bounce_dash', name: '弹跳冲刺', a: 'speed', b: 'bounce', desc: '弹跳伤害 +20%' },
+    { id: 'precise_magnet', name: '精确磁吸', a: 'luck', b: 'homing', desc: '幸运 ≥3 时瞄准血量最高敌人' },
+    { id: 'pierce_arc', name: '贯通电弧', a: 'pierce', b: 'chain', desc: '贯穿命中的敌人也会触发连锁' },
+    { id: 'permafrost', name: '冻土', a: 'ice', b: 'explosive', desc: '爆炸留下 2s 冰面，踩上的敌人减速 50%' },
+    { id: 'fire_tongue', name: '火舌', a: 'fire', b: 'chain', desc: '燃烧的敌人死亡时点燃最近的敌人' },
+    { id: 'sugar_dregs', name: '糖渣', a: 'split', b: 'shots', desc: '每发额外再裂 2 片' },
+    { id: 'hot_cold', name: '冷热交替', a: 'fire', b: 'ice', desc: '交替命中同一目标 3 次 → 蒸汽爆发' },
+];
+
+/** 当前道具组合点亮的协同（同一对标签只算一条） */
+export function findSynergies(items: string[]): SynergyDef[] {
+    const tags: Record<string, boolean> = {};
+    for (const id of items) {
+        const it = ITEM_BY_ID[id];
+        if (!it) continue;
+        for (const t of it.tags) tags[t] = true;
+    }
+    const out: SynergyDef[] = [];
+    for (const s of SYNERGIES) {
+        if (tags[s.a] && tags[s.b]) out.push(s);
+    }
+    return out;
+}
 
 // ==================== 角色表（规格 §10.1，共 6 个） ====================
 
@@ -382,12 +514,302 @@ export const FLOOR_ENEMIES: Record<number, string[]> = {
     4: ['frostspike', 'rustknight', 'conddrop', 'piston'],
 };
 
-/** Boss（§9.2；M2 只做第 1 层霉王，其余层随 M4 接入） */
+/** Boss（§9.2，四层各一只；弹幕图案由 shotIndex / 计时器确定性驱动） */
 export const BOSS_DEFS: Record<number, EnemyDef> = {
     1: { kind: 'moldking', name: '霉王', hp: 180, speed: 52, r: 34, dmg: 1, ai: 'phase' },
+    2: { kind: 'stitchbear', name: '缝线熊', hp: 260, speed: 58, r: 38, dmg: 1, ai: 'phase' },
+    3: { kind: 'bluescreen', name: '蓝屏', hp: 340, speed: 44, r: 34, dmg: 1, ai: 'phase' },
+    4: { kind: 'compressor', name: '压缩机之心', hp: 460, speed: 40, r: 40, dmg: 1, ai: 'phase' },
 };
 
-export const BOSS_KIND_BY_FLOOR: Record<number, string> = { 1: 'moldking' };
+export const BOSS_KIND_BY_FLOOR: Record<number, string> = {
+    1: 'moldking', 2: 'stitchbear', 3: 'bluescreen', 4: 'compressor',
+};
+
+/** Boss 副色（渲染层用；不引入新贴图） */
+export const BOSS_TINT: Record<string, string> = {
+    moldking: '#C77DFF',
+    stitchbear: '#E8A33D',
+    bluescreen: '#7CFF6B',
+    compressor: '#9FE8FF',
+};
+
+export function isBossKind(kind: string): boolean {
+    return kind === 'moldking' || kind === 'stitchbear' || kind === 'bluescreen' || kind === 'compressor';
+}
+
+// ==================== Boss 核心（§8.4，每层击破后三选一） ====================
+
+export interface CoreDef {
+    id: string;
+    name: string;
+    desc: string;
+}
+
+export const CORES: CoreDef[] = [
+    { id: 'bounce', name: '弹跳核心', desc: '所有子弹撞墙反弹一次' },
+    { id: 'split', name: '分裂核心', desc: '每发 15% 概率分裂' },
+    { id: 'freeze', name: '霜冻核心', desc: '命中 10% 概率冻结 1 秒' },
+    { id: 'overheat', name: '过热核心', desc: '连续命中同一目标伤害递增，最多 +50%' },
+    { id: 'shield', name: '护盾核心', desc: '每房间开始获得 1 点护盾' },
+    { id: 'greed', name: '贪婪核心', desc: '金币掉落 +50%，商店价格 −20%' },
+];
+
+export const CORE_BY_ID: Record<string, CoreDef> = (() => {
+    const map: Record<string, CoreDef> = {};
+    for (const c of CORES) map[c.id] = c;
+    return map;
+})();
+
+/** 未持有核心不足 3 个时的补位（§8.4，每次三选一至少 3 项；补位不可重复购买） */
+export const CORE_FILLERS: CoreDef[] = [
+    { id: 'fill_charge', name: '充能扩容', desc: '主动充能上限 +1' },
+    { id: 'fill_bomb', name: '炸弹扩容', desc: '炸弹上限 +1（并立刻 +1）' },
+    { id: 'fill_hp', name: '生命扩容', desc: '生命上限 +1 半心' },
+];
+
+export const CORE_FILLER_BY_ID: Record<string, CoreDef> = (() => {
+    const map: Record<string, CoreDef> = {};
+    for (const c of CORE_FILLERS) map[c.id] = c;
+    return map;
+})();
+
+// ==================== 跨局进度：冰箱贴 / 解锁树 / 图鉴 / 每日挑战（§11） ====================
+
+/** 冰箱贴收益（§11.1）：清房 +1 / Boss +5 / 通关 +15 / 秘密房 +2；失败按一半结算（最少 1） */
+export const MAGNET_PER_CLEAR = 1;
+export const MAGNET_PER_BOSS = 5;
+export const MAGNET_PER_WIN = 15;
+export const MAGNET_PER_SECRET = 2;
+export const MAGNET_FAIL_MIN = 1;
+/** 热度模式收益倍率（§11.2） */
+export const HEAT_MAGNET_MUL = 1.5;
+/** 贪心核心：金币掉落倍率与商店折扣 */
+export const GREED_COIN_MUL = 1.5;
+export const GREED_SHOP_MUL = 0.8;
+/** 过热核心：每层 +10%，最多 +50% */
+export const OVERHEAT_STEP = 0.1;
+export const OVERHEAT_MAX = 0.5;
+/** 分裂核心概率 */
+export const CORE_SPLIT_CHANCE = 0.15;
+/** 霜冻核心概率 / 时长 */
+export const CORE_FREEZE_CHANCE = 0.1;
+export const CORE_FREEZE_TIME = 1;
+/** 补位核心的即时数值 */
+export const FILLER_HP = 1;
+export const FILLER_BOMB = 1;
+
+export type UnlockKind = 'char' | 'pool' | 'mode' | 'collect' | 'deco';
+
+export interface UnlockNode {
+    id: string;
+    name: string;
+    desc: string;
+    /** 冰箱贴价格（条件式解锁是免费的另一条路） */
+    price: number;
+    kind: UnlockKind;
+    /** 角色解锁节点对应的 charId */
+    charId?: string;
+}
+
+/** 解锁树（§11.2）：只解锁内容，不卖数值 */
+export const UNLOCK_NODES: UnlockNode[] = [
+    { id: 'char_candy', name: '角色 · 硬糖', desc: '贴脸爆发，用血量换伤害', price: 30, kind: 'char', charId: 'candy' },
+    { id: 'char_icecube', name: '角色 · 冰块', desc: '控场：自冻无敌，受伤越来越慢', price: 40, kind: 'char', charId: 'icecube' },
+    { id: 'char_soda', name: '角色 · 气泡水', desc: '4 心起步，弹幕密度更高', price: 50, kind: 'char', charId: 'soda' },
+    { id: 'char_yogurt', name: '角色 · 过期酸奶', desc: '毒流：腐坏道具回血', price: 60, kind: 'char', charId: 'yogurt' },
+    { id: 'char_magneto', name: '角色 · 冰箱贴', desc: '1 心极限：把弹幕吸成金币', price: 80, kind: 'char', charId: 'magneto' },
+    { id: 'supply1', name: '深度补给 I', desc: '第 3 层起也能见到第 4 层专属道具', price: 20, kind: 'pool' },
+    { id: 'supply2', name: '深度补给 II', desc: '1–2 层也能刷到深层专属道具', price: 35, kind: 'pool' },
+    { id: 'supply3', name: '深度补给 III', desc: '宝箱至少保证 1 个与现有标签协同的道具', price: 50, kind: 'pool' },
+    { id: 'daily_supply', name: '每日特供', desc: '商店每天多一个折扣货位', price: 25, kind: 'pool' },
+    { id: 'daily', name: '每日挑战', desc: '固定种子 + 固定角色，每天一次', price: 30, kind: 'mode' },
+    { id: 'elevator', name: '电梯', desc: '可以直接从第 2 层开始', price: 40, kind: 'mode' },
+    { id: 'heat', name: '热度模式', desc: '带上 3 个诅咒开局，冰箱贴 +50%', price: 60, kind: 'mode' },
+    { id: 'codex_up', name: '图鉴升级', desc: '图鉴里显示道具组合与掉落权重', price: 15, kind: 'collect' },
+    { id: 'palette1', name: '调色板 · 蜜桃', desc: '布丁的配色（纯装饰）', price: 10, kind: 'deco' },
+    { id: 'palette2', name: '调色板 · 薄荷', desc: '布丁的配色（纯装饰）', price: 10, kind: 'deco' },
+    { id: 'palette3', name: '调色板 · 夜空', desc: '布丁的配色（纯装饰）', price: 10, kind: 'deco' },
+];
+
+export const UNLOCK_BY_ID: Record<string, UnlockNode> = (() => {
+    const map: Record<string, UnlockNode> = {};
+    for (const n of UNLOCK_NODES) map[n.id] = n;
+    return map;
+})();
+
+/** 角色 → 购买解锁节点 id */
+export const CHAR_UNLOCK_NODE: Record<string, string> = {
+    candy: 'char_candy',
+    icecube: 'char_icecube',
+    soda: 'char_soda',
+    yogurt: 'char_yogurt',
+    magneto: 'char_magneto',
+};
+
+/** 布丁配色（0 = 默认；1–3 由调色板解锁） */
+export const PLAYER_PALETTES: Array<{ player: string; dark: string; name: string }> = [
+    { player: '#FFE999', dark: '#D6A842', name: '奶油' },
+    { player: '#FFB3A7', dark: '#D97B6C', name: '蜜桃' },
+    { player: '#B8F5D8', dark: '#6BC7A2', name: '薄荷' },
+    { player: '#B8C8FF', dark: '#6C7FD4', name: '夜空' },
+];
+
+/** 热度模式诅咒（§11.2） */
+export interface HeatCurse {
+    id: string;
+    name: string;
+    desc: string;
+}
+
+export const HEAT_CURSES: HeatCurse[] = [
+    { id: 'fast', name: '敌人加速', desc: '敌人移速 +25%' },
+    { id: 'noshot', name: '无商店', desc: '商店不营业（房间变成战斗房）' },
+    { id: 'halfhp', name: '半心上限', desc: '生命上限不超过 3 颗心（6 半心）' },
+];
+
+/** 兼容旧写法：no-shop 诅咒 id */
+export const HEAT_CURSE_NO_SHOP = 'noshot';
+export const HEAT_CURSE_FAST = 'fast';
+export const HEAT_CURSE_HALFHP = 'halfhp';
+export const HEAT_FAST_MUL = 1.25;
+export const HEAT_HALF_CAP = 6;
+
+/** 每日挑战（§11.5）：种子 = YYYYMMDD；角色按日期轮换 */
+export function dailyDateKey(date: Date = new Date()): string {
+    const y = date.getFullYear();
+    const m = date.getMonth() + 1;
+    const d = date.getDate();
+    return `${y}${m < 10 ? '0' : ''}${m}${d < 10 ? '0' : ''}${d}`;
+}
+
+export function dailySeed(dateKey: string): number {
+    const n = parseInt(dateKey, 10);
+    return Number.isFinite(n) ? n >>> 0 : 0;
+}
+
+/** 每日角色：在 6 个角色里按日期确定性轮换（固定，不受解锁影响） */
+export function dailyChar(dateKey: string): string {
+    let h = 0;
+    for (let i = 0; i < dateKey.length; i++) h = (h * 31 + dateKey.charCodeAt(i)) >>> 0;
+    return CHARACTERS[h % CHARACTERS.length].id;
+}
+
+/** 角色是否已解锁：默认角色 / 条件解锁（写入 unlocks）/ 冰箱贴购买 */
+export function isCharUnlocked(unlocks: string[], charId: string): boolean {
+    const def = CHAR_BY_ID[charId];
+    if (!def) return false;
+    if (def.unlock.kind === 'default') return true;
+    const nodeId = CHAR_UNLOCK_NODE[charId];
+    return (!!nodeId && unlocks.indexOf(nodeId) >= 0) || unlocks.indexOf(charId) >= 0;
+}
+
+/** 图鉴升级：显示组合 / 权重 */
+export function hasUnlock(unlocks: string[], id: string): boolean {
+    return unlocks.indexOf(id) >= 0;
+}
+
+/** 一次跑局的结算摘要（解锁条件的判定输入，§11.3） */
+export interface RunSummary {
+    charId: string;
+    floorReached: number;
+    /** 已通关的最高层（0–4） */
+    maxClearedFloor: number;
+    won: boolean;
+    kills: number;
+    secretsOpened: number;
+    shopSpent: number;
+    bombsUsed: number;
+    /** 单局里同一标签最多凑到的个数（协同图鉴用） */
+    maxTagCount: number;
+    clearedWhileHalfHeart: boolean;
+    clearedFloorWithoutBomb: boolean;
+}
+
+export interface MetaStatsLike {
+    runs: number;
+    wins: number;
+    kills: number;
+    secrets: number;
+    bestFloor: number;
+    spent: number;
+    charClears: string[];
+    maxClearedFloor?: number;
+}
+
+/**
+ * 结算后评估条件式解锁（§11.3）。返回本次新解锁的节点 id 列表（不含已拥有的）。
+ * 纯函数，方便自检直接断言。
+ */
+export function evaluateUnlocks(
+    meta: { unlocks: string[]; stats: MetaStatsLike; seenItems: string[] },
+    run: RunSummary,
+): string[] {
+    const out: string[] = [];
+    const add = (id: string): void => {
+        if (meta.unlocks.indexOf(id) < 0 && out.indexOf(id) < 0) out.push(id);
+    };
+    const maxCleared = Math.max(meta.stats.maxClearedFloor || 0, run.maxClearedFloor);
+    const bestFloor = Math.max(meta.stats.bestFloor, run.floorReached);
+    const secrets = meta.stats.secrets + run.secretsOpened;
+    const spent = meta.stats.spent + run.shopSpent;
+
+    if (bestFloor >= 2) add('char_candy');            // 首次抵达第 2 层
+    if (maxCleared >= 2) { add('daily'); add('elevator'); } // 首次通关第 2 层
+    if (maxCleared >= 3) add('char_yogurt');          // 首次通关第 3 层
+    if (maxCleared >= 4) add('heat');                 // 首次通关第 4 层
+    if (run.kills >= 200 || meta.stats.kills + run.kills >= 1000) add('char_icecube'); // 200 击杀
+    if (spent >= 300) add('char_soda');               // 商店累计消费 300
+    if (secrets >= 5) add('char_magneto');            // 累计打开 5 个秘密房
+    if (meta.seenItems.length >= 30) add('collector'); // 图鉴集齐 30（占位：收藏家挑战）
+    return out;
+}
+
+/** 图鉴集齐率（0–1，按 40 道具计） */
+export function collectionRate(seenItems: string[]): number {
+    let n = 0;
+    for (const id of seenItems) if (ITEM_BY_ID[id]) n++;
+    return n / ITEMS.length;
+}
+
+/**
+ * 按层 + 深度补给解锁决定可掉落道具池（§11.2）。
+ * 基础规则：全局池（floor 0）+ 本层专属；supply1 让第 3 层看到第 4 层；
+ * supply2 让 1–2 层也能看到 3–4 层专属；supply3 在宝箱里另做「保底协同」。
+ */
+export function rollItemPool(floor: number, unlocks: string[]): ItemDef[] {
+    const out: ItemDef[] = [];
+    const s1 = hasUnlock(unlocks, 'supply1');
+    const s2 = hasUnlock(unlocks, 'supply2');
+    for (const it of ITEMS) {
+        let ok = it.floor === 0 || it.floor === floor;
+        if (!ok && s1 && floor >= 3 && it.floor === 4) ok = true;
+        if (!ok && s2 && floor <= 2 && it.floor >= 3) ok = true;
+        if (ok) out.push(it);
+    }
+    return out;
+}
+
+/** 与现有标签有交集的道具（深度补给 III 的宝箱保底） */
+export function synergyItemPool(items: string[], pool: ItemDef[]): ItemDef[] {
+    const tags: Record<string, boolean> = {};
+    for (const id of items) {
+        const it = ITEM_BY_ID[id];
+        if (!it) continue;
+        for (const t of it.tags) tags[t] = true;
+    }
+    const out: ItemDef[] = [];
+    for (const it of pool) {
+        if (it.tags.length === 0) continue;
+        for (const t of it.tags) {
+            if (tags[t]) {
+                out.push(it);
+                break;
+            }
+        }
+    }
+    return out;
+}
 
 /** 炸弹上限 / 清房奖励区间（§12） */
 export const BOMBS_MAX = 9;
@@ -398,6 +820,20 @@ export const HEART_DROP_CHANCE = 0.3;
 export const BOMB_DROP_CHANCE = 0.15;
 /** 宝箱重掷价格 */
 export const REROLL_COST = 2;
+
+/** 商店：道具 12–18 币 / 半心 4 币 / 炸弹 3 币（规格 §8.3） */
+export const SHOP_ITEM_MIN = 12;
+export const SHOP_ITEM_MAX = 18;
+export const SHOP_HEART_PRICE = 4;
+export const SHOP_BOMB_PRICE = 3;
+/** 祭坛：用 1 颗心（2 半心）换 1 个高价值道具；不足 2 半心时不能献祭 */
+export const ALTAR_COST = 2;
+/** 炸弹：半径 140 / 伤害 50 / 引信 0.9s / 清敌弹 / 炸开秘密墙（规格 §7.3） */
+export const BOMB_RADIUS = 140;
+export const BOMB_DMG = 50;
+export const BOMB_FUSE = 0.9;
+/** 秘密房提示：幸运达到该值后墙上出现裂纹 */
+export const SECRET_HINT_LUCK = 4;
 
 /** 每层调色板（规格 §3） */
 export interface FloorPalette {

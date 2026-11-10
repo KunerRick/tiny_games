@@ -74,8 +74,11 @@ tiny_games/
 │   │   ├── game_tower_defense/ # 场景: TowerDefense（守卫塔楼）
 │   │   ├── game_pool/          # 场景: Pool（台球）
 │   │   ├── game_wordle/        # 场景: Wordle（成语猜猜）
+│   │   ├── game_bubble/        # 场景: Bubble（泡泡龙）
+│   │   ├── game_sokoban/       # 场景: Sokoban（推箱子）
 │   │   ├── game_shmup/         # 场景: Shmup（星际弹幕）
-│   │   └── game_thunder/       # 场景: Thunder（雷霆战机）
+│   │   ├── game_thunder/       # 场景: Thunder（雷霆战机）
+│   │   └── game_fridge/        # 场景: Fridge（冰箱底下）
 │   ├── common/            # 公共模块
 │   │   ├── managers/      # SceneManager, StorageManager, GameConfig
 │   │   └── components/    # BackButton, SafeAreaAdapter
@@ -119,8 +122,11 @@ tiny_games/
 { id: 'tower_defense', name: '守卫塔楼', icon: 'default', sceneName: 'TowerDefense', description: '沿路径布塔，撑过 10 波进攻' }
 { id: 'pool',          name: '台球',     icon: 'default', sceneName: 'Pool',        description: '拉杆瞄准，把球全部打进袋' }
 { id: 'wordle',        name: '成语猜猜', icon: 'default', sceneName: 'Wordle',      description: '六次机会猜出四字成语' }
+{ id: 'bubble',        name: '泡泡龙',   icon: 'default', sceneName: 'Bubble',      description: '瞄准弹射同色泡泡，三连消除清空盘面' }
+{ id: 'sokoban',       name: '推箱子',   icon: 'default', sceneName: 'Sokoban',     description: '推动箱子到目标点，20 关最强规划' }
 { id: 'shmup',         name: '星际弹幕', icon: 'default', sceneName: 'Shmup',       description: '拖动飞船自动开火，9 波弹幕闯关' }
 { id: 'thunder',       name: '雷霆战机', icon: 'default', sceneName: 'Thunder',     description: '关卡制养成弹幕，升级机库击破雷霆核心' }
+{ id: 'fridge',        name: '冰箱底下', icon: 'default', sceneName: 'Fridge',      description: '房间制地牢肉鸽，攒调味料道具打出标签组合' }
 ```
 
 **添加新游戏四步骤**：① `GameConfig.ts` 注册 ② 创建 `assets/games/game_xxx/scenes/Xxx.scene` ③ 场景名与 `sceneName` 一致 ④ **在 `GameIconArt.ts` 补 `ACCENTS[id]` + `drawShape` 的 `case 'id':`**（漏了会落回兜底问号，大厅里和别的游戏长一样），改完跑 `node tools/check-game-icons.js`；规范见 [`design/2026-11-10-ui-art-style-guide.md`](./docs/design/2026-11-10-ui-art-style-guide.md)。

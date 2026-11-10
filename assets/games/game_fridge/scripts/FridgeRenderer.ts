@@ -15,7 +15,9 @@ import { _decorator, Color, Component, Graphics, Node, UITransform } from 'cc';
 import { hex } from '../../../common/ui/UITheme';
 import {
     ARENA_MAX_X, ARENA_MAX_Y, ARENA_MIN_X, ARENA_MIN_Y,
-    COLS, FIELD_H, FIELD_W, FLOOR_PALETTES, PAL, ROWS, TILE, DOOR_HALF, WALL,
+    BOMB_FUSE, BOMB_RADIUS, BOSS_TINT,
+    COLS, FIELD_H, FIELD_W, FLOOR_PALETTES, PAL, PLAYER_PALETTES, ROWS, TILE, DOOR_HALF, WALL,
+    isBossKind,
 } from './FridgeConfig';
 import type { CoreEvent, Enemy, FridgeSnapshot, Pickup } from './FridgeConfig';
 
@@ -71,6 +73,13 @@ export class FridgeRenderer extends Component {
     private _cAim = hex(PAL.white, 140);
     private _cAimTarget = hex(PAL.aimTarget, 180);
     private _cFrost = hex(PAL.frost);
+    /** 四层 Boss 各自的副色（无贴图，靠颜色+王冠区分） */
+    private _cBoss: Record<string, Color> = {
+        moldking: hex(BOSS_TINT.moldking),
+        stitchbear: hex(BOSS_TINT.stitchbear),
+        bluescreen: hex(BOSS_TINT.bluescreen),
+        compressor: hex(BOSS_TINT.compressor),
+    };
 
     onLoad(): void {
         if (!this.entityGfx) {
@@ -100,6 +109,13 @@ export class FridgeRenderer extends Component {
         this._applyPalette(floor);
     }
 
+    /** 调色板（M4 纯装饰解锁）：0 = 默认奶油色 */
+    setPlayerPalette(index: number): void {
+        const p = PLAYER_PALETTES[index] || PLAYER_PALETTES[0];
+        this._cPlayer.fromHEX(p.player);
+        this._cPlayerDark.fromHEX(p.dark);
+    }
+
     /** 安全赋色：复制到暂存色再改 alpha，不污染缓存 */
     private _fill(g: Graphics, c: Color, a = 255): void {
         this._tmpColor.set(c);
@@ -122,6 +138,14 @@ export class FridgeRenderer extends Component {
             } else if (ev.type === 'playerHit') {
                 this._flash = 0.22;
                 this._fx.push({ kind: 'ring', x: ev.x, y: ev.y, r: 16, t: 0, life: 0.3, color: this._cFlash });
+            } else if (ev.type === 'boom') {
+                // 爆炸 / 连锁 / 蒸汽爆发：按事件半径给一圈扩散环
+                this._fx.push({ kind: 'ring', x: ev.x, y: ev.y, r: ev.r * 0.55, t: 0, life: 0.24, color: this._cCanRed });
+            } else if (ev.type === 'bomb' && ev.r > 0) {
+                this._fx.push({ kind: 'ring', x: ev.x, y: ev.y, r: ev.r * 0.5, t: 0, life: 0.32, color: this._cCanRed });
+            } else if (ev.type === 'secret') {
+                // 秘密房炸开：点亮一盏金圈
+                this._fx.push({ kind: 'ring', x: 0, y: FIELD_H / 2 - WALL / 2, r: 30, t: 0, life: 0.6, color: this._cCoin });
             } else if (ev.type === 'room') {
                 this._fade = 0.18;
             }
@@ -142,7 +166,11 @@ export class FridgeRenderer extends Component {
 
         this._drawFloor(g);
         this._drawWalls(g, snap);
+        this._drawStairs(g, snap);
+        this._drawSecretHints(g, snap);
+        this._drawIceFields(g, snap);
         this._drawPickups(g, snap.pickups);
+        this._drawBomb(g, snap);
         this._drawEnemies(g, snap.enemies);
         this._drawBullets(g, snap);
         this._drawPlayer(g, snap);
@@ -165,8 +193,42 @@ export class FridgeRenderer extends Component {
 
     // ==================== 场景 ====================
 
-    private _drawFloor(g: Graphics): void {
-        g.fillColor = this._cBg;
+    /** 冻土协同的冰面：按剩余时间淡出 */
+    private _drawIceFields(g: Graphics, snap: FridgeSnapshot): void {
+        const fields = snap.iceFields;
+        if (!fields || fields.length === 0) return;
+        for (const f of fields) {
+            const a = Math.max(0, Math.min(1, f.t / 2));
+            this._fill(g, this._cFrost, Math.round(70 * a));
+            g.circle(f.x, f.y, f.r);
+            g.fill();
+        }
+    }
+
+    /** 传送口（M4）：Boss 层选完核心后出现，踩上去进下一层 */
+    private _drawStairs(g: Graphics, snap: FridgeSnapshot): void {
+        const s = snap.stairs;
+        if (!s) return;
+        this._fill(g, this._cAccent, 55);
+        g.circle(s.x, s.y, 34);
+        g.fill();
+        this._fill(g, this._cWhite, 40);
+        g.circle(s.x, s.y, 26);
+        g.fill();
+        // 向上的三级台阶
+        g.fillColor = this._cBlack;
+        g.rect(s.x - 20, s.y - 14, 40, 7);
+        g.rect(s.x - 13, s.y - 2, 26, 7);
+        g.rect(s.x - 6, s.y + 10, 12, 7);
+        g.fill();
+        g.fillColor = this._cAccent;
+        g.rect(s.x - 20, s.y - 16, 40, 2);
+        g.rect(s.x - 13, s.y - 4, 26, 2);
+        g.rect(s.x - 6, s.y + 8, 12, 2);
+        g.fill();
+    }
+
+    private _drawFloor(g: Graphics): void {        g.fillColor = this._cBg;
         g.rect(-FIELD_W / 2 - WALL, -FIELD_H / 2 - WALL, FIELD_W + WALL * 2, FIELD_H + WALL * 2);
         g.fill();
 
@@ -249,6 +311,47 @@ export class FridgeRenderer extends Component {
         }
     }
 
+    /** 幸运够高时，秘密房方向的墙上出现极淡裂纹（越高越明显，规格 §6.4） */
+    private _drawSecretHints(g: Graphics, snap: FridgeSnapshot): void {
+        const hints = snap.secretHints;
+        if (!hints || hints.length === 0) return;
+        for (const hint of hints) {
+            const a = Math.round(50 + 120 * hint.strength);
+            this._fill(g, this._cWhite, a);
+            if (hint.dir === 'up') {
+                g.rect(-10, FIELD_H / 2 - WALL - 1, 3, WALL * 0.7 + 1);
+                g.rect(6, FIELD_H / 2 - WALL - 8, 2, 12);
+            } else if (hint.dir === 'down') {
+                g.rect(-10, -FIELD_H / 2 + 1, 3, WALL * 0.7);
+                g.rect(6, -FIELD_H / 2 + WALL - 4, 2, 12);
+            } else if (hint.dir === 'left') {
+                g.rect(-FIELD_W / 2 + 1, -10, WALL * 0.7, 3);
+                g.rect(-FIELD_W / 2 + WALL - 4, 6, 12, 2);
+            } else {
+                g.rect(FIELD_W / 2 - WALL - 1, -10, WALL * 0.7 + 1, 3);
+                g.rect(FIELD_W / 2 - WALL - 8, 6, 12, 2);
+            }
+            g.fill();
+        }
+    }
+
+    /** 已放置的炸弹：红圈警示 + 闪烁的引信 */
+    private _drawBomb(g: Graphics, snap: FridgeSnapshot): void {
+        const b = snap.bomb;
+        if (!b) return;
+        const k = Math.max(0, Math.min(1, b.t / BOMB_FUSE));
+        const pulse = 0.5 + 0.5 * Math.sin((1 - k) * 24);
+        this._fill(g, this._cCanRed, Math.round(40 + 60 * pulse));
+        g.circle(b.x, b.y, BOMB_RADIUS * (0.4 + 0.6 * (1 - k)));
+        g.fill();
+        g.fillColor = this._cBlack;
+        g.circle(b.x, b.y, 11);
+        g.fill();
+        this._fill(g, this._cCoin, Math.round(140 + 115 * pulse));
+        g.circle(b.x + 4, b.y + 14, 3 + 2 * pulse);
+        g.fill();
+    }
+
     // ==================== 实体 ====================
 
     private _drawPickups(g: Graphics, pickups: Pickup[]): void {
@@ -304,14 +407,15 @@ export class FridgeRenderer extends Component {
                 g.fillColor = this._cCanRed;
                 g.rect(e.x - e.r + 4, e.y - 2, e.r * 2 - 8, 5);
                 g.fill();
-            } else if (e.kind === 'moldking') {
-                // Boss：大霉球 + 王冠 + 二阶段光晕
+            } else if (isBossKind(e.kind)) {
+                // Boss：大圆 + 王冠 + 二阶段光晕（颜色区分四层）
+                const tint = this._cBoss[e.kind] || this._cEnemyDark;
                 if (e.gen >= 2) {
                     this._fill(g, this._cCanRed, 70);
                     g.circle(e.x, e.y, e.r + 10);
                     g.fill();
                 }
-                g.fillColor = flash ? this._cWhite : this._cEnemyDark;
+                g.fillColor = flash ? this._cWhite : tint;
                 g.circle(e.x, e.y, e.r);
                 g.fill();
                 g.fillColor = flash ? this._cWhite : this._cEnemy;
@@ -344,6 +448,20 @@ export class FridgeRenderer extends Component {
                 g.fill();
                 g.fillColor = this._cEnemyDark;
                 g.circle(e.x - e.r * 0.3, e.y - e.r * 0.3, e.r * 0.55);
+                g.fill();
+            }
+            // 元素状态：冻结 / 燃烧 / 中毒（只画最优先的一种，避免糊成一团）
+            if (e.freezeT > 0) {
+                this._fill(g, this._cFrost, 110);
+                g.circle(e.x, e.y, e.r + 3);
+                g.fill();
+            } else if (e.burnT > 0) {
+                this._fill(g, this._cCanRed, 90);
+                g.circle(e.x, e.y, e.r + 3);
+                g.fill();
+            } else if (e.poisonT > 0) {
+                this._fill(g, this._cEnemy, 90);
+                g.circle(e.x, e.y, e.r + 3);
                 g.fill();
             }
             // 血条（受伤后才显示）
@@ -447,7 +565,7 @@ export class FridgeRenderer extends Component {
             if (f.kind === 'ring') {
                 g.lineWidth = 3;
                 this._stroke(g, f.color, Math.round(200 * (1 - k)));
-                g.circle(f.x, f.y, 10 + 26 * k);
+                g.circle(f.x, f.y, f.r + 26 * k);
                 g.stroke();
             } else {
                 this._fill(g, f.color, Math.round(230 * (1 - k)));

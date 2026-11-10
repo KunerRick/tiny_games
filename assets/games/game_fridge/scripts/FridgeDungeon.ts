@@ -10,7 +10,8 @@
  * 同一 (seed, floor) 必然得到同一张图；RNG 只用于地图与房间刷怪，调用顺序固定。
  */
 
-import { CHAR_BY_ID, ITEM_BY_ID, clamp, mulberry32 } from './FridgeConfig';
+import { CHAR_BY_ID, CORE_BY_ID, CORE_FILLER_BY_ID, ITEM_BY_ID, clamp, mulberry32 } from './FridgeConfig';
+import type { ShopOffer } from './FridgeConfig';
 
 // ==================== 地图结构 ====================
 
@@ -304,8 +305,8 @@ export const RUN_KEY = 'tiny_games_fridge_run';
 export const META_KEY = 'tiny_games_fridge_meta';
 export const BACKUP_KEY = 'tiny_games_fridge_backup';
 
-export const CURRENT_RUN_VERSION = 2;
-export const CURRENT_META_VERSION = 2;
+export const CURRENT_RUN_VERSION = 3;
+export const CURRENT_META_VERSION = 3;
 
 export interface RoomNodeSave {
     x: number;
@@ -331,7 +332,7 @@ export interface FloorMapSave {
 }
 
 export interface RunSave {
-    schemaVersion: 2;
+    schemaVersion: 3;
     runId: string;
     mode: 'normal' | 'daily' | 'heat';
     seed: number;
@@ -339,8 +340,10 @@ export interface RunSave {
     rngState: number;
     charId: string;
     floor: 1 | 2 | 3 | 4;
-    startFloor: 1 | 2;
+    startFloor: number;
     heatCurses: string[];
+    /** 本局携带的解锁节点（深度补给 / 每日特供等，M4） */
+    unlocks?: string[];
     map: FloorMapSave | null;
     roomId: number;
     enteringFrom: Dir | null;
@@ -352,21 +355,39 @@ export interface RunSave {
         charges: number;
         maxCharges: number;
         frozenSpeedPenalty: number;
+        /** 保鲜膜本层免死是否已用（M3，旧档缺省 false） */
+        deathWardUsed?: boolean;
+        /** 存档点本房间复活是否已用（M3，旧档缺省 -1） */
+        savepointUsedRoom?: number;
     };
     items: string[];
     activeItem: string | null;
     cores: string[];
+    /** 本局已点亮的协同 id（M3） */
+    synergies?: string[];
+    /** Boss 核心三选一待选（M4，非 null 时续玩仍冻结在三选一） */
+    pendingCore?: string[] | null;
+    /** 本局冰箱贴 / 秘密房 / 商店消费 / 炸弹（M4 结算用） */
+    magnets?: number;
+    secretOpened?: number;
+    shopSpent?: number;
+    bombsUsed?: number;
     treasure: { offered: string[]; rerolled: boolean } | null;
-    shop: { stock: (string | null)[]; rerolled: boolean } | null;
+    /** 商店货架（M3：未买完 / 未离开时非 null） */
+    shop: { offers: ShopOffer[]; sold: boolean[] } | null;
+    /** 祭坛献祭（M3） */
+    altar?: { itemId: string; used: boolean } | null;
     savedAt: number;
     gameVersion: string;
 }
 
 export interface FridgeSave {
-    schemaVersion: 2;
+    schemaVersion: 3;
     magnets: number;
     unlocks: string[];
     seenItems: string[];
+    /** 已见过的协同（图鉴升级后展示，M4） */
+    seenSynergies: string[];
     stats: {
         runs: number;
         wins: number;
@@ -375,9 +396,13 @@ export interface FridgeSave {
         bestFloor: number;
         spent: number;
         charClears: string[];
+        /** 已通关的最高层（0–4，M4 解锁条件用） */
+        maxClearedFloor: number;
     };
     daily: { date: string; charId: string; bestFloor: number; cleared: boolean } | null;
     settings: { sfx: boolean; music: boolean; shake: boolean };
+    /** 已选中的角色配色（0 = 默认；调色板是纯外观解锁，M4） */
+    palette: number;
 }
 
 export function serializeFloorMap(map: FloorMap | null): FloorMapSave | null {
@@ -490,10 +515,10 @@ export function sanitizeRun(raw: unknown): RunSave | null {
     const maxHp = clamp(Number.isFinite(maxHpRaw) ? maxHpRaw : 6, 2, 12);
     const hpRaw = Math.round(Number(p.hp));
     const hp = clamp(Number.isFinite(hpRaw) ? hpRaw : maxHp, 1, maxHp);
-    const maxCharges = clamp(Math.round(Number(p.maxCharges)) || 3, 1, 9);
+    const maxCharges = clamp(Math.round(Number(p.maxCharges)) || 3, 1, 12);
     const charges = clamp(Math.round(Number(p.charges)) || 0, 0, maxCharges);
     const coins = Math.max(0, Math.floor(Number(p.coins)) || 0);
-    const bombs = clamp(Math.round(Number(p.bombs)) || 0, 0, 9);
+    const bombs = clamp(Math.round(Number(p.bombs)) || 0, 0, 12);
     const frozen = clamp(Number(p.frozenSpeedPenalty) || 0, 0, 0.4);
 
     const items: string[] = [];
@@ -504,9 +529,34 @@ export function sanitizeRun(raw: unknown): RunSave | null {
     }
     const cores: string[] = [];
     if (Array.isArray(o.cores)) {
-        for (const id of o.cores) if (typeof id === 'string') cores.push(id);
+        for (const id of o.cores) {
+            if (typeof id === 'string' && (CORE_BY_ID[id] || CORE_FILLER_BY_ID[id])) cores.push(id);
+        }
     }
+    let pendingCore: string[] | null = null;
+    if (Array.isArray(o.pendingCore)) {
+        const opts: string[] = [];
+        for (const id of o.pendingCore) {
+            if (typeof id === 'string' && (CORE_BY_ID[id] || CORE_FILLER_BY_ID[id])) opts.push(id);
+        }
+        if (opts.length === 3) pendingCore = opts;
+    }
+    const unlocks: string[] = [];
+    if (Array.isArray(o.unlocks)) {
+        for (const id of o.unlocks) if (typeof id === 'string') unlocks.push(id);
+    }
+    const counter = (v: unknown): number => {
+        const n = Math.floor(Number(v));
+        return Number.isFinite(n) && n > 0 ? n : 0;
+    };
     const activeItem = typeof o.activeItem === 'string' && ITEM_BY_ID[o.activeItem] ? o.activeItem : null;
+    const synergies: string[] = [];
+    if (Array.isArray(o.synergies)) {
+        for (const id of o.synergies) if (typeof id === 'string') synergies.push(id);
+    }
+    const deathWardUsed = !!p.deathWardUsed;
+    const savepointUsedRoom = Number.isFinite(Number(p.savepointUsedRoom))
+        ? Math.round(Number(p.savepointUsedRoom)) : -1;
 
     let treasure: RunSave['treasure'] = null;
     if (o.treasure && typeof o.treasure === 'object' && Array.isArray(o.treasure.offered)) {
@@ -517,52 +567,88 @@ export function sanitizeRun(raw: unknown): RunSave | null {
         if (offered.length === 3) treasure = { offered, rerolled: !!o.treasure.rerolled };
     }
 
+    let shop: RunSave['shop'] = null;
+    if (o.shop && typeof o.shop === 'object' && Array.isArray(o.shop.offers)) {
+        const offers: ShopOffer[] = [];
+        for (const raw of o.shop.offers) {
+            if (!raw || typeof raw !== 'object') continue;
+            const price = clamp(Math.round(Number(raw.price)) || 0, 0, 99);
+            if (raw.kind === 'item' && typeof raw.id === 'string' && ITEM_BY_ID[raw.id]) {
+                offers.push({ kind: 'item', id: raw.id, price });
+            } else if (raw.kind === 'heart' || raw.kind === 'bomb') {
+                offers.push({ kind: raw.kind, price });
+            }
+        }
+        const soldRaw: unknown[] = Array.isArray(o.shop.sold) ? o.shop.sold : [];
+        if (offers.length > 0) shop = { offers, sold: offers.map((_, i) => !!soldRaw[i]) };
+    }
+    let altar: RunSave['altar'] = null;
+    if (o.altar && typeof o.altar === 'object'
+        && typeof o.altar.itemId === 'string' && ITEM_BY_ID[o.altar.itemId]) {
+        altar = { itemId: o.altar.itemId, used: !!o.altar.used };
+    }
+
     const enteringFrom = isDir(o.enteringFrom) ? o.enteringFrom : null;
     const rngState = Number(o.rngState);
     return {
-        schemaVersion: 2,
+        schemaVersion: 3,
         runId: typeof o.runId === 'string' && o.runId ? o.runId : `run-${seed}`,
         mode: o.mode === 'daily' || o.mode === 'heat' ? o.mode : 'normal',
         seed: seed >>> 0,
         rngState: Number.isFinite(rngState) ? rngState >>> 0 : 0,
         charId,
         floor: floor as 1 | 2 | 3 | 4,
-        startFloor: o.startFloor === 2 ? 2 : 1,
+        startFloor: clamp(Math.round(Number(o.startFloor)) || 1, 1, 4),
         heatCurses: Array.isArray(o.heatCurses) ? o.heatCurses.filter((c: unknown) => typeof c === 'string') : [],
+        unlocks,
         map: serializeFloorMap(map),
         roomId,
         enteringFrom,
-        player: { hp, maxHp, coins, bombs, charges, maxCharges, frozenSpeedPenalty: frozen },
+        player: {
+            hp, maxHp, coins, bombs, charges, maxCharges, frozenSpeedPenalty: frozen,
+            deathWardUsed, savepointUsedRoom,
+        },
         items,
         activeItem,
         cores,
+        synergies,
+        pendingCore,
+        magnets: counter(o.magnets),
+        secretOpened: counter(o.secretOpened),
+        shopSpent: counter(o.shopSpent),
+        bombsUsed: counter(o.bombsUsed),
         treasure,
-        shop: null,
+        shop,
+        altar,
         savedAt: Number(o.savedAt) || 0,
         gameVersion: typeof o.gameVersion === 'string' ? o.gameVersion : '',
     };
 }
 
-/** 旧档迁移：目前只有 v2；未来字段只增不改，逐级升版（§13.4） */
+/** 旧档迁移：v1 → v2（补 rngState / treasure / enteringFrom）→ v3（补 pendingCore / magnets 计数 / unlocks）；字段只增不改 */
 export function migrateRun(raw: unknown): RunSave | null {
     if (!raw || typeof raw !== 'object') return null;
     const o = raw as Record<string, any>;
     const ver = Number(o.schemaVersion);
     if (Number.isFinite(ver) && ver > CURRENT_RUN_VERSION) return null; // 未来版本：不覆盖、不崩
     if (!Number.isFinite(ver)) o.schemaVersion = 1; // 无版本号的极旧档按 v1 处理
-    // v1 → v2：v1 没有 rngState / treasure / enteringFrom，sanitizeRun 会补默认值
     return sanitizeRun(o);
 }
 
 export function defaultMeta(): FridgeSave {
     return {
-        schemaVersion: 2,
+        schemaVersion: 3,
         magnets: 0,
         unlocks: [],
         seenItems: [],
-        stats: { runs: 0, wins: 0, kills: 0, secrets: 0, bestFloor: 0, spent: 0, charClears: [] },
+        seenSynergies: [],
+        stats: {
+            runs: 0, wins: 0, kills: 0, secrets: 0, bestFloor: 0, spent: 0,
+            charClears: [], maxClearedFloor: 0,
+        },
         daily: null,
         settings: { sfx: true, music: true, shake: true },
+        palette: 0,
     };
 }
 
@@ -577,6 +663,9 @@ export function sanitizeMeta(raw: unknown): FridgeSave {
     if (Array.isArray(o.seenItems)) {
         base.seenItems = o.seenItems.filter((x: unknown) => typeof x === 'string' && !!ITEM_BY_ID[x as string]);
     }
+    if (Array.isArray(o.seenSynergies)) {
+        base.seenSynergies = o.seenSynergies.filter((x: unknown) => typeof x === 'string');
+    }
     const s = (o.stats && typeof o.stats === 'object' ? o.stats : {}) as Record<string, any>;
     const num = (v: unknown): number => {
         const n = Math.floor(Number(v));
@@ -590,6 +679,7 @@ export function sanitizeMeta(raw: unknown): FridgeSave {
         bestFloor: clamp(num(s.bestFloor), 0, 4),
         spent: num(s.spent),
         charClears: Array.isArray(s.charClears) ? s.charClears.filter((x: unknown) => typeof x === 'string') : [],
+        maxClearedFloor: clamp(num(s.maxClearedFloor), 0, 4),
     };
     if (o.daily && typeof o.daily === 'object') {
         const d = o.daily as Record<string, any>;
@@ -604,6 +694,7 @@ export function sanitizeMeta(raw: unknown): FridgeSave {
         const st = o.settings as Record<string, any>;
         base.settings = { sfx: st.sfx !== false, music: st.music !== false, shake: st.shake !== false };
     }
+    base.palette = clamp(num(o.palette), 0, 3);
     return base;
 }
 
