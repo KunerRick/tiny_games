@@ -385,6 +385,13 @@ function parseLogTime(line) {
 function findLastDevtoolsCompile(logDirs) {
   let latest = 0;
   let where = '';
+  // 三种「工具处理了本项目」的信号：
+  //   ① 首次打开 / 重启模拟器 → `simulator launch success|failed`
+  //   ② 模拟器已在跑时的重新编译 → `[SimulatorService] simulator app compile`
+  //   ③ 工具重启后自动打开上次的项目并拉起模拟器 → `[SimulatorService] init simulator`
+  //      （2026-11-10 实测：重启工具只会走 ③，既没有 launch 也没有 app compile，
+  //        于是「构建 → 重开工具 → 模拟器已经显示新画面」会被误判成停在过期构建）
+  const handledLine = /simulator launch (success|failed)|simulator app compile|\[SimulatorService\] init simulator/;
   for (const dir of logDirs) {
     let names;
     try {
@@ -405,12 +412,7 @@ function findLastDevtoolsCompile(logDirs) {
         continue;
       }
       for (const line of text.split('\n')) {
-        // 两种「工具处理了本项目」的信号：
-        //   ① 首次打开 / 重启模拟器 → `simulator launch success|failed`
-        //   ② 模拟器已在跑时的重新编译 → `[SimulatorService] simulator app compile`
-        // 只认 ① 会把「产物被改写后工具自动重编译」误判成「工具停在过期构建」，
-        // 而模拟器一直开着时，工具根本不会再打一条 launch 日志。
-        if (!/simulator launch (success|failed)|simulator app compile/.test(line)) continue;
+        if (!handledLine.test(line)) continue;
         const t = parseLogTime(line);
         if (t > latest) {
           latest = t;
