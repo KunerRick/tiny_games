@@ -12,6 +12,7 @@
  */
 
 import { _decorator, Color, Component, Graphics, Label, Node, UITransform } from 'cc';
+import { COLOR, hex } from '../../../common/ui/UITheme';
 import { ARENA_HALF, COLORS, ORBIT_BALL_RADIUS, ORBIT_LEVELS, SurvivorSnapshot } from './SurvivorConfig';
 import type { BulletState, CoreEvent, EnemyState, GemState } from './SurvivorConfig';
 
@@ -100,10 +101,10 @@ export class SurvivorRenderer extends Component {
     private _cLightning = new Color();
     private _cHeal = new Color();
     private _cFx = new Color();
-    private _cWhite = new Color(255, 255, 255, 255);
-    private _cBarBack = new Color(0, 0, 0, 160);
+    private _cWhite = hex(COLORS.fx);
+    private _cBarBack = hex(COLOR.BG_OVERLAY, 160);
     private _cElite = new Color();
-    private _cDark = new Color(0, 0, 0, 0);
+    private _cDark = hex(COLOR.BG_OVERLAY, 0);
     private _bgDrawn = false;
 
     private _fx: FxItem[] = [];
@@ -124,11 +125,7 @@ export class SurvivorRenderer extends Component {
         this._cBomberWarn.fromHEX(COLORS.bomberWarn);
         this._cBoss.fromHEX(COLORS.boss);
         this._cGem.fromHEX(COLORS.gem);
-        this._cGemTier = COLORS.gemTiers.map((hex) => {
-            const c = new Color();
-            c.fromHEX(hex);
-            return c;
-        });
+        this._cGemTier = COLORS.gemTiers.map((tierHex) => hex(tierHex));
         this._cPickupHeal.fromHEX(COLORS.pickupHeal);
         this._cPickupMagnet.fromHEX(COLORS.pickupMagnet);
         this._cPickupBomb.fromHEX(COLORS.pickupBomb);
@@ -209,7 +206,7 @@ export class SurvivorRenderer extends Component {
             const inset = i * (bandW / 6);
             const alpha = 26 - i * 4;
             if (alpha <= 0) break;
-            g.fillColor = new Color(0, 0, 0, alpha);
+            g.fillColor = hex(COLOR.BG_OVERLAY, alpha);
             const t = bandW / 6;
             g.rect(-ARENA_HALF + inset, ARENA_HALF - inset - t, ARENA_HALF * 2 - inset * 2, t);
             g.rect(-ARENA_HALF + inset, -ARENA_HALF + inset, ARENA_HALF * 2 - inset * 2, t);

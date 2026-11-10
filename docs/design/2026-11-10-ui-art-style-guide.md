@@ -66,7 +66,13 @@ assets/main/scripts/
 
 1. **新代码只用 `COLOR.*`**；`UI.*` 是 9 款老游戏的简写色板，取值刻意冻结，迁移完再收缩。
 2. 需要 `Color` 实例时用 `hex(COLOR.X)` 新取一个（`Color` 是可变 ValueType，别共享）。
-3. 透明度走 `ALPHA.*`，别再散落 180 / 220 / 245 这种数字。
+   取色一律走 `UITheme.hex()`，**不要在各游戏里再抄一份 `function hex()`**。
+3. 透明度走 `ALPHA.*` / `hex(x, alpha)`，别再散落 180 / 220 / 245 这种数字。
+4. **游戏身份色放该游戏的配置里**（`SurvivorConfig.COLORS`、`FridgeConfig.PAL`，只放十六进制字符串，
+   配置不 import `cc` 才能被自检脚本直接编译），渲染层 `hex(COLORS.x, alpha)` 取值；
+   业务代码里不再出现 `new Color(r, g, b, a)` 字面量。
+   判据：通用界面（文字三档 / 面板底 / 遮罩）用令牌，**玩法身份色**（主角奶油黄、敌人豌豆绿、
+   冰蓝强调色这类）才留在游戏调色板里。
 
 ### 2.2 字号与间距（`UITheme`）
 
@@ -81,12 +87,12 @@ assets/main/scripts/
   后者一律 `stripVariationSelectors()`（红线 10，否则微信字体渲染成方框）。
 - 能用 Graphics 画就别用 emoji：emoji 在不同机型上的字形与基线不可控。
 
-### 2.4 已知偏差（待收敛，不影响当前可玩）
+### 2.4 已知偏差（不影响当前可玩）
 
-| 游戏 | 偏差 | 收敛方向 |
-|------|------|---------|
+| 游戏 | 偏差 | 现状 |
+|------|------|------|
 | `tetris` | 自带 `TetrisSkin.ts` 一整套皮肤（历史原因），不走 `GameUIKit` | 保持；返回键已按约定例外（`BackButton` 检测到自带 Graphics 不再叠皮） |
-| `survivor` / `fridge` | 运行时 UI 内联 RGB（`new Color(6,8,14)` 这类），未引令牌 | 后续把取值替换为 `COLOR.*`，画面肉眼不变 |
+| `survivor` / `fridge` | 玩法身份色不入 `COLOR` 令牌 | **已收敛**（2026-11-10）：身份色集中到 `SurvivorConfig.COLORS` / `FridgeConfig.PAL`，取色一律走共享 `hex()`；文字三档与面板底改用 `COLOR.*`。生产代码里已无 `new Color(r,g,b,a)` 字面量 |
 
 ---
 
@@ -198,3 +204,4 @@ node "$TSC" --noEmit                    # 编译通过
 | 日期 | 变更 |
 |------|------|
 | 2026-11-10 | 六款新游戏（wordle / bubble / sokoban / shmup / thunder / fridge）补齐专属图标；新增 `tools/check-game-icons.js`；本文立稿 |
+| 2026-11-10 | `survivor` / `fridge` 内联 RGB 收敛：身份色集中到 `SurvivorConfig.COLORS` / 新增 `FridgeConfig.PAL`，取色统一走 `UITheme.hex()`，文字与面板底改用 `COLOR.*`；补上「游戏身份色放哪」的规则（§2.1 第 4 条） |

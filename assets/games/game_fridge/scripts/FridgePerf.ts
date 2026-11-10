@@ -10,7 +10,9 @@
  *  - onDestroy 只解绑自身事件与清引用（红线 4）
  */
 
-import { _decorator, Color, Component, Graphics, Label, Node, UITransform } from 'cc';
+import { _decorator, Component, Graphics, Label, Node, UITransform } from 'cc';
+import { COLOR, hex } from '../../../common/ui/UITheme';
+import { PAL } from './FridgeConfig';
 import type { FridgeSnapshot } from './FridgeConfig';
 
 const { ccclass } = _decorator;
@@ -151,7 +153,7 @@ export class FridgePerf extends Component {
         this._toggleNode = node;
 
         const gfx = node.addComponent(Graphics);
-        gfx.fillColor = new Color(24, 30, 46, 200);
+        gfx.fillColor = hex(PAL.panel, 200);
         gfx.roundRect(-56, -20, 112, 40, 10);
         gfx.fill();
 
@@ -166,7 +168,7 @@ export class FridgePerf extends Component {
         const label = labelNode.addComponent(Label);
         label.fontSize = 17;
         label.lineHeight = 22;
-        label.color = new Color(210, 230, 240, 255);
+        label.color = hex(COLOR.TEXT_SECONDARY);
         label.horizontalAlign = Label.HorizontalAlign.CENTER;
         label.verticalAlign = Label.VerticalAlign.CENTER;
         label.overflow = Label.Overflow.NONE;
@@ -197,7 +199,7 @@ export class FridgePerf extends Component {
         this._panel = node;
 
         const gfx = node.addComponent(Graphics);
-        gfx.fillColor = new Color(10, 14, 24, 190);
+        gfx.fillColor = hex(PAL.panelDeep, 190);
         gfx.roundRect(-PANEL_W / 2, -PANEL_H / 2, PANEL_W, PANEL_H, 10);
         gfx.fill();
         this._bg = gfx;
@@ -217,7 +219,7 @@ export class FridgePerf extends Component {
         const label = node.addComponent(Label);
         label.fontSize = size;
         label.lineHeight = Math.round(size * 1.35);
-        label.color = new Color(210, 230, 240, 255);
+        label.color = hex(COLOR.TEXT_SECONDARY);
         label.horizontalAlign = align;
         label.verticalAlign = Label.VerticalAlign.TOP;
         label.overflow = Label.Overflow.NONE;

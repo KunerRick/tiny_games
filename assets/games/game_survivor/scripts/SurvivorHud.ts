@@ -9,8 +9,9 @@
  * 构筑行是「升级不明显」的关键反馈：玩家选过的每一张卡都要在屏幕上留下名字。
  */
 
-import { _decorator, Color, Component, EventTouch, Graphics, Label, Node, UITransform } from 'cc';
-import { PASSIVE_NAMES, WEAPON_NAMES, SurvivorSnapshot } from './SurvivorConfig';
+import { _decorator, Component, EventTouch, Graphics, Label, Node, UITransform } from 'cc';
+import { COLOR, hex } from '../../../common/ui/UITheme';
+import { COLORS, PASSIVE_NAMES, WEAPON_NAMES, SurvivorSnapshot } from './SurvivorConfig';
 import type { PassiveTrack, WeaponTrack } from './SurvivorConfig';
 
 const { ccclass } = _decorator;
@@ -24,22 +25,12 @@ const XP_BAR_H = 10;
 /** 生命条只占左半，右边留给等级与击杀 */
 const HP_BAR_W = 320;
 
-const TEXT_PRIMARY = '#F8FAFC';
-const TEXT_SECONDARY = '#94A3B8';
-
 /** 顶栏小按钮（倍速 / 暂停）：手机上没有键盘，必须给触屏入口 */
 const BTN_W = 92;
 const BTN_H = 46;
 const BTN_SPEED_X = 196;
 const BTN_PAUSE_X = 300;
 const BTN_Y = 548;
-
-function hex(hexStr: string, alpha = 255): Color {
-    const c = new Color();
-    c.fromHEX(hexStr);
-    c.a = alpha;
-    return c;
-}
 
 @ccclass('SurvivorHud')
 export class SurvivorHud extends Component {
@@ -58,10 +49,10 @@ export class SurvivorHud extends Component {
     onSpeedTap: (() => void) | null = null;
     onPauseTap: (() => void) | null = null;
 
-    private _cBarBack = hex('#000000', 140);
-    private _cHp = hex('#5DE89A');
-    private _cHpLow = hex('#E85D5D');
-    private _cXp = hex('#7FE7FF');
+    private _cBarBack = hex(COLOR.BG_OVERLAY, 140);
+    private _cHp = hex(COLORS.gem);
+    private _cHpLow = hex(COLORS.chaser);
+    private _cXp = hex(COLORS.player);
 
     private _lastTime = '';
     private _lastHp = '';
@@ -86,15 +77,15 @@ export class SurvivorHud extends Component {
         const root = this.node;
         this._gfx = root.addComponent(Graphics);
 
-        this._time = this._label(root, 0, 588, 240, 40, '', 28, TEXT_PRIMARY, true);
-        this._level = this._label(root, 250, 588, 160, 36, '', 24, TEXT_PRIMARY, true);
+        this._time = this._label(root, 0, 588, 240, 40, '', 28, COLOR.TEXT_PRIMARY, true);
+        this._level = this._label(root, 250, 588, 160, 36, '', 24, COLOR.TEXT_PRIMARY, true);
         this._level.horizontalAlign = Label.HorizontalAlign.RIGHT;
-        this._hp = this._label(root, -170, 548, 300, 22, '', 18, TEXT_PRIMARY, true);
+        this._hp = this._label(root, -170, 548, 300, 22, '', 18, COLOR.TEXT_PRIMARY, true);
         // 左对齐会压到左上角的返回按钮，改成贴着生命条右端右对齐
         this._hp.horizontalAlign = Label.HorizontalAlign.RIGHT;
-        this._kills = this._label(root, 250, 472, 180, 28, '', 20, TEXT_SECONDARY, false);
+        this._kills = this._label(root, 250, 472, 180, 28, '', 20, COLOR.TEXT_SECONDARY, false);
         this._kills.horizontalAlign = Label.HorizontalAlign.RIGHT;
-        this._build = this._label(root, -80, 472, 520, 28, '', 20, TEXT_SECONDARY, false);
+        this._build = this._label(root, -80, 472, 520, 28, '', 20, COLOR.TEXT_SECONDARY, false);
         this._build.horizontalAlign = Label.HorizontalAlign.LEFT;
 
         this._speedBtn = this._makeButton(root, BTN_SPEED_X, BTN_Y, '1x');
@@ -114,15 +105,15 @@ export class SurvivorHud extends Component {
         node.setPosition(x, y, 0);
 
         const g = node.addComponent(Graphics);
-        g.fillColor = hex('#000000', 120);
+        g.fillColor = hex(COLOR.BG_OVERLAY, 120);
         g.roundRect(-BTN_W / 2, -BTN_H / 2, BTN_W, BTN_H, 12);
         g.fill();
         g.lineWidth = 1.5;
-        g.strokeColor = hex('#7FE7FF', 150);
+        g.strokeColor = hex(COLORS.player, 150);
         g.roundRect(-BTN_W / 2, -BTN_H / 2, BTN_W, BTN_H, 12);
         g.stroke();
 
-        const label = this._label(node, 0, 0, BTN_W - 12, BTN_H - 8, text, 22, TEXT_PRIMARY, true);
+        const label = this._label(node, 0, 0, BTN_W - 12, BTN_H - 8, text, 22, COLOR.TEXT_PRIMARY, true);
         label.overflow = Label.Overflow.SHRINK;
 
         parent.addChild(node);

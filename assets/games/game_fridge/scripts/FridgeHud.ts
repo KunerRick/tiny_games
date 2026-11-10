@@ -8,8 +8,9 @@
  */
 
 import { _decorator, Color, Component, EventTouch, Graphics, Label, Node, sys, UITransform } from 'cc';
+import { COLOR, hex } from '../../../common/ui/UITheme';
 import type { FridgeSnapshot } from './FridgeConfig';
-import { ITEM_BY_ID, REROLL_COST } from './FridgeConfig';
+import { ITEM_BY_ID, PAL, REROLL_COST } from './FridgeConfig';
 import type { FloorMap } from './FridgeDungeon';
 import { MAP_H, MAP_W } from './FridgeDungeon';
 
@@ -61,9 +62,9 @@ export class FridgeHud extends Component {
     private _wasDead = false;
     private _newRecord = false;
 
-    private _cFull = new Color(226, 88, 84, 255);
-    private _cEmpty = new Color(60, 60, 70, 255);
-    private _cText = new Color(236, 240, 245, 255);
+    private _cFull = hex(PAL.red);
+    private _cEmpty = hex(PAL.barEmpty);
+    private _cText = hex(COLOR.TEXT_PRIMARY);
 
     static create(parent: Node): FridgeHud {
         const node = new Node('FridgeHud');
@@ -240,11 +241,11 @@ export class FridgeHud extends Component {
         }
     }
 
-    private _cMapPlain = new Color(90, 108, 126, 235);
-    private _cMapCleared = new Color(124, 200, 255, 235);
-    private _cMapCurrent = new Color(255, 233, 153, 255);
-    private _cMapBoss = new Color(226, 88, 84, 235);
-    private _cMapTreasure = new Color(255, 214, 92, 235);
+    private _cMapPlain = hex(PAL.mapPlain, 235);
+    private _cMapCleared = hex(PAL.accentLight, 235);
+    private _cMapCurrent = hex(PAL.player);
+    private _cMapBoss = hex(PAL.red, 235);
+    private _cMapTreasure = hex(PAL.coin, 235);
 
     // ==================== 宝箱三选一 ====================
 
@@ -261,7 +262,7 @@ export class FridgeHud extends Component {
         dim.layer = this.node.layer;
         dim.addComponent(UITransform).setContentSize(720, 1060);
         const dg = dim.addComponent(Graphics);
-        dg.fillColor = new Color(6, 8, 14, 190);
+        dg.fillColor = hex(PAL.overlay, 190);
         dg.rect(-360, -530, 720, 1060);
         dg.fill();
         node.addChild(dim);
@@ -280,11 +281,11 @@ export class FridgeHud extends Component {
             cut.setAnchorPoint(0.5, 0.5);
             card.setPosition(xs[i], 120, 0);
             const cg = card.addComponent(Graphics);
-            cg.fillColor = new Color(28, 38, 56, 245);
+            cg.fillColor = hex(PAL.card, 245);
             cg.roundRect(-95, -130, 190, 260, 16);
             cg.fill();
             cg.lineWidth = 3;
-            cg.strokeColor = new Color(255, 214, 92, 200);
+            cg.strokeColor = hex(PAL.coin, 200);
             cg.roundRect(-95, -130, 190, 260, 16);
             cg.stroke();
             node.addChild(card);
@@ -312,12 +313,12 @@ export class FridgeHud extends Component {
         rut.setAnchorPoint(0.5, 0.5);
         reroll.setPosition(0, -110, 0);
         const rg = reroll.addComponent(Graphics);
-        rg.fillColor = new Color(124, 231, 255, 235);
+        rg.fillColor = hex(PAL.accent, 235);
         rg.roundRect(-150, -32, 300, 64, 32);
         rg.fill();
         const rl = this._makeLabel('RerollLabel', 0, 0, 24, Label.HorizontalAlign.CENTER, 280);
         rl.string = `换一批（${REROLL_COST} 金币）`;
-        rl.color = new Color(10, 18, 28, 255);
+        rl.color = hex(PAL.ink);
         rl.node.setPosition(0, 0, 0);
         reroll.addChild(rl.node);
         reroll.on(Node.EventType.TOUCH_END, this.onTreasureRerollTouch, this);
@@ -444,21 +445,21 @@ export class FridgeHud extends Component {
         this._deadDim = node;
 
         const g = node.addComponent(Graphics);
-        g.fillColor = new Color(6, 8, 14, 170);
+        g.fillColor = hex(PAL.overlay, 170);
         g.rect(-360, -530, 720, 1060);
         g.fill();
 
         // 提示卡片
-        g.fillColor = new Color(24, 30, 46, 235);
+        g.fillColor = hex(PAL.panel, 235);
         g.roundRect(-300, -30, 600, 220, 22);
         g.fill();
         g.lineWidth = 3;
-        g.strokeColor = new Color(124, 231, 255, 160);
+        g.strokeColor = hex(PAL.accent, 160);
         g.roundRect(-300, -30, 600, 220, 22);
         g.stroke();
 
         // 「再来一局」按钮底
-        g.fillColor = new Color(124, 231, 255, 235);
+        g.fillColor = hex(PAL.accent, 235);
         g.roundRect(-130, -150, 260, 64, 32);
         g.fill();
 
@@ -473,7 +474,7 @@ export class FridgeHud extends Component {
         bl.fontSize = 26;
         bl.lineHeight = 32;
         bl.isBold = true;
-        bl.color = new Color(10, 18, 28, 255);
+        bl.color = hex(PAL.ink);
         bl.horizontalAlign = Label.HorizontalAlign.CENTER;
         bl.verticalAlign = Label.VerticalAlign.CENTER;
         node.addChild(btn);

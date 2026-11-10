@@ -8,8 +8,9 @@
  *  - 事件在 show() 绑定、hide() 解绑（防崩溃守则 6），handler 全部命名方法（红线 5）
  */
 
-import { _decorator, Color, Component, EventTouch, Graphics, Label, Node, UITransform } from 'cc';
-import { UpgradeOffer } from './SurvivorConfig';
+import { _decorator, Component, EventTouch, Graphics, Label, Node, UITransform } from 'cc';
+import { COLOR, hex } from '../../../common/ui/UITheme';
+import { COLORS, UpgradeOffer } from './SurvivorConfig';
 
 const { ccclass } = _decorator;
 
@@ -24,19 +25,20 @@ const ICON_R = 30;
 /** 三张卡的中心 y（Canvas 中心为原点） */
 const CARD_YS = [250, 40, -170];
 
-const PANEL_BG = '#0B0C14';
-const CARD_BG = '#1E2130';
-const TEXT_PRIMARY = '#F8FAFC';
-const TEXT_SECONDARY = '#94A3B8';
+/** 面板遮罩底：本品夜色；卡片底与文字走全站令牌 */
+const PANEL_BG = COLORS.panelBg;
+const CARD_BG = COLOR.PANEL_BG;
+const TEXT_PRIMARY = COLOR.TEXT_PRIMARY;
+const TEXT_SECONDARY = COLOR.TEXT_SECONDARY;
 
 /** 卡牌类别 → 边框/标签颜色（沿用敌人与玩家的主色，不新增色） */
 const KIND_COLORS: Record<string, string> = {
-    weaponUpgrade: '#7FE7FF',
-    newWeapon: '#7FE7FF',
-    passiveUpgrade: '#5DE89A',
-    newPassive: '#5DE89A',
-    heal: '#FF5FA2',
-    temper: '#FFD166',
+    weaponUpgrade: COLORS.player,
+    newWeapon: COLORS.player,
+    passiveUpgrade: COLORS.gem,
+    newPassive: COLORS.gem,
+    heal: COLORS.boss,
+    temper: COLORS.win,
 };
 
 const KIND_TAGS: Record<string, string> = {
@@ -54,13 +56,6 @@ interface CardView {
     tag: Label;
     title: Label;
     detail: Label;
-}
-
-function hex(hexStr: string, alpha = 255): Color {
-    const c = new Color();
-    c.fromHEX(hexStr);
-    c.a = alpha;
-    return c;
 }
 
 @ccclass('SurvivorUpgradePanel')

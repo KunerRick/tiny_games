@@ -14,7 +14,8 @@
  * 约定：事件 handler 全部命名方法（红线 5）；`onDestroy()` 只解绑与清引用（红线 4）。
  */
 
-import { _decorator, Color, Component, EventTouch, Graphics, Node, UITransform, Vec2, Vec3 } from 'cc';
+import { _decorator, Component, EventTouch, Graphics, Node, UITransform, Vec2, Vec3 } from 'cc';
+import { hex } from '../../../common/ui/UITheme';
 import { COLORS } from './SurvivorConfig';
 
 const { ccclass } = _decorator;
@@ -173,8 +174,8 @@ export class SurvivorJoystick extends Component {
         ut.setContentSize(radius * 2, radius * 2);
 
         const g = node.addComponent(Graphics);
-        const fill = this._hex(COLORS.player, Math.round(fillAlpha * 255));
-        const stroke = this._hex(COLORS.player, Math.round(strokeAlpha * 255));
+        const fill = hex(COLORS.player, Math.round(fillAlpha * 255));
+        const stroke = hex(COLORS.player, Math.round(strokeAlpha * 255));
         g.fillColor = fill;
         g.circle(0, 0, radius);
         g.fill();
@@ -185,13 +186,5 @@ export class SurvivorJoystick extends Component {
 
         this.node.addChild(node);
         return node;
-    }
-
-    /** '#RRGGBB' + alpha → Color */
-    private _hex(hex: string, alpha: number): Color {
-        const c = new Color();
-        Color.fromHEX(c, hex);
-        c.a = alpha;
-        return c;
     }
 }

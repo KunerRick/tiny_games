@@ -12,9 +12,10 @@
  */
 
 import { _decorator, Color, Component, Graphics, Node, UITransform } from 'cc';
+import { hex } from '../../../common/ui/UITheme';
 import {
     ARENA_MAX_X, ARENA_MAX_Y, ARENA_MIN_X, ARENA_MIN_Y,
-    COLS, FIELD_H, FIELD_W, FLOOR_PALETTES, ROWS, TILE, DOOR_HALF, WALL,
+    COLS, FIELD_H, FIELD_W, FLOOR_PALETTES, PAL, ROWS, TILE, DOOR_HALF, WALL,
 } from './FridgeConfig';
 import type { CoreEvent, Enemy, FridgeSnapshot, Pickup } from './FridgeConfig';
 
@@ -53,23 +54,23 @@ export class FridgeRenderer extends Component {
     private _cWall = new Color();
     private _cDoor = new Color();
     private _cAccent = new Color();
-    private _cPlayer = new Color(255, 233, 153, 255);
-    private _cPlayerDark = new Color(214, 168, 66, 255);
-    private _cEye = new Color(30, 24, 16, 255);
-    private _cTear = new Color(180, 236, 255, 255);
-    private _cEnemy = new Color(158, 196, 120, 255);
-    private _cEnemyDark = new Color(96, 128, 72, 255);
-    private _cCan = new Color(200, 200, 210, 255);
-    private _cCanRed = new Color(226, 88, 84, 255);
-    private _cEnemyBullet = new Color(255, 122, 138, 255);
-    private _cWhite = new Color(255, 255, 255, 255);
-    private _cBlack = new Color(0, 0, 0, 255);
-    private _cFlash = new Color(255, 90, 90, 90);
-    private _cPedestal = new Color(242, 193, 78, 255);
-    private _cCoin = new Color(255, 214, 92, 255);
-    private _cAim = new Color(255, 255, 255, 140);
-    private _cAimTarget = new Color(255, 120, 120, 180);
-    private _cFrost = new Color(159, 232, 255, 255);
+    private _cPlayer = hex(PAL.player);
+    private _cPlayerDark = hex(PAL.playerDark);
+    private _cEye = hex(PAL.eye);
+    private _cTear = hex(PAL.tear);
+    private _cEnemy = hex(PAL.enemy);
+    private _cEnemyDark = hex(PAL.enemyDark);
+    private _cCan = hex(PAL.can);
+    private _cCanRed = hex(PAL.red);
+    private _cEnemyBullet = hex(PAL.enemyBullet);
+    private _cWhite = hex(PAL.white);
+    private _cBlack = hex(PAL.black);
+    private _cFlash = hex(PAL.flash, 90);
+    private _cPedestal = hex(PAL.pedestal);
+    private _cCoin = hex(PAL.coin);
+    private _cAim = hex(PAL.white, 140);
+    private _cAimTarget = hex(PAL.aimTarget, 180);
+    private _cFrost = hex(PAL.frost);
 
     onLoad(): void {
         if (!this.entityGfx) {
@@ -85,7 +86,8 @@ export class FridgeRenderer extends Component {
         this._applyPalette(1);
     }
 
-    private _applyPalette(floor: number): void {        const p = FLOOR_PALETTES[floor] || FLOOR_PALETTES[1];
+    private _applyPalette(floor: number): void {
+        const p = FLOOR_PALETTES[floor] || FLOOR_PALETTES[1];
         this._cBg.fromHEX(p.bg);
         this._cFloor.fromHEX(p.floor);
         this._cGrid.fromHEX(p.wall);

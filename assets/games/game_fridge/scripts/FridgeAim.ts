@@ -9,6 +9,8 @@
  */
 
 import { _decorator, Color, Component, EventTouch, Graphics, Node, UITransform, Vec2, Vec3 } from 'cc';
+import { hex } from '../../../common/ui/UITheme';
+import { PAL } from './FridgeConfig';
 
 const { ccclass } = _decorator;
 
@@ -17,7 +19,7 @@ const AIM_THRESHOLD = 10;
 /** 瞄准摇杆视觉半径（设计像素） */
 const AIM_RADIUS = 56;
 const AIM_KNOB_RADIUS = 22;
-const AIM_COLOR = new Color(124, 231, 255, 255);
+const AIM_COLOR = hex(PAL.accent);
 
 @ccclass('FridgeAim')
 export class FridgeAim extends Component {

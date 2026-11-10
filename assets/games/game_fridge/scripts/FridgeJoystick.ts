@@ -7,7 +7,9 @@
  * 约定：事件 handler 全部命名方法（红线 5）；onDestroy 只解绑与清引用（红线 4）。
  */
 
-import { _decorator, Color, Component, EventTouch, Graphics, Node, UITransform, Vec2, Vec3 } from 'cc';
+import { _decorator, Component, EventTouch, Graphics, Node, UITransform, Vec2, Vec3 } from 'cc';
+import { hex } from '../../../common/ui/UITheme';
+import { PAL } from './FridgeConfig';
 
 const { ccclass } = _decorator;
 
@@ -148,8 +150,8 @@ export class FridgeJoystick extends Component {
         ut.setContentSize(radius * 2, radius * 2);
 
         const g = node.addComponent(Graphics);
-        const fill = new Color(255, 233, 153, Math.round(fillAlpha * 255));
-        const stroke = new Color(255, 233, 153, Math.round(strokeAlpha * 255));
+        const fill = hex(PAL.player, Math.round(fillAlpha * 255));
+        const stroke = hex(PAL.player, Math.round(strokeAlpha * 255));
         g.fillColor = fill;
         g.circle(0, 0, radius);
         g.fill();

@@ -415,6 +415,63 @@ export const FLOOR_PALETTES: Record<number, FloorPalette> = {
     4: { bg: '#12141C', wall: '#222634', floor: '#171A24', door: '#9FE8FF', accent: '#9FE8FF' },
 };
 
+/**
+ * 本品配色：奶油色主角 / 豌豆绿敌人 / 冰蓝强调色，是「冰箱底下」的美术身份，
+ * 所以留在本文件，不塞进全站 `COLOR` 语义令牌（进令牌就等于改掉 24 款共用的语义）。
+ *
+ * 分层约定（见 docs/design/2026-11-10-ui-art-style-guide.md §2.4）：
+ *  - 通用界面（文字三档、面板底、遮罩）用 `COLOR.*` / `ALPHA.*`；
+ *  - 本品身份色只在这里写一次，渲染层一律 `hex(PAL.x, alpha)` 取值；
+ *  - 业务代码里不再出现 `new Color(r, g, b, a)` 字面量。
+ *
+ * 本文件不 import 'cc'，所以这里只放十六进制字符串（自检脚本直接编译本文件）。
+ */
+export const PAL = {
+    /** 主强调（冰蓝）：瞄准圈、摇杆、按钮、当前房间高亮 */
+    accent: '#7CE7FF',
+    /** 已清理房间在地图上的浅蓝 */
+    accentLight: '#7CC8FF',
+
+    /** 主角（奶油白）、暗部、瞳孔、眼泪 */
+    player: '#FFE999',
+    playerDark: '#D6A842',
+    eye: '#1E1810',
+    tear: '#B4ECFF',
+
+    /** 敌人（豌豆绿）、暗部、敌方子弹 */
+    enemy: '#9EC478',
+    enemyDark: '#608048',
+    enemyBullet: '#FF7A8A',
+
+    /** 可推动的罐子（冷灰）与危险红（受击 / Boss / 满血条） */
+    can: '#C8C8D2',
+    red: '#E25854',
+
+    /** 金币 / 底座 / 宝箱边（金） */
+    coin: '#FFD65C',
+    pedestal: '#F2C14E',
+
+    /** 受伤闪色 / 霜冻 / 纯色 */
+    flash: '#FF5A5A',
+    frost: '#9FE8FF',
+    white: '#FFFFFF',
+    black: '#000000',
+    /** 自动瞄准的红色预警圈 */
+    aimTarget: '#FF7878',
+
+    /** 界面：全屏遮罩 / 深底字与按钮文字 / 面板 / 卡片 */
+    overlay: '#06080E',
+    panelDeep: '#0A0E18',
+    panel: '#181E2E',
+    card: '#1C2638',
+    ink: '#0A121C',
+
+    /** 血条底（暗灰） */
+    barEmpty: '#3C3C46',
+    /** 小地图：未清理房间 */
+    mapPlain: '#5A6C7E',
+};
+
 // ==================== 属性计算（规格 §7.1 公式，自检直接断言） ====================
 
 export function clamp(v: number, lo: number, hi: number): number {

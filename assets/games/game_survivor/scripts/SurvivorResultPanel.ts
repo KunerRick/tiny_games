@@ -9,8 +9,9 @@
  * handler 全部命名方法（红线 5），onDestroy 只清引用（红线 4）。
  */
 
-import { _decorator, Color, Component, EventTouch, Graphics, Label, Node, UITransform } from 'cc';
-import { HIT_SOURCE_NAMES, PASSIVE_NAMES, WEAPON_NAMES } from './SurvivorConfig';
+import { _decorator, Component, EventTouch, Graphics, Label, Node, UITransform } from 'cc';
+import { COLOR, hex } from '../../../common/ui/UITheme';
+import { COLORS, HIT_SOURCE_NAMES, PASSIVE_NAMES, WEAPON_NAMES } from './SurvivorConfig';
 import type { PassiveTrack, RunSummary, SurvivorSnapshot, WeaponTrack } from './SurvivorConfig';
 
 const { ccclass } = _decorator;
@@ -20,24 +21,18 @@ const CARD_H = 760;
 const BUTTON_W = 240;
 const BUTTON_H = 84;
 
-const PANEL_BG = '#0B0C14';
-const CARD_BG = '#1E2130';
-const TEXT_PRIMARY = '#F8FAFC';
-const TEXT_SECONDARY = '#94A3B8';
-const WIN = '#FFD166';
-const LOSE = '#E85D5D';
-const ACTION = '#7FE7FF';
+/** 面板遮罩底是本品夜色；卡片底与文字走全站令牌；胜负/主操作用本品调色板 */
+const PANEL_BG = COLORS.panelBg;
+const CARD_BG = COLOR.PANEL_BG;
+const TEXT_PRIMARY = COLOR.TEXT_PRIMARY;
+const TEXT_SECONDARY = COLOR.TEXT_SECONDARY;
+const WIN = COLORS.win;
+const LOSE = COLORS.chaser;
+const ACTION = COLORS.player;
 
 interface Callbacks {
     onRestart: () => void;
     onLobby: () => void;
-}
-
-function hex(hexStr: string, alpha = 255): Color {
-    const c = new Color();
-    c.fromHEX(hexStr);
-    c.a = alpha;
-    return c;
 }
 
 function mmss(seconds: number): string {
@@ -189,7 +184,7 @@ export class SurvivorResultPanel extends Component {
         this._cause = this._makeLabel(root, 0, -100, 540, 40, '', 22, LOSE, false);
 
         this._restartNode = this._makeButton(root, -130, -250, '再来一局', ACTION);
-        this._lobbyNode = this._makeButton(root, 130, -250, '返回大厅', '#94A3B8');
+        this._lobbyNode = this._makeButton(root, 130, -250, '返回大厅', TEXT_SECONDARY);
     }
 
     private _cardGfx: Graphics | null = null;
