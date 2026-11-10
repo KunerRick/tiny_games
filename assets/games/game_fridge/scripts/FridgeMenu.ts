@@ -8,6 +8,7 @@
 import { _decorator, Component, EventTouch, Graphics, Label, Node, UITransform } from 'cc';
 import { COLOR, hex } from '../../../common/ui/UITheme';
 import type { FridgeSave } from './FridgeDungeon';
+import { sfx } from './FridgeAudio';
 import {
     CHAR_BY_ID, CHARACTERS, HEAT_CURSES, ITEMS, UNLOCK_BY_ID, UNLOCK_NODES,
     collectionRate, dailyChar, dailyDateKey, hasUnlock, isCharUnlocked,
@@ -108,9 +109,14 @@ export class FridgeMenu extends Component {
         this._buildUnlocks();
         this._switchView('main');
         this._root!.active = false;
+        // 整屏点一下给个「咔」：子按钮的 TOUCH_END 会冒泡到根节点，不必逐个绑（M5）
+        this._root!.on(Node.EventType.TOUCH_END, this.onAnyTapped, this);
     }
 
     onDestroy(): void {
+        if (this._root && this._root.isValid) {
+            this._root.off(Node.EventType.TOUCH_END, this.onAnyTapped, this);
+        }
         this._offButton(this._btnContinue, this.onContinueTouch);
         this._offButton(this._btnStart, this.onStartTouch);
         this._offButton(this._btnDaily, this.onDailyTouch);
@@ -377,6 +383,11 @@ export class FridgeMenu extends Component {
         this._btnChars.on(Node.EventType.TOUCH_END, this.onCharsTouch, this);
         this._btnCodex.on(Node.EventType.TOUCH_END, this.onCodexTouch, this);
         this._btnUnlock.on(Node.EventType.TOUCH_END, this.onUnlockTouch, this);
+    }
+
+    /** 根节点收到冒泡的 TOUCH_END：播一声点击音（M5） */
+    private onAnyTapped(_ev: EventTouch): void {
+        sfx.play('click');
     }
 
     private onContinueTouch(): void {

@@ -22,6 +22,7 @@ import type { CoreEvent } from './FridgeConfig';
 import { discardRun, loadMeta, loadRun, saveMeta, saveRun } from './FridgeDungeon';
 import type { FridgeSave } from './FridgeDungeon';
 import { FridgeAim } from './FridgeAim';
+import { FridgeAudioUi, sfx } from './FridgeAudio';
 import { FridgeHud } from './FridgeHud';
 import { FridgeJoystick } from './FridgeJoystick';
 import { FridgeMenu } from './FridgeMenu';
@@ -58,6 +59,7 @@ export class FridgeGame extends Component {
     _hud: FridgeHud | null = null;
     _perf: FridgePerf | null = null;
     _menu: FridgeMenu | null = null;
+    _sfxUi: FridgeAudioUi | null = null;
     _meta: FridgeSave | null = null;
     _paused = false;
 
@@ -77,11 +79,14 @@ export class FridgeGame extends Component {
         this._ensureControls();
         this._ensureHud();
         this._ensurePerf();
+        // 音效开关节点先于菜单创建，菜单全屏时才能盖住它
+        this._ensureAudio();
         this._ensureMenu();
 
         const safeTop = this._readSafeTop();
         this._hud?.setSafeTop(safeTop);
         this._perf?.setSafeTop(safeTop);
+        this._sfxUi?.setSafeTop(safeTop);
         if (safeTop > 0) this._shiftBackButton(safeTop);
         if (this._hud) {
             this._hud.onRestartRequested = () => this.openMenu();
@@ -98,6 +103,8 @@ export class FridgeGame extends Component {
 
         input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
         input.on(Input.EventType.KEY_UP, this.onKeyUp, this);
+        // 首次交互时解锁音频上下文（浏览器自动播放限制 / 微信需要用户手势）
+        input.on(Input.EventType.TOUCH_START, this.onAnyTouchStart, this);
         input.on(Input.EventType.TOUCH_END, this.onAnyTouchEnd, this);
         input.on(Input.EventType.MOUSE_UP, this.onAnyMouseUp, this);
         game.on(Game.EVENT_HIDE, this.onGameHide, this);
@@ -119,6 +126,7 @@ export class FridgeGame extends Component {
     onDestroy(): void {
         input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this);
         input.off(Input.EventType.KEY_UP, this.onKeyUp, this);
+        input.off(Input.EventType.TOUCH_START, this.onAnyTouchStart, this);
         input.off(Input.EventType.TOUCH_END, this.onAnyTouchEnd, this);
         input.off(Input.EventType.MOUSE_UP, this.onAnyMouseUp, this);
         game.off(Game.EVENT_HIDE, this.onGameHide, this);
@@ -147,6 +155,7 @@ export class FridgeGame extends Component {
         this._hud = null;
         this._perf = null;
         this._menu = null;
+        this._sfxUi = null;
         this._meta = null;
         this._input = { moveX: 0, moveY: 0, aimX: 0, aimY: 0, firing: false };
     }
@@ -426,6 +435,7 @@ export class FridgeGame extends Component {
 
     private onKeyDown(ev: EventKeyboard): void {
         this._keys.add(ev.keyCode);
+        sfx.unlock();
         if (ev.keyCode === KeyCode.KEY_R) {
             const core = this._core;
             if (!core) return;
@@ -451,6 +461,11 @@ export class FridgeGame extends Component {
     /** 死亡 / 通关后点击任意处：回主菜单看结算 */
     private onAnyTouchEnd(_ev: EventTouch): void {
         this._restartIfDead();
+    }
+
+    /** 首次触摸解锁音频（浏览器要求用户手势之后才能出声） */
+    private onAnyTouchStart(_ev: EventTouch): void {
+        sfx.unlock();
     }
 
     /** 桌面端鼠标抬起不会派发 TOUCH_END，需要单独接一份（手册 §11） */
@@ -488,6 +503,7 @@ export class FridgeGame extends Component {
             && !core.pendingTreasure && !core.pendingShop && !core.pendingAltar
             && core.player.bombs <= 0) {
             this._hud?.showToast('没有炸弹了');
+            sfx.play('click');
         }
         this._hud?.refresh(core.snapshot());
     }
@@ -503,12 +519,14 @@ export class FridgeGame extends Component {
                 ? (ITEM_BY_ID[offer.id] ? ITEM_BY_ID[offer.id].name : offer.id)
                 : offer.kind === 'heart' ? '半颗心' : '炸弹';
             this._hud?.showToast(`买下：${name}（−${offer.price} 币）`);
+            sfx.play('coin');
             saveRun(core);
         } else {
             const shop = core.pendingShop;
             if (shop) {
                 const sold = shop.sold[index];
                 this._hud?.showToast(sold ? '这个已经卖掉了' : '金币不够');
+                sfx.play('click');
             }
         }
         this._hud?.refresh(core.snapshot());
@@ -527,9 +545,11 @@ export class FridgeGame extends Component {
         if (!core) return;
         if (core.takeAltar()) {
             this._hud?.showToast('献祭 1 颗心，换来一件道具');
+            sfx.play('pickup');
             saveRun(core);
         } else if (core.pendingAltar) {
             this._hud?.showToast(core.pendingAltar.used ? '祭坛已经空了' : '心不够（至少留 1 颗心）');
+            sfx.play('click');
         }
         this._hud?.refresh(core.snapshot());
     }
@@ -550,6 +570,7 @@ export class FridgeGame extends Component {
         let dirty = false;
         let ended = false;
         for (const ev of events) {
+            this._playEventSfx(ev);
             if (ev.type === 'room' || ev.type === 'clear' || ev.type === 'pickup'
                 || ev.type === 'treasure' || ev.type === 'shop' || ev.type === 'altar') {
                 dirty = true;
@@ -574,6 +595,31 @@ export class FridgeGame extends Component {
         else if (dirty) saveRun(core);
     }
 
+    /** 核心事件 → 音效 / 震动（M5）。节流与静音判断都在 FridgeAudio 内部 */
+    private _playEventSfx(ev: CoreEvent): void {
+        switch (ev.type) {
+            case 'shoot': sfx.play('shoot'); break;
+            case 'hit': sfx.play('hit'); break;
+            case 'kill': sfx.play('kill'); break;
+            case 'playerHit': sfx.play('playerHit'); break;
+            case 'pickup': sfx.play('pickup'); break;
+            case 'boom': sfx.play('boom'); break;
+            case 'bomb': if (ev.r > 0) sfx.play('boom'); break;
+            case 'treasure':
+            case 'shop':
+            case 'altar': sfx.play('coin'); break;
+            case 'clear': sfx.play('clear'); break;
+            case 'synergy': sfx.play('synergy'); break;
+            case 'active': sfx.play('active'); break;
+            case 'core': sfx.play('core'); break;
+            case 'floor': sfx.play('floor'); break;
+            case 'secret': sfx.play('secret'); break;
+            case 'dead': sfx.play('dead'); break;
+            case 'won': sfx.play('won'); break;
+            default: break;
+        }
+    }
+
     /** 切后台：补写一次档（微信可能直接杀进程） */
     private onGameHide(): void {
         const core = this._core;
@@ -586,6 +632,7 @@ export class FridgeGame extends Component {
         if (!core) return;
         if (core.chooseCore(index)) {
             saveRun(core);
+            sfx.play('pickup');
             this._hud?.showToast(`获得核心（本局 ${core.cores.length} 枚）`);
         }
         this._hud?.refresh(core.snapshot());
@@ -598,6 +645,7 @@ export class FridgeGame extends Component {
         if (!core) return;
         if (core.takeTreasure(index)) {
             saveRun(core);
+            sfx.play('pickup');
         }
     }
 
@@ -606,6 +654,7 @@ export class FridgeGame extends Component {
         if (!core) return;
         if (core.rerollTreasure()) {
             saveRun(core);
+            sfx.play('click');
         }
     }
 
@@ -673,6 +722,13 @@ export class FridgeGame extends Component {
         let node = parent.getChildByName('FridgePerf');
         if (!node) node = FridgePerf.create(parent).node;
         this._perf = node.getComponent(FridgePerf);
+    }
+
+    private _ensureAudio(): void {
+        const parent = this.node.parent || this.node;
+        let node = parent.getChildByName('FridgeAudioUi');
+        if (!node) node = FridgeAudioUi.create(parent).node;
+        this._sfxUi = node.getComponent(FridgeAudioUi);
     }
 
     private _ensureMenu(): void {
