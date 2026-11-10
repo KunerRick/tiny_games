@@ -40,6 +40,12 @@ const ACCENTS: Record<string, Accent> = {
     match3: { main: new Color(219, 39, 119, 255), soft: new Color(45, 212, 191, 255) },
     tower_defense: { main: new Color(71, 85, 105, 255), soft: new Color(148, 163, 184, 255) },
     pool: { main: new Color(6, 95, 70, 255), soft: new Color(52, 211, 153, 255) },
+    wordle: { main: new Color(22, 163, 74, 255), soft: new Color(250, 204, 21, 255) },
+    bubble: { main: new Color(3, 105, 161, 255), soft: new Color(125, 211, 252, 255) },
+    sokoban: { main: new Color(146, 64, 14, 255), soft: new Color(251, 146, 60, 255) },
+    shmup: { main: new Color(99, 102, 241, 255), soft: new Color(165, 180, 252, 255) },
+    thunder: { main: new Color(234, 179, 8, 255), soft: new Color(255, 237, 160, 255) },
+    fridge: { main: new Color(13, 148, 136, 255), soft: new Color(153, 246, 228, 255) },
 };
 
 const DEFAULT_ACCENT: Accent = {
@@ -301,6 +307,80 @@ function drawShape(g: Graphics, id: string, accent: Accent): void {
             g.circle(12, 14, 9);
             stroke(g, INK, 2);
             dot(g, 0, -8, 9, soft);
+            break;
+        }
+        case 'wordle': {
+            // 四格猜字：一绿（位置对）一黄（字对位不对）+ 下方输入行
+            const row: [number, Color][] = [[-39, main], [-13, soft], [13, INK], [39, INK]];
+            for (const [x, c] of row) square(g, x, 32, 26, c, 5);
+            for (let i = 0; i < 3; i++) square(g, -30 + i * 23, -6, 19, i === 0 ? soft : INK, 4);
+            g.roundRect(9, -16, 33, 20, 5);
+            fill(g, main);
+            break;
+        }
+        case 'bubble': {
+            // 一串同色泡泡 + 向上发射的炮口
+            dot(g, -20, 38, 14, main);
+            dot(g, 11, 44, 12, INK);
+            dot(g, 37, 30, 10, soft);
+            dot(g, -35, 14, 9, soft);
+            dot(g, -2, 16, 13, INK);
+            triangle(g, [[0, 0], [-15, -30], [15, -30]], main);
+            line(g, 0, -2, 0, 10, INK, 5);
+            break;
+        }
+        case 'sokoban': {
+            // 木箱（打叉）+ 目标格
+            g.roundRect(-44, -30, 36, 36, 5);
+            stroke(g, soft, 4);
+            g.roundRect(-6, 8, 46, 46, 5);
+            fill(g, INK);
+            line(g, -1, 13, 35, 49, PAPER, 4);
+            line(g, 35, 13, -1, 49, PAPER, 4);
+            // 推箱的小人
+            dot(g, -26, -16, 6, INK);
+            triangle(g, [[-34, -26], [-18, -26], [-26, -6]], INK);
+            break;
+        }
+        case 'shmup': {
+            // 战机 + 两路弹幕 + 敌弹
+            triangle(g, [[0, 22], [-16, -6], [16, -6]], main);
+            triangle(g, [[0, -8], [-40, -30], [-6, -25]], INK);
+            triangle(g, [[0, -8], [40, -30], [6, -25]], INK);
+            dot(g, 0, 6, 5, PAPER);
+            dot(g, -10, 40, 4, soft);
+            dot(g, 10, 40, 4, soft);
+            dot(g, 0, 52, 4, soft);
+            dot(g, -32, 44, 4, INK);
+            dot(g, 32, 44, 4, INK);
+            break;
+        }
+        case 'thunder': {
+            // 闪电 + 机翼
+            triangle(g, [[-38, -34], [0, -14], [38, -34]], INK);
+            g.moveTo(10, 56);
+            g.lineTo(-16, 14);
+            g.lineTo(2, 14);
+            g.lineTo(-8, -24);
+            g.lineTo(22, 20);
+            g.lineTo(2, 20);
+            g.close();
+            fill(g, main);
+            dot(g, -30, 34, 5, soft);
+            dot(g, 30, 30, 4, soft);
+            break;
+        }
+        case 'fridge': {
+            // 冰箱：上下两门 + 把手，底部一条透光的缝
+            g.roundRect(-30, -30, 60, 84, 8);
+            fill(g, INK);
+            line(g, -30, 12, 30, 12, PAPER, 3);
+            g.roundRect(16, 22, 7, 16, 3);
+            fill(g, soft);
+            g.roundRect(16, -8, 7, 16, 3);
+            fill(g, soft);
+            g.roundRect(-34, -40, 68, 10, 5);
+            fill(g, soft);
             break;
         }
         default: {
