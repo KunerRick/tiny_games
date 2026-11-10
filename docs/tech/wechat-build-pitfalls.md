@@ -141,6 +141,13 @@ node tools/check-wechat-build.js <构建目录>       # 指定其它目录
 > 但模拟器**已经开着**时，产物被改写只会让工具打 `[SimulatorService] simulator app compile`，**不会再打 launch**。
 > 于是「构建完成 → 工具自动重编译成功 → 模拟器里画面已经更新」这种情况会被误报成「停在过期构建」，
 > 卡住整个预检。现在两种标记都算（`simulator launch …|simulator app compile`）。
+>
+> **2026-11-10 又补了第三种标记**：`[SimulatorService] init simulator s0`。实测「构建 → 杀掉工具进程 →
+> 重新打开」后，工具会**自动打开上次的项目并直接拉起模拟器**，日志里既没有 `simulator launch`
+> 也没有 `app compile` —— 只认前两种就会把「模拟器里明明已经是新画面」误判成停在过期构建。
+> 三种标记现在是同一个正则：`simulator launch (success|failed)|simulator app compile|\[SimulatorService\] init simulator`。
+> 判据没变：仍然只比**时间戳**，所以放宽匹配不会让「真过期」蒙混过关
+> （反证：拷一份构建目录、只 `touch assets/main/index.js`，第 7 项照样失败）。
 
 ---
 
