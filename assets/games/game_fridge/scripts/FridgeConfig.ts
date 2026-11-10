@@ -159,7 +159,14 @@ export interface Enemy {
     timer: number;
     /** 受击闪白剩余时间 */
     hitFlash: number;
+    /** 阶段 / 代数（Boss 二阶段 = 2；果冻分裂代数） */
     gen: number;
+    /** Boss 出招累计时间 */
+    atk: number;
+    /** Boss 前摇剩余（冲刺预警），>0 表示正在蓄力 */
+    windup: number;
+    /** Boss 冲刺剩余时间 */
+    dashT: number;
 }
 
 export interface Bullet {
@@ -182,7 +189,7 @@ export interface Bullet {
 
 export interface Pickup {
     id: number;
-    kind: 'item' | 'coin' | 'heart';
+    kind: 'item' | 'coin' | 'heart' | 'bomb';
     itemId?: string;
     x: number;
     y: number;
@@ -196,11 +203,19 @@ export type CoreEvent =
     | { type: 'pickup'; x: number; y: number; itemId: string }
     | { type: 'shoot'; x: number; y: number }
     | { type: 'dead' }
-    | { type: 'wave'; n: number };
+    | { type: 'wave'; n: number }
+    /** 进入新房间（渲染层做 0.15s 遮罩，HUD 刷新小地图） */
+    | { type: 'room'; id: number; kind: string }
+    /** 清空战斗 / Boss 房 */
+    | { type: 'clear'; roomId: number }
+    /** 宝箱三选一弹窗打开 */
+    | { type: 'treasure'; roomId: number }
+    /** 通关（M2 只到第 1 层） */
+    | { type: 'won' };
 
 /** 渲染 / HUD 只读快照 */
 export interface FridgeSnapshot {
-    phase: 'playing' | 'dead';
+    phase: 'playing' | 'dead' | 'won';
     roomCleared: boolean;
     time: number;
     kills: number;
@@ -216,6 +231,15 @@ export interface FridgeSnapshot {
     aimTargetId: number;
     aimX: number;
     aimY: number;
+    /** 地牢状态（M2；未接地图时为 null / -1） */
+    floor: number;
+    coins: number;
+    roomId: number;
+    roomKind: string | null;
+    doors: string[];
+    locked: boolean;
+    map: unknown | null;
+    pendingTreasure: { offered: string[]; rerolled: boolean } | null;
 }
 
 // ==================== 道具表（规格 §8.3，共 40 个） ====================
@@ -358,6 +382,23 @@ export const FLOOR_ENEMIES: Record<number, string[]> = {
     4: ['frostspike', 'rustknight', 'conddrop', 'piston'],
 };
 
+/** Boss（§9.2；M2 只做第 1 层霉王，其余层随 M4 接入） */
+export const BOSS_DEFS: Record<number, EnemyDef> = {
+    1: { kind: 'moldking', name: '霉王', hp: 180, speed: 52, r: 34, dmg: 1, ai: 'phase' },
+};
+
+export const BOSS_KIND_BY_FLOOR: Record<number, string> = { 1: 'moldking' };
+
+/** 炸弹上限 / 清房奖励区间（§12） */
+export const BOMBS_MAX = 9;
+export const ROOM_COIN_MIN = 2;
+export const ROOM_COIN_MAX = 4;
+/** 每房掉落概率（§12） */
+export const HEART_DROP_CHANCE = 0.3;
+export const BOMB_DROP_CHANCE = 0.15;
+/** 宝箱重掷价格 */
+export const REROLL_COST = 2;
+
 /** 每层调色板（规格 §3） */
 export interface FloorPalette {
     bg: string;
@@ -379,6 +420,32 @@ export const FLOOR_PALETTES: Record<number, FloorPalette> = {
 export function clamp(v: number, lo: number, hi: number): number {
     if (!isFinite(v)) return lo;
     return v < lo ? lo : v > hi ? hi : v;
+}
+
+/** 可读写状态的确定性随机数（存档要存 rngState，§13.2） */
+export interface RngFn {
+    (): number;
+    getState(): number;
+    setState(s: number): void;
+}
+
+/** mulberry32：同种子序列逐位一致；状态可导出 / 恢复（续玩一致性） */
+export function mulberry32(seed: number): RngFn {
+    let a = seed >>> 0;
+    const next = function (): number {
+        a = (a + 0x6D2B79F5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    } as RngFn;
+    next.getState = function (): number {
+        return a >>> 0;
+    };
+    next.setState = function (s: number): void {
+        a = s >>> 0;
+    };
+    return next;
 }
 
 export interface StatMods {

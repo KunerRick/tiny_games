@@ -1,8 +1,10 @@
 /**
- * 冰箱底下 — 运行时主组件（M1）。
+ * 冰箱底下 — 运行时主组件（M2）。
  *
  * 职责：把输入（左摇杆 / 右半屏瞄准 / 键盘调试）喂给纯逻辑核心，固定步长推进，调度渲染与 HUD。
  * 节点全部运行时创建（Field / Controls / HUD），场景里只需 Canvas + GameRoot 挂本组件，减少 MCP 手工绑定。
+ *
+ * M2 增补：断点续玩（进入房间 / 清房 / 拾取 / 宝箱时写档，死亡 / 通关删档，切后台补写）。
  *
  * 约定：
  *  - 事件 handler 全部命名方法（红线 5）
@@ -11,11 +13,13 @@
  */
 
 import {
-    _decorator, Component, EventKeyboard, EventMouse, EventTouch, Input, input, KeyCode, Node, UITransform,
+    _decorator, Component, EventKeyboard, EventMouse, EventTouch, Game, game, Input, input, KeyCode, Node, UITransform,
 } from 'cc';
 import { FridgeWorld } from './FridgeCore';
 import type { FridgeInput } from './FridgeCore';
 import { FIXED_DT, FIELD_H, FIELD_W } from './FridgeConfig';
+import type { CoreEvent } from './FridgeConfig';
+import { discardRun, loadRun, saveRun } from './FridgeDungeon';
 import { FridgeAim } from './FridgeAim';
 import { FridgeHud } from './FridgeHud';
 import { FridgeJoystick } from './FridgeJoystick';
@@ -68,13 +72,18 @@ export class FridgeGame extends Component {
         this._hud?.setSafeTop(safeTop);
         this._perf?.setSafeTop(safeTop);
         if (safeTop > 0) this._shiftBackButton(safeTop);
-        if (this._hud) this._hud.onRestartRequested = () => this.startRun();
+        if (this._hud) {
+            this._hud.onRestartRequested = () => this.startRun(false);
+            this._hud.onTreasurePick = (index: number) => this.onTreasurePick(index);
+            this._hud.onTreasureReroll = () => this.onTreasureReroll();
+        }
 
         input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
         input.on(Input.EventType.KEY_UP, this.onKeyUp, this);
         input.on(Input.EventType.TOUCH_END, this.onAnyTouchEnd, this);
         input.on(Input.EventType.MOUSE_UP, this.onAnyMouseUp, this);
-        this.startRun();
+        game.on(Game.EVENT_HIDE, this.onGameHide, this);
+        this.startRun(true);
     }
 
     onDestroy(): void {
@@ -82,7 +91,12 @@ export class FridgeGame extends Component {
         input.off(Input.EventType.KEY_UP, this.onKeyUp, this);
         input.off(Input.EventType.TOUCH_END, this.onAnyTouchEnd, this);
         input.off(Input.EventType.MOUSE_UP, this.onAnyMouseUp, this);
-        if (this._hud) this._hud.onRestartRequested = null;
+        game.off(Game.EVENT_HIDE, this.onGameHide, this);
+        if (this._hud) {
+            this._hud.onRestartRequested = null;
+            this._hud.onTreasurePick = null;
+            this._hud.onTreasureReroll = null;
+        }
         this._keys.clear();
         this._core = null;
         this._joystick = null;
@@ -92,16 +106,36 @@ export class FridgeGame extends Component {
         this._input = { moveX: 0, moveY: 0, aimX: 0, aimY: 0, firing: false };
     }
 
-    startRun(): void {
-        const seed = this.seed || (Date.now() % 2147483647);
-        this._core = new FridgeWorld(seed, 'pudding');
+    /**
+     * 开一局：resume=true 时优先读档续玩（页面重载 / 切后台回来），否则新开并清掉旧档。
+     */
+    startRun(resume = false): void {
+        let core: FridgeWorld | null = null;
+        if (resume) {
+            const save = loadRun();
+            if (save) {
+                try {
+                    core = FridgeWorld.fromSave(save);
+                } catch {
+                    core = null;
+                }
+            }
+        }
+        if (!core) {
+            discardRun();
+            const seed = this.seed || (Date.now() % 2147483647);
+            core = FridgeWorld.newRun(seed, 'pudding');
+        }
+        this._core = core;
         this._acc = 0;
         this._steps = 0;
         this._paused = false;
         this._joystick?.release();
         this._aim?.release();
         this.renderer?.resetFx();
-        if (this._hud) this._hud.refresh(this._core.snapshot());
+        if (this._hud) this._hud.refresh(core.snapshot());
+        // 刚开一局就写一次档：瞬间杀进程也能回到起点房
+        saveRun(core);
     }
 
     update(dt: number): void {
@@ -110,6 +144,11 @@ export class FridgeGame extends Component {
         let logicMs = 0;
         if (core.phase === 'playing' && !this._paused) {
             const t0 = nowMs();
+            // 宝箱三选一期间冻结输入，避免误触与摇杆残留
+            if (core.pendingTreasure) {
+                this._joystick?.release();
+                this._aim?.release();
+            }
             this._readInput();
             this._acc += dt;
             const maxAcc = FIXED_DT * MAX_STEPS;
@@ -123,7 +162,7 @@ export class FridgeGame extends Component {
             }
             this._steps = steps;
             const events = core.drainEvents();
-            this.renderer?.pushEvents(events);
+            this._handleEvents(events);
             logicMs = nowMs() - t0;
         }
 
@@ -145,6 +184,14 @@ export class FridgeGame extends Component {
     // ==================== 输入 ====================
 
     private _readInput(): void {
+        if (this._core && this._core.pendingTreasure) {
+            this._input.moveX = 0;
+            this._input.moveY = 0;
+            this._input.aimX = 0;
+            this._input.aimY = 0;
+            this._input.firing = false;
+            return;
+        }
         const j = this._joystick;
         if (j && j.isValid && j.isActive()) {
             const d = j.direction;
@@ -185,7 +232,7 @@ export class FridgeGame extends Component {
     private onKeyDown(ev: EventKeyboard): void {
         this._keys.add(ev.keyCode);
         if (ev.keyCode === KeyCode.KEY_R) {
-            this.startRun();
+            this.startRun(false);
         } else if (ev.keyCode === KeyCode.KEY_P) {
             this._paused = !this._paused;
         } else if (ev.keyCode === KeyCode.KEY_K) {
@@ -199,7 +246,7 @@ export class FridgeGame extends Component {
         this._keys.delete(ev.keyCode);
     }
 
-    /** 死亡后点击任意处重开（M1 没有结算面板） */
+    /** 死亡 / 通关后点击任意处重开 */
     private onAnyTouchEnd(_ev: EventTouch): void {
         this._restartIfDead();
     }
@@ -211,7 +258,51 @@ export class FridgeGame extends Component {
 
     private _restartIfDead(): void {
         const core = this._core;
-        if (core && core.phase === 'dead') this.startRun();
+        if (core && core.phase !== 'playing') this.startRun(false);
+    }
+
+    // ==================== 地牢事件 → 存档 ====================
+
+    /** 渲染特效 + 断点续玩写档（§13.2：进房 / 清房 / 拾取 / 宝箱写，死亡 / 通关删） */
+    private _handleEvents(events: CoreEvent[]): void {
+        this.renderer?.pushEvents(events);
+        const core = this._core;
+        if (!core || events.length === 0) return;
+        let dirty = false;
+        let ended = false;
+        for (const ev of events) {
+            if (ev.type === 'room' || ev.type === 'clear' || ev.type === 'pickup' || ev.type === 'treasure') {
+                dirty = true;
+            } else if (ev.type === 'dead' || ev.type === 'won') {
+                ended = true;
+            }
+        }
+        if (ended) discardRun();
+        else if (dirty) saveRun(core);
+    }
+
+    /** 切后台：补写一次档（微信可能直接杀进程） */
+    private onGameHide(): void {
+        const core = this._core;
+        if (core && core.phase === 'playing') saveRun(core);
+    }
+
+    // ==================== 宝箱三选一 ====================
+
+    private onTreasurePick(index: number): void {
+        const core = this._core;
+        if (!core) return;
+        if (core.takeTreasure(index)) {
+            saveRun(core);
+        }
+    }
+
+    private onTreasureReroll(): void {
+        const core = this._core;
+        if (!core) return;
+        if (core.rerollTreasure()) {
+            saveRun(core);
+        }
     }
 
     // ==================== 运行时节点 ====================

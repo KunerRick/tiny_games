@@ -41,6 +41,8 @@ export class FridgeRenderer extends Component {
     private _g: Graphics | null = null;
     private _fx: Fx[] = [];
     private _flash = 0;
+    /** 换房黑场剩余时间 */
+    private _fade = 0;
     /** 赋色用的暂存色，避免污染缓存颜色 */
     private _tmpColor = new Color();
 
@@ -118,6 +120,8 @@ export class FridgeRenderer extends Component {
             } else if (ev.type === 'playerHit') {
                 this._flash = 0.22;
                 this._fx.push({ kind: 'ring', x: ev.x, y: ev.y, r: 16, t: 0, life: 0.3, color: this._cFlash });
+            } else if (ev.type === 'room') {
+                this._fade = 0.18;
             }
         }
     }
@@ -125,6 +129,7 @@ export class FridgeRenderer extends Component {
     resetFx(): void {
         this._fx.length = 0;
         this._flash = 0;
+        this._fade = 0;
     }
 
     render(snap: FridgeSnapshot, dt: number): void {
@@ -134,7 +139,7 @@ export class FridgeRenderer extends Component {
         g.clear();
 
         this._drawFloor(g);
-        this._drawWalls(g);
+        this._drawWalls(g, snap);
         this._drawPickups(g, snap.pickups);
         this._drawEnemies(g, snap.enemies);
         this._drawBullets(g, snap);
@@ -145,6 +150,12 @@ export class FridgeRenderer extends Component {
             this._flash = Math.max(0, this._flash - dt);
             g.fillColor = this._cFlash;
             g.rect(-FIELD_W / 2, -FIELD_H / 2, FIELD_W, FIELD_H);
+            g.fill();
+        }
+        if (this._fade > 0) {
+            this._fade = Math.max(0, this._fade - dt);
+            this._fill(g, this._cBlack, Math.round(200 * (this._fade / 0.18)));
+            g.rect(-FIELD_W / 2 - WALL, -FIELD_H / 2 - WALL, FIELD_W + WALL * 2, FIELD_H + WALL * 2);
             g.fill();
         }
         this.lastRenderMs = performance.now() - t0;
@@ -174,7 +185,7 @@ export class FridgeRenderer extends Component {
         g.fill();
     }
 
-    private _drawWalls(g: Graphics): void {
+    private _drawWalls(g: Graphics, snap: FridgeSnapshot): void {
         g.fillColor = this._cWall;
         // 上 / 下
         g.rect(-FIELD_W / 2, FIELD_H / 2 - WALL, FIELD_W, WALL);
@@ -184,21 +195,56 @@ export class FridgeRenderer extends Component {
         g.rect(FIELD_W / 2 - WALL, -FIELD_H / 2, WALL, FIELD_H);
         g.fill();
 
-        // 四面门（M1 测试房只有门洞，不锁门）
-        g.fillColor = this._cDoor;
-        g.rect(-DOOR_HALF, FIELD_H / 2 - WALL, DOOR_HALF * 2, WALL);
-        g.rect(-DOOR_HALF, -FIELD_H / 2, DOOR_HALF * 2, WALL);
-        g.rect(-FIELD_W / 2, -DOOR_HALF, WALL, DOOR_HALF * 2);
-        g.rect(FIELD_W / 2 - WALL, -DOOR_HALF, WALL, DOOR_HALF * 2);
-        g.fill();
+        // 沙盒模式（M1 自检房）：四面常开门洞
+        if (!snap.map) {
+            g.fillColor = this._cDoor;
+            g.rect(-DOOR_HALF, FIELD_H / 2 - WALL, DOOR_HALF * 2, WALL);
+            g.rect(-DOOR_HALF, -FIELD_H / 2, DOOR_HALF * 2, WALL);
+            g.rect(-FIELD_W / 2, -DOOR_HALF, WALL, DOOR_HALF * 2);
+            g.rect(FIELD_W / 2 - WALL, -DOOR_HALF, WALL, DOOR_HALF * 2);
+            g.fill();
+            this._fill(g, this._cAccent, 120);
+            g.rect(-DOOR_HALF, FIELD_H / 2 - WALL - 2, DOOR_HALF * 2, 2);
+            g.rect(-DOOR_HALF, -FIELD_H / 2 + WALL, DOOR_HALF * 2, 2);
+            g.rect(-FIELD_W / 2 + WALL, -DOOR_HALF, 2, DOOR_HALF * 2);
+            g.rect(FIELD_W / 2 - WALL - 2, -DOOR_HALF, 2, DOOR_HALF * 2);
+            g.fill();
+            return;
+        }
 
-        // 门内提示线
-        this._fill(g, this._cAccent, 120);
-        g.rect(-DOOR_HALF, FIELD_H / 2 - WALL - 2, DOOR_HALF * 2, 2);
-        g.rect(-DOOR_HALF, -FIELD_H / 2 + WALL, DOOR_HALF * 2, 2);
-        g.rect(-FIELD_W / 2 + WALL, -DOOR_HALF, 2, DOOR_HALF * 2);
-        g.rect(FIELD_W / 2 - WALL - 2, -DOOR_HALF, 2, DOOR_HALF * 2);
-        g.fill();
+        // 地牢模式：只画这张图上真实存在的门；未清房时门显示为墙 + 锁条
+        const locked = snap.locked;
+        const doorColor = locked ? this._cWall : this._cDoor;
+        for (const dir of snap.doors) {
+            g.fillColor = doorColor;
+            if (dir === 'up') g.rect(-DOOR_HALF, FIELD_H / 2 - WALL, DOOR_HALF * 2, WALL);
+            else if (dir === 'down') g.rect(-DOOR_HALF, -FIELD_H / 2, DOOR_HALF * 2, WALL);
+            else if (dir === 'left') g.rect(-FIELD_W / 2, -DOOR_HALF, WALL, DOOR_HALF * 2);
+            else g.rect(FIELD_W / 2 - WALL, -DOOR_HALF, WALL, DOOR_HALF * 2);
+            g.fill();
+        }
+
+        if (locked) {
+            // 锁条：门洞中央两道横杠
+            this._fill(g, this._cCanRed, 230);
+            for (const dir of snap.doors) {
+                if (dir === 'up') g.rect(-24, FIELD_H / 2 - WALL + 8, 48, 8);
+                else if (dir === 'down') g.rect(-24, -FIELD_H / 2 + 8, 48, 8);
+                else if (dir === 'left') g.rect(-FIELD_W / 2 + 8, -24, 8, 48);
+                else g.rect(FIELD_W / 2 - WALL + 8, -24, 8, 48);
+            }
+            g.fill();
+        } else {
+            // 可通行提示线
+            this._fill(g, this._cAccent, 140);
+            for (const dir of snap.doors) {
+                if (dir === 'up') g.rect(-DOOR_HALF, FIELD_H / 2 - WALL - 2, DOOR_HALF * 2, 2);
+                else if (dir === 'down') g.rect(-DOOR_HALF, -FIELD_H / 2 + WALL, DOOR_HALF * 2, 2);
+                else if (dir === 'left') g.rect(-FIELD_W / 2 + WALL, -DOOR_HALF, 2, DOOR_HALF * 2);
+                else g.rect(FIELD_W / 2 - WALL - 2, -DOOR_HALF, 2, DOOR_HALF * 2);
+            }
+            g.fill();
+        }
     }
 
     // ==================== 实体 ====================
@@ -220,6 +266,27 @@ export class FridgeRenderer extends Component {
                 g.fillColor = this._cCoin;
                 g.circle(it.x, it.y + bob, 5);
                 g.fill();
+            } else if (it.kind === 'heart') {
+                // 半心：两圆 + 三角
+                g.fillColor = this._cCanRed;
+                g.circle(it.x - 5, it.y + bob + 3, 5.5);
+                g.circle(it.x + 5, it.y + bob + 3, 5.5);
+                g.fill();
+                g.moveTo(it.x - 10, it.y + bob + 2);
+                g.lineTo(it.x + 10, it.y + bob + 2);
+                g.lineTo(it.x, it.y + bob - 10);
+                g.close();
+                g.fill();
+            } else if (it.kind === 'bomb') {
+                g.fillColor = this._cBlack;
+                g.circle(it.x, it.y + bob, 8);
+                g.fill();
+                g.fillColor = this._cEnemyBullet;
+                g.rect(it.x - 1, it.y + bob + 7, 2, 5);
+                g.fill();
+                g.fillColor = this._cCoin;
+                g.circle(it.x + 3, it.y + bob + 12, 2.5);
+                g.fill();
             }
         }
     }
@@ -235,6 +302,40 @@ export class FridgeRenderer extends Component {
                 g.fillColor = this._cCanRed;
                 g.rect(e.x - e.r + 4, e.y - 2, e.r * 2 - 8, 5);
                 g.fill();
+            } else if (e.kind === 'moldking') {
+                // Boss：大霉球 + 王冠 + 二阶段光晕
+                if (e.gen >= 2) {
+                    this._fill(g, this._cCanRed, 70);
+                    g.circle(e.x, e.y, e.r + 10);
+                    g.fill();
+                }
+                g.fillColor = flash ? this._cWhite : this._cEnemyDark;
+                g.circle(e.x, e.y, e.r);
+                g.fill();
+                g.fillColor = flash ? this._cWhite : this._cEnemy;
+                g.circle(e.x, e.y - 2, e.r * 0.8);
+                g.fill();
+                // 王冠（三尖）
+                g.fillColor = this._cCoin;
+                g.moveTo(e.x - e.r * 0.7, e.y + e.r * 0.55);
+                g.lineTo(e.x - e.r * 0.7, e.y + e.r * 1.15);
+                g.lineTo(e.x - e.r * 0.2, e.y + e.r * 0.8);
+                g.lineTo(e.x + e.r * 0.2, e.y + e.r * 1.15);
+                g.lineTo(e.x + e.r * 0.7, e.y + e.r * 0.8);
+                g.lineTo(e.x + e.r * 0.7, e.y + e.r * 0.55);
+                g.close();
+                g.fill();
+                // 眼睛
+                g.fillColor = this._cBlack;
+                g.circle(e.x - 9, e.y + 4, 4);
+                g.circle(e.x + 9, e.y + 4, 4);
+                g.fill();
+                // 冲刺前摇：红色预警环
+                if (e.windup > 0) {
+                    this._fill(g, this._cCanRed, 160);
+                    g.circle(e.x, e.y, e.r + 14);
+                    g.fill();
+                }
             } else {
                 g.fillColor = flash ? this._cWhite : this._cEnemy;
                 g.circle(e.x, e.y, e.r);

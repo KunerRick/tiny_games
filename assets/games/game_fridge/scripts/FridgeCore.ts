@@ -12,13 +12,25 @@
 
 import {
     ARENA_MAX_X, ARENA_MAX_Y, ARENA_MIN_X, ARENA_MIN_Y,
-    AUTO_AIM_RANGE, BULLET_R, ENEMY_BULLET_R, ENEMY_DEFS,
-    FIXED_DT, INVULN, ITEM_BY_ID, MAX_BULLETS, MAX_ENEMIES, PICKUP_R, PLAYER_R,
-    clamp, computeStats, CHAR_BY_ID,
+    AUTO_AIM_RANGE, BOMB_DROP_CHANCE, BOMBS_MAX, BOSS_DEFS, BOSS_KIND_BY_FLOOR,
+    BULLET_R, DOOR_HALF, ENEMY_BULLET_R, ENEMY_DEFS, FLOOR_ENEMIES,
+    FIXED_DT, HEART_DROP_CHANCE, INVULN, ITEM_BY_ID, ITEMS, MAX_BULLETS, MAX_ENEMIES, MAX_HP, PICKUP_R, PLAYER_R,
+    REROLL_COST, ROOM_COIN_MAX, ROOM_COIN_MIN,
+    clamp, computeStats, CHAR_BY_ID, mulberry32,
 } from './FridgeConfig';
 import type {
     Bullet, CharDef, CoreEvent, Enemy, EnemyDef, FridgeSnapshot, ItemTag, Pickup, PlayerState, PlayerStats,
 } from './FridgeConfig';
+import {
+    DIR_DELTA, generateFloor, oppositeDir,
+} from './FridgeDungeon';
+import type {
+    Dir, FloorMap, RoomNode, RunSave,
+} from './FridgeDungeon';
+import { serializeFloorMap, floorMapFromSave } from './FridgeDungeon';
+
+export { mulberry32 };
+export type { RngFn } from './FridgeConfig';
 
 /** 子弹飞行速度（规格 §7.1） */
 const BULLET_SPEED = 420;
@@ -30,17 +42,6 @@ const MAX_DT = 0.05;
 const WAVE_INTERVAL = 2.4;
 /** 每波递增的敌人数上限 */
 const WAVE_STEP = 5;
-
-export function mulberry32(seed: number): () => number {
-    let a = seed >>> 0;
-    return function next(): number {
-        a = (a + 0x6D2B79F5) >>> 0;
-        let t = a;
-        t = Math.imul(t ^ (t >>> 15), t | 1);
-        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-}
 
 /** 输入帧：移动方向 0..1，瞄准方向 0..1，firing = 右半屏正在拖动 */
 export interface FridgeInput {
@@ -58,7 +59,7 @@ export class FridgeWorld {
     readonly charId: string;
     readonly char: CharDef;
 
-    phase: 'playing' | 'dead' = 'playing';
+    phase: 'playing' | 'dead' | 'won' = 'playing';
     time = 0;
     kills = 0;
     wave = 0;
@@ -72,8 +73,19 @@ export class FridgeWorld {
     cores: string[] = [];
     activeItem: string | null = null;
 
+    /** 地牢状态（null = M1 沙盒测试房：无限刷怪，自检用） */
+    map: FloorMap | null = null;
+    floor = 1;
+    roomId = -1;
+    coins = 0;
+    enteringFrom: Dir | null = null;
+    /** 宝箱三选一待选（非 null 时世界冻结，等玩家在面板上选择） */
+    pendingTreasure: { offered: string[]; rerolled: boolean } | null = null;
+
+    runId: string;
+
     /** 浏览器探针 / 自检用 */
-    _rng: () => number;
+    _rng: ReturnType<typeof mulberry32>;
     _rngState = 0;
     _fireCd = 0;
     _waveTimer = 0;
@@ -90,20 +102,98 @@ export class FridgeWorld {
         this.charId = charId;
         this.char = CHAR_BY_ID[charId] || CHAR_BY_ID.pudding;
         this._rng = mulberry32(this.seed);
+        this.runId = `r${this.seed.toString(36)}${Date.now().toString(36)}`;
         this._stats = computeStats(charId, []);
         this.player = this._makePlayer(this._stats);
         this.items = [];
-        // M1：房间里放一个辣椒酱底座，走过即拾取
+        // M1 沙盒：房间里放一个辣椒酱底座，走过即拾取；地牢模式会在 _enterDungeon 里清空
         this.pickups.push({ id: this._nextId++, kind: 'item', itemId: 'chili', x: 0, y: 110, bob: 0 });
         // 初始三只霉球
         for (let i = 0; i < 3; i++) this.spawnEnemy('moldball');
         this.wave = 1;
     }
 
+    // ==================== 开局 / 续玩 ====================
+
+    /** 地牢开局：生成第 1 层地图，落到起点房 */
+    static newRun(seed: number, charId = 'pudding', floor = 1): FridgeWorld {
+        const w = new FridgeWorld(seed, charId);
+        w._enterDungeon(floor);
+        return w;
+    }
+
+    /** 从快照恢复：地图 / 道具 / 金币按存档，当前房间实体重新生成（§13.2） */
+    static fromSave(save: RunSave): FridgeWorld {
+        const w = new FridgeWorld(save.seed, save.charId);
+        const map = save.map ? floorMapFromSave(save.map, save.floor) : null;
+        if (!map) return FridgeWorld.newRun(save.seed, save.charId, 1);
+
+        w.map = map;
+        w.floor = save.floor;
+        w.roomId = clamp(save.roomId, 0, map.rooms.length - 1);
+        w.enteringFrom = save.enteringFrom;
+        w.runId = save.runId;
+        w.items = save.items.filter((id) => !!ITEM_BY_ID[id]);
+        w.cores = save.cores.slice();
+        w.activeItem = save.activeItem && ITEM_BY_ID[save.activeItem] ? save.activeItem : null;
+        w._recomputeStats();
+        const p = save.player;
+        w.player.maxHp = clamp(p.maxHp, 2, MAX_HP);
+        w.player.hp = clamp(p.hp, 1, w.player.maxHp);
+        w.player.maxCharges = clamp(p.maxCharges, 1, 9);
+        w.player.charges = clamp(p.charges, 0, w.player.maxCharges);
+        w.player.bombs = clamp(p.bombs, 0, BOMBS_MAX);
+        w.player.frozenSpeedPenalty = clamp(p.frozenSpeedPenalty, 0, 0.4);
+        w.coins = Math.max(0, Math.floor(p.coins));
+        w._rng.setState(save.rngState);
+
+        // 实体全部重建：只保留地图上的 cleared / visited
+        w.enemies = [];
+        w.bullets = [];
+        w.pickups = [];
+        w.time = 0;
+        w.wave = 0;
+        const room = w.rooms()[w.roomId];
+        room.visited = true;
+        if (!room.cleared) w._spawnRoomEnemies(room);
+        if (room.kind === 'treasure' && !room.cleared) {
+            w.pendingTreasure = save.treasure && save.treasure.offered.length === 3
+                ? { offered: save.treasure.offered.slice(), rerolled: save.treasure.rerolled }
+                : w._rollTreasure();
+        }
+        w.roomCleared = room.cleared;
+        w._placeAtDoor(w.enteringFrom);
+        return w;
+    }
+
+    private _enterDungeon(floor: number): void {
+        this.floor = clamp(Math.round(floor), 1, 4);
+        this.map = generateFloor(this.seed, this.floor);
+        this.roomId = this.map.startId;
+        const room = this.rooms()[this.roomId];
+        room.visited = true;
+        room.cleared = true;
+        this.roomCleared = true;
+        this.enemies = [];
+        this.bullets = [];
+        this.pickups = [];
+        this.pendingTreasure = null;
+        this.enteringFrom = null;
+        this.player.x = 0;
+        this.player.y = -40;
+        this.player.vx = 0;
+        this.player.vy = 0;
+        this.wave = 0;
+        this.time = 0;
+        this.kills = 0;
+        this.coins = 0;
+    }
+
     // ==================== 对外 API ====================
 
     step(dt: number, input: FridgeInput): void {
         if (this.phase !== 'playing') return;
+        if (this.pendingTreasure) return; // 宝箱面板打开时冻结
         const step = Math.min(Math.max(dt, 0), MAX_DT);
         this.time += step;
 
@@ -124,6 +214,7 @@ export class FridgeWorld {
 
     /** 只读快照（渲染 / HUD 不得修改其中对象） */
     snapshot(): FridgeSnapshot {
+        const room = this.currentRoom();
         return {
             phase: this.phase,
             roomCleared: this.roomCleared,
@@ -140,6 +231,14 @@ export class FridgeWorld {
             aimTargetId: this._aimTargetId,
             aimX: this._aimX,
             aimY: this._aimY,
+            floor: this.floor,
+            coins: this.coins,
+            roomId: this.roomId,
+            roomKind: room ? room.kind : null,
+            doors: room ? room.doors.slice() : [],
+            locked: this.isRoomLocked(),
+            map: this.map,
+            pendingTreasure: this.pendingTreasure,
         };
     }
 
@@ -147,6 +246,67 @@ export class FridgeWorld {
         const out = this._events;
         this._events = [];
         return out;
+    }
+
+    /** 当前房间（沙盒模式返回 null） */
+    rooms(): RoomNode[] {
+        return this.map ? this.map.rooms : [];
+    }
+
+    currentRoom(): RoomNode | null {
+        if (!this.map) return null;
+        return this.map.rooms[this.roomId] || null;
+    }
+
+    /** 战斗 / Boss 房未清空 → 锁门 */
+    isRoomLocked(): boolean {
+        const room = this.currentRoom();
+        if (!room) return false;
+        return (room.kind === 'fight' || room.kind === 'boss') && !room.cleared;
+    }
+
+    /** 走进一扇门；锁门 / 没有这扇门时返回 false（规格 §15.1 第 16 条） */
+    enterDoor(dir: Dir): boolean {
+        if (!this.map || this.phase !== 'playing') return false;
+        const room = this.currentRoom();
+        if (!room || room.doors.indexOf(dir) < 0) return false;
+        if (this.isRoomLocked()) return false;
+        const nx = room.x + DIR_DELTA[dir].x;
+        const ny = room.y + DIR_DELTA[dir].y;
+        let target: RoomNode | null = null;
+        for (const r of this.map.rooms) {
+            if (r.x === nx && r.y === ny) {
+                target = r;
+                break;
+            }
+        }
+        if (!target) return false;
+        this._changeRoom(target.id, oppositeDir(dir));
+        return true;
+    }
+
+    /** 宝箱三选一：index 越界 / 没有待选宝箱时返回 false */
+    takeTreasure(index: number): boolean {
+        if (!this.pendingTreasure) return false;
+        const offered = this.pendingTreasure.offered;
+        if (!Number.isInteger(index) || index < 0 || index >= offered.length) return false;
+        const id = offered[index];
+        this.pendingTreasure = null;
+        this.addItem(id);
+        const room = this.currentRoom();
+        if (room && room.kind === 'treasure') room.cleared = true;
+        this.roomCleared = true;
+        this._events.push({ type: 'pickup', x: this.player.x, y: this.player.y, itemId: id });
+        return true;
+    }
+
+    /** 花 2 金币重掷宝箱（§6.3 宝箱房） */
+    rerollTreasure(): boolean {
+        if (!this.pendingTreasure || this.pendingTreasure.rerolled) return false;
+        if (this.coins < REROLL_COST) return false;
+        this.coins -= REROLL_COST;
+        this.pendingTreasure = Object.assign(this._rollTreasure(), { rerolled: true });
+        return true;
     }
 
     /** 拾取道具（宝箱 / 商店 / 底座共用） */
@@ -168,7 +328,8 @@ export class FridgeWorld {
     /** 调试 / 自检：直接刷一只敌人（位置随机但确定性） */
     spawnEnemy(kind: string, x?: number, y?: number): Enemy | null {
         if (this.enemies.length >= MAX_ENEMIES) return null;
-        const def = ENEMY_DEFS[kind];
+        const bossDef = BOSS_DEFS[this.floor];
+        const def = ENEMY_DEFS[kind] || (bossDef && bossDef.kind === kind ? bossDef : undefined);
         if (!def) return null;
         const pos = x === undefined || y === undefined ? this._randomSpawnPos() : { x, y };
         const e: Enemy = {
@@ -186,6 +347,9 @@ export class FridgeWorld {
             timer: this._rng() * 0.5,
             hitFlash: 0,
             gen: 0,
+            atk: 0,
+            windup: 0,
+            dashT: 0,
         };
         this.enemies.push(e);
         return e;
@@ -196,6 +360,176 @@ export class FridgeWorld {
         const steps = Math.max(1, Math.round(seconds / FIXED_DT));
         for (let i = 0; i < steps && this.phase === 'playing'; i++) this.step(FIXED_DT, input);
         return this.phase === 'playing';
+    }
+
+    // ==================== 地牢：换房 / 清房 / 宝箱 ====================
+
+    private _changeRoom(id: number, from: Dir | null): void {
+        if (!this.map) return;
+        this.roomId = clamp(id, 0, this.map.rooms.length - 1);
+        this.enteringFrom = from;
+        const room = this.map.rooms[this.roomId];
+        room.visited = true;
+        this.enemies = [];
+        this.bullets = [];
+        this.pickups = [];
+        this.pendingTreasure = null;
+        this._fireCd = 0;
+        this.roomCleared = room.cleared;
+        this._placeAtDoor(from);
+        if (!room.cleared) {
+            if (room.kind === 'treasure') {
+                this.pendingTreasure = this._rollTreasure();
+                this._events.push({ type: 'treasure', roomId: room.id });
+            } else {
+                this._spawnRoomEnemies(room);
+                this.wave = 1;
+            }
+        }
+        this._events.push({ type: 'room', id: room.id, kind: room.kind });
+    }
+
+    private _placeAtDoor(from: Dir | null): void {
+        const p = this.player;
+        const inset = PLAYER_R + 26;
+        if (from === 'up') {
+            p.x = 0;
+            p.y = ARENA_MAX_Y - inset;
+        } else if (from === 'left') {
+            p.x = ARENA_MIN_X + inset;
+            p.y = 0;
+        } else if (from === 'right') {
+            p.x = ARENA_MAX_X - inset;
+            p.y = 0;
+        } else {
+            p.x = 0;
+            p.y = ARENA_MIN_Y + inset;
+        }
+        p.vx = 0;
+        p.vy = 0;
+        p.invuln = Math.max(p.invuln, 0.4);
+    }
+
+    /** 按层 / 深度刷本房敌人（数量 4–9，§9.3） */
+    private _spawnRoomEnemies(room: RoomNode): void {
+        if (room.kind === 'boss') {
+            const kind = BOSS_KIND_BY_FLOOR[this.floor] || 'moldking';
+            this.spawnEnemy(kind, 0, ARENA_MAX_Y - 110);
+            this.spawnEnemy('moldball', -110, ARENA_MAX_Y - 90);
+            this.spawnEnemy('moldball', 110, ARENA_MAX_Y - 90);
+            return;
+        }
+        if (room.kind !== 'fight') return;
+        const pool = FLOOR_ENEMIES[this.floor] || FLOOR_ENEMIES[1];
+        const count = clamp(3 + Math.max(1, room.depth), 4, 9);
+        for (let i = 0; i < count; i++) {
+            this.spawnEnemy(pool[Math.floor(this._rng() * pool.length)]);
+        }
+    }
+
+    /** 最后一个敌人倒下：开门、+1 充能、掉落、写档事件 */
+    private _clearRoom(room: RoomNode): void {
+        if (room.cleared) return;
+        room.cleared = true;
+        this.roomCleared = true;
+        this.player.charges = Math.min(this.player.maxCharges, this.player.charges + 1);
+        this.wave = 0;
+
+        // 清房掉落（§12）：2–4 币 + 30% 半心 + 15% 炸弹
+        const coinCount = ROOM_COIN_MIN + Math.floor(this._rng() * (ROOM_COIN_MAX - ROOM_COIN_MIN + 1));
+        for (let i = 0; i < coinCount; i++) {
+            this.pickups.push({
+                id: this._nextId++, kind: 'coin',
+                x: -60 + i * 30, y: -60 + this._rng() * 30, bob: this._rng() * 6,
+            });
+        }
+        if (this._rng() < HEART_DROP_CHANCE) {
+            this.pickups.push({ id: this._nextId++, kind: 'heart', x: 40, y: 20, bob: 0 });
+        }
+        if (this._rng() < BOMB_DROP_CHANCE) {
+            this.pickups.push({ id: this._nextId++, kind: 'bomb', x: -40, y: 30, bob: 0 });
+        }
+        this._events.push({ type: 'clear', roomId: room.id });
+        if (room.kind === 'boss') {
+            // M2 只到第 1 层：击破 Boss = 通关第 1 层（核心三选一在 M4 接入）
+            this.phase = 'won';
+            this._events.push({ type: 'won' });
+        }
+    }
+
+    private _rollTreasure(): { offered: string[]; rerolled: boolean } {
+        const pool: string[] = [];
+        for (const it of ITEMS) {
+            if (it.floor === 0 || it.floor === this.floor) {
+                if (this._countItem(it.id) < 3) pool.push(it.id);
+            }
+        }
+        const offered: string[] = [];
+        let guard = 0;
+        while (offered.length < 3 && pool.length > 0 && guard++ < 60) {
+            const id = pool[Math.floor(this._rng() * pool.length)];
+            if (offered.indexOf(id) < 0) offered.push(id);
+        }
+        while (offered.length < 3) offered.push('sugar');
+        return { offered, rerolled: false };
+    }
+
+    private _countItem(id: string): number {
+        let n = 0;
+        for (const it of this.items) if (it === id) n++;
+        return n;
+    }
+
+    /** 玩家贴到墙边且对着门洞 → 自动进入下一间 */
+    private _checkDoorEntry(): void {
+        const p = this.player;
+        const eps = 0.75;
+        if (p.y >= ARENA_MAX_Y - PLAYER_R - eps && Math.abs(p.x) <= DOOR_HALF) {
+            this.enterDoor('up');
+        } else if (p.y <= ARENA_MIN_Y + PLAYER_R + eps && Math.abs(p.x) <= DOOR_HALF) {
+            this.enterDoor('down');
+        } else if (p.x <= ARENA_MIN_X + PLAYER_R + eps && Math.abs(p.y) <= DOOR_HALF) {
+            this.enterDoor('left');
+        } else if (p.x >= ARENA_MAX_X - PLAYER_R - eps && Math.abs(p.y) <= DOOR_HALF) {
+            this.enterDoor('right');
+        }
+    }
+
+    // ==================== 存档快照（§13.2 / §14.1） ====================
+
+    toSave(): RunSave {
+        return {
+            schemaVersion: 2,
+            runId: this.runId,
+            mode: 'normal',
+            seed: this.seed,
+            rngState: this._rng.getState(),
+            charId: this.charId,
+            floor: clamp(this.floor, 1, 4) as 1 | 2 | 3 | 4,
+            startFloor: 1,
+            heatCurses: [],
+            map: serializeFloorMap(this.map),
+            roomId: this.roomId,
+            enteringFrom: this.enteringFrom,
+            player: {
+                hp: this.player.hp,
+                maxHp: this.player.maxHp,
+                coins: this.coins,
+                bombs: this.player.bombs,
+                charges: this.player.charges,
+                maxCharges: this.player.maxCharges,
+                frozenSpeedPenalty: this.player.frozenSpeedPenalty,
+            },
+            items: this.items.slice(),
+            activeItem: this.activeItem,
+            cores: this.cores.slice(),
+            treasure: this.pendingTreasure
+                ? { offered: this.pendingTreasure.offered.slice(), rerolled: this.pendingTreasure.rerolled }
+                : null,
+            shop: null,
+            savedAt: Date.now(),
+            gameVersion: 'm2',
+        };
     }
 
     // ==================== 玩家 ====================
@@ -266,6 +600,8 @@ export class FridgeWorld {
             p.facingX = mx / (len || 1);
             p.facingY = my / (len || 1);
         }
+        // 贴到门洞边缘 → 自动进下一间（地牢模式）
+        if (this.map) this._checkDoorEntry();
     }
 
     // ==================== 瞄准与开火 ====================
@@ -447,7 +783,7 @@ export class FridgeWorld {
         for (const e of this.enemies) {
             if (e.hp <= 0) continue;
             if (e.hitFlash > 0) e.hitFlash = Math.max(0, e.hitFlash - dt);
-            const def = ENEMY_DEFS[e.kind];
+            const def = ENEMY_DEFS[e.kind] || BOSS_DEFS[this.floor] || ENEMY_DEFS.moldball;
             const dx = p.x - e.x;
             const dy = p.y - e.y;
             const dist = Math.hypot(dx, dy) || 1;
@@ -455,7 +791,9 @@ export class FridgeWorld {
             const ny = dy / dist;
             e.timer += dt;
 
-            switch (def.ai) {
+            if (e.kind === 'moldking') {
+                this._updateBoss(e, dt, nx, ny, dist);
+            } else switch (def.ai) {
                 case 'chase': {
                     const stop = def.ranged ? 150 : 0;
                     if (dist > stop) {
@@ -530,7 +868,6 @@ export class FridgeWorld {
 
             e.x = clamp(e.x, ARENA_MIN_X + e.r, ARENA_MAX_X - e.r);
             e.y = clamp(e.y, ARENA_MIN_Y + e.r, ARENA_MAX_Y - e.r);
-
             // 接触伤害
             const rr = e.r + PLAYER_R;
             if ((p.x - e.x) * (p.x - e.x) + (p.y - e.y) * (p.y - e.y) <= rr * rr) {
@@ -543,6 +880,99 @@ export class FridgeWorld {
             out.push(e);
         }
         this.enemies = out;
+
+        // 战斗 / Boss 房清空 → 开门（沙盒模式不判清房）
+        if (this.map) {
+            const room = this.currentRoom();
+            if (room && !room.cleared && (room.kind === 'fight' || room.kind === 'boss') && this.enemies.length === 0) {
+                this._clearRoom(room);
+            }
+        }
+    }
+
+    /**
+     * Boss「霉王」：一阶段三向孢子 + 召唤霉球；半血后二阶段改冲刺 + 弧形孢弹（§9.2）。
+     * 全部攻击有 ≥0.4s 前摇，弹幕角度确定性（不依赖随机）。
+     */
+    private _updateBoss(e: Enemy, dt: number, nx: number, ny: number, dist: number): void {
+        const def = BOSS_DEFS[this.floor] || BOSS_DEFS[1];
+        const phase2 = e.hp <= e.maxHp * 0.5;
+        e.gen = phase2 ? 2 : 1;
+        e.atk += dt;
+
+        // 冲刺：0.4s 前摇 → 0.5s 直线冲刺
+        if (e.windup > 0) {
+            e.windup -= dt;
+            if (e.windup <= 0) {
+                e.windup = 0;
+                e.dashT = 0.5;
+                e.vx = nx * 300;
+                e.vy = ny * 300;
+            }
+            return;
+        }
+        if (e.dashT > 0) {
+            e.dashT = Math.max(0, e.dashT - dt);
+            e.x += e.vx * dt;
+            e.y += e.vy * dt;
+            return;
+        }
+
+        // 走位：保持 150–260px 距离
+        if (dist > 260) {
+            e.x += nx * def.speed * dt;
+            e.y += ny * def.speed * dt;
+        } else if (dist < 150) {
+            e.x -= nx * def.speed * 0.7 * dt;
+            e.y -= ny * def.speed * 0.7 * dt;
+        }
+
+        if (!phase2) {
+            // 一阶段：每 1.8s 三向孢子；每 7s 召唤 2 只霉球
+            if (e.atk >= 1.8) {
+                e.atk = 0;
+                this._bossSpores(e, nx, ny, 3, 0.38, 165);
+            }
+            if (e.timer >= 7) {
+                e.timer = 0;
+                if (this.enemies.length + 2 <= MAX_ENEMIES) {
+                    this.spawnEnemy('moldball');
+                    this.spawnEnemy('moldball');
+                }
+            }
+        } else {
+            // 二阶段：每 1.3s 五向弧形孢弹；每 4.5s 一次冲刺（带 0.4s 前摇）
+            if (e.atk >= 1.3) {
+                e.atk = 0;
+                this._bossSpores(e, nx, ny, 5, 0.3, 190);
+            }
+            if (e.timer >= 4.5) {
+                e.timer = 0;
+                e.windup = 0.4;
+            }
+        }
+    }
+
+    private _bossSpores(e: Enemy, nx: number, ny: number, count: number, spread: number, speed: number): void {
+        const base = Math.atan2(ny, nx);
+        for (let i = 0; i < count; i++) {
+            const offset = (i - (count - 1) / 2) * spread;
+            const a = base + offset;
+            this._pushBullet({
+                id: this._nextId++,
+                owner: 'enemy',
+                x: e.x + Math.cos(a) * (e.r + 4),
+                y: e.y + Math.sin(a) * (e.r + 4),
+                vx: Math.cos(a) * speed,
+                vy: Math.sin(a) * speed,
+                r: ENEMY_BULLET_R,
+                dmg: e.dmg,
+                life: 5,
+                pierce: 0,
+                bounces: 0,
+                hitIds: [],
+            });
+        }
     }
 
     private _enemyShoot(e: Enemy, nx: number, ny: number, def: EnemyDef): void {
@@ -599,7 +1029,21 @@ export class FridgeWorld {
                     this.addItem(it.itemId);
                     this._events.push({ type: 'pickup', x: it.x, y: it.y, itemId: it.itemId });
                 } else if (it.kind === 'coin') {
-                    // M1 不做经济，金币只做视觉反馈
+                    this.coins++;
+                    this._events.push({ type: 'pickup', x: it.x, y: it.y, itemId: 'coin' });
+                } else if (it.kind === 'heart') {
+                    // 半心回血，不超上限
+                    if (p.hp < p.maxHp) {
+                        p.hp = Math.min(p.maxHp, p.hp + 1);
+                        this._events.push({ type: 'pickup', x: it.x, y: it.y, itemId: 'heart' });
+                    } else {
+                        // 满血时不浪费：折算成 1 金币
+                        this.coins++;
+                        this._events.push({ type: 'pickup', x: it.x, y: it.y, itemId: 'coin' });
+                    }
+                } else if (it.kind === 'bomb') {
+                    p.bombs = Math.min(BOMBS_MAX, p.bombs + 1);
+                    this._events.push({ type: 'pickup', x: it.x, y: it.y, itemId: 'bomb' });
                 }
                 continue;
             }
@@ -609,6 +1053,8 @@ export class FridgeWorld {
     }
 
     private _updateWaves(dt: number): void {
+        // 地牢模式：敌人由房间决定，不跑沙盒的无尽波次
+        if (this.map) return;
         this._waveTimer += dt;
         if (this._waveTimer < WAVE_INTERVAL) return;
         this._waveTimer = 0;
@@ -650,6 +1096,16 @@ export class FridgeWorld {
         if (!isFinite(p.dmg) || p.dmg < 0) errs.push('dmg 非法');
         if (this.enemies.length > MAX_ENEMIES) errs.push('敌人超上限');
         if (this.bullets.length > MAX_BULLETS) errs.push('子弹超上限');
+        if (!isFinite(this.coins) || this.coins < 0) errs.push(`金币非法 ${this.coins}`);
+        if (p.bombs < 0 || p.bombs > BOMBS_MAX) errs.push(`炸弹越界 ${p.bombs}`);
+        if (p.charges < 0 || p.charges > p.maxCharges) errs.push(`充能越界 ${p.charges}`);
+        if (this.map) {
+            const room = this.currentRoom();
+            if (!room) errs.push(`房间不存在 ${this.roomId}`);
+            else if (room.kind !== 'start' && room.doors.length === 0 && room.kind !== 'secret') {
+                errs.push(`房间 ${room.id} 无门`);
+            }
+        }
         for (const e of this.enemies) {
             if (!isFinite(e.x) || !isFinite(e.y)) errs.push(`敌人 ${e.id} 坐标 NaN`);
             if (e.x < ARENA_MIN_X - 1 || e.x > ARENA_MAX_X + 1) errs.push(`敌人 ${e.id} 越界 x`);
