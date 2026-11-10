@@ -569,6 +569,35 @@ async (page) => {
 | 点"返回" | 回大厅（全屏触摸节点没吞掉按钮） | ✅ |
 | 大厅点"午夜幸存者"再进 | 摇杆重建、方向正常 | ✅ |
 
+### 11.8 桌面输入的两条硬规则（2026-11-09 冰箱底下 M1 实测）
+
+> **来源**：Fridge M1 交互验证（摇杆 / 瞄准 / 死亡重开）。
+
+#### ① 页内注入只认 `MouseEvent`，`PointerEvent` 会被引擎忽略
+
+同一轮里先派发 `PointerEvent('pointerdown'/'pointermove'/'pointerup', {pointerType:'touch'})`，
+DOM 能收到、`_joystick._active` 仍是 `false`、玩家坐标一动不动；换成
+`MouseEvent('mousedown'/'mousemove'/'mouseup', {buttons, button:0, view:window})` 后才生效
+（本例实测位移 +132 设计像素）。**判据**：事件对象类型不对时"派发了但没反应"，不要当成游戏缺陷。
+
+#### ② 全局 `input.on(Input.EventType.TOUCH_END)` 收不到桌面鼠标抬起
+
+节点级 `Node.EventType.TOUCH_END` 由引擎用鼠标模拟，但**全局 `input` 只派发 `MOUSE_UP`**。
+"死亡后点击任意处重开"这类挂在 `input` 上的逻辑，桌面分支必须再绑一份：
+
+```ts
+input.on(Input.EventType.TOUCH_END, this.onAnyTouchEnd, this);   // 触屏
+input.on(Input.EventType.MOUSE_UP, this.onAnyMouseUp, this);     // 桌面（少这条就"点了没反应"）
+```
+
+`onDestroy` 里两条都要 `off`。
+
+#### ③ 运行时 `Label` 左对齐要同时改锚点
+
+`Label.horizontalAlign = LEFT` 只决定文字在**自己的 content 区**里怎么排，节点仍是 0.5 锚点：
+把 `x` 当成左边界写 `-340`，整行会被推出屏幕（实测顶栏只剩句尾）。
+运行时建 Label 时按对齐方式设锚点：`ut.setAnchorPoint(align === LEFT ? 0 : 0.5, 0.5)`。
+
 ---
 
 ## 附：本轮用到的 MCP 工具
