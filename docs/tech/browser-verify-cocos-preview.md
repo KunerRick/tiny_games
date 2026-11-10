@@ -58,6 +58,8 @@ http://127.0.0.1:7456/?scene=1ad57925-cccf-430b-9c93-16dc41ffdf15
   ```
 
 > 实例：本轮改了 `TinyVanguardMain.ts` 后重载预览，新方法仍是 `undefined`；调用 `project_refresh_assets` 再重载才生效。
+>
+> **刷新了仍是旧代码**（2026-11-10 实测）：`touch` / `project_refresh_assets` 都可能没触发脚本重编译，`temp/programming/.../chunks/` 里对应 chunk 的 mtime 不更新。此时对**具体脚本**再调一次 `project_reimport_asset`（`url: "db://assets/games/game_fridge/scripts/FridgeHud.ts"`），再重载预览即可；判据同样是 `typeof comp.新方法 === 'function'`。
 
 ---
 
