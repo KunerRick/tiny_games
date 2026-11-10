@@ -18,6 +18,7 @@
 | 显示 emoji/符号图标（尤其要在微信上跑） | [`tech/wechat-text-rendering.md`](./tech/wechat-text-rendering.md) |
 | 构建微信小游戏、或开发者工具报编译错误 / 一打开就崩 | [`tech/wechat-build-pitfalls.md`](./tech/wechat-build-pitfalls.md) + `node tools/check-wechat-build.js`（9 项预检）+ `node tools/replay-wechat-bundle.js`（包装器复现器） |
 | 新增游戏后同步构建场景清单（MCP / 脚本 / GUI 阶梯） | [`tech/wechat-build-pitfalls.md` §9.1](./tech/wechat-build-pitfalls.md) |
+| 新增游戏 / 改大厅图标 / 统一 UI 美术风格 | [`design/2026-11-10-ui-art-style-guide.md`](./design/2026-11-10-ui-art-style-guide.md) + `node tools/check-game-icons.js` |
 | 新增游戏或场景 | [`../AGENTS.md`](../AGENTS.md) 的 **项目结构 + 游戏注册** |
 | 查某游戏的设计/计划/场景配置 | 下文的 **按游戏分类** |
 | 规划剩余 8 款的玩法/美术/复核开工顺序 | [`plans/2026-11-07-remaining-games-polish-plan.md`](./plans/2026-11-07-remaining-games-polish-plan.md) |
@@ -36,6 +37,7 @@
 - [`tech/wechat-text-rendering.md`](./tech/wechat-text-rendering.md) — 微信文本渲染：变体选择符 VS16 导致图标方框、图标单一来源规约
 - [`tech/wechat-build-pitfalls.md`](./tech/wechat-build-pitfalls.md) — 微信小游戏构建产物：开发者工具「编译报错」的时序根因、**「能编译但一打开就崩」的包装器/项目类型根因**、日志与缓存取证、预检脚本与声明纪律
 - [`tech/dev-toolchain-notes.md`](./tech/dev-toolchain-notes.md) — 文本编码（PowerShell 陷阱）、`tsc` 版本注意事项、提交前检查
+- [`design/2026-11-10-ui-art-style-guide.md`](./design/2026-11-10-ui-art-style-guide.md) — 全站 UI / 图标美术规范：设计令牌（`UITheme` / `GameUIKit` / `SceneSkin`）、大厅图标四色法与登记表、新增游戏第四步与 `tools/check-game-icons.js`
 
 ---
 

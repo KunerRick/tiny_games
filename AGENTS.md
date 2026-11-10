@@ -89,7 +89,7 @@ tiny_games/
 │   ├── assets/            # 文档配图
 │   ├── tech/              # 技术决策与踩坑详情（AGENTS.md 教训的展开）
 │   └── cocos-best-practices.md
-├── tools/                 # 本地校验/同步脚本（verify-battle-fixes.js、verify-tetris-core.js、verify-idiom-core.js、verify-gomoku-core.js、verify-idle-core.js、verify-match3-core.js、verify-td-core.js、verify-pool-core.js、verify-wordle-core.js、verify-shmup-core.js、verify-thunder-core.js、check-wechat-build.js、replay-wechat-bundle.js、sync-build-scenes.js）
+├── tools/                 # 本地校验/同步脚本（verify-battle-fixes.js、verify-tetris-core.js、verify-idiom-core.js、verify-gomoku-core.js、verify-idle-core.js、verify-match3-core.js、verify-td-core.js、verify-pool-core.js、verify-wordle-core.js、verify-shmup-core.js、verify-thunder-core.js、check-game-icons.js、check-wechat-build.js、replay-wechat-bundle.js、sync-build-scenes.js）
 ├── settings/              # Cocos 编辑器设置
 ├── extensions/            # 编辑器插件（tsconfig 排除；node_modules 已 gitignore）
 └── build/                 # 构建输出（gitignored）
@@ -123,7 +123,7 @@ tiny_games/
 { id: 'thunder',       name: '雷霆战机', icon: 'default', sceneName: 'Thunder',     description: '关卡制养成弹幕，升级机库击破雷霆核心' }
 ```
 
-**添加新游戏三步骤**：① `GameConfig.ts` 注册 ② 创建 `assets/games/game_xxx/scenes/Xxx.scene` ③ 场景名与 `sceneName` 一致。
+**添加新游戏四步骤**：① `GameConfig.ts` 注册 ② 创建 `assets/games/game_xxx/scenes/Xxx.scene` ③ 场景名与 `sceneName` 一致 ④ **在 `GameIconArt.ts` 补 `ACCENTS[id]` + `drawShape` 的 `case 'id':`**（漏了会落回兜底问号，大厅里和别的游戏长一样），改完跑 `node tools/check-game-icons.js`；规范见 [`design/2026-11-10-ui-art-style-guide.md`](./docs/design/2026-11-10-ui-art-style-guide.md)。
 
 ## 架构与模式
 
@@ -204,6 +204,14 @@ node "$TSC" --noEmit && echo TS_OK   # 实测 Version 5.8.2 通过
 ```bash
 node tools/verify-battle-fixes.js
 # 注意：脚本内 ROOT 硬编码为作者的 Windows 路径，跨机运行前需先改成本机绝对路径
+```
+
+大厅图标覆盖自检（**新增游戏后必跑**；退出码 0 = GAME_LIST 里每款都有专属强调色与图形）：
+
+```bash
+node tools/check-game-icons.js                   # 24 款全覆盖才通过
+node tools/check-game-icons.js --art <改坏的副本>  # 自测用：验证脚本真能拦住漏登记
+# 只查登记表，不判「两个图标长得像」；规范见 docs/design/2026-11-10-ui-art-style-guide.md
 ```
 
 方块坠落纯逻辑自检（不启动编辑器，覆盖 SRS 四态与踢墙、7-bag、出生位置、消行、Ghost、计分与重力表）：
@@ -382,6 +390,7 @@ node tools/sync-build-scenes.js --all            # 顺带修其它平台的构�
 - [Cocos Creator 最佳实践（完整版）](./docs/cocos-best-practices.md)
 - [Graphics 动态部件（分层 / 镜像 / 程序化动作）](./docs/tech/cocos-graphics-animation-layering.md)
 - [文档索引与定位指南](./docs/README.md)
+- [全站 UI / 图标美术规范（令牌 + 大厅图标登记表 + 自检）](./docs/design/2026-11-10-ui-art-style-guide.md)
 - [排期/补间陷阱（自排期回调被丢弃 → 回合卡死）](./docs/tech/cocos-scheduler-and-tween-pitfalls.md)
 - [微信文本渲染（变体选择符 VS16 → 图标方框）](./docs/tech/wechat-text-rendering.md)
 - [微信小游戏构建产物（编译报错的时序根因 + 预检流程）](./docs/tech/wechat-build-pitfalls.md)
