@@ -434,6 +434,44 @@ AX 树抓不到按钮时退回坐标点击：`screencapture` 截图量中心，*
 
 ---
 
+## 9.2 模拟器验收操作要点（2026-11-10 实测，Fridge 门禁 ②）
+
+构建完成后要在**微信开发者工具**里跑起来看帧率 / 崩不崩，本节是这次踩通的完整路径。工具版本：
+`2.02.2609250 Stable`，窗口进程名在 AX 里叫 **`Electron`**，但 CG 窗口 owner 叫 **`微信开发者工具`** ——
+`cu find Electron ...` 永远查不到元素（整棵树只有一个 `AXGroup`），**只能截图 + 坐标点击**。
+
+| 环节 | 做法 | 坑 |
+|---|---|---|
+| 打开项目 | 构建前必须关掉工具里的项目；构建完 `open -a wechatwebdevtools`，工具会自动恢复上次项目 | `cli open --project <dir>` 要求先在「设置 → 安全设置」打开服务端口，否则直接报 `IDE service port disabled` |
+| 打开模拟器 | 菜单栏「界面 → 模拟器」；AX 树为空，用 System Events 按**菜单项名**点击：`Application("System Events").processes.byName("Electron").menuBars[0].menuBarItems.whose({name:"界面"})()[0].menus()[0].menuItems.whose({name:"模拟器"})()[0].click()` | `cu find` / `cu press` 对 Electron 全面失效；`cu click x y --app Electron` 会被遮挡守卫误判（报告 topWindow 是「微信开发者工具」），要加 `--force` |
+| 进入游戏 | 大厅是滚动网格，**滚轮无效，必须拖拽**（`cu scroll` 不动，`MOUSE_WHEEL` 到不了 Cocos ScrollView） | 拖拽脚本见下方「拖拽 JXA」；`左摇杆/游戏内手势` 同样是拖拽，`cu click` 只能触发点击 |
+| 游戏内键盘 | **模拟器不转发键盘**：`cu key f` / `cu key k` 都进不了游戏（游戏内 F 开帧率面板、K 刷怪的调试键全部无效） | 验收一律用**屏幕上的按钮**（Fridge 顶部「帧率」按钮） |
+| 读日志 | 底部「调试器」标签页 = 挂到游戏的 Chrome DevTools，Console 能看到 `LoadScene xxx` 之类的日志，可据此确认游戏真的起来了 | 游戏代码里的 `globalThis.__xxx` 探针**读不到**：`cc` 不是全局、`GameGlobal.__fridgePerf` / `window.__fridgePerf` 都是 undefined（引擎在独立作用域）。要断言状态只能看画面 |
+| 截图 | `cu shot` 全屏（Retina 下 2x 像素），量到像素后 ÷2 得 pt 再点击 | 模拟器设备区域约 pt x 983–1306、y 115–842（iPhone 12/13） |
+| 关看护 | 收工 `cu keepawake stop` | 面板 / 模拟器操作动辄几分钟，中途锁屏会前功尽弃 |
+
+**拖拽 JXA**（CGEvent；`cu` 没有 drag 子命令，`cu scroll` 对 Cocos 无效）：
+
+```javascript
+ObjC.import('CoreGraphics');
+function post(t, x, y) { $.CGEventPost($.kCGHIDEventTap, $.CGEventCreateMouseEvent(null, t, $.CGPointMake(x, y), 0)); }
+function run(argv) {
+  const [x1, y1, x2, y2, n] = argv.map(Number);
+  post(1, x1, y1);                       // mouseDown
+  for (let i = 1; i <= n; i++) { post(6, x1 + (x2-x1)*i/n, y1 + (y2-y1)*i/n); delay(0.012); }  // leftMouseDragged
+  post(2, x2, y2);                       // mouseUp
+}
+```
+
+用法：`osascript -l JavaScript drag.js 1144 680 1144 260 30`（大厅从下往上滑，能看到第 5 行以后的游戏）。
+**判据**：拖完再截图，图标行确实换了 —— `ok: true` 不代表滑动了。
+
+**FPS 读数的口径**：模拟器里 `FPS 56–57`、`帧 17.6 ms` 是**模拟器自己的刷新节奏**（≈56.8 Hz），
+不是游戏算力不足；同时看游戏内 `FridgePerf` 的 `逻辑 / 渲染` 两项（本次 <0.5 ms/帧）才能判断余量。
+真机 60fps 仍要单独复签，模拟器结论不能替代。
+
+---
+
 ## 10. 相关
 
 - 预检脚本（9 项）：[`../../tools/check-wechat-build.js`](../../tools/check-wechat-build.js)
