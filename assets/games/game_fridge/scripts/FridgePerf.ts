@@ -37,9 +37,11 @@ export class FridgePerf extends Component {
     _heapMb = -1;
 
     private _panel: Node | null = null;
+    private _toggleNode: Node | null = null;
     private _text: Label | null = null;
     private _bg: Graphics | null = null;
     private _toggleLabel: Label | null = null;
+    private _safeTop = 0;
 
     private _winTime = 0;
     private _winFrames = 0;
@@ -69,11 +71,23 @@ export class FridgePerf extends Component {
 
     onDestroy(): void {
         this._panel = null;
+        this._toggleNode = null;
         this._text = null;
         this._bg = null;
         this._toggleLabel = null;
         const g = globalThis as unknown as { __fridgePerf?: FridgePerf };
         if (g.__fridgePerf === this) g.__fridgePerf = undefined;
+    }
+
+    /** 顶栏整体下移刘海高度（设计像素） */
+    setSafeTop(top: number): void {
+        this._safeTop = Math.max(0, top);
+        if (this._toggleNode && this._toggleNode.isValid) {
+            this._toggleNode.setPosition(0, 604 - this._safeTop, 0);
+        }
+        if (this._panel && this._panel.isValid) {
+            this._panel.setPosition(PANEL_X + PANEL_W / 2, PANEL_Y - PANEL_H / 2 - this._safeTop, 0);
+        }
     }
 
     toggle(): void {
@@ -131,6 +145,7 @@ export class FridgePerf extends Component {
         ut.setContentSize(96, 40);
         node.setPosition(0, 604, 0);
         this.node.addChild(node);
+        this._toggleNode = node;
 
         const gfx = node.addComponent(Graphics);
         gfx.fillColor = new Color(24, 30, 46, 200);

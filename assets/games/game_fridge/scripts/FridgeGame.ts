@@ -30,6 +30,8 @@ const FIELD_Y = 160;
 const MAX_STEPS = 3;
 /** HUD 刷新间隔（秒） */
 const HUD_REFRESH = 0.1;
+/** 设计分辨率高度，用于把 wx 的安全区像素换算成设计像素 */
+const DESIGN_H = 1280;
 /** 触摸层高度：留出顶部 140px 给 HUD 与返回按钮，避免全屏手势层吞掉按钮点击 */
 const TOUCH_LAYER_H = 1140;
 const TOUCH_LAYER_Y = -70;
@@ -61,6 +63,13 @@ export class FridgeGame extends Component {
         this._ensureControls();
         this._ensureHud();
         this._ensurePerf();
+
+        const safeTop = this._readSafeTop();
+        this._hud?.setSafeTop(safeTop);
+        this._perf?.setSafeTop(safeTop);
+        if (safeTop > 0) this._shiftBackButton(safeTop);
+        if (this._hud) this._hud.onRestartRequested = () => this.startRun();
+
         input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
         input.on(Input.EventType.KEY_UP, this.onKeyUp, this);
         input.on(Input.EventType.TOUCH_END, this.onAnyTouchEnd, this);
@@ -73,6 +82,7 @@ export class FridgeGame extends Component {
         input.off(Input.EventType.KEY_UP, this.onKeyUp, this);
         input.off(Input.EventType.TOUCH_END, this.onAnyTouchEnd, this);
         input.off(Input.EventType.MOUSE_UP, this.onAnyMouseUp, this);
+        if (this._hud) this._hud.onRestartRequested = null;
         this._keys.clear();
         this._core = null;
         this._joystick = null;
@@ -129,6 +139,7 @@ export class FridgeGame extends Component {
         const renderMs = nowMs() - t1;
 
         this._perf?.sample(dt, logicMs, renderMs, snap);
+        this._hud?.setFps(this._perf ? this._perf._fps : 0);
     }
 
     // ==================== 输入 ====================
@@ -267,6 +278,32 @@ export class FridgeGame extends Component {
         let node = parent.getChildByName('FridgePerf');
         if (!node) node = FridgePerf.create(parent).node;
         this._perf = node.getComponent(FridgePerf);
+    }
+
+    // ==================== 安全区 ====================
+
+    /** 读取 wx 安全区顶部，换算成设计像素；非小游戏环境返回 0 */
+    private _readSafeTop(): number {
+        const wx = (globalThis as unknown as {
+            wx?: { getSystemInfoSync?: () => { safeArea?: { top?: number }; windowHeight?: number } };
+        }).wx;
+        if (!wx || typeof wx.getSystemInfoSync !== 'function') return 0;
+        try {
+            const sys = wx.getSystemInfoSync();
+            const area = sys && sys.safeArea;
+            if (!area || typeof area.top !== 'number' || !sys.windowHeight) return 0;
+            return Math.max(0, Math.round(area.top * (DESIGN_H / sys.windowHeight)));
+        } catch {
+            return 0;
+        }
+    }
+
+    /** 让返回按钮也避让刘海（场景节点，运行时只改位置，不改场景文件） */
+    private _shiftBackButton(top: number): void {
+        const parent = this.node.parent;
+        if (!parent) return;
+        const btn = parent.getChildByName('BackButton');
+        if (btn && btn.isValid) btn.setPosition(btn.position.x, btn.position.y - top, 0);
     }
 
     // ==================== 调试接口（浏览器探针 / 验收） ====================
