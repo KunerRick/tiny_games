@@ -1,38 +1,50 @@
 import { _decorator } from 'cc';
 
+/** 大厅分类（试玩报告 §3.1：24 款已经超过一屏的舒适浏览阈值，加分类标签） */
+export type GameCategory = 'casual' | 'puzzle' | 'action' | 'growth';
+
+export const GAME_CATEGORIES: { id: GameCategory; label: string }[] = [
+    { id: 'casual', label: '休闲' },
+    { id: 'puzzle', label: '益智' },
+    { id: 'action', label: '动作' },
+    { id: 'growth', label: '养成' },
+];
+
 export interface GameConfig {
     id: string;
     name: string;
     icon: string;
     sceneName: string;
     description?: string;
+    /** 大厅分类；省略则归入「全部」但在任何分类标签下都不显示（新游戏记得补） */
+    category?: GameCategory;
 }
 
 export const GAME_LIST: GameConfig[] = [
-    { id: '2048', name: '2048', icon: 'default', sceneName: 'Game2048', description: '经典数字合并游戏' },
-    { id: 'war_evo', name: '战争进化', icon: 'default', sceneName: 'WarEvo', description: '时代进化对推' },
-    { id: 'snake', name: '贪吃蛇', icon: 'default', sceneName: 'Snake', description: '大作战风格贪吃蛇' },
-    { id: 'tiny_vanguard', name: '小小先锋', icon: 'default', sceneName: 'TinyVanguard', description: 'Roguelike 回合制战棋' },
-    { id: 'tetris', name: '方块坠落', icon: 'default', sceneName: 'Tetris', description: '经典方块消除' },
-    { id: 'brick', name: '砖块远征', icon: 'default', sceneName: 'BrickBreaker', description: '打砖块 + 肉鸽升级' },
-    { id: 'merge', name: '合合大作战', icon: 'default', sceneName: 'Merge', description: '合成同类水果，越滚越大' },
-    { id: 'gate_runner', name: '数值冲刺', icon: 'default', sceneName: 'GateRunner', description: '穿过 ×2 / ÷2 数值门，带队伍冲到 Boss' },
-    { id: 'solitaire', name: '纸牌接龙', icon: 'default', sceneName: 'Solitaire', description: '克朗代克单人纸牌' },
-    { id: 'survivor', name: '午夜幸存者', icon: 'default', sceneName: 'Survivor', description: '8 分钟肉鸽生存，自动攻击 + 三选一构筑' },
-    { id: 'minesweeper', name: '扫雷', icon: 'default', sceneName: 'Minesweeper', description: '经典扫雷，首点安全 + 和弦' },
-    { id: 'sudoku', name: '数独', icon: 'default', sceneName: 'Sudoku', description: '经典数独，笔记 / 提示 / 撤销' },
-    { id: 'idiom', name: '成语填字', icon: 'default', sceneName: 'Idiom', description: '纵横交叉填成语，全部锁定通关' },
-    { id: 'gomoku', name: '五子棋', icon: 'default', sceneName: 'Gomoku', description: '15×15 经典五子棋，人机三档 / 双人对战' },
-    { id: 'idle', name: '小店日记', icon: 'default', sceneName: 'Idle', description: '点击经营小店，升级设施，离线也赚钱' },
-    { id: 'match3', name: '缤纷消除', icon: 'default', sceneName: 'Match3', description: '交换相邻方块凑三连，连锁消除闯 30 关' },
-    { id: 'tower_defense', name: '守卫塔楼', icon: 'default', sceneName: 'TowerDefense', description: '沿路径布塔，撑过 10 波进攻' },
-    { id: 'pool', name: '台球', icon: 'default', sceneName: 'Pool', description: '拉杆瞄准，把球全部打进袋' },
-    { id: 'wordle', name: '成语猜猜', icon: 'default', sceneName: 'Wordle', description: '六次机会猜出四字成语' },
-    { id: 'bubble', name: '泡泡龙', icon: 'default', sceneName: 'Bubble', description: '瞄准弹射同色泡泡，三连消除清空盘面' },
-    { id: 'sokoban', name: '推箱子', icon: 'default', sceneName: 'Sokoban', description: '推动箱子到目标点，20 关最强规划' },
-    { id: 'shmup', name: '星际弹幕', icon: 'default', sceneName: 'Shmup', description: '拖动飞船自动开火，9 波弹幕闯关' },
-    { id: 'thunder', name: '雷霆战机', icon: 'default', sceneName: 'Thunder', description: '关卡制养成弹幕，升级机库击破雷霆核心' },
-    { id: 'fridge', name: '冰箱底下', icon: 'default', sceneName: 'Fridge', description: '房间制地牢肉鸽，攒调味料道具打出标签组合' },
+    { id: '2048', name: '2048', icon: 'default', sceneName: 'Game2048', description: '经典数字合并游戏', category: 'casual' },
+    { id: 'war_evo', name: '战争进化', icon: 'default', sceneName: 'WarEvo', description: '时代进化对推', category: 'action' },
+    { id: 'snake', name: '贪吃蛇', icon: 'default', sceneName: 'Snake', description: '大作战风格贪吃蛇', category: 'casual' },
+    { id: 'tiny_vanguard', name: '小小先锋', icon: 'default', sceneName: 'TinyVanguard', description: 'Roguelike 回合制战棋', category: 'action' },
+    { id: 'tetris', name: '方块坠落', icon: 'default', sceneName: 'Tetris', description: '经典方块消除', category: 'puzzle' },
+    { id: 'brick', name: '砖块远征', icon: 'default', sceneName: 'BrickBreaker', description: '打砖块 + 肉鸽升级', category: 'casual' },
+    { id: 'merge', name: '合合大作战', icon: 'default', sceneName: 'Merge', description: '合成同类水果，越滚越大', category: 'casual' },
+    { id: 'gate_runner', name: '数值冲刺', icon: 'default', sceneName: 'GateRunner', description: '穿过 ×2 / ÷2 数值门，带队伍冲到 Boss', category: 'action' },
+    { id: 'solitaire', name: '纸牌接龙', icon: 'default', sceneName: 'Solitaire', description: '克朗代克单人纸牌', category: 'puzzle' },
+    { id: 'survivor', name: '午夜幸存者', icon: 'default', sceneName: 'Survivor', description: '8 分钟肉鸽生存，自动攻击 + 三选一构筑', category: 'action' },
+    { id: 'minesweeper', name: '扫雷', icon: 'default', sceneName: 'Minesweeper', description: '经典扫雷，首点安全 + 和弦', category: 'puzzle' },
+    { id: 'sudoku', name: '数独', icon: 'default', sceneName: 'Sudoku', description: '经典数独，笔记 / 提示 / 撤销', category: 'puzzle' },
+    { id: 'idiom', name: '成语填字', icon: 'default', sceneName: 'Idiom', description: '纵横交叉填成语，全部锁定通关', category: 'puzzle' },
+    { id: 'gomoku', name: '五子棋', icon: 'default', sceneName: 'Gomoku', description: '15×15 经典五子棋，人机三档 / 双人对战', category: 'puzzle' },
+    { id: 'idle', name: '小店日记', icon: 'default', sceneName: 'Idle', description: '点击经营小店，升级设施，离线也赚钱', category: 'growth' },
+    { id: 'match3', name: '缤纷消除', icon: 'default', sceneName: 'Match3', description: '交换相邻方块凑三连，连锁消除闯 30 关', category: 'puzzle' },
+    { id: 'tower_defense', name: '守卫塔楼', icon: 'default', sceneName: 'TowerDefense', description: '沿路径布塔，撑过 10 波进攻', category: 'action' },
+    { id: 'pool', name: '台球', icon: 'default', sceneName: 'Pool', description: '拉杆瞄准，把球全部打进袋', category: 'casual' },
+    { id: 'wordle', name: '成语猜猜', icon: 'default', sceneName: 'Wordle', description: '六次机会猜出四字成语', category: 'puzzle' },
+    { id: 'bubble', name: '泡泡龙', icon: 'default', sceneName: 'Bubble', description: '瞄准弹射同色泡泡，三连消除清空盘面', category: 'casual' },
+    { id: 'sokoban', name: '推箱子', icon: 'default', sceneName: 'Sokoban', description: '推动箱子到目标点，20 关最强规划', category: 'casual' },
+    { id: 'shmup', name: '星际弹幕', icon: 'default', sceneName: 'Shmup', description: '拖动飞船自动开火，9 波弹幕闯关', category: 'action' },
+    { id: 'thunder', name: '雷霆战机', icon: 'default', sceneName: 'Thunder', description: '关卡制养成弹幕，升级机库击破雷霆核心', category: 'action' },
+    { id: 'fridge', name: '冰箱底下', icon: 'default', sceneName: 'Fridge', description: '房间制地牢肉鸽，攒调味料道具打出标签组合', category: 'growth' },
 ];
 
 export function getGameById(id: string): GameConfig | undefined {

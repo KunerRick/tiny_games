@@ -47,6 +47,7 @@ import {
     stripVariationSelectors,
 } from './UITheme';
 import type { FontToken } from './UITheme';
+import { StorageManager } from '../managers/StorageManager';
 
 /** 令牌随构件一起再导出，调用方只需引一个模块 */
 export * from './UITheme';
@@ -318,6 +319,30 @@ export function toast(parent: Node, text: string, seconds = 1.6, yFromTop = 1180
         })
         .start();
     return node;
+}
+
+// ==================== 首次进入引导 ====================
+
+/**
+ * 首次进入某游戏的浮层提示：同一个 `seen_tutorial_*` 键只弹一次。
+ *
+ * 试玩报告里「进游戏不知道该点哪里」是共性 P1；用一个 3 秒的浮层说一句话，
+ * 成本最低，也比常驻角标小字更容易被看到。存储失败时只当作已看过，不阻塞开局。
+ */
+export function showTutorialOnce(parent: Node, gameId: string, text: string, seconds = 3.2): Node | null {
+    const key = 'seen_tutorial';
+    const store = StorageManager.instance;
+    try {
+        if (store.getItem(gameId, key) === '1') return null;
+    } catch (e) {
+        // 读不到存储就当作没看过，游戏照常开始
+    }
+    try {
+        store.setItem(gameId, key, '1');
+    } catch (e) {
+        // 写不进去就每次弹一次，不影响玩法
+    }
+    return toast(parent, text, seconds, 1080);
 }
 
 // ==================== 返回按钮皮肤 ====================

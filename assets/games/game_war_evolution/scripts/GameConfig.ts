@@ -46,7 +46,7 @@ export const UNIT_CONFIGS: UnitConfig[] = [
         id: 'caveman', name: '穴居人', cost: 15,
         hp: 35, attack: 15, attackSpeed: 1.0, moveSpeed: 80,
         attackRange: 30, age: Age.PRIMITIVE, desc: '廉价近战',
-        scale: 1.0,
+        scale: 1.2,
         tint: { r: 68, g: 136, b: 255 },
         icon: 'caveman',
     },
@@ -55,7 +55,7 @@ export const UNIT_CONFIGS: UnitConfig[] = [
         hp: 120, attack: 35, attackSpeed: 0.6, moveSpeed: 60,
         attackRange: 35, age: Age.PRIMITIVE, desc: '重型践踏',
         hasStomp: true,
-        scale: 1.25,
+        scale: 1.5,
         tint: { r: 100, g: 80, b: 220 },
         icon: 'mammoth',
     },
@@ -65,7 +65,7 @@ export const UNIT_CONFIGS: UnitConfig[] = [
         hp: 90, attack: 50, attackSpeed: 1.0, moveSpeed: 110,
         attackRange: 30, age: Age.MEDIEVAL, desc: '冲锋击退',
         hasCharge: true,
-        scale: 1.0,
+        scale: 1.2,
         tint: { r: 60, g: 180, b: 255 },
         icon: 'knight',
     },
@@ -74,7 +74,7 @@ export const UNIT_CONFIGS: UnitConfig[] = [
         hp: 25, attack: 30, attackSpeed: 1.0, moveSpeed: 80,
         attackRange: 150, age: Age.MEDIEVAL, desc: '远程攻击',
         closeRangePenalty: 0.5,
-        scale: 1.0,
+        scale: 1.2,
         tint: { r: 80, g: 200, b: 120 },
         icon: 'archer',
     },
@@ -84,7 +84,7 @@ export const UNIT_CONFIGS: UnitConfig[] = [
         hp: 200, attack: 80, attackSpeed: 0.8, moveSpeed: 90,
         attackRange: 40, age: Age.FUTURE, desc: '能量护盾',
         hasShield: true,
-        scale: 1.2,
+        scale: 1.45,
         tint: { r: 140, g: 100, b: 255 },
         icon: 'mech',
     },
@@ -93,7 +93,7 @@ export const UNIT_CONFIGS: UnitConfig[] = [
         hp: 50, attack: 45, attackSpeed: 1.2, moveSpeed: 95,
         attackRange: 260, age: Age.FUTURE, desc: '聚焦射击',
         hasLaserFocus: true,
-        scale: 0.9,
+        scale: 1.1,
         tint: { r: 100, g: 220, b: 255 },
         icon: 'laser',
     },
@@ -123,7 +123,9 @@ export const EVOLVE_BONUS_GOLD = 200;
 export const WORLD = {
     PLAYER_X: -280,     // 玩家城堡中心 x（场景中 Castle_Player 的 x）
     ENEMY_X: 280,       // 敌方城堡中心 x
-    BATTLE_Y: 60,       // 主战线逻辑 y（城堡在此高度；单位用渲染层偏移分行）
+    BATTLE_Y: 0,        // 主战线逻辑 y（城堡在此高度；单位用渲染层偏移分行）
+                        // 第二轮复核 N12：原来 60 让整条战线偏上，战场下方留出一大段空地面。
+                        // 归零后近战 -18 / 远程 78，上下余量接近，画面居中。
     QUEUE_DIST: 44,     // 排队间距（像素）
     SPAWN_OFFSET: 25,   // 单位出生时从城堡向外偏移
 };

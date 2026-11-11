@@ -661,6 +661,28 @@ export class MergeGame extends Component {
             g.rect(left + x, lineY, 14, 2);
         }
         g.fill();
+
+        this._ensureWarnHint();
+    }
+
+    /**
+     * 警戒线旁的一行说明（试玩报告：红色虚线没有解释，玩家不知道越线会怎样）。
+     * 只建一次，挂在静态背景层上，随 `_drawBackground` 的节点一起销毁。
+     */
+    private _ensureWarnHint(): void {
+        const host = this._bgGraphics ? this._bgGraphics.node : null;
+        if (!host || host.getChildByName('WarnHint')) return;
+        const width = 200;
+        const lineY = PLAY_H / 2 - GAME_OVER_LINE;
+        const label = createLabel(host, '警戒线 · 越线即结束', FONT_CAPTION.fontSize, {
+            width,
+            height: 24,
+            color: COLOR.TEXT_DISABLED,
+            align: 'right',
+            x: PLAY_W / 2 - WALL_T - 10 - width / 2,
+            y: lineY + 16,
+        });
+        label.node.name = 'WarnHint';
     }
 
     private _drawFruits(): void {

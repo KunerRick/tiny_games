@@ -693,6 +693,13 @@ export class ShmupWorld {
         });
     }
 
+    /** 当前波次敌人总数（HUD 进度条分母用） */
+    waveTotal(): number {
+        let total = 0;
+        for (const e of this.wave.entries) total += Math.max(1, e.count || 1);
+        return total;
+    }
+
     /** 当前波次还剩多少敌人生成 / 存活（HUD 用） */
     remainingInWave(): number {
         const wave = this.wave;

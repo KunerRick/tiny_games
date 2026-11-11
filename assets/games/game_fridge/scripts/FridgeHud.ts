@@ -55,6 +55,8 @@ export class FridgeHud extends Component {
     private _hint: Label | null = null;
     private _dead: Label | null = null;
     private _deadDim: Node | null = null;
+    /** 死亡遮罩上的「再来一局」按钮（只它重开，遮罩空白处仍是回主菜单） */
+    private _deadAgain: Node | null = null;
 
     /** 主动槽按钮 */
     private _activeNode: Node | null = null;
@@ -159,8 +161,8 @@ export class FridgeHud extends Component {
     }
 
     onDestroy(): void {
-        if (this._deadDim && this._deadDim.isValid) {
-            this._deadDim.off(Node.EventType.TOUCH_END, this.onDeadDimTouch, this);
+        if (this._deadAgain && this._deadAgain.isValid) {
+            this._deadAgain.off(Node.EventType.TOUCH_END, this.onDeadDimTouch, this);
         }
         for (const card of this._treasureCards) {
             if (card && card.isValid) card.off(Node.EventType.TOUCH_END, this.onTreasureCardTouch, this);
@@ -196,6 +198,7 @@ export class FridgeHud extends Component {
         this._hint = null;
         this._dead = null;
         this._deadDim = null;
+        this._deadAgain = null;
         this._activeNode = null;
         this._activeGfx = null;
         this._activeName = null;
@@ -319,7 +322,7 @@ export class FridgeHud extends Component {
                 const extra = this._resultLines.length > 0 ? `\n${this._resultLines.join('\n')}` : '';
                 this._dead.string =
                     `${head}\n${floorText}得分 ${score} · 击杀 ${snap.kills} · 坚持 ${Math.floor(snap.time)} 秒\n` +
-                    `${bestText}${extra}\n点击任意处返回主菜单`;
+                    `${bestText}${extra}\n点空白处回主菜单 · 点「再来一局」立即重开`;
             }
         }
         if (this._deadDim) {
@@ -1019,6 +1022,10 @@ export class FridgeHud extends Component {
                 return `热度：${names.join(' · ')}　左半屏拖动 / 右半屏瞄准`;
             }
         }
+        // 空房间 / 清完怪的房间明确告诉玩家「已经没事可做」，别让玩家站在原地等怪
+        if (snap.roomCleared && snap.enemies.length === 0 && snap.doors.length > 0) {
+            return '本房间已清空 · 走到门口进入下一个房间';
+        }
         return '左半屏拖动移动 · 右半屏拖动瞄准 / 射击 · 点技能 / 炸弹（Q / E）';
     }
 
@@ -1181,8 +1188,17 @@ export class FridgeHud extends Component {
         bl.verticalAlign = Label.VerticalAlign.CENTER;
         node.addChild(btn);
 
-        node.on(Node.EventType.TOUCH_END, this.onDeadDimTouch, this);
+        // 只有按钮重开；遮罩本身不再消费触摸 —— 空白处点击由全局手势回主菜单，
+        // 否则「点哪都重开」会让玩家没法看结算（试玩报告 §3.2）
+        this._deadAgain = btn;
+        btn.on(Node.EventType.TOUCH_END, this.onDeadDimTouch, this);
         node.active = false;
+    }
+
+    /** 回主菜单时收起死亡遮罩（否则下次进入会看到残留的半透明层） */
+    hideGameOver(): void {
+        if (this._deadDim && this._deadDim.isValid) this._deadDim.active = false;
+        if (this._dead && this._dead.node.isValid) this._dead.node.active = false;
     }
 
     private onDeadDimTouch(): void {

@@ -9,7 +9,7 @@
  * 构筑行是「升级不明显」的关键反馈：玩家选过的每一张卡都要在屏幕上留下名字。
  */
 
-import { _decorator, Component, EventTouch, Graphics, Label, Node, UITransform } from 'cc';
+import { _decorator, Component, EventTouch, Graphics, Label, Node, tween, UIOpacity, UITransform } from 'cc';
 import { COLOR, hex } from '../../../common/ui/UITheme';
 import { COLORS, PASSIVE_NAMES, WEAPON_NAMES, SurvivorSnapshot } from './SurvivorConfig';
 import type { PassiveTrack, WeaponTrack } from './SurvivorConfig';
@@ -147,6 +147,43 @@ export class SurvivorHud extends Component {
 
     setPaused(paused: boolean): void {
         if (this._pauseLabel) this._pauseLabel.string = paused ? '继续' : '暂停';
+    }
+
+    /**
+     * 开场提示（试玩报告：直接进战斗、没有任何说明）。
+     * 5 秒后淡出并销毁；每条命只显示一次，避免重复开局的干扰。
+     */
+    showOpeningTip(): void {
+        const root = this.node;
+        if (!root || !root.isValid || root.getChildByName('OpeningTip')) return;
+        const node = new Node('OpeningTip');
+        node.layer = root.layer;
+        const ut = node.addComponent(UITransform);
+        ut.setContentSize(620, 44);
+        node.setPosition(0, 380, 0);
+        root.addChild(node);
+
+        const g = node.addComponent(Graphics);
+        g.fillColor = hex(COLOR.BG_OVERLAY, 190);
+        g.roundRect(-310, -22, 620, 44, 22);
+        g.fill();
+        g.lineWidth = 1.5;
+        g.strokeColor = hex(COLORS.player, 150);
+        g.roundRect(-310, -22, 620, 44, 22);
+        g.stroke();
+
+        const label = this._label(node, 0, 0, 600, 36, '自动攻击 · 升级三选一 · 撑到 8 分钟', 22, COLOR.TEXT_PRIMARY, true);
+        label.overflow = Label.Overflow.SHRINK;
+
+        const op = node.addComponent(UIOpacity);
+        op.opacity = 255;
+        tween(op)
+            .delay(5)
+            .to(0.6, { opacity: 0 })
+            .call(() => {
+                if (node.isValid) node.destroy();
+            })
+            .start();
     }
 
     private _label(

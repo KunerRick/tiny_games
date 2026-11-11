@@ -2,7 +2,7 @@ import { _decorator, Component, Node, Label, Button, Sprite, SpriteFrame, UITran
 import { COLOR, CLASS_COLOR, CONTROL, FONT_BODY, FONT_CAPTION, FONT_TINY, FONT_TITLE, applyFont, applyFontAndColor, hex, applyButtonTheme, ButtonVariant, stripVariationSelectors } from './config/Theme';
 import {
   drawCornerBrackets, drawDivider, drawFrame, ensureChild, ensureScaleButton, ensureTransform,
-  makeChip, makeLabel, makeMedallion, makeStatBar, stylePanel,
+  makeChip, makeLabel, makeMedallion, makeStatBar, stylePanel, createBackButton, UiButton,
 } from './ui/GameUIKit';
 import { RouteMapUI, RouteNode } from './ui/RouteMapUI';
 import { BattleManager, BattleResult, UnitActionPhase } from './battle/BattleManager';
@@ -125,6 +125,8 @@ export class TinyVanguardMain extends Component {
   classSelectPanel: Node = null;
 
   private _state: GameState = 'class_select';
+  /** 左上角返回大厅入口（职业选择 / 路线图可见；战斗中收起，避免误触丢进度） */
+  private _lobbyBtn: UiButton | null = null;
   private _selectedClasses: string[] = [];
   /** 运行时职业卡（classId → 节点），与场景里 4 个旧行按钮并行存在（旧行已隐藏） */
   private _classCardNodes: Map<string, Node> = new Map();
@@ -235,6 +237,9 @@ export class TinyVanguardMain extends Component {
     this.applyPanelButtonThemes();
     // 荣誉天赋入口（设计 §6.2）：跨局消费荣誉，放在职业选择页
     this.ensureTalentEntry();
+    // 职业选择 / 路线图必须有回大厅的入口（试玩报告：地图页无返回，玩家被困）
+    this.ensureLobbyEntry();
+    this.setLobbyEntryVisible(true);
     // B5⑤：底板对齐内容包围盒 —— 必须放在按钮规格统一与天赋入口**之后**，
     // 否则按钮变高、或天赋按钮后加进来时会超出已算好的底板
     this.fitPanelBackground(this.classSelectPanel);
@@ -819,6 +824,16 @@ export class TinyVanguardMain extends Component {
     SceneManager.gotoLobby();
   }
 
+  /** 创建左上角返回大厅按钮（只建一次） */
+  private ensureLobbyEntry(): void {
+    if (this._lobbyBtn?.node?.isValid) return;
+    this._lobbyBtn = createBackButton(this.node, this.onReturnToLobby);
+  }
+
+  private setLobbyEntryVisible(visible: boolean): void {
+    if (this._lobbyBtn?.node?.isValid) this._lobbyBtn.node.active = visible;
+  }
+
   /**
    * 商店/圣泉改造后各自只剩一个"离开"按钮 —— 商品卡与强化卡都是运行时创建的，
    * 点击由卡片自带的 `PanelCardButton` 承载，不需要在这里绑 @property。
@@ -1234,6 +1249,7 @@ export class TinyVanguardMain extends Component {
 
   private startNewRun(): void {
     this._state = 'route_map';
+    this.setLobbyEntryVisible(true);
     this._battleCount = 0;
     // 记录起点荣誉：结算面板的"本局荣誉收益"要用它与当前值的差
     this._honorAtRunStart = this._runData.honor;
@@ -1333,6 +1349,7 @@ export class TinyVanguardMain extends Component {
 
   private startBattle(isElite: boolean, isBoss: boolean): void {
     this._state = 'battle';
+    this.setLobbyEntryVisible(false);
     // 战斗中 HUD 双端可见：左回合、右金币
     this.setHudVisible(true, true);
     this.routeMapUI.hide();
@@ -1418,7 +1435,11 @@ export class TinyVanguardMain extends Component {
   }
 
   private onConfirmDeploy(): void {
-    if (!this.battleManager.confirmDeploy()) return;
+    if (!this.battleManager.confirmDeploy()) {
+      const left = this.battleManager.undeployedCount;
+      this.battleUI.updatePhase('布阵阶段', `还有 ${left} 个单位未上阵：先点底部兵牌，再点棋盘底部两行`);
+      return;
+    }
     // 布阵确认成功 → 把本场阵型写入存档，下次战斗沿用（§3.2）
     this._runData.deployLayout = this.battleManager.exportDeployLayout();
     SaveManager.saveRun(this._runData);
@@ -1490,7 +1511,7 @@ export class TinyVanguardMain extends Component {
 
     switch (phase) {
       case 'deploy':
-        this.battleUI.updatePhase('\u5E03\u9635\u9636\u6BB5', '\u70B9\u51FB\u524D\u4E24\u884C\u90E8\u7F72\u5355\u4F4D');
+        this.battleUI.updatePhase('\u5E03\u9635\u9636\u6BB5', '\u70B9\u51FB\u5E95\u90E8\u4E24\u884C\u90E8\u7F72\u5355\u4F4D');
         break;
 
       case 'player_turn':
@@ -1498,8 +1519,11 @@ export class TinyVanguardMain extends Component {
           const idx = aliveUnits.findIndex(u => u === unit) + 1;
           // 提示语要能解释"点自己"的语义 —— 这是本次交互改造的核心：
           // 移动阶段点自己 = 原地待命，行动阶段点自己 = 撤销待命
-          const hint = actionPhase === 'move' ? '点击可移动位置；点自己原地待命' :
-                       actionPhase === 'attack_target' ? '选择攻击目标' :
+          const hint = actionPhase === 'move'
+            ? (this.battleManager.hasMovePreview
+                ? '再次点击同一格确认移动；点自己原地待命'
+                : '点击绿色格子移动；点敌方进入攻击')
+            : actionPhase === 'attack_target' ? '选择攻击目标' :
                        actionPhase === 'skill_target' ? '选择技能目标，再次点击确认' :
                        actionPhase === 'skill_target_aoe' ? '选择AOE中心点，再次点击确认' :
                        '点击攻击/技能，点自己可撤销待命';
@@ -1771,6 +1795,7 @@ export class TinyVanguardMain extends Component {
 
   private returnToRouteMap(): void {
     this._state = 'route_map';
+    this.setLobbyEntryVisible(true);
     // 确保所有子面板已隐藏（防止跨阶段残留）
     if (this.upgradeUI) this.upgradeUI.hide();
     if (this.eventUI) this.eventUI.hide();
@@ -2030,6 +2055,8 @@ export class TinyVanguardMain extends Component {
     if (this.routeMapUI) this.routeMapUI.hide();
     // 终局态：原先两种结算都停在 'battle'（GameState 里的 'game_over' 从未被赋值过）
     this._state = victory ? 'run_victory' : 'game_over';
+    // 结算面板自带「返回大厅」，左上角按钮收起，避免两个入口语义重复
+    this.setLobbyEntryVisible(false);
 
     if (victory) {
       this._runData.honor += 100;
@@ -2360,6 +2387,7 @@ export class TinyVanguardMain extends Component {
     if (this.restPanel) this.restPanel.active = false;
 
     this._state = 'class_select';
+    this.setLobbyEntryVisible(true);
     this._selectedClasses = [];
     SaveManager.clearRun();
     this.resetClassSelectionVisual();

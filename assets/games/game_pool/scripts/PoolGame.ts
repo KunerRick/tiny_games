@@ -11,9 +11,10 @@
  *      逻辑用 update 直接喂 core.step（核心内部已是固定步长）。
  */
 
-import { _decorator, Component, EventTouch, Graphics, Label, Node, UITransform, Vec3 } from 'cc';
+import { _decorator, Component, EventTouch, Graphics, Label, Node, UIOpacity, UITransform, Vec3 } from 'cc';
 import { SceneManager } from '../../../common/managers/SceneManager';
 import { StorageManager } from '../../../common/managers/StorageManager';
+import { createAudio } from '../../../common/audio/GameAudio';
 import {
     UI,
     createBackButton,
@@ -41,15 +42,19 @@ import { PoolCore } from './PoolCore';
 
 const { ccclass } = _decorator;
 
+/** 全站统一音效 / 震动总线（试玩修复 C1） */
+const sfx = createAudio('pool');
+
 const GAME_ID = 'pool';
 const SAVE_KEY = 'save';
 
-/** 赛台节点尺寸（含库边），比台面大一圈，便于边缘触摸 */
+/** 赛台节点尺寸（含库边），比台面大一圈，便于边缘触摸。
+ *  竖屏下把整个节点旋转 90°，让长边沿屏幕纵向；物理与绘制仍用 TABLE_W×TABLE_H。 */
 const VIEW_W = TABLE_W + 56;
 const VIEW_H = TABLE_H + 56;
 /** 赛台中心（设计坐标） */
 const TABLE_CX = 360;
-const TABLE_CY = 480;
+const TABLE_CY = 570;
 
 /** 拉杆手势：死区 / 满力距离（设计像素） */
 const DRAG_DEAD_ZONE = 16;
@@ -76,6 +81,8 @@ export class PoolGame extends Component {
 
     private _save: PoolSave = createDefaultPoolSave();
     private _table: Node | null = null;
+    /** 进球飘字（update 驱动，表格坐标 → 屏幕坐标后挂在根节点上） */
+    private _popups: { node: Node; x: number; y: number; t: number }[] = [];
     private _gfx: Graphics | null = null;
     private _powerG: Graphics | null = null;
     private _powerLabel: Label | null = null;
@@ -110,6 +117,7 @@ export class PoolGame extends Component {
         const events = core.drainEvents();
         if (events.length > 0) this._handleEvents(events);
 
+        this._stepPopups(dt);
         this._drawTable();
         this._drawPower();
         this._tickPanelIn(dt);
@@ -124,6 +132,7 @@ export class PoolGame extends Component {
     onDestroy(): void {
         this.core = null;
         this._table = null;
+        this._popups = [];
         this._gfx = null;
         this._powerG = null;
         this._powerLabel = null;
@@ -150,6 +159,7 @@ export class PoolGame extends Component {
         this.dragging = false;
         this._save.lastLevel = id;
         this._persist();
+        this._clearPopups();
         this._destroyPanel();
         this._refreshHud();
         this._drawTable();
@@ -178,12 +188,20 @@ export class PoolGame extends Component {
             const ev = events[i];
             if (!ev) continue;
             if (ev.type === 'pot') {
+                // 进球反馈三件套（报告 §3.20）：音效 + 飘字 + 连击提示
+                sfx.play('coin');
+                this._spawnPopup(ev.x, ev.y, `+${ev.gain}`, ev.combo > 1 ? '#FBBF24' : '#A7F3D0');
                 if (ev.combo > 1) toast(this.node, `连击 x${ev.combo} · +${ev.gain}`, 1.0, 660);
             } else if (ev.type === 'scratch') {
+                sfx.play('playerHit');
                 toast(this.node, '母球落袋 · 已复位', 1.2, 660);
+            } else if (ev.type === 'shoot') {
+                sfx.play('shoot');
             } else if (ev.type === 'won') {
+                sfx.play('won');
                 this._finish(true);
             } else if (ev.type === 'lost') {
+                sfx.play('dead');
                 this._finish(false);
             }
         }
@@ -204,6 +222,7 @@ export class PoolGame extends Component {
     // ==================== 输入：拉杆 ====================
 
     private onTableTouchStart(ev: EventTouch): void {
+        sfx.unlock();
         const core = this.core;
         if (!core || core.state !== 'aiming') return;
         const p = this._toTable(ev);
@@ -398,17 +417,19 @@ export class PoolGame extends Component {
         createLabel(this.node, 'POOL', 15, { ...this._at(360, 104), color: UI.textMuted, width: 320, height: 24 });
 
         this._levelLabel = createLabel(this.node, '关卡 1/3', 22, {
-            ...this._at(130, 160), bold: true, width: 220, height: 34,
+            ...this._at(130, 140), bold: true, width: 220, height: 34,
         });
-        this._strokeLabel = createLabel(this.node, '杆数 0/0', 22, {
-            ...this._at(360, 160), bold: true, color: UI.accent, width: 260, height: 34,
+        this._strokeLabel = createLabel(this.node, '杆数 0 / 0', 22, {
+            ...this._at(360, 140), bold: true, color: UI.accent, width: 260, height: 34,
         });
         this._scoreLabel = createLabel(this.node, '分数 0', 22, {
-            ...this._at(590, 160), bold: true, color: UI.warning, width: 200, height: 34,
+            ...this._at(590, 140), bold: true, color: UI.warning, width: 200, height: 34,
         });
 
         this._table = createNode('Table', this.node, VIEW_W, VIEW_H);
         this._table.setPosition(designPos(TABLE_CX, TABLE_CY));
+        // 竖屏：整张球桌旋转 90°，长边沿屏幕纵向（输入用 convertToNodeSpaceAR，自动跟随旋转）
+        this._table.angle = 90;
         this._gfx = this._table.addComponent(Graphics);
         this._table.on(Node.EventType.TOUCH_START, this.onTableTouchStart, this);
         this._table.on(Node.EventType.TOUCH_MOVE, this.onTableTouchMove, this);
@@ -416,40 +437,82 @@ export class PoolGame extends Component {
         this._table.on(Node.EventType.TOUCH_CANCEL, this.onTableTouchCancel, this);
 
         this._statusLabel = createLabel(this.node, '', 19, {
-            ...this._at(360, 700), color: UI.textDim, width: 680, height: 28,
+            ...this._at(360, 998), color: UI.textDim, width: 680, height: 28,
         });
 
         this._powerLabel = createLabel(this.node, '力度 0%', 19, {
-            ...this._at(70, 758), color: UI.textMuted, width: 140, height: 26,
+            ...this._at(70, 1026), color: UI.textMuted, width: 140, height: 26,
         });
         const powerBar = createNode('PowerBar', this.node, 520, 26);
-        powerBar.setPosition(designPos(430, 758));
+        powerBar.setPosition(designPos(430, 1026));
         this._powerG = powerBar.addComponent(Graphics);
 
         const prevBtn = createButton(this.node, {
-            w: 150, h: 70, text: '◀ 换关', fontSize: 22,
+            w: 150, h: 70, text: '◀ 上一关', fontSize: 22,
             fill: '#1E293B', activeFill: UI.accentDark, radius: 16, stroke: '#26364F',
             onTap: () => this.onPrevLevel(),
         });
-        prevBtn.node.setPosition(designPos(140, 850));
+        prevBtn.node.setPosition(designPos(140, 1082));
 
         this._levelBtn = createButton(this.node, {
             w: 220, h: 70, text: '重开本关', fontSize: 22,
             fill: UI.primary, activeFill: UI.success, radius: 16,
             onTap: () => this.onRestart(),
         }).node;
-        this._levelBtn.setPosition(designPos(360, 850));
+        this._levelBtn.setPosition(designPos(360, 1082));
 
         const nextBtn = createButton(this.node, {
-            w: 150, h: 70, text: '换关 ▶', fontSize: 22,
+            w: 150, h: 70, text: '下一关 ▶', fontSize: 22,
             fill: '#1E293B', activeFill: UI.accentDark, radius: 16, stroke: '#26364F',
             onTap: () => this.onNextLevel(),
         });
-        nextBtn.node.setPosition(designPos(580, 850));
+        nextBtn.node.setPosition(designPos(580, 1082));
 
         createLabel(this.node, '按住台面往回拖 → 拉杆，松手出杆 · 拖得越远力度越大', 17, {
-            ...this._at(360, 940), color: UI.textMuted, width: 680, height: 24,
+            ...this._at(360, 1136), color: UI.textMuted, width: 680, height: 24,
         });
+        // 规则说明（试玩报告：白球落袋 / 连击 / 杆数上限都没告诉玩家）
+        createLabel(this.node, '白球落袋回开球点 · 连续进球有连击加分 · 杆数用完即结束', 16, {
+            ...this._at(360, 1168), color: UI.textMuted, width: 700, height: 22,
+        });
+    }
+
+    /** 进球飘字：台面坐标 → 旋转后的屏幕坐标（球桌节点 angle=90） */
+    private _spawnPopup(tx: number, ty: number, text: string, color: string): void {
+        const center = designPos(TABLE_CX, TABLE_CY);
+        const lx = tx - TABLE_W / 2;
+        const ly = TABLE_H / 2 - ty;
+        // 球桌整体转了 90°（竖屏），局部 (lx, ly) 映射到父节点 (－ly, lx)
+        const x = center.x - ly;
+        const y = center.y + lx;
+        const label = createLabel(this.node, text, 26, { x, y, color, bold: true });
+        const node = label.node;
+        const op = node.getComponent(UIOpacity) ?? node.addComponent(UIOpacity);
+        if (op) op.opacity = 255;
+        this._popups.push({ node, x, y, t: 0.75 });
+    }
+
+    private _stepPopups(dt: number): void {
+        for (let i = this._popups.length - 1; i >= 0; i--) {
+            const p = this._popups[i];
+            p.t -= dt;
+            if (p.t <= 0) {
+                if (p.node.isValid) p.node.destroy();
+                this._popups.splice(i, 1);
+                continue;
+            }
+            const k = 1 - p.t / 0.75;
+            if (p.node.isValid) {
+                p.node.setPosition(p.x, p.y + 56 * k, 0);
+                const op = p.node.getComponent(UIOpacity);
+                if (op) op.opacity = Math.round(255 * (1 - k * k));
+            }
+        }
+    }
+
+    private _clearPopups(): void {
+        for (const p of this._popups) if (p.node.isValid) p.node.destroy();
+        this._popups = [];
     }
 
     private _at(xFromLeft: number, yFromTop: number): { x: number; y: number } {
@@ -463,7 +526,7 @@ export class PoolGame extends Component {
         if (this._levelLabel) {
             this._levelLabel.string = `关卡 ${this.levelId}/${POOL_LEVEL_COUNT} · ${core.level.name}`;
         }
-        if (this._strokeLabel) this._strokeLabel.string = `杆数 ${core.strokes}/${core.strokeLimit}`;
+        if (this._strokeLabel) this._strokeLabel.string = `杆数 ${core.strokes} / ${core.strokeLimit}`;
         if (this._scoreLabel) this._scoreLabel.string = `分数 ${core.score}`;
         if (this._statusLabel) {
             if (core.state === 'rolling') {

@@ -9,8 +9,9 @@ import { GameGrid } from './GameGrid';
 import { SettingsPanel } from './SettingsPanel';
 import { GameOverPanel } from './GameOverPanel';
 import {
-    createLabel, designPos, drawBackSkin, drawFrame, ensureChild, ensureScaleButton,
+    createButton, createLabel, designPos, drawBackSkin, drawFrame, ensureChild, ensureScaleButton,
 } from '../../../common/ui/GameUIKit';
+import type { UiButton } from '../../../common/ui/GameUIKit';
 import {
     COLOR, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_TITLE,
     applyFontAndColor, hex,
@@ -54,6 +55,10 @@ export class Game2048 extends Component {
     private _settingsNode: Node | null = null;
     private _newGameNode: Node | null = null;
     private _backNode: Node | null = null;
+    /** 一步撤销（试玩报告：2048 玩家的强预期） */
+    private _undoBtn: UiButton | null = null;
+    private _undoTiles: TileData[] | null = null;
+    private _undoScore = 0;
     /** 滑动动画后的补间结算；场景销毁时必须取消，否则会打到已销毁的组件上 */
     private _moveTimer = 0;
 
@@ -157,8 +162,70 @@ export class Game2048 extends Component {
         // 底部主按钮
         const newGame = this.pick('gameContainer/footer/newGameButton');
         if (newGame) this.skinActionButton(newGame, 'primary', 240, 64);
+        this._ensureUndoButton(newGame);
 
         this._themePanels();
+    }
+
+    /** 底栏「撤销」：紧贴「新游戏」左侧，尺寸 132×64（与主按钮同高） */
+    private _ensureUndoButton(newGame: Node | null): void {
+        if (this._undoBtn && this._undoBtn.node.isValid) return;
+        const btn = createButton(this.node, {
+            w: 132,
+            h: 64,
+            text: '撤销',
+            fontSize: 22,
+            fill: COLOR.SURFACE,
+            stroke: COLOR.PANEL_BORDER,
+            radius: 14,
+            onTap: () => this.onUndoClick(),
+        });
+        let x = designPos(150, 1120).x;
+        let y = designPos(150, 1120).y;
+        // 挂到「新游戏」同一个父节点下、用局部坐标对齐：以前按 worldPosition 反算，
+        // footer 的 Widget 还没完成布局时会差 40 设计像素（第二轮复核 N8）。
+        if (newGame && newGame.isValid && newGame.parent) {
+            const parent = newGame.parent;
+            btn.node.removeFromParent();
+            parent.addChild(btn.node);
+            const ui = newGame.getComponent(UITransform);
+            const newW = ui ? ui.width : 240;
+            const gap = 12;
+            x = newGame.position.x - newW / 2 - gap - 66;
+            y = newGame.position.y;
+        }
+        btn.node.setPosition(x, y, 0);
+        this._undoBtn = btn;
+        this._syncUndoButton();
+    }
+
+    private _syncUndoButton(): void {
+        const btn = this._undoBtn;
+        if (!btn || !btn.node.isValid) return;
+        const canUndo = !!this._undoTiles && !this._isMoving && !this._isGameOver;
+        btn.setColor(canUndo ? COLOR.SURFACE : COLOR.SLOT_EMPTY_BG,
+            canUndo ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED);
+    }
+
+    private onUndoClick(): void {
+        if (!this._undoTiles || this._isMoving) return;
+        const tiles = this._undoTiles;
+        this._undoTiles = null;
+
+        this.gameGrid?.clearTiles();
+        this._tiles = tiles.map(t => ({ ...t, isNew: false, isMerged: false }));
+        for (const t of this._tiles) this.gameGrid?.spawnTile(t);
+        this.scoreManager?.setScore(this._undoScore);
+        this._isGameOver = false;
+        this._isMoving = false;
+        this._syncUndoButton();
+        this.saveProgress();
+    }
+
+    /** 滑动手势开始前存一份棋盘快照（只保留最近一步） */
+    private _captureUndo(): void {
+        this._undoTiles = this._tiles.map(t => ({ ...t }));
+        this._undoScore = this.scoreManager ? this.scoreManager.getCurrentScore() : 0;
     }
 
     /** 设置 / 结算两个弹窗：遮罩、面板底、文字、滑条、按钮 */
@@ -311,6 +378,8 @@ export class Game2048 extends Component {
         this._settingsNode = null;
         this._newGameNode = null;
         this._backNode = null;
+        this._undoBtn = null;
+        this._undoTiles = null;
     }
     
     start() {
@@ -360,18 +429,27 @@ export class Game2048 extends Component {
         }
         
         this.saveProgress();
+        this._undoTiles = null;
+        this._syncUndoButton();
     }
-    
+
     private onDirectionInput(direction: Direction): void {
         if (this._isGameOver || this._isMoving) return;
         if (this.settingsPanel?.node.active || this.gameOverPanelComponent?.node.active) return;
 
+        const prevTiles = this._tiles.map(t => ({ ...t }));
+        const prevScore = this.scoreManager ? this.scoreManager.getCurrentScore() : 0;
         const result = this.gameGrid?.move(this._tiles, direction, this._gridSize);
         if (!result || !result.hasMoved) {
             // 棋盘没变，但需检测是否已死（满+无合并方向）
             this.checkGameEnd();
             return;
         }
+
+        // 只有真的动过才把快照立为「可撤销」，空滑不覆盖上一步
+        this._undoTiles = prevTiles;
+        this._undoScore = prevScore;
+        this._syncUndoButton();
 
         // 更新分数
         if (result.scoreGained > 0) {
@@ -396,6 +474,7 @@ export class Game2048 extends Component {
         this._moveTimer = 0;
         if (!this.isValid) return;
         this._isMoving = false;
+        this._syncUndoButton();
 
         const newTile = this.gameGrid?.spawnRandomTile(this._tiles, this._gridSize);
         if (newTile) {

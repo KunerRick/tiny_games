@@ -76,8 +76,10 @@ const TILE_H = 78;
 const TILE_GAP = 5;
 const POOL_TOP = 898;
 
-const STATUS_Y = 800;
-const ACTION_Y = 856;
+// 状态行与「连续 N 天」合并成同一行，放在棋盘下沿与按钮行之间
+// （试玩报告：状态行 y≈800、按钮顶边 y≈824，文字被按钮压掉一半）
+const STATUS_Y = 804;
+const ACTION_Y = 862;
 
 interface TileView {
     node: Node;
@@ -429,9 +431,14 @@ export class WordleGame extends Component {
         statsLabel.node.setPosition(0, 62);
 
         const buttons: Array<{ text: string; y: number; fill: string; w: number; h: number; onTap: () => void }> = [
-            { text: '复制战绩', y: 0, fill: COLOR.PRIMARY, w: 380, h: 68, onTap: () => this._copyShare() },
-            { text: '再来一局', y: -74, fill: COLOR.SURFACE, w: 380, h: 60, onTap: () => this.newRound() },
-            { text: '返回大厅', y: -140, fill: COLOR.SURFACE, w: 380, h: 60, onTap: () => this.onBack() },
+            // 三颗按钮等高（试玩报告 §3.21：提交 60 / 删除 52 视觉不齐）
+            { text: '复制战绩', y: 0, fill: COLOR.PRIMARY, w: 380, h: 64, onTap: () => this._copyShare() },
+            {
+                // 每日已完成后不能「再来一局」（今日题目已结束），改成去随机对局
+                text: this._mode === 'daily' ? '去随机对局' : '再来一局',
+                y: -76, fill: COLOR.SURFACE, w: 380, h: 64, onTap: () => this.newRound(),
+            },
+            { text: '返回大厅', y: -146, fill: COLOR.SURFACE, w: 380, h: 64, onTap: () => this.onBack() },
         ];
         for (let i = 0; i < buttons.length; i++) {
             const cfg = buttons[i];
@@ -641,24 +648,24 @@ export class WordleGame extends Component {
         }
 
         this._statusLabel = createLabel(this.node, '', FONT_CAPTION.fontSize, {
-            width: 660,
+            width: 460,
             height: 28,
             color: COLOR.TEXT_SECONDARY,
         });
         applyFontAndColor(this._statusLabel, FONT_CAPTION, COLOR.TEXT_SECONDARY);
-        this._statusLabel.node.setPosition(designPos(360, STATUS_Y));
+        this._statusLabel.node.setPosition(designPos(250, STATUS_Y));
 
         this._streakLabel = createLabel(this.node, '', FONT_CAPTION.fontSize, {
-            width: 260,
+            width: 220,
             height: 28,
             color: COLOR.WARNING,
         });
         applyFontAndColor(this._streakLabel, FONT_CAPTION, COLOR.WARNING);
-        this._streakLabel.node.setPosition(designPos(360, STATUS_Y + 30));
+        this._streakLabel.node.setPosition(designPos(575, STATUS_Y));
 
         this._clearBtn = createButton(this.node, {
             w: 160,
-            h: 56,
+            h: 60,
             text: '清除',
             fontSize: 24,
             fill: COLOR.SURFACE,
@@ -670,7 +677,7 @@ export class WordleGame extends Component {
 
         this._submitBtn = createButton(this.node, {
             w: 240,
-            h: 64,
+            h: 60,
             text: '提交',
             fontSize: 28,
             fill: COLOR.PRIMARY,
@@ -682,7 +689,7 @@ export class WordleGame extends Component {
 
         this._restartBtn = createButton(this.node, {
             w: 150,
-            h: 56,
+            h: 60,
             text: '换一局',
             fontSize: 22,
             fill: COLOR.SURFACE,

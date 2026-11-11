@@ -441,8 +441,10 @@ export class MinesweeperGame extends Component {
         if (this._board && this._board.isValid) this._board.destroy();
         this._cells = [];
 
-        const maxW = 660;
-        const cell = Math.min(64, Math.floor(maxW / core.cols));
+        // 9×9 屏效有富余（试玩报告 §3.13）：上限从 64 提到 76、可用宽度提到 684，
+        // 9 列从 64 → 76（+19%），16/30 列仍按宽度自适应。
+        const maxW = 684;
+        const cell = Math.min(76, Math.floor(maxW / core.cols));
         this._cellSize = cell;
         const boardW = cell * core.cols;
         const boardH = cell * core.rows;

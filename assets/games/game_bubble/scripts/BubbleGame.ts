@@ -79,12 +79,14 @@ const DANGER_ROW = BUBBLE_MAX_ROWS - 2;
 const DANGER_DESIGN_Y = BOARD_DY + BUBBLE_R + DANGER_ROW * BUBBLE_ROW_H + BUBBLE_R;
 
 /**
- * 瞄准区：盖住盘面到炮台上方，避开底部按钮。
- * 上边界必须压在顶栏（关卡标题 y≈128）之下 —— 瞄准层是整片可点区域，
+ * 瞄准区：盖住盘面到炮台下方，避开底部按钮。
+ * 上边界必须压在顶栏（关卡标题 y≈60）之下 —— 瞄准层是整片可点区域，
  * 盖住哪个节点就吃掉哪个节点的点击（关卡标题的选关入口会被静默吞掉）。
+ * 下边界要盖住发射器（y≈1050），否则从发射器按下拖动完全没反应
+ * （试玩报告：玩家第一反应就是摸发射器）。
  */
 const AIM_TOP = 152;
-const AIM_BOTTOM = 960;
+const AIM_BOTTOM = 1120;
 const AIM_H = AIM_BOTTOM - AIM_TOP;
 const AIM_CENTER_DESIGN_Y = (AIM_TOP + AIM_BOTTOM) / 2;
 /** 根节点局部坐标 → 瞄准区局部坐标的 y 位移 */
@@ -143,6 +145,8 @@ export class BubbleGame extends Component {
     private _rand: () => number = mulberry32(1);
     private _phase: Phase = 'aim';
     private _aim = 0;
+    /** 正在拖动瞄准（决定是否画落点预览环，松手后立刻消失） */
+    private _dragging = false;
     private _fly: FlyState | null = null;
     private _maxLevel = 1;
     private _orgLen = 0;
@@ -170,6 +174,8 @@ export class BubbleGame extends Component {
         this._buildUi();
         this._bindEvents();
         this._restoreOrStart();
+        // 不再弹首次浮层：toast 固定在 y=1080，会压住发射器，且与底部常驻提示重复
+        // （第二轮复核 N5）。底部提示已写明「从任意位置拖动」，信息不缺。
     }
 
     onDestroy(): void {
@@ -227,8 +233,9 @@ export class BubbleGame extends Component {
         const sub = createLabel(this.node, 'BUBBLE SHOOTER', 13, { color: COLOR.TEXT_SECONDARY });
         sub.node.setPosition(designPos(360, 92));
 
+        // 关卡标题挪到右上：原先在 y=128，正好压在盘面顶饰线和第一行泡泡上（试玩报告）
         this._levelLabel = createLabel(this.node, '', FONT_BODY.fontSize, { color: COLOR.TEXT_SECONDARY });
-        this._levelLabel.node.setPosition(designPos(360, 128));
+        this._levelLabel.node.setPosition(designPos(586, 60));
         this._levelLabel.node.on(Node.EventType.TOUCH_END, this._onLevelLabelTap, this);
 
         // 盘面背景（静态）+ 泡泡层
@@ -248,8 +255,16 @@ export class BubbleGame extends Component {
         this._cannonGfx.node.setPosition(designPos(CANNON_DESIGN_X, CANNON_DESIGN_Y));
 
         // 下一颗
+        // 警戒线标注（试玩报告 §3.22：一条无说明的红虚线，玩家不知道越过会失败）
+        const dangerCap = createLabel(this.node, '危险线 · 泡泡越线即失败', FONT_TINY.fontSize, {
+            color: COLOR.DANGER,
+            width: 420,
+            height: 22,
+        });
+        dangerCap.node.setPosition(designPos(360, DANGER_DESIGN_Y - 16));
+
         const nextCap = createLabel(this.node, 'NEXT', FONT_TINY.fontSize, { color: COLOR.TEXT_DISABLED });
-        nextCap.node.setPosition(designPos(632, 986));
+        nextCap.node.setPosition(designPos(632, CANNON_DESIGN_Y - 46));
         this._nextGfx = createNode('NextGfx', this.node, 120, 120).addComponent(Graphics);
         this._nextGfx.node.setPosition(designPos(632, CANNON_DESIGN_Y));
 
@@ -259,7 +274,9 @@ export class BubbleGame extends Component {
         this._scoreLabel = createLabel(this.node, '', FONT_BODY.fontSize, { color: COLOR.TEXT_PRIMARY });
         this._scoreLabel.node.setPosition(designPos(540, 1128));
 
-        this._hintLabel = createLabel(this.node, '在盘面上拖动瞄准，松手发射', FONT_CAPTION.fontSize, {
+        // 唯一一条常驻操作提示：从发射器或盘面任意位置起手都行（A4 已支持），
+        // 不再用「在盘面上」这种限制性说法（第二轮复核 N5）。
+        this._hintLabel = createLabel(this.node, '从任意位置拖动瞄准 · 松手发射', FONT_BODY.fontSize, {
             color: COLOR.TEXT_DISABLED,
         });
         this._hintLabel.node.setPosition(designPos(360, 1178));
@@ -311,11 +328,13 @@ export class BubbleGame extends Component {
         const dy = p.y - AIM_CANNON_LOCAL_Y;
         if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return;
         this._aim = clampAim(Math.atan2(dx, dy));
+        this._dragging = true;
         this._drawAim();
     }
 
     private _onTouchRelease(): void {
         if (this._phase !== 'aim' || this._overlayOpen()) return;
+        this._dragging = false;
         this._fire();
     }
 
@@ -354,6 +373,7 @@ export class BubbleGame extends Component {
         this._next = pickNextColor(this._board, this._rand);
         this._phase = 'aim';
         this._aim = 0;
+        this._dragging = false;
         this._fly = null;
         this._closeOverlays();
         this._redrawAll();
@@ -396,6 +416,7 @@ export class BubbleGame extends Component {
             pos: path[0],
         };
         this._phase = 'flying';
+        this._dragging = false;
         this._aimGfx.clear();
         this._drawFlyingBubble();
     }
@@ -606,8 +627,8 @@ export class BubbleGame extends Component {
         }
         g.fill();
 
-        // 落点预览环
-        if (trace.cell) {
+        // 落点预览环只在拖动时画：松手后残留的「空心圆」玩家看不懂（第二轮复核 N6）
+        if (this._dragging && trace.cell) {
             const c = cellCenter(trace.cell.row, trace.cell.col);
             const p = this._boardToLocal(c.x, c.y);
             g.strokeColor = hex(BUBBLE_COLORS[Math.max(0, this._current)], 200);

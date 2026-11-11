@@ -293,7 +293,7 @@ export class TDGame extends Component {
 
     private onToggleSpeed(): void {
         this.speed = this.speed >= 2 ? 1 : 2;
-        if (this._speedBtn) this._speedBtn.setText(`${this.speed}x`);
+        if (this._speedBtn) this._speedBtn.setText(`倍速 ${this.speed}x`);
         this._acc = 0;
     }
 
@@ -541,6 +541,11 @@ export class TDGame extends Component {
             createLabel(panel, `击杀 ${core.totalKills} · 剩余生命 ${core.lives}`, 20, {
                 x: 0, y: 62, color: UI.textMuted, width: 500, height: 26,
             });
+            if (!win) {
+                createLabel(panel, `原因：累计漏过 ${core.totalLeaks} 只怪`, 19, {
+                    x: 0, y: 24, color: UI.danger, width: 500, height: 24,
+                });
+            }
         }
 
         const again = createButton(panel, {
@@ -637,12 +642,15 @@ export class TDGame extends Component {
         this._goldLabel = createLabel(this.node, '金币 0', 24, {
             ...this._at(360, 156), bold: true, color: UI.warning, width: 240, height: 34,
         });
-        this._livesLabel = createLabel(this.node, '生命 10', 24, {
+        this._livesLabel = createLabel(this.node, '生命 10/10', 24, {
             ...this._at(570, 156), bold: true, color: UI.danger, width: 240, height: 34,
         });
 
         this._board = createNode('Board', this.node, BOARD_W, BOARD_H);
         this._board.setPosition(designPos(BOARD_CX, BOARD_CY));
+        // 棋盘（含射程圈）必须压在 HUD 下面：射程圆没有裁剪，若 Board 后创建会盖住
+        // 「下一波 / 金币」文字（第二轮复核 N13）。Bg 之后、HUD 之前即可。
+        this._board.setSiblingIndex(1);
         this._gfx = this._board.addComponent(Graphics);
         this._board.on(Node.EventType.TOUCH_END, this.onBoardTouch, this);
 
@@ -665,7 +673,7 @@ export class TDGame extends Component {
         mapBtn.node.setPosition(designPos(112, 1120));
 
         this._speedBtn = createButton(this.node, {
-            w: 180, h: 72, text: '1x', fontSize: 22,
+            w: 180, h: 72, text: '倍速 1x', fontSize: 22,
             fill: '#1E293B', activeFill: '#0E7490', radius: 16, stroke: '#26364F',
             onTap: () => this.onToggleSpeed(),
         });
@@ -691,7 +699,7 @@ export class TDGame extends Component {
                 : `下一波 ${wave} / 10`;
         }
         if (this._goldLabel) this._goldLabel.string = `金币 ${core.gold}`;
-        if (this._livesLabel) this._livesLabel.string = `生命 ${core.lives}`;
+        if (this._livesLabel) this._livesLabel.string = `生命 ${core.lives}/${core.map.lives}`;
         if (this._startBtn) {
             const show = core.phase === 'prep';
             this._startBtn.node.active = show;
@@ -707,7 +715,7 @@ export class TDGame extends Component {
                 this._statusLabel.string = '';
             }
         }
-        if (this._speedBtn) this._speedBtn.setText(`${this.speed}x`);
+        if (this._speedBtn) this._speedBtn.setText(`倍速 ${this.speed}x`);
     }
 
     // ==================== 绘制 ====================
@@ -753,8 +761,12 @@ export class TDGame extends Component {
             if (slot && slot.tower) {
                 const def = TD_TOWERS[slot.tower.kind];
                 const stats = def.levels[slot.tower.level - 1];
-                g.strokeColor = toColor(COLOR_RANGE, 110);
-                g.lineWidth = 2;
+                // 实心半透明填充 + 亮边：深色地图上纯虚线几乎看不见（试玩报告）
+                g.fillColor = toColor(COLOR_RANGE, 34);
+                g.circle(this._lx(slot.x), this._ly(slot.y), stats.range * CELL);
+                g.fill();
+                g.strokeColor = toColor(COLOR_RANGE, 190);
+                g.lineWidth = 2.5;
                 g.circle(this._lx(slot.x), this._ly(slot.y), stats.range * CELL);
                 g.stroke();
             }

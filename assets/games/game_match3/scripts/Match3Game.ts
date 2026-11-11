@@ -379,16 +379,25 @@ export class Match3Game extends Component {
         createLabel(this.node, '缤纷消除', 44, { ...this._at(360, 64), bold: true, width: 360, height: 66 });
         createLabel(this.node, 'MATCH 3', 15, { ...this._at(360, 104), color: UI.textMuted, width: 300, height: 24 });
 
+        // 顶栏三列：关卡 / 得分 / 步数。得分原在棋盘下方（y≈900），
+        // 试玩复核 N1 指出那里既脱离顶栏又压按钮，这里与步数并排。
         this._levelLabel = createLabel(this.node, '第 1 关', 26, {
-            ...this._at(150, 166),
+            ...this._at(136, 166),
             bold: true,
-            width: 220,
+            width: 200,
             height: 36,
         });
-        this._movesLabel = createLabel(this.node, '步数 20', 26, {
-            ...this._at(540, 166),
+        this._scoreLabel = createLabel(this.node, '得分 0', 26, {
+            ...this._at(360, 166),
             bold: true,
-            width: 220,
+            width: 240,
+            height: 36,
+            color: UI.text,
+        });
+        this._movesLabel = createLabel(this.node, '步数 20', 26, {
+            ...this._at(584, 166),
+            bold: true,
+            width: 200,
             height: 36,
             color: UI.warning,
         });
@@ -411,21 +420,8 @@ export class Match3Game extends Component {
         const flashNode = createNode('Flash', this._board, BOARD_PX, BOARD_PX);
         this._flashG = flashNode.addComponent(Graphics);
 
-        createLabel(this.node, '得分', 18, {
-            ...this._at(360, 898),
-            color: UI.textMuted,
-            width: 200,
-            height: 26,
-        });
-        this._scoreLabel = createLabel(this.node, '0', 46, {
-            ...this._at(360, 940),
-            bold: true,
-            width: 400,
-            height: 58,
-            color: UI.text,
-        });
         this._chainLabel = createLabel(this.node, '', 28, {
-            ...this._at(360, 992),
+            ...this._at(360, 920),
             bold: true,
             width: 400,
             height: 36,
@@ -473,8 +469,8 @@ export class Match3Game extends Component {
 
     private _refreshHud(): void {
         if (this._levelLabel) this._levelLabel.string = `第 ${this.level.id} 关`;
+        if (this._scoreLabel) this._scoreLabel.string = `得分 ${this.progress.score}`;
         if (this._movesLabel) this._movesLabel.string = `步数 ${this.movesLeft}`;
-        if (this._scoreLabel) this._scoreLabel.string = String(this.progress.score);
         if (this._goalLabel) {
             const state = evaluateGoal(this.level, this.progress);
             const text = this.level.goal.type === 'collect'
@@ -528,7 +524,56 @@ export class Match3Game extends Component {
             const cy = BOARD_HALF - row * CELL - CELL / 2;
             this._drawPiece(g, index, cx, cy);
         }
+        this._drawHintArrow(g);
         this._drawFlash();
+    }
+
+    /**
+     * 提示时在两格之间画一条双向箭头（试玩报告：只高亮两块，看不出往哪个方向换）。
+     */
+    private _drawHintArrow(g: Graphics): void {
+        if (this._hintCells.length < 2) return;
+        const center = (index: number): { x: number; y: number } => {
+            const row = Math.floor(index / 8);
+            const col = index % 8;
+            return {
+                x: -BOARD_HALF + col * CELL + CELL / 2,
+                y: BOARD_HALF - row * CELL - CELL / 2,
+            };
+        };
+        const a = center(this._hintCells[0]);
+        const b = center(this._hintCells[1]);
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const ux = dx / len;
+        const uy = dy / len;
+        // 两端各收进 20px，箭头压在格子边缘而不是中心
+        const inset = 20;
+        const x1 = a.x + ux * inset;
+        const y1 = a.y + uy * inset;
+        const x2 = b.x - ux * inset;
+        const y2 = b.y - uy * inset;
+        const head = 13;
+        g.strokeColor = toColor(COLOR_HINT);
+        g.lineWidth = 6;
+        g.lineCap = Graphics.LineCap.ROUND;
+        g.moveTo(x1, y1);
+        g.lineTo(x2, y2);
+        g.stroke();
+        // 两端箭头（垂直方向 ±head/2）
+        const px = -uy;
+        const py = ux;
+        for (const [ex, ey, sx, sy] of [
+            [x2, y2, -ux, -uy],
+            [x1, y1, ux, uy],
+        ] as Array<[number, number, number, number]>) {
+            g.moveTo(ex, ey);
+            g.lineTo(ex + sx * head + px * head * 0.72, ey + sy * head + py * head * 0.72);
+            g.moveTo(ex, ey);
+            g.lineTo(ex + sx * head - px * head * 0.72, ey + sy * head - py * head * 0.72);
+        }
+        g.stroke();
     }
 
     private _drawPiece(g: Graphics, index: number, cx: number, cy: number): void {

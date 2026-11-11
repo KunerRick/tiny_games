@@ -22,7 +22,6 @@ import {
     createNode,
     designPos,
     drawDivider,
-    drawRoundRect,
     ensureChild,
     toColor,
 } from '../../../common/ui/GameUIKit';
@@ -317,20 +316,30 @@ export class SnakeGame extends Component {
         }
         this._startHint = null;
 
-        const hint = createNode('StartHint', this.node, 380, 84);
-        hint.setPosition(designPos(360, 500));
+        // 试玩修复 C4：开始页满屏彩点却没有图例，玩家分不清三种食物。
+        const hint = createNode('StartHint', this.node, 460, 176);
+        hint.setPosition(designPos(360, 486));
         const g = hint.addComponent(Graphics);
-        drawRoundRect(
-            g, 380, 84, 42,
-            toColor(COLOR.SLOT_EMPTY_BG, 240), toColor(COLOR.INFO), 2,
-        );
+        // 上半：开始提示胶囊
+        const pillY = 40;
+        g.fillColor = toColor(COLOR.SLOT_EMPTY_BG, 240);
+        g.strokeColor = toColor(COLOR.INFO);
+        g.lineWidth = 2;
+        g.roundRect(-190, pillY - 42, 380, 84, 42);
+        g.fill();
+        g.stroke();
         const hintText = createLabel(hint, '滑动屏幕开始', FONT_TITLE.fontSize, {
             width: 350,
             height: 76,
             color: COLOR.TEXT_PRIMARY,
             bold: true,
+            x: 0,
+            y: pillY,
         });
         applyFontAndColor(hintText, FONT_TITLE, COLOR.TEXT_PRIMARY);
+
+        // 下半：食物图例（颜色与 FoodSpawner 的 FOOD_CONFIG 一致）
+        this._drawFoodLegend(hint, g, -42);
 
         const op = hint.addComponent(UIOpacity);
         op.opacity = 255;
@@ -343,6 +352,35 @@ export class SnakeGame extends Component {
             .start();
 
         this._startHint = hint;
+    }
+
+    /**
+     * 开始页图例（试玩报告：满屏彩点却没有说明）。
+     * 颜色与 `FoodSpawner.FOOD_CONFIG` 的三种食物一一对应。
+     */
+    private _drawFoodLegend(parent: Node, g: Graphics, y: number): void {
+        const items: Array<{ color: string; text: string }> = [
+            { color: '#39FF14', text: '食物 +10' },
+            { color: '#FFD700', text: '高分 +30' },
+            { color: '#FF0080', text: '彩虹 +50' },
+        ];
+        const startX = -150;
+        const stepX = 150;
+        for (let i = 0; i < items.length; i++) {
+            const cx = startX + i * stepX;
+            g.fillColor = toColor(items[i].color);
+            g.circle(cx - 42, y, 7);
+            g.fill();
+            const label = createLabel(parent, items[i].text, FONT_CAPTION.fontSize, {
+                width: 108,
+                height: 24,
+                color: COLOR.TEXT_SECONDARY,
+                align: 'left',
+                x: cx + 16,
+                y,
+            });
+            applyFontAndColor(label, FONT_CAPTION, COLOR.TEXT_SECONDARY);
+        }
     }
 
     /** 玩家首次输入：收起提示，开始移动 */
@@ -491,7 +529,7 @@ export class SnakeGame extends Component {
             this.finalScoreLabel.string = `${this._score}`;
         }
         if (this.finalScoreDescLabel) {
-            this.finalScoreDescLabel.string = '本局得分';
+            this.finalScoreDescLabel.string = '撞墙结束 · 本局得分';
         }
         if (this.finalBestScoreLabel) {
             this.finalBestScoreLabel.string = `历史最佳 ${this._bestScore}`;

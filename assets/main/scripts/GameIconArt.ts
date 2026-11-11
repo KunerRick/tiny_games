@@ -23,7 +23,7 @@ interface Accent {
 
 const ACCENTS: Record<string, Accent> = {
     '2048': { main: new Color(224, 122, 63, 255), soft: new Color(247, 196, 122, 255) },
-    war_evo: { main: new Color(192, 57, 43, 255), soft: new Color(239, 154, 118, 255) },
+    war_evo: { main: new Color(157, 23, 77, 255), soft: new Color(249, 168, 212, 255) },
     snake: { main: new Color(14, 159, 110, 255), soft: new Color(110, 231, 183, 255) },
     tiny_vanguard: { main: new Color(37, 99, 235, 255), soft: new Color(147, 197, 253, 255) },
     tetris: { main: new Color(124, 58, 237, 255), soft: new Color(196, 181, 253, 255) },
@@ -40,7 +40,7 @@ const ACCENTS: Record<string, Accent> = {
     match3: { main: new Color(219, 39, 119, 255), soft: new Color(45, 212, 191, 255) },
     tower_defense: { main: new Color(71, 85, 105, 255), soft: new Color(148, 163, 184, 255) },
     pool: { main: new Color(6, 95, 70, 255), soft: new Color(52, 211, 153, 255) },
-    wordle: { main: new Color(22, 163, 74, 255), soft: new Color(250, 204, 21, 255) },
+    wordle: { main: new Color(202, 138, 4, 255), soft: new Color(253, 230, 138, 255) },
     bubble: { main: new Color(3, 105, 161, 255), soft: new Color(125, 211, 252, 255) },
     sokoban: { main: new Color(146, 64, 14, 255), soft: new Color(251, 146, 60, 255) },
     shmup: { main: new Color(99, 102, 241, 255), soft: new Color(165, 180, 252, 255) },

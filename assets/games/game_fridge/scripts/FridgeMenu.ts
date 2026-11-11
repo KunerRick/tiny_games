@@ -236,7 +236,12 @@ export class FridgeMenu extends Component {
                 `局数 ${s.runs} · 通关 ${s.wins} · 最佳第 ${Math.max(1, s.bestFloor)} 层　` +
                 `图鉴 ${seenCount}/${ITEMS.length}`;
         }
-        if (this._btnContinue) this._btnContinue.active = this._hasRun;
+        if (this._btnContinue) {
+            this._btnContinue.active = this._hasRun;
+            // 「继续上局」和「开始冒险」同为主入口：以前两者都是卡片底色，
+            // 与真正不可用的灰按钮长得一样（第二轮复核 N4）。给继续上局加强调描边。
+            if (this._hasRun) this._paintSecondary(this._btnContinue, '继续上局');
+        }
 
         const dailyUnlocked = hasUnlock(meta.unlocks, 'daily');
         const heatUnlocked = hasUnlock(meta.unlocks, 'heat');
@@ -283,7 +288,11 @@ export class FridgeMenu extends Component {
     private _renderCodex(meta: FridgeSave): void {
         const rate = collectionRate(meta.seenItems);
         const seenCount = Math.round(rate * ITEMS.length);
-        if (this._codexTitle) this._codexTitle.string = `图鉴 ${seenCount}/${ITEMS.length}（${Math.round(rate * 100)}%）`;
+        if (this._codexTitle) {
+            this._codexTitle.string = seenCount === 0
+                ? `图鉴 0/${ITEMS.length} · 冒险中拾取道具即可点亮`
+                : `图鉴 ${seenCount}/${ITEMS.length}（${Math.round(rate * 100)}%）`;
+        }
         const showTags = hasUnlock(meta.unlocks, 'codex_up');
         for (let i = 0; i < ITEMS.length && i < this._codexLabels.length; i++) {
             const def = ITEMS[i];
@@ -291,7 +300,9 @@ export class FridgeMenu extends Component {
             if (!label) continue;
             const seen = meta.seenItems.indexOf(def.id) >= 0;
             if (!seen) {
-                label.string = `?F ???`;
+                // 未收集条目：不能露出楼层 / 名字，但也不能是「?F ???」这种占位残留
+                // （第二轮复核 N3），统一用中文问号，一眼看得出是「还没遇到」。
+                label.string = '？？？';
                 label.color = hex('#4A5266');
             } else {
                 const fb = def.floor > 0 ? `${def.floor}F` : '池';
@@ -369,6 +380,11 @@ export class FridgeMenu extends Component {
         this._btnChars = this._makeButton(view, 'BtnChars', -118, -158, 224, 66, '角色');
         this._btnCodex = this._makeButton(view, 'BtnCodex', 118, -158, 224, 66, '图鉴');
         this._btnUnlock = this._makeButton(view, 'BtnUnlock', 0, -240, 460, 66, '解锁树');
+        // 这三个是次级导航入口，可以点：用「卡片底 + 强调描边 + 正常字色」，
+        // 与灰底灰字的禁用态明确区分（第二轮复核 N4）。
+        this._paintSecondary(this._btnChars, '角色');
+        this._paintSecondary(this._btnCodex, '图鉴');
+        this._paintSecondary(this._btnUnlock, '解锁树');
 
         this._stats = this._makeLabel(view, 'MenuStats', 0, -330, 16, Label.HorizontalAlign.CENTER, 660);
         this._stats.color = this._cDim;
@@ -665,6 +681,35 @@ export class FridgeMenu extends Component {
         if (label) {
             label.string = text;
             label.color = enabled ? this._cInk : this._cDim;
+        }
+    }
+
+    /**
+     * 次级按钮：可点但比主按钮低调——卡片底 + 强调色描边 + 正文亮字。
+     * 文字必须用 `_cText` 而不是 `_cInk`：`_cInk` 是给强调色填充的主按钮配的深色字，
+     * 铺在 `_cCard`（#1C2638）上对比度只有 1.2:1，「角色 / 图鉴 / 解锁树」几乎看不见
+     * （第二轮复核 R3 / N4 的视觉根因）。
+     */
+    private _paintSecondary(node: Node | null, text: string): void {
+        if (!node) return;
+        const g = node.getComponent(Graphics);
+        const ut = node.getComponent(UITransform);
+        if (!g || !ut) return;
+        const w = ut.contentSize.width;
+        const h = ut.contentSize.height;
+        const radius = Math.round(h / 1.6);
+        g.clear();
+        g.fillColor = this._cCard;
+        g.roundRect(-w / 2, -h / 2, w, h, radius);
+        g.fill();
+        g.lineWidth = 2;
+        g.strokeColor = this._cAccent;
+        g.roundRect(-w / 2, -h / 2, w, h, radius);
+        g.stroke();
+        const label = node.getComponentInChildren(Label);
+        if (label) {
+            label.string = text;
+            label.color = this._cText;
         }
     }
 

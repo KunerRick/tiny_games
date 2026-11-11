@@ -469,9 +469,14 @@ export class SolitaireGame extends Component {
                 const core = SolitaireCore.fromSave(parsed);
                 if (core && !core.isWon()) {
                     this._core = core;
-                    this._elapsed = typeof parsed.elapsed === 'number' ? Math.max(0, parsed.elapsed) : 0;
+                    // 计时器只跟随「真的动过牌」的存档继续；读到 0 步却带 5 分钟计时的存档，
+                    // 玩家会以为计时错乱（试玩报告 P0），这种存档按新局从 0 开始。
+                    this._elapsed = core.state.moves > 0 && typeof parsed.elapsed === 'number'
+                        ? Math.max(0, parsed.elapsed) : 0;
                     this._won = core.isWon();
+                    this._running = true;
                     this._render(false);
+                    this._refreshHud(true);
                     return;
                 }
             } catch (err) {
@@ -1644,8 +1649,8 @@ export class SolitaireGame extends Component {
             this.menuStatsLabel.string =
                 `胜局 ${s.won} / ${s.played}（${rate}%）\n` +
                 `最长连胜 ${s.bestStreak}\n` +
-                `抽 1：${line(b1)}\n` +
-                `抽 3：${line(b3)}`;
+                `抽 1 张：${line(b1)}\n` +
+                `抽 3 张：${line(b3)}`;
         }
     }
 

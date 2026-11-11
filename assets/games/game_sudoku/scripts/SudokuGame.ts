@@ -543,7 +543,11 @@ export class SudokuGame extends Component {
         if (this._hintLabel) this._hintLabel.string = String(core.hintsUsed);
         if (this._statusLabel) {
             if (core.status === 'won') this._statusLabel.string = '全部填对，完成！';
-            else if (core.selected < 0) this._statusLabel.string = '选一个空格开始';
+            else if (core.selected < 0) {
+                // 提示随进度更新（试玩报告 §3.14：开始填了还一直显示「选一个空格开始」）
+                const left = core.remainingCells();
+                this._statusLabel.string = left > 0 ? `还差 ${left} 个数字 · 点一个空格继续` : '全部填对，完成！';
+            }
             else {
                 const r = Math.floor(core.selected / 9) + 1;
                 const c = (core.selected % 9) + 1;

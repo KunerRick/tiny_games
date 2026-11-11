@@ -13,12 +13,15 @@ export const DESIGN_H = 1280;
 // ==================== 列栅格 ====================
 
 /** 左右边距 */
-export const BOARD_MARGIN_X = 15;
+export const BOARD_MARGIN_X = 6;
 /** 列间距 */
-export const COL_GAP = 10;
-/** 牌宽 / 牌高（1.4 比例） */
-export const CARD_W = 90;
-export const CARD_H = 126;
+export const COL_GAP = 4;
+/** 牌宽 / 牌高（1.4 比例）。
+ * 牌宽被 7 列卡死：7 × 98 + 6 × 4 + 2 × 6 = 722 已经贴满 720，横向放不大；
+ * 第二轮复核 N14 的「再放大 15%」只能在**纵向**消化——牌高 137 → 148（+8%），
+ * 比例变 1.51，牌面数字更好认，同时配合下面加大的扇开间距填满中部空白。 */
+export const CARD_W = 98;
+export const CARD_H = 148;
 /** 相邻列中心距 = 牌宽 + 间距 */
 export const COL_STEP = CARD_W + COL_GAP;
 
@@ -56,12 +59,12 @@ export const FOUNDATION_COLS = [3, 4, 5, 6];
 
 // ==================== 牌堆排布 ====================
 
-/** 背面牌露出高度 */
-export const FAN_DOWN = 14;
+/** 背面牌露出高度（N14：加大扇开间距，让牌列更快占满纵向空间） */
+export const FAN_DOWN = 24;
 /** 正面牌露出高度 */
-export const FAN_UP = 30;
+export const FAN_UP = 50;
 /** 超长列压缩后的正面最小露出高度 */
-export const FAN_UP_MIN = 18;
+export const FAN_UP_MIN = 26;
 /** 废牌堆抽 3 张时的横向扇开间距 */
 export const WASTE_FAN = 26;
 /** 牌堆厚度暗示：每张偏移（最多叠 4 张的量） */

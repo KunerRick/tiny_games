@@ -79,6 +79,7 @@ import {
     enemyAtkAt,
     enemyRegenAt,
     enemyProfile,
+    enemyKindLabel,
     enemyWidthAt,
     bossAtkAt,
     scrollSpeedAt,
@@ -197,6 +198,8 @@ export class GateCore {
 
     private _hitTimer = 0;
     private _pendingHit = 0;
+    /** 失败原因（结算面板「原因」行用） */
+    private _failReason: string | null = null;
 
     /** 集火剩余时长 / 剩余冷却 */
     private _pulseTimer = 0;
@@ -244,6 +247,7 @@ export class GateCore {
         this._nextId = 1;
         this._hitTimer = 0;
         this._pendingHit = 0;
+        this._failReason = null;
         this._pulseTimer = 0;
         this._pulseCd = 0;
         this._streak = 0;
@@ -276,6 +280,7 @@ export class GateCore {
         this._acc = 0;
         this._hitTimer = 0;
         this._pendingHit = 0;
+        this._failReason = null;
         this._pulseTimer = 0;
         this._pulseCd = 0;
         this._streak = 0;
@@ -470,6 +475,7 @@ export class GateCore {
         if (this._countF <= 0) {
             this._countF = 0;
             this._flushHit();
+            this._failReason = `被${enemyKindLabel(e.kind)}挡住`;
             this._fail();
         }
     }
@@ -582,6 +588,7 @@ export class GateCore {
             });
 
             if (finalCount <= 0) {
+                this._failReason = '被 ÷2 门削减到 0';
                 this._fail();
                 return;
             }
@@ -777,4 +784,6 @@ export class GateCore {
     }
     /** 队伍数字上限（供 UI 判断是否需要缩写） */
     get countCap(): number { return COUNT_MAX; }
+    /** 失败原因（结算面板「原因」行用；通关时为 null） */
+    get failReason(): string | null { return this._failReason; }
 }

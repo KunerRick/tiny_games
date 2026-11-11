@@ -81,7 +81,10 @@ export class HudPanel extends Component {
 
     updateStats(score: number, level: number, lines: number): void {
         if (this.scoreLabel) {
-            this.scoreLabel.string = formatScore(score);
+            // 大号数字必须带单位：顶栏原来只有一个孤零零的「0」，和
+            // 「等级 1 / 消行 0」并列时看不出是什么（第二轮复核 N11）。
+            // 「分」放后缀而不是前缀，数字仍是第一眼看到的主体。
+            this.scoreLabel.string = `${formatScore(score)} 分`;
         }
         if (this.levelLabel) {
             this.levelLabel.string = `等级 ${level}`;
@@ -91,7 +94,7 @@ export class HudPanel extends Component {
         }
         this._lastLevel = level;
         if (this.linesLabel) {
-            this.linesLabel.string = `行 ${lines}`;
+            this.linesLabel.string = `消行 ${lines}`;
         }
     }
 

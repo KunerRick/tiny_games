@@ -313,8 +313,9 @@ export class IdiomGame extends Component {
         const chipXs = [114, 278, 442, 606];
         this._timeLabel = this._createStatChip(chipXs[0], CHIPS_Y, '用时', chipW).value;
         this._scoreLabel = this._createStatChip(chipXs[1], CHIPS_Y, '得分', chipW).value;
-        this._mistakeLabel = this._createStatChip(chipXs[2], CHIPS_Y, '失误', chipW).value;
-        this._hintLabel = this._createStatChip(chipXs[3], CHIPS_Y, '提示', chipW).value;
+        this._mistakeLabel = this._createStatChip(chipXs[2], CHIPS_Y, '错误', chipW).value;
+        // 数值是「剩余次数」，标题必须写明，否则玩家不知道 3 是剩 3 次还是已用 3 次（复核 R5）
+        this._hintLabel = this._createStatChip(chipXs[3], CHIPS_Y, '提示剩余', chipW).value;
 
         const gap = 174;
         for (let i = 0; i < DIFF_ORDER.length; i++) {
@@ -392,7 +393,7 @@ export class IdiomGame extends Component {
         node.setPosition(designPos(xFromLeft, yFromTop));
         const g = node.addComponent(Graphics);
         drawRoundRect(g, w, 62, 15, toColor('#141F33'), toColor('#24324A'), 2);
-        createLabel(node, caption, 16, {
+        createLabel(node, caption, 18, {
             y: 13,
             color: UI.textMuted,
             width: w - 16,

@@ -14,7 +14,7 @@ import { COLORS, PLAY_H, PLAY_W, getUpgradeDef } from './BrickConfig';
 import type { UpgradeId } from './BrickConfig';
 import { StorageManager } from '../../../common/managers/StorageManager';
 import { SceneManager } from '../../../common/managers/SceneManager';
-import { applySceneClearColor } from '../../../common/ui/GameUIKit';
+import { applySceneClearColor, showTutorialOnce } from '../../../common/ui/GameUIKit';
 import {
     COLOR, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_TITLE, applyFontAndColor,
 } from '../../../common/ui/UITheme';
@@ -25,6 +25,9 @@ import {
 const { ccclass, property } = _decorator;
 
 const GAME_ID = 'brick';
+
+/** 普通砖按行轮换的底色：相邻行不同色，一眼能看出反弹参照行 */
+const BRICK_ROW_COLORS = [COLORS.brickHp1, 0x22c55e, 0xeab308, 0x14b8a6];
 const TAP_SLOP = 12;
 const PARTICLE_MAX = 140;
 const SHAKE_DECAY = 8;
@@ -195,6 +198,8 @@ export class BrickGame extends Component {
         this._hidePanel(this.upgradePanel);
         this._hidePanel(this.gameOverPanel);
         this._applyUnifiedTheme();
+        // 首次进入：只弹一次的浮层，说明「球要手动发射」
+        showTutorialOnce(this.node, GAME_ID, '拖动挡板移动 · 点一下屏幕发球');
     }
 
     // ------------------------------------------------------------------
@@ -716,7 +721,7 @@ export class BrickGame extends Component {
             if (!brick.alive) continue;
             const x = -PLAY_W / 2 + brick.x;
             const y = PLAY_H / 2 - brick.y - brick.h;
-            g.fillColor = this._color(this._brickColor(brick.kind, brick.hp));
+            g.fillColor = this._color(this._brickColor(brick.kind, brick.hp, brick.row));
             g.roundRect(x, y, brick.w, brick.h, 6);
             g.fill();
 
@@ -811,7 +816,7 @@ export class BrickGame extends Component {
         }
         const remain = core.aliveBrickCount;
         if ((core.level !== this._lastLevel || remain !== this._lastRemain) && this.levelLabel) {
-            this.levelLabel.string = `第 ${core.level} 关 · 剩 ${remain}`;
+            this.levelLabel.string = `第 ${core.level} 关 · 剩余砖块 ${remain}`;
             this._lastLevel = core.level;
             this._lastRemain = remain;
         }
@@ -880,10 +885,13 @@ export class BrickGame extends Component {
 
     // ==================== 小工具 ====================
 
-    private _brickColor(kind: string, hp: number): number {
+    private _brickColor(kind: string, hp: number, row = 0): number {
         if (kind === 'bomb') return COLORS.bomb;
+        // 耐久砖用紫/蓝明确表示「要多打几下」，普通砖按行换色（试玩报告 §3.8：
+        // 整屏一片橙分不出行，反弹角度判断也少了参照）
         if (kind === 'tough') return hp >= 3 ? COLORS.brickHp3 : COLORS.brickHp2;
-        return hp >= 3 ? COLORS.brickHp3 : COLORS.brickHp1;
+        if (hp >= 3) return COLORS.brickHp3;
+        return BRICK_ROW_COLORS[row % BRICK_ROW_COLORS.length];
     }
 
     private _color(hex: number, alpha = 1): Color {

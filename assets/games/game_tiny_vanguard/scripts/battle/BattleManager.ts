@@ -134,6 +134,9 @@ export class BattleManager extends Component {
   private _aiWatchdogAt = 0;
 
   get phase(): BattlePhase { return this._phase; }
+
+  /** 是否已选中一个待确认的移动落点（UI 用来提示「再次点击确认」） */
+  get hasMovePreview(): boolean { return !!this._movePreviewPos; }
   get playerUnits(): UnitController[] { return this._playerUnits; }
   get enemyUnits(): UnitController[] { return this._enemyUnits; }
   get selectedUnit(): UnitController | null { return this._selectedUnit; }
@@ -529,6 +532,11 @@ export class BattleManager extends Component {
       return false;
     }
     return true;
+  }
+
+  /** 还有多少单位没上阵（确认部署被拒时用来告诉玩家原因） */
+  get undeployedCount(): number {
+    return Math.max(0, this._playerUnits.length - this._deployedPositions.length);
   }
 
   // 动画完成后调用，真正开始战斗
@@ -1198,6 +1206,7 @@ export class BattleManager extends Component {
       if (isOwnTile && this._movePreviewPos) {
         this.gridController.clearPreview();
         this._movePreviewPos = null;
+        if (this._onUnitPhaseChanged) this._onUnitPhaseChanged('player_turn', unit, 'move');
         return;
       }
       // 点自己（无预览）：原地待命，进入行动阶段。
@@ -1214,6 +1223,20 @@ export class BattleManager extends Component {
         }
         this._checkAutoSkipIfNoTargets(unit);
         return;
+      }
+
+      // 移动阶段也允许直接点另一名待行动的友方单位切换（原先只在 action 阶段生效，
+      // 玩家点到别的单位毫无反应，容易误判成「操作卡死」）
+      if (!this._movePreviewPos) {
+        const clickedPlayer = this._playerUnits.find(u =>
+          u !== unit && u.data?.isAlive && !u.data.hasActed &&
+          u.data.gridPos.row === gridPos.row && u.data.gridPos.col === gridPos.col
+        );
+        if (clickedPlayer) {
+          this._currentUnitIndex = this._playerUnits.indexOf(clickedPlayer);
+          this.selectNextPlayerUnit();
+          return;
+        }
       }
 
       // 检查是否在可移动范围内
@@ -1251,6 +1274,8 @@ export class BattleManager extends Component {
       // 第一次点击可移动格：设置预览
       this._movePreviewPos = { row: gridPos.row, col: gridPos.col };
       this.gridController.highlightPreviewCell(gridPos);
+      // 立刻刷新阶段提示为「再次点击确认」，否则玩家看到棋子没动会以为没响应
+      if (this._onUnitPhaseChanged) this._onUnitPhaseChanged('player_turn', unit, 'move');
       return;
     }
 

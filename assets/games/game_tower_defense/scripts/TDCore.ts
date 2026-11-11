@@ -246,6 +246,8 @@ export class TDCore {
     gold: number;
     lives: number;
     totalKills = 0;
+    /** 累计漏过的敌人数（结算「原因」行用） */
+    totalLeaks = 0;
 
     private _segments: Segment[] = [];
     private _waveTime = 0;
@@ -521,6 +523,7 @@ export class TDCore {
                 e.x = p.x;
                 e.y = p.y;
                 e.alive = false;
+                this.totalLeaks++;
                 this.lives = Math.max(0, this.lives - TD_ENEMIES[e.kind].leak);
                 this._events.push(`leak:${e.kind}`);
                 if (this.lives <= 0 && this.phase !== 'lost') {

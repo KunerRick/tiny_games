@@ -18,6 +18,9 @@ export class SettingsPanel extends Component {
     cancelButton: Button | null = null;
 
     private _selectedSize: GridSize = 4;
+    private _currentSize: GridSize = 4;
+    /** 改了棋盘尺寸时的二次确认：第一次点「开始」只提示会重开，再点一次才生效 */
+    private _confirmArmed = false;
     private _onConfirm: ((size: GridSize) => void) | null = null;
     private _showCalled: boolean = false;
 
@@ -37,6 +40,8 @@ export class SettingsPanel extends Component {
         // 必须先置位再激活：节点首次激活会同步触发 onLoad
         this._showCalled = true;
         this._selectedSize = currentSize;
+        this._currentSize = currentSize;
+        this._confirmArmed = false;
         this._onConfirm = onConfirm;
 
         // 先解绑再绑定，防止重复调用 show() 时事件累积
@@ -90,6 +95,7 @@ export class SettingsPanel extends Component {
         const rawValue = this.gridSizeSlider.progress * 4; // 0-4
         const index = Math.round(rawValue);
         this._selectedSize = GRID_SIZES[index];
+        this._confirmArmed = false;
 
         // 吸附到刻度
         this.gridSizeSlider.progress = index / 4;
@@ -102,9 +108,25 @@ export class SettingsPanel extends Component {
         if (this.gridSizeValueLabel) {
             this.gridSizeValueLabel.string = this._selectedSize.toString();
         }
+        // 尺寸和当前牌局不同时，按钮文案先说明「会重开」，避免玩家以为只是改设置
+        const label = this.startButton ? this.startButton.node.getComponentInChildren(Label) : null;
+        if (label) {
+            const changed = this._selectedSize !== this._currentSize;
+            label.string = !changed
+                ? '开始游戏'
+                : this._confirmArmed
+                    ? `再点一次确认 · 重开为 ${this._selectedSize}×${this._selectedSize}`
+                    : `改为 ${this._selectedSize}×${this._selectedSize}（会重开）`;
+        }
     }
 
     private onStart(): void {
+        // 换尺寸 = 放弃当前牌局，需要二次确认
+        if (this._selectedSize !== this._currentSize && !this._confirmArmed) {
+            this._confirmArmed = true;
+            this.updateValueLabel();
+            return;
+        }
         this._onConfirm?.(this._selectedSize);
         this.hide();
     }

@@ -49,9 +49,9 @@ const KEY_SAVE = 'save';
 const DESIGN_W = 720;
 const CANVAS_H = 1280;
 
-const BOARD_W = 648;
-const BOARD_TOP = 176;
-const BOARD_BOTTOM = 872;
+const BOARD_W = 672;
+const BOARD_TOP = 158;
+const BOARD_BOTTOM = 884;
 const BOARD_H = BOARD_BOTTOM - BOARD_TOP;
 const BOARD_CENTER_Y = (BOARD_TOP + BOARD_BOTTOM) / 2;
 
@@ -60,9 +60,12 @@ const MOVE_DUR = 0.09;
 /** 滑动至少这么多设计像素才认方向 */
 const SWIPE_MIN = 24;
 
+// 试玩报告：墙与地板同色、目标点几乎看不见。这里把明度差拉开到肉眼可辨：
+// 地板最暗，墙明显更亮并加描边，目标点改成实心圆环 + 深色内点。
 const FLOOR_FILL = '#141C2B';
-const WALL_FILL = '#2C3A52';
-const WALL_TOP = '#43536F';
+const WALL_FILL = '#41527A';
+const WALL_TOP = '#6C82B4';
+const WALL_STROKE = '#8FA4CC';
 const BOX_FILL = '#B4763A';
 const BOX_STROKE = '#7A4A1E';
 
@@ -395,7 +398,8 @@ export class SokobanGame extends Component {
 
     private _updateLabels(): void {
         if (this._levelLabel && this._levelLabel.isValid) {
-            this._levelLabel.string = `第 ${this._level.id} 关 · ${this._level.name}`;
+            // 这行同时是选关入口。加 ▾ 与「点此选关」后缀，否则玩家猜不到它能点（复核 N7）。
+            this._levelLabel.string = `▾ 第 ${this._level.id} 关 · ${this._level.name}（点此选关）`;
         }
         if (this._statusLabel && this._statusLabel.isValid) {
             this._statusLabel.string = `步数 ${this._board.moves} · 最少 ${this._level.par}`;
@@ -445,6 +449,17 @@ export class SokobanGame extends Component {
         }
         g.fill();
 
+        // 墙体描边：让每块墙的边界在地板上立起来
+        g.lineWidth = 2;
+        g.strokeColor = toColor(WALL_STROKE);
+        for (let y = 0; y < b.height; y++) {
+            for (let x = 0; x < b.width; x++) {
+                if (!b.isWall(x, y)) continue;
+                g.rect(tx(x) + 1, ty(y) + 1, cell - 2, cell - 2);
+            }
+        }
+        g.stroke();
+
         g.fillColor = toColor(WALL_TOP);
         for (let y = 0; y < b.height; y++) {
             for (let x = 0; x < b.width; x++) {
@@ -454,18 +469,26 @@ export class SokobanGame extends Component {
         }
         g.fill();
 
-        // 目标点
-        g.lineWidth = 3;
-        g.strokeColor = toColor(COLOR.WARNING);
+        // 目标点：实心圆环 + 深色内点（暗黄细圈在深色地板上几乎看不见）
         let hasGoal = false;
+        g.fillColor = toColor(COLOR.WARNING);
         for (let y = 0; y < b.height; y++) {
             for (let x = 0; x < b.width; x++) {
                 if (!b.isGoal(x, y)) continue;
-                g.circle(cx0(x), cy0(y), cell * 0.17);
+                g.circle(cx0(x), cy0(y), cell * 0.21);
                 hasGoal = true;
             }
         }
-        if (hasGoal) g.stroke();
+        if (hasGoal) g.fill();
+
+        g.fillColor = toColor(FLOOR_FILL);
+        for (let y = 0; y < b.height; y++) {
+            for (let x = 0; x < b.width; x++) {
+                if (!b.isGoal(x, y)) continue;
+                g.circle(cx0(x), cy0(y), cell * 0.09);
+            }
+        }
+        if (hasGoal) g.fill();
 
         // 箱子（被推的那个用插值位置单独画）
         const anim = this._anim;

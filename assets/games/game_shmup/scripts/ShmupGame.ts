@@ -20,7 +20,9 @@ import {
     FONT_BODY,
     FONT_CAPTION,
     FONT_DISPLAY,
+    FONT_TINY,
     FONT_TITLE,
+    UiButton,
     createBackButton,
     createButton,
     createLabel,
@@ -70,7 +72,7 @@ const ENEMY_COLOR: Record<EnemyKind, string> = {
     boss: C.boss,
 };
 
-type UiPhase = 'ready' | 'playing' | 'won' | 'lost';
+type UiPhase = 'ready' | 'playing' | 'paused' | 'won' | 'lost';
 
 @ccclass('ShmupGame')
 export class ShmupGame extends Component {
@@ -80,14 +82,23 @@ export class ShmupGame extends Component {
     private _bgGfx: Graphics | null = null;
     private _fieldGfx: Graphics | null = null;
     private _hudGfx: Graphics | null = null;
+    /** 战斗 HUD 容器：开始页 / 结算 / 暂停时必须整层隐藏（试玩报告：HUD 漏到标题页上） */
+    private _hud: Node | null = null;
+    private _pauseBtn: UiButton | null = null;
+    private _pauseOverlay: Node | null = null;
 
     private _scoreLabel: Label | null = null;
     private _waveLabel: Label | null = null;
     private _powerLabel: Label | null = null;
+    private _waveProgLabel: Label | null = null;
+    /** 生命数量文字（报告 §3.24：只有一排无标签小尖角） */
+    private _livesLabel: Label | null = null;
+    private _lastLives = -1;
 
     private _startOverlay: Node | null = null;
     private _endOverlay: Node | null = null;
     private _endTitle: Label | null = null;
+    private _endReason: Label | null = null;
     private _endScore: Label | null = null;
     private _endBest: Label | null = null;
 
@@ -104,6 +115,7 @@ export class ShmupGame extends Component {
     private _lastScore = -1;
     private _lastWave = '';
     private _lastPower = -1;
+    private _lastWaveProg = '';
 
     onLoad(): void {
         // 根节点必须是全屏 UITransform：Cocos 的 UI 点击按 UITransform 命中测试，
@@ -127,12 +139,18 @@ export class ShmupGame extends Component {
         this._bgGfx = null;
         this._fieldGfx = null;
         this._hudGfx = null;
+        this._hud = null;
+        this._pauseBtn = null;
+        this._pauseOverlay = null;
         this._scoreLabel = null;
         this._waveLabel = null;
         this._powerLabel = null;
+        this._waveProgLabel = null;
+        this._livesLabel = null;
         this._startOverlay = null;
         this._endOverlay = null;
         this._endTitle = null;
+        this._endReason = null;
         this._endScore = null;
         this._endBest = null;
     }
@@ -150,6 +168,7 @@ export class ShmupGame extends Component {
         this._fieldGfx = field.addComponent(Graphics);
 
         const hud = createNode('Hud', root, FIELD_W, FIELD_H);
+        this._hud = hud;
         this._hudGfx = hud.addComponent(Graphics);
 
         this._scoreLabel = createLabel(hud, '分数 0', FONT_BODY.fontSize, {
@@ -167,14 +186,50 @@ export class ShmupGame extends Component {
             width: 240,
         });
 
+        // 波次居中：原来中心在 design x=420、宽 300（右缘 570），会压到右侧「生命 ×N」
+        // 的左缘 440（第二轮复核 N2 读成「侦察编队生命 ×3」）。收到屏幕中心并缩窄。
         this._waveLabel = createLabel(hud, '', FONT_CAPTION.fontSize, {
-            x: 420 - 360,
+            x: 0,
             y: 640 - 46,
             color: COLOR.TEXT_SECONDARY,
-            width: 300,
+            width: 340,
+            align: 'center',
+        });
+
+        // 本波剩余进度条的文字标签（试玩报告：顶部蓝条不知含义）
+        this._waveProgLabel = createLabel(hud, '', FONT_TINY.fontSize, {
+            x: 0,
+            y: FIELD_H / 2 - HUD_H + 34,
+            color: COLOR.TEXT_SECONDARY,
+            width: 320,
+        });
+
+        // 生命数字：贴在生命图标左侧（图标从 local x=320 往左排）
+        this._livesLabel = createLabel(hud, '生命 ×0', FONT_TINY.fontSize, {
+            x: FIELD_W / 2 - 220,
+            y: FIELD_H / 2 - 46,
+            color: C.player,
+            width: 120,
+            align: 'right',
         });
 
         createBackButton(root, () => this._onBackTap());
+
+        // 暂停入口：战斗中显示，开始页 / 结算页隐藏（试玩报告：战斗中无处暂停 / 退出）
+        this._pauseBtn = createButton(root, {
+            w: 124,
+            h: 56,
+            text: '暂停',
+            fontSize: FONT_CAPTION.fontSize,
+            fill: COLOR.SURFACE,
+            textColor: COLOR.TEXT_SECONDARY,
+            radius: 14,
+            onTap: () => this._onPauseTap(),
+        });
+        this._pauseBtn.node.setPosition(640 - 360, 640 - 46, 0);
+        this._pauseBtn.node.active = false;
+
+        this._setHudVisible(false);
     }
 
     private _drawStars(): void {
@@ -257,15 +312,92 @@ export class ShmupGame extends Component {
         SceneManager.gotoLobby();
     }
 
+    /** 战斗 HUD（分数/火力/波次/进度条）与暂停按钮只在战斗中存在 */
+    private _setHudVisible(visible: boolean): void {
+        if (this._hud && this._hud.isValid) this._hud.active = visible;
+        if (this._pauseBtn && this._pauseBtn.node && this._pauseBtn.node.isValid) {
+            this._pauseBtn.node.active = visible;
+        }
+    }
+
+    private _onPauseTap(): void {
+        if (this._phase !== 'playing') return;
+        this._phase = 'paused';
+        this._dragging = false;
+        this._showPause();
+    }
+
+    private _onResumeTap(): void {
+        if (this._pauseOverlay && this._pauseOverlay.isValid) this._pauseOverlay.active = false;
+        if (this._phase === 'paused') this._phase = 'playing';
+    }
+
+    private _showPause(): void {
+        if (this._pauseOverlay && this._pauseOverlay.isValid) {
+            this._pauseOverlay.active = true;
+            return;
+        }
+        const overlay = createNode('PauseOverlay', this.node, FIELD_W, FIELD_H);
+        const dim = overlay.addComponent(Graphics);
+        dim.fillColor = hex('#050A14', 200);
+        dim.rect(-FIELD_W / 2, -FIELD_H / 2, FIELD_W, FIELD_H);
+        dim.fill();
+
+        const panel = createNode('Panel', overlay, 520, 520);
+        const pg = panel.addComponent(Graphics);
+        drawRoundRect(pg, 520, 520, 28, hex(C.panel), hex('#2C3A52'), 2);
+
+        createLabel(panel, '已暂停', FONT_TITLE.fontSize, {
+            x: 0,
+            y: 170,
+            color: COLOR.TEXT_PRIMARY,
+            bold: true,
+        });
+
+        const resume = createButton(panel, {
+            w: 320,
+            h: 88,
+            text: '继续战斗',
+            fontSize: FONT_BODY.fontSize,
+            fill: C.player,
+            textColor: '#06212E',
+            onTap: () => this._onResumeTap(),
+        });
+        resume.node.setPosition(0, 40, 0);
+
+        const restart = createButton(panel, {
+            w: 320,
+            h: 84,
+            text: '重新开始',
+            fontSize: FONT_BODY.fontSize,
+            onTap: () => this._onStartTap(),
+        });
+        restart.node.setPosition(0, -72, 0);
+
+        const back = createButton(panel, {
+            w: 320,
+            h: 84,
+            text: '返回大厅',
+            fontSize: FONT_BODY.fontSize,
+            onTap: () => this._onBackTap(),
+        });
+        back.node.setPosition(0, -184, 0);
+
+        this._pauseOverlay = overlay;
+    }
+
     private _onStartTap(): void {
         if (this._startOverlay && this._startOverlay.isValid) this._startOverlay.active = false;
         if (this._endOverlay && this._endOverlay.isValid) this._endOverlay.active = false;
+        if (this._pauseOverlay && this._pauseOverlay.isValid) this._pauseOverlay.active = false;
         this._world.reset();
         this._phase = 'playing';
+        this._setHudVisible(true);
         this._dragging = false;
         this._lastScore = -1;
         this._lastWave = '';
         this._lastPower = -1;
+        this._lastWaveProg = '';
         this._draw();
         this._syncHud();
     }
@@ -275,6 +407,7 @@ export class ShmupGame extends Component {
     private _showStart(): void {
         this._phase = 'ready';
         this._world.reset();
+        this._setHudVisible(false);
         this._draw();
 
         if (this._startOverlay && this._startOverlay.isValid) {
@@ -335,6 +468,8 @@ export class ShmupGame extends Component {
     }
 
     private _showEnd(won: boolean): void {
+        this._setHudVisible(false);
+        if (this._pauseOverlay && this._pauseOverlay.isValid) this._pauseOverlay.active = false;
         if (!this._endOverlay || !this._endOverlay.isValid) {
             const overlay = createNode('EndOverlay', this.node, FIELD_W, FIELD_H);
             const dim = overlay.addComponent(Graphics);
@@ -351,6 +486,11 @@ export class ShmupGame extends Component {
                 y: 200,
                 color: COLOR.TEXT_PRIMARY,
                 bold: true,
+            });
+            this._endReason = createLabel(panel, '', FONT_CAPTION.fontSize, {
+                x: 0,
+                y: 158,
+                color: COLOR.TEXT_SECONDARY,
             });
             this._endScore = createLabel(panel, '得分 0', FONT_BODY.fontSize, {
                 x: 0,
@@ -387,6 +527,12 @@ export class ShmupGame extends Component {
         }
 
         if (this._endTitle) this._endTitle.string = won ? '母舰击沉！' : '飞船被击落';
+        if (this._endReason) {
+            const wave = Math.min(this._world.waveIndex + 1, SHMUP_WAVES.length);
+            this._endReason.string = won
+                ? `完成全部 ${SHMUP_WAVES.length} 波`
+                : `第 ${wave} 波 · ${this._world.wave.name} 被击落`;
+        }
         if (this._endScore) this._endScore.string = `得分 ${this._world.score}`;
         if (this._endBest) this._endBest.string = `最高分 ${this._best}`;
         this._endOverlay.active = true;
@@ -409,7 +555,11 @@ export class ShmupGame extends Component {
         this._time += dt;
 
         if (this._phase !== 'playing') {
-            this._scrollStars(dt * 0.3);
+            // 结算 / 暂停面板出现后整幅战斗画面完全静止（含星空）。
+            // 以前这里还按 0.3 倍滚星空，背景「活着」会分散注意力（第二轮复核 N18）；
+            // 敌机 / 子弹本身在 _phase 变化后已停止更新，只有星空在动。
+            // 开始界面保留缓慢星空，避免首屏死气沉沉。
+            if (this._phase === 'ready') this._scrollStars(dt * 0.3);
             return;
         }
 
@@ -439,6 +589,10 @@ export class ShmupGame extends Component {
 
     private _syncHud(): void {
         const w = this._world;
+        if (this._livesLabel && w.player.lives !== this._lastLives) {
+            this._lastLives = w.player.lives;
+            this._livesLabel.string = `生命 ×${w.player.lives}`;
+        }
         if (this._scoreLabel && w.score !== this._lastScore) {
             this._lastScore = w.score;
             this._scoreLabel.string = `分数 ${w.score}`;
@@ -451,6 +605,13 @@ export class ShmupGame extends Component {
         if (this._waveLabel && waveText !== this._lastWave) {
             this._lastWave = waveText;
             this._waveLabel.string = waveText;
+        }
+        if (this._waveProgLabel) {
+            const progText = `本波剩余 ${w.remainingInWave()} / ${w.waveTotal()}`;
+            if (progText !== this._lastWaveProg) {
+                this._lastWaveProg = progText;
+                this._waveProgLabel.string = progText;
+            }
         }
     }
 
@@ -667,7 +828,7 @@ export class ShmupGame extends Component {
         g.fillColor = hex('#1B2740');
         g.roundRect(bx, by, barW, 6, 3);
         g.fill();
-        const ratio = Math.min(1, remain / 12);
+        const ratio = Math.min(1, remain / Math.max(1, w.waveTotal()));
         if (ratio > 0.001) {
             g.fillColor = hex(C.player, 200);
             g.roundRect(bx, by, barW * ratio, 6, 3);

@@ -188,9 +188,14 @@ export class UIController extends Component {
     private _evolveNoticeTimer: number = 0;
 
     onLoad() {
-        // 旧版 HUD 隐藏（新 HUD 由本组件运行时搭建）
+        // 旧版 HUD 隐藏（新 HUD 由本组件运行时搭建）。
+        // 注意：返回大厅按钮挂在 topBar 下，不能整条隐藏，否则玩家出不去。
         const topBar = this.node.getChildByName('topBar');
-        if (topBar) topBar.active = false;
+        if (topBar) {
+            for (const child of topBar.children) {
+                if (child.name !== 'backButton') child.active = false;
+            }
+        }
         const bottomBar = this.node.getChildByName('bottomBar');
         if (bottomBar) bottomBar.active = false;
 
@@ -259,7 +264,8 @@ export class UIController extends Component {
 
         // 金币
         const coin = createNode('Coin', hud, 24, 24);
-        coin.setPosition(-306, 600, 0);
+        // 左上角留给返回按钮（topBar/backButton 世界坐标约 -300,590）
+        coin.setPosition(-258, 600, 0);
         const cg = coin.addComponent(Graphics);
         cg.fillColor = colorFromHex('#F59E0B');
         cg.circle(0, 0, 10);
@@ -268,7 +274,7 @@ export class UIController extends Component {
         cg.circle(-2, 2, 4);
         cg.fill();
         this._goldText = createLabel(hud, '0', 24, {
-            width: 160, height: 34, x: -215, y: 600, bold: true, align: 'left',
+            width: 160, height: 34, x: -165, y: 600, bold: true, align: 'left',
         });
 
         // 时代 / 击杀 / 难度

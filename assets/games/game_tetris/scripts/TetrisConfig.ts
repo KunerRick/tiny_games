@@ -178,19 +178,25 @@ export const MAX_CELL_SIZE = 56;
 /** 暂存面板尺寸 */
 export const HOLD_PANEL_SIZE = 120;
 
-/** Next 面板里的小方格边长（84 宽的面板放得下 4 格宽的 I） */
-export const NEXT_MINI_CELL = 20;
+/**
+ * Next / Hold 预览里的小方格边长。
+ * 试玩报告 §3.4：原 20px 的预览块太小看不清。侧栏面板宽 120，4 格宽的 I 占
+ * 4×24 = 96 < 120 仍留 12px 边；预览节点只做定位、Graphics 不裁剪，故放大不会串格。
+ */
+export const NEXT_MINI_CELL = 24;
 
 /** Hold / Next 预览面板的绘制区域边长 */
 export const PREVIEW_SIZE = 84;
 
 /**
- * 运行时格宽：按可见区域算，取偶数便于居中。
- * 只按按钮模式（BOTTOM_ZONE 更大）算一次，切模式不重算——否则方块尺寸会跳变。
+ * 运行时格宽：按可见区域与当前操控模式的底部预留算，取偶数便于居中。
+ * 手势模式只用留 120 的操作条，按钮模式要放四个大按钮，两种模式各算一次
+ * （试玩报告：手势模式沿用按钮模式的 300 预留，屏幕下方空了 160px）。
  */
-export function computeCellSize(visibleWidth: number, visibleHeight: number): number {
+export function computeCellSize(visibleWidth: number, visibleHeight: number,
+    bottomZone: number = BUTTON_BOTTOM_ZONE): number {
     const byWidth = (visibleWidth - 240) / BOARD_COLS;
-    const byHeight = (visibleHeight - BOARD_TOP_RESERVED - BUTTON_BOTTOM_ZONE) / VISIBLE_ROWS;
+    const byHeight = (visibleHeight - BOARD_TOP_RESERVED - bottomZone) / VISIBLE_ROWS;
     const raw = Math.floor(Math.min(byWidth, byHeight) / 2) * 2;
     return Math.max(MIN_CELL_SIZE, Math.min(MAX_CELL_SIZE, raw));
 }

@@ -63,7 +63,8 @@ const DIFF_KEY = 'tiny_games_gomoku_diff';
 
 const COLOR_BOARD = '#152033';
 const COLOR_BOARD_STROKE = '#2A3A57';
-const COLOR_GRID = '#33415A';
+// 格线加深（试玩报告 P0：深色底上几乎看不清交叉点）
+const COLOR_GRID = '#5C739F';
 const COLOR_STAR = '#94A3B8';
 const COLOR_STONE_BLACK = '#0B1220';
 const COLOR_STONE_BLACK_STROKE = '#475569';
@@ -190,13 +191,38 @@ export class GomokuGame extends Component {
         const r = Math.round((GRID_HALF - local.y) / CELL);
         if (!core.isInside(r, c)) return;
 
-        const target = this._localOf(r, c);
-        const dx = local.x - target.x;
-        const dy = local.y - target.y;
-        if (Math.sqrt(dx * dx + dy * dy) > CELL * 0.6) return;
-        if (!core.isLegal(r, c)) return;
-        this._placeAt(r, c);
+        // 手指落在已有棋子上时，吸附到半径内最近的空交叉点
+        // （试玩报告：15×15 格距小，点偏一点就「没反应」）
+        if (core.isLegal(r, c) && this._withinSnap(local, r, c)) {
+            this._placeAt(r, c);
+            return;
+        }
+        let bestR = -1;
+        let bestC = -1;
+        let bestD = CELL * 0.6;
+        for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+                const nr = r + dr;
+                const nc = c + dc;
+                if (!core.isInside(nr, nc) || !core.isLegal(nr, nc)) continue;
+                const t = this._localOf(nr, nc);
+                const d = Math.hypot(local.x - t.x, local.y - t.y);
+                if (d < bestD) {
+                    bestD = d;
+                    bestR = nr;
+                    bestC = nc;
+                }
+            }
+        }
+        if (bestR >= 0) this._placeAt(bestR, bestC);
     }
+
+    /** 触摸点是否落在该交叉点的吸附半径内 */
+    private _withinSnap(local: Vec3, r: number, c: number): boolean {
+        const target = this._localOf(r, c);
+        return Math.hypot(local.x - target.x, local.y - target.y) <= CELL * 0.6;
+    }
+
 
     // ==================== 落子与回合 ====================
 
@@ -456,10 +482,12 @@ export class GomokuGame extends Component {
         (board as unknown as { __gomoku?: BoardTouchData }).__gomoku = { game: this };
         board.on(Node.EventType.TOUCH_START, onBoardTouchStart);
 
-        this._statusLabel = createLabel(this.node, '', 24, {
-            color: UI.textDim,
+        this._statusLabel = createLabel(this.node, '', 26, {
+            // 状态行是玩家最需要读的一句（轮到你 / 胜负），原来 24 号 #94A3B8
+            // 在深色底上偏淡（第二轮复核 N15），提到正文白色。
+            color: UI.text,
             width: 660,
-            height: 34,
+            height: 36,
         });
         this._statusLabel.node.setPosition(designPos(360, 996));
 
@@ -503,11 +531,12 @@ export class GomokuGame extends Component {
         node.setPosition(designPos(xFromLeft, yFromTop));
         const g = node.addComponent(Graphics);
         drawRoundRect(g, w, 62, 15, toColor('#141F33'), toColor('#24324A'), 2);
-        createLabel(node, caption, 16, {
+        createLabel(node, caption, 18, {
+            // 胜 / 负 / 平 是用户看战绩的唯一线索，16 号 + textMuted 太小太淡（N15）
             y: 13,
-            color: UI.textMuted,
+            color: UI.textDim,
             width: w - 16,
-            height: 20,
+            height: 22,
         });
         const value = createLabel(node, '0', 26, {
             y: -11,

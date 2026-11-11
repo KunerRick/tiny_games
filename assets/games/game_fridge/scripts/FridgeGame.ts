@@ -17,6 +17,7 @@ import {
 } from 'cc';
 import { FridgeWorld } from './FridgeCore';
 import type { FridgeInput } from './FridgeCore';
+import { showTutorialOnce } from '../../../common/ui/GameUIKit';
 import { FIXED_DT, FIELD_H, FIELD_W, ITEM_BY_ID, UNLOCK_BY_ID, dailyDateKey, evaluateUnlocks } from './FridgeConfig';
 import type { CoreEvent } from './FridgeConfig';
 import { discardRun, loadMeta, loadRun, saveMeta, saveRun } from './FridgeDungeon';
@@ -89,7 +90,11 @@ export class FridgeGame extends Component {
         this._sfxUi?.setSafeTop(safeTop);
         if (safeTop > 0) this._shiftBackButton(safeTop);
         if (this._hud) {
-            this._hud.onRestartRequested = () => this.openMenu();
+            // 死亡面板的「再来一局」= 用同一套选项立刻重开（之前错接成回主菜单）
+            this._hud.onRestartRequested = () => {
+                if (this._lastOpts) this.startNewRun(this._lastOpts);
+                else this.openMenu();
+            };
             this._hud.onTreasurePick = (index: number) => this.onTreasurePick(index);
             this._hud.onTreasureReroll = () => this.onTreasureReroll();
             this._hud.onActiveRequested = () => this.useActive();
@@ -197,6 +202,8 @@ export class FridgeGame extends Component {
         });
         this._lastOpts = opts;
         this._beginCore(core);
+        // 首次进入：浮层说明左右半屏的分工（菜单里没有图解）
+        showTutorialOnce(this.node, 'fridge', '左半屏拖动移动 · 右半屏拖动瞄准射击');
     }
 
     private _beginCore(core: FridgeWorld): void {
@@ -224,6 +231,7 @@ export class FridgeGame extends Component {
         this._paused = false;
         this._joystick?.release();
         this._aim?.release();
+        this._hud?.hideGameOver();
         if (!this._meta) this._meta = loadMeta();
         if (this._menu) {
             this._menu.setMeta(this._meta);

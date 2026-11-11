@@ -22,6 +22,8 @@
 | 新增游戏或场景 | [`../AGENTS.md`](../AGENTS.md) 的 **项目结构 + 游戏注册** |
 | 查某游戏的设计/计划/场景配置 | 下文的 **按游戏分类** |
 | 规划剩余 8 款的玩法/美术/复核开工顺序 | [`plans/2026-11-07-remaining-games-polish-plan.md`](./plans/2026-11-07-remaining-games-polish-plan.md) |
+| **想知道全部 24 款有哪些体验坑 / 该先修什么** | [`plans/2026-11-10-all-games-playtest-ux-report.md`](./plans/2026-11-10-all-games-playtest-ux-report.md)（玩家视角实机试玩：跨游戏共性问题 + 逐款清单 + P0/P1/P2 批次） |
+| **想知道上一轮修复哪些真生效、哪些没落地** | [`plans/2026-11-11-playtest-fix-review.md`](./plans/2026-11-11-playtest-fix-review.md)（第二轮复核：A 批 10 条全过、B/C 5 处未生效、18 条新问题 + 4 条原报告更正） |
 
 ---
 

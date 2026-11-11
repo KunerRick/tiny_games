@@ -46,10 +46,11 @@ import {
 import type { GateEvent, GatePair, Enemy } from './GateCore';
 import { StorageManager } from '../../../common/managers/StorageManager';
 import { SceneManager } from '../../../common/managers/SceneManager';
-import { COLOR, FONT_BODY, FONT_CAPTION, FONT_DISPLAY } from '../../../common/ui/UITheme';
+import { COLOR, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_ICON } from '../../../common/ui/UITheme';
 import {
     addDialogBackdrop, findPath, paintLabel, skinButton, skinOverlay,
 } from '../../../common/ui/SceneSkin';
+import { createLabel, designPos } from '../../../common/ui/GameUIKit';
 
 const { ccclass, property } = _decorator;
 
@@ -193,6 +194,11 @@ export class GateGame extends Component {
     private _squadBadgeLabel: Label | null = null;
     private _shake = 0;
 
+    /** 盾兵警告条：首次遇到盾兵时提示「点屏幕集火」（试玩报告 §3.10） */
+    private _shieldWarn: Label | null = null;
+    private _shieldWarnT = 0;
+    private _shieldWarned = false;
+
     /** Boss 阶段切换闪光剩余时长（0 = 无闪光） */
     private _bossPhaseFlash = 0;
 
@@ -235,6 +241,9 @@ export class GateGame extends Component {
         this._bindStatic();
         this.startNewRun();
         this._applyUnifiedTheme();
+        // 首局不再弹「左右拖动选门 · 点一下屏幕集火」的浮层：
+        // 顶部 HintLabel 常驻同一句操作提示（32 号），浮层只是重复一遍，
+        // 还会在小屏上压住门（第二轮复核 N17）。
     }
 
     // ------------------------------------------------------------------
@@ -247,7 +256,14 @@ export class GateGame extends Component {
         paintLabel(root, 'HudTop/CountTitle', FONT_BODY, COLOR.TEXT_SECONDARY);
         paintLabel(root, 'HudTop/CountLabel', FONT_DISPLAY, COLOR.TEXT_PRIMARY);
         paintLabel(root, 'HudTop/DistanceLabel', FONT_BODY, COLOR.TEXT_SECONDARY);
-        paintLabel(root, 'HudTop/HintLabel', FONT_CAPTION, COLOR.TEXT_DISABLED);
+        // 核心操作提示（拖动选门 / 点屏幕集火）是玩家唯一能看到的解法，
+        // 原先 FONT_CAPTION(16) 在手机上像乱码（试玩报告 P0）：放大到 32 并提亮。
+        const hint = paintLabel(root, 'HudTop/HintLabel', FONT_ICON, COLOR.TEXT_PRIMARY);
+        if (hint) {
+            hint.overflow = Label.Overflow.NONE;
+            const ut = hint.node.getComponent(UITransform);
+            if (ut) ut.setContentSize(660, 44);
+        }
 
         skinButton(root, 'PauseButton', 'secondary', 88, 56);
 
@@ -308,6 +324,7 @@ export class GateGame extends Component {
             if (this._bossPhaseFlash > 0) {
                 this._bossPhaseFlash = Math.max(0, this._bossPhaseFlash - dt);
             }
+            this._stepShieldWarn(dt);
         }
 
         this._drawBackground();
@@ -329,6 +346,9 @@ export class GateGame extends Component {
         this._fireTimer = 0;
         this._bossPhaseFlash = 0;
         this._gestureOnButton = false;
+        this._shieldWarned = false;
+        this._shieldWarnT = 0;
+        if (this._shieldWarn && this._shieldWarn.node.isValid) this._shieldWarn.node.active = false;
         this._lastCount = -1;
         this._lastDistance = -1;
         this._lastHint = '';
@@ -525,7 +545,8 @@ export class GateGame extends Component {
         if (this.resultScoreLabel) this.resultScoreLabel.string = `${this._core.score}`;
         if (this.resultCountLabel) {
             const meters = Math.floor(this._core.distance / 10);
-            this.resultCountLabel.string = `人数 ${this._core.count}  ·  ${meters} m`;
+            const cause = !victory && this._core.failReason ? `  ·  ${this._core.failReason}` : '';
+            this.resultCountLabel.string = `人数 ${this._core.count}  ·  ${meters} m${cause}`;
         }
         if (this.resultBestLabel) this.resultBestLabel.string = `最高分 ${this._highScore}`;
 
@@ -607,6 +628,9 @@ export class GateGame extends Component {
                     if (event.boss) {
                         this._shake = Math.max(this._shake, 8);
                         this._spawnFxText('BOSS 战', COLORS.danger, PLAYER_Y - 130);
+                    } else if (event.kind === 'shield') {
+                        this._spawnFxText(enemyKindLabel(event.kind), enemyProfile(event.kind).color, PLAYER_Y - 130);
+                        this._showShieldWarn();
                     } else if (event.kind !== 'grunt') {
                         this._spawnFxText(enemyKindLabel(event.kind), enemyProfile(event.kind).color, PLAYER_Y - 130);
                     }
@@ -1284,6 +1308,32 @@ export class GateGame extends Component {
                 color,
             });
         }
+    }
+
+    /** 盾兵警告：2.4 秒，最后 0.6 秒淡出；每局只提示一次 */
+    private _showShieldWarn(): void {
+        if (this._shieldWarned) return;
+        this._shieldWarned = true;
+        if (!this._shieldWarn || !this._shieldWarn.node.isValid) {
+            const pos = designPos(360, PLAYER_Y - 200);
+            this._shieldWarn = createLabel(this.node, '盾兵！点屏幕集火', 30, {
+                x: pos.x, y: pos.y, bold: true, width: 460, height: 46,
+            });
+        }
+        this._shieldWarn.color = this._color(COLORS.danger);
+        this._shieldWarn.node.active = true;
+        this._shieldWarnT = 2.4;
+    }
+
+    private _stepShieldWarn(dt: number): void {
+        if (this._shieldWarnT <= 0) return;
+        this._shieldWarnT = Math.max(0, this._shieldWarnT - dt);
+        const label = this._shieldWarn;
+        if (!label || !label.node.isValid) return;
+        const c = label.color;
+        const k = this._shieldWarnT > 0.6 ? 1 : this._shieldWarnT / 0.6;
+        label.color = new Color(c.r, c.g, c.b, Math.round(255 * k));
+        if (this._shieldWarnT <= 0) label.node.active = false;
     }
 
     private _spawnFxText(text: string, color: number, y: number): void {

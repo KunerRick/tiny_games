@@ -78,6 +78,8 @@ export class SurvivorGame extends Component {
     private _renderSum = 0;
     private _renderCount = 0;
     private _tmp = new Vec3();
+    /** 开场提示每次进入场景只显示一次（重开不重复打扰） */
+    private _openingTipShown = false;
 
     onLoad(): void {
         if (!this.renderer) this.renderer = this.getComponent(SurvivorRenderer);
@@ -92,8 +94,11 @@ export class SurvivorGame extends Component {
             this._hud.setSpeed(this._speed);
             this._hud.setPaused(this._paused);
         }
-        // M2 的调试读数退场：正式 HUD 接管顶栏
-        if (this.debugLabel) this.debugLabel.node.active = false;
+        // M2 的调试读数退场：正式 HUD 接管顶栏（节点一并销毁，别留在层级里被遍历）
+        if (this.debugLabel) {
+            if (this.debugLabel.node.isValid) this.debugLabel.node.destroy();
+            this.debugLabel = null;
+        }
         input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
         input.on(Input.EventType.KEY_UP, this.onKeyUp, this);
         this.startRun();
@@ -221,6 +226,10 @@ export class SurvivorGame extends Component {
             this.renderer.resetFx();
         }
         if (this._hud && this._core) this._hud.refresh(this._core.getSnapshot());
+        if (!this._openingTipShown && this._hud) {
+            this._openingTipShown = true;
+            this._hud.showOpeningTip();
+        }
     }
 
     update(dt: number): void {

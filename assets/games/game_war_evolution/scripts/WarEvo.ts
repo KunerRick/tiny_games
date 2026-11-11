@@ -655,8 +655,9 @@ export class WarEvo extends Component {
                 evolveSub = `金币不足 ${Math.floor(this._playerGold)}/${next.goldRequired}`;
             } else if (buyLeft > 0) {
                 evolveTitle = '购买经验';
-                // 190 宽 + 17 号字放不下「（剩 N 次）」，会被挤成两行 → 用 ×N 表达剩余次数
-                evolveSub = `${buyCost}g → ${BUY_EXP.GAIN}经验 ×${buyLeft}`;
+                // 原来「45g → 25经验 ×6」里的 ×6 会被读成「六倍经验」，
+                // 实际是本时代还能买 6 次（第二轮复核 N12）。改成两行白话。
+                evolveSub = `花 ${buyCost} 金币\n换 ${BUY_EXP.GAIN} 经验（剩${buyLeft}）`;
             } else {
                 evolveTitle = '经验不足';
                 evolveSub = `击杀敌人积累（${Math.floor(this._playerExp)}/${next.expRequired}）`;

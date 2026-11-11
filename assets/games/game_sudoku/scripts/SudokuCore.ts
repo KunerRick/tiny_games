@@ -340,6 +340,13 @@ export class SudokuCore {
         return out;
     }
 
+    /** 还没填的格子数（顶部提示「还差 N 个数字」用） */
+    remainingCells(): number {
+        let count = 0;
+        for (let i = 0; i < 81; i++) if (this.values[i] === 0) count++;
+        return count;
+    }
+
     remainingOf(n: number): number {
         let count = 0;
         for (let i = 0; i < 81; i++) if (this.values[i] === n) count++;

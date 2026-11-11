@@ -25,6 +25,7 @@ import {
 import {
     BOARD_COLS,
     BUTTON_BOTTOM_ZONE,
+    GESTURE_BOTTOM_ZONE,
     COLOR_BOARD_BG,
     COLOR_GRID_LINE,
     HARD_DROP_POINTS_PER_CELL,
@@ -550,6 +551,8 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
         this._syncInputEnabled();
         this.pausePanel?.refresh(mode, this._vibrate);
         this._syncHints();
+        // 两种模式的底部预留不同 → 格宽/棋盘位置都变，切完立即重排
+        this._layout();
     }
 
     /** 输入层的唯一开关处：非游戏中（暂停/结算/消行前）一律关掉，避免残留软降与连发 */
@@ -982,12 +985,13 @@ export class TetrisGame extends Component implements ITetrisHost, IPausePanelHos
         const width = canvasTransform ? canvasTransform.width : 720;
         const height = canvasTransform ? canvasTransform.height : 1280;
 
-        const cell = computeCellSize(width, height);
+        const zone = this._controlMode === 'gesture' ? GESTURE_BOTTOM_ZONE : BUTTON_BOTTOM_ZONE;
+        const cell = computeCellSize(width, height, zone);
         this._cell = cell;
 
         const boardWidth = BOARD_COLS * cell;
         const boardHeight = VISIBLE_ROWS * cell;
-        const bottom = -height / 2 + BUTTON_BOTTOM_ZONE;
+        const bottom = -height / 2 + zone;
 
         if (this.boardRoot) {
             this.boardRoot.setPosition(0, bottom + boardHeight / 2, 0);

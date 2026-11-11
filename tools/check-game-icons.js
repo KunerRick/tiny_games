@@ -14,6 +14,7 @@
  *   4. 没有两款游戏用完全相同的 (main, soft) 强调色对        （撞 → 警告）
  *   5. GameIconArt.ts 里没有 U+FE0E / U+FE0F 变体选择符       （有 → 错误，红线 10）
  *   6. drawShape 保留 `default` 兜底分支                      （缺 → 警告）
+ *   7. GAME_LIST 里相邻两款的主色相差 ≥ 40° 色相              （近 → 警告）
  *
  * 用法：
  *   node tools/check-game-icons.js
@@ -80,9 +81,11 @@ function parseAccents(text) {
   const re = /^\s*'?([A-Za-z0-9_]+)'?\s*:\s*\{\s*main:\s*new Color\(([^)]*)\)\s*,\s*soft:\s*new Color\(([^)]*)\)/gm;
   let m;
   while ((m = re.exec(body))) {
+    const rgb = m[2].split(',').map((n) => Number(n.trim())).filter((n) => Number.isFinite(n));
     out.push({
       id: m[1],
       key: `${m[2].replace(/\s+/g, '')} / ${m[3].replace(/\s+/g, '')}`,
+      rgb: rgb.length >= 3 ? rgb.slice(0, 3) : null,
       line: lineOf(text, start + m.index),
     });
   }
@@ -158,8 +161,42 @@ function main() {
   }
   // 6. 兜底分支
   if (!hasDefault) warnings.push('drawShape 没有 default 分支：没登记的 id 会画不出任何图形（更隐蔽，建议保留）');
+  // 7. 相邻图标色相距离（试玩报告 §3.1：同色系成对出现，缩略图尺寸小，区分度一般）
+  const byId = new Map(accents.map((a) => [a.id, a]));
+  for (let i = 1; i < games.length; i++) {
+    const prev = byId.get(games[i - 1].id);
+    const cur = byId.get(games[i].id);
+    if (!prev || !cur || !prev.rgb || !cur.rgb) continue;
+    const d = hueDistance(prev.rgb, cur.rgb);
+    if (d < 40) {
+      warnings.push(
+        `相邻图标色相太近：「${prev.id}」与「${cur.id}」相差 ${d.toFixed(0)}°（< 40°，大厅里成排容易看混）`,
+      );
+    }
+  }
 
   report({ games: games.length, accents: accents.length, cases: cases.length });
+}
+
+/** RGB → 色相角（0–360）；灰阶返回 0 */
+function hueOf(rgb) {
+  const [r, g, b] = rgb.map((v) => v / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  if (d < 1e-6) return 0;
+  let h;
+  if (max === r) h = ((g - b) / d) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  h *= 60;
+  return (h + 360) % 360;
+}
+
+/** 两个颜色在色环上的最短距离（0–180） */
+function hueDistance(a, b) {
+  const d = Math.abs(hueOf(a) - hueOf(b));
+  return Math.min(d, 360 - d);
 }
 
 function report(summary) {

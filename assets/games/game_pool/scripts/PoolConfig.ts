@@ -1,7 +1,7 @@
 /**
  * 台球（`pool`）—— 配置与数值（纯数据，不依赖 cc，可被 Node 自检直接编译）。
  *
- * 坐标约定：原点在赛台左上角，x 向右、y 向下；赛台尺寸 660×330（设计分辨率 720 宽）。
+ * 坐标约定：原点在赛台左上角，x 向右、y 向下；赛台尺寸 754×377（设计分辨率 720 宽）。
  * 球心可行区域是 [r, W-r] × [r, H-r]，即台边（库边）本身没有厚度，直接当墙处理。
  *
  * 规则：单人清台。把台面上的目标球全部打进袋，杆数用完还没清完即失败。
@@ -10,11 +10,11 @@
 // ==================== 赛台几何 ====================
 
 /** 赛台宽（含库边） */
-export const TABLE_W = 660;
+export const TABLE_W = 754;
 /** 赛台高（含库边） */
-export const TABLE_H = 330;
-/** 球半径：直径 18 ≈ 台宽的 2.7%，比真实球略大，便于手机识别 */
-export const BALL_R = 9;
+export const TABLE_H = 377;
+/** 球半径：直径 20 ≈ 台宽的 2.7%，比真实球略大，便于手机识别 */
+export const BALL_R = 10;
 
 export type PoolPocketKind = 'corner' | 'side';
 
@@ -36,12 +36,12 @@ export interface PoolPocket {
  * 不做袋口豁口几何：球在进入捕获半径前一律按库边反弹，简单且不会漏判。
  */
 export const POOL_POCKETS: PoolPocket[] = [
-    { x: 0, y: 0, r: 23, kind: 'corner' },
-    { x: TABLE_W / 2, y: 0, r: 19, kind: 'side' },
-    { x: TABLE_W, y: 0, r: 23, kind: 'corner' },
-    { x: 0, y: TABLE_H, r: 23, kind: 'corner' },
-    { x: TABLE_W / 2, y: TABLE_H, r: 19, kind: 'side' },
-    { x: TABLE_W, y: TABLE_H, r: 23, kind: 'corner' },
+    { x: 0, y: 0, r: 25, kind: 'corner' },
+    { x: TABLE_W / 2, y: 0, r: 21, kind: 'side' },
+    { x: TABLE_W, y: 0, r: 25, kind: 'corner' },
+    { x: 0, y: TABLE_H, r: 25, kind: 'corner' },
+    { x: TABLE_W / 2, y: TABLE_H, r: 21, kind: 'side' },
+    { x: TABLE_W, y: TABLE_H, r: 25, kind: 'corner' },
 ];
 
 /** 开球 / 复位时母球的默认位置（「开球点」） */
