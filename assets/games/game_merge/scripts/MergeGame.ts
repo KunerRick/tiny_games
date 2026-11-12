@@ -85,36 +85,43 @@ const SHAPE_SEGMENTS = 32;
 /** 每级水果的单位剪影（y 向上，外接半径约 1），第一次使用时生成并缓存 */
 const SHAPE_CACHE: number[][][] = [];
 
-/** 按层级给出单位剪影上的点。相邻两级轮廓必须不同 —— 只看剪影就能分辨。 */
+/**
+ * 按层级给出单位剪影上的点。相邻两级轮廓必须不同 —— 只看剪影就能分辨。
+ *
+ * 形状全部按「水果」重绘（试玩报告 §3.9：原来的六边形/菱形/水滴像宝石糖果）：
+ * 0 樱桃 / 1 苹果 / 2 柠檬 / 3 梨 / 4 桃子 / 5 葡萄串，6 起是「越合越花哨」的奖励形。
+ * 都是极坐标单值轮廓（或椭圆缩放），保证采样后是简单多边形，不会自交。
+ */
 function shapePoint(tier: number, theta: number): { x: number; y: number } {
     const c = Math.cos(theta);
     const s = Math.sin(theta);
+    /** 顶部凹窝：只在正上方附近生效，指数越大越局部 */
+    const topNotch = (power: number): number => Math.pow(Math.max(0, s), power);
     switch (tier) {
-        case 0: // 圆
-            return { x: c, y: s };
-        case 1: // 横椭圆
-            return { x: c * 1.1, y: s * 0.9 };
-        case 2: // 竖椭圆
-            return { x: c * 0.9, y: s * 1.1 };
-        case 3: { // 圆角方（超椭圆）
-            const p = 0.55;
+        case 0: // 樱桃：近圆，顶部一个小凹窝
+            return { x: c, y: s * (1 - 0.10 * topNotch(8)) };
+        case 1: // 苹果：顶部凹窝更深、肩部略宽、底部微平
             return {
-                x: Math.sign(c) * Math.pow(Math.abs(c), p),
-                y: Math.sign(s) * Math.pow(Math.abs(s), p),
+                x: c * (1 + 0.02 * Math.abs(s)),
+                y: s * (1 - 0.20 * topNotch(6)) * (s < 0 ? 0.96 : 1),
             };
+        case 2: { // 柠檬：两端收尖的透镜形
+            const lx = Math.sign(c) * Math.pow(Math.abs(c), 1.35) * 1.18;
+            const ly = s * 0.86;
+            return { x: lx, y: ly };
         }
-        case 4: { // 六边形
-            const a = Math.PI / 3;
-            const m = ((theta % a) + a) % a;
-            const r = Math.cos(a / 2) / Math.cos(m - a / 2);
+        case 3: // 梨：上窄下宽
+            return s > 0
+                ? { x: c * (1 - 0.30 * s), y: s * 1.06 }
+                : { x: c * (1 + 0.04 * -s), y: s * 1.02 };
+        case 4: // 桃子：圆润、底部微尖、顶部浅凹
+            return {
+                x: c * (1 - 0.03 * topNotch(4)),
+                y: s * (1 - 0.12 * topNotch(6)) * (s < 0 ? 0.98 : 1),
+            };
+        case 5: { // 葡萄串：9 个小瓣组成的簇
+            const r = 1 + 0.075 * Math.cos(9 * theta);
             return { x: c * r, y: s * r };
-        }
-        case 5: { // 水滴：上半收尖
-            if (s > 0) {
-                const taper = 1 - 0.5 * s;
-                return { x: c * taper, y: s * 1.2 };
-            }
-            return { x: c, y: s };
         }
         case 6: { // 心形（参数方程归一化）
             const hx = 16 * Math.pow(Math.sin(theta), 3);
@@ -279,6 +286,10 @@ export class MergeGame extends Component {
     private _lastGuide = '';
     private _lastNextTier = -1;
 
+    /** 警戒线左侧的实时余量提示「再投 N 个触线」（试玩报告：只有红线没有量化预期） */
+    private _overflowLabel: Label | null = null;
+    private _lastOverflowText = '';
+
     private _highScore = 0;
 
     // onDestroy 只用这些缓存（不访问 @property）
@@ -396,6 +407,7 @@ export class MergeGame extends Component {
         this._updateEffects(dt);
         this._drawFruits();
         this._drawEffects();
+        this._updateOverflowHint();
         this._refreshHud();
     }
 
@@ -680,9 +692,55 @@ export class MergeGame extends Component {
             color: COLOR.TEXT_DISABLED,
             align: 'right',
             x: PLAY_W / 2 - WALL_T - 10 - width / 2,
-            y: lineY + 16,
+            y: lineY + 24,
         });
         label.node.name = 'WarnHint';
+    }
+
+    /**
+     * 警戒线左侧的实时余量：「再投 N 个触线」。
+     *
+     * 按**当前落点列**算：落点果顶到警戒线之间的高度 / (2×当前层级半径)，
+     * 即同一列继续竖直投放还能叠几个。比只画一条红线多一个量化预期，
+     * 又不用跑物理模拟（相邻会滚动的果子不参与估算，文案用「约」兜住）。
+     */
+    private _updateOverflowHint(): void {
+        const playing = !this._paused && !this._gameOverShown && this._core.state !== 'game_over';
+        if (!playing) {
+            if (this._overflowLabel) this._overflowLabel.node.active = false;
+            return;
+        }
+
+        const host = this._effectGraphics ? this._effectGraphics.node : null;
+        if (!host || !host.isValid) return;
+
+        if (!this._overflowLabel || !this._overflowLabel.node.isValid) {
+            const width = 220;
+            const lineY = PLAY_H / 2 - GAME_OVER_LINE;
+            this._overflowLabel = createLabel(host, '', FONT_CAPTION.fontSize, {
+                width,
+                height: 24,
+                color: COLOR.TEXT_SECONDARY,
+                align: 'left',
+                x: -PLAY_W / 2 + WALL_T + 10 + width / 2,
+                y: lineY + 24,
+            });
+            this._overflowLabel.node.name = 'OverflowHint';
+            this._lastOverflowText = '';
+        }
+
+        const tier = this._core.currentTier;
+        const r = tierRadius(tier);
+        const landY = this._predictLandY(this._core.dropX, tier);
+        const headroom = landY - r - GAME_OVER_LINE;
+        const count = Math.floor(headroom / (2 * r));
+        const text = count <= 0 ? '本列已到警戒线' : `再投约 ${count} 个触线`;
+        if (text !== this._lastOverflowText) {
+            this._lastOverflowText = text;
+            this._overflowLabel.string = text;
+            this._overflowLabel.color = count <= 1 ? this._color(COLORS.warn) : this._color(0x94a3b8);
+        }
+        this._overflowLabel.node.active = true;
     }
 
     private _drawFruits(): void {
@@ -815,8 +873,30 @@ export class MergeGame extends Component {
         g.ellipse(nx + Math.cos(ha) * rx * 0.4, ny + Math.sin(ha) * ry * 0.4, r * 0.2, r * 0.16);
         g.fill();
 
-        // 果蒂/籽：第二个标记，小果子省掉这枚图元
-        if (r >= 34) {
+        // 果蒂：沿果体「上方」长出的一小截梗（跟着滚动角转，看得出果实在转）
+        if (r >= 34 && tier <= 5) {
+            const up = angle + Math.PI / 2;
+            const ux = Math.cos(up);
+            const uy = Math.sin(up);
+            g.fillColor = this._color(0x6b4f3a, 0.9 * alpha);
+            for (let i = 0; i < 3; i++) {
+                const d = 0.82 + i * 0.10;
+                const rad = Math.max(2, r * (0.10 - i * 0.02));
+                g.circle(nx + ux * rx * d, ny + uy * ry * d, rad);
+            }
+            g.fill();
+            // 叶：贴在梗根侧边，只给中大型果（太小会糊成一团）
+            if (r >= 58) {
+                g.fillColor = this._color(0x4ade80, 0.75 * alpha);
+                g.ellipse(
+                    nx + ux * rx * 0.86 - uy * rx * 0.22,
+                    ny + uy * ry * 0.86 + ux * ry * 0.22,
+                    r * 0.16,
+                    r * 0.09,
+                );
+                g.fill();
+            }
+        } else if (r >= 34) {
             const sa = angle - 0.55;
             g.fillColor = this._color(0x000000, 0.22 * alpha);
             g.circle(nx + Math.cos(sa) * rx * 0.48, ny + Math.sin(sa) * ry * 0.48, r * 0.1);

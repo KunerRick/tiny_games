@@ -392,8 +392,8 @@ function drawShape(g: Graphics, id: string, accent: Accent): void {
     }
 }
 
-/** 画整张卡片（卡片底 + 图标），并返回是否绘制成功 */
-export function drawGameIconArt(g: Graphics, id: string, cardColor: Color, width = 150, height = 180): void {
+/** 只画卡片底（不含图标）。图标单独一层时用它，两层共享同一块底板。 */
+export function drawGameIconCard(g: Graphics, cardColor: Color, width = 150, height = 180): void {
     g.clear();
 
     // 卡片底：浅色圆角块 + 一圈更浅的高光边
@@ -401,7 +401,18 @@ export function drawGameIconArt(g: Graphics, id: string, cardColor: Color, width
     fill(g, cardColor);
     g.roundRect(-width / 2 + 1.5, -height / 2 + 1.5, width - 3, height - 3, 21);
     stroke(g, new Color(255, 255, 255, 90), 1.5);
+}
 
+/** 只画图标剪影（不含卡片底）。节点可整体缩放，卡片底不会跟着溢出。 */
+export function drawGameIconShape(g: Graphics, id: string): void {
+    g.clear();
+    const accent = ACCENTS[id] || DEFAULT_ACCENT;
+    drawShape(g, id, accent);
+}
+
+/** 画整张卡片（卡片底 + 图标），并返回是否绘制成功 */
+export function drawGameIconArt(g: Graphics, id: string, cardColor: Color, width = 150, height = 180): void {
+    drawGameIconCard(g, cardColor, width, height);
     const accent = ACCENTS[id] || DEFAULT_ACCENT;
     drawShape(g, id, accent);
 }

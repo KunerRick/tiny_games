@@ -91,6 +91,12 @@ export class HintBar extends Component {
             if (opacity) opacity.opacity = done ? DONE_OPACITY : ACTIVE_OPACITY;
         }
 
+        /**
+         * 试玩报告 §3.4 的「手势模式下半屏空白」实测不复现：手势模式下棋盘按
+         * 可见高度算格子，已经铺满整屏（只剩约 20 CSS 像素），三行提示其实是**压在棋盘下沿**上的。
+         * 先前尝试「学会后压到 25% 常驻」，预览截图确认图例直接叠在棋盘格上，因此保持原行为：
+         * 全部学会或累计 3 局后隐藏，把整块屏留给棋盘。
+         */
         return this._rows.length > 0 && !(allDone || gamesPlayed >= HIDE_AFTER_GAMES);
     }
 

@@ -12,7 +12,7 @@ import {
     Vec3,
 } from 'cc';
 import { GameConfig, GAME_LIST } from '../../common/managers/GameConfig';
-import { drawGameIconArt } from './GameIconArt';
+import { drawGameIconCard, drawGameIconShape } from './GameIconArt';
 
 const { ccclass, property } = _decorator;
 
@@ -48,6 +48,7 @@ export class GameIcon extends Component {
     private _gameConfig: GameConfig | null = null;
     private _onClickCallback: ((gameId: string) => void) | null = null;
     private _art: Graphics | null = null;
+    private _shape: Graphics | null = null;
     
     onLoad() {
         this.node.on(Node.EventType.TOUCH_START, this.onTouchStart, this);
@@ -105,13 +106,16 @@ export class GameIcon extends Component {
      * 用 Graphics 现画卡片底 + 专属图标。
      * 预制体里的 Sprite 只是一张通用占位图（18 个游戏长得一模一样），
      * 这里把它关掉，改画每个游戏各自的图形。
+     *
+     * 底板与图标分成两层（试玩报告 §3.1：三列缩略图里的图形偏小、辨识慢）：
+     * 图标层整体放大 14%，底板保持原尺寸，因此不会撑破卡片或压到相邻卡片，
+     * 也不需要改网格布局与预制体。
      */
     private applyCardColor(gameId: string): void {
         const sprite = this.node.getComponent(Sprite);
         if (sprite) sprite.enabled = false;
 
-        let art = this._art;
-        if (!art) {
+        if (!this._art) {
             const artNode = new Node('Art');
             artNode.layer = this.node.layer;
             this.node.addChild(artNode);
@@ -119,10 +123,23 @@ export class GameIcon extends Component {
             artNode.setSiblingIndex(0);
             const ut = artNode.addComponent(UITransform);
             ut.setContentSize(150, 180);
-            art = artNode.addComponent(Graphics);
-            this._art = art;
+            this._art = artNode.addComponent(Graphics);
         }
-        drawGameIconArt(art, gameId, this.cardColor(gameId));
+
+        if (!this._shape) {
+            const shapeNode = new Node('Shape');
+            shapeNode.layer = this.node.layer;
+            this.node.addChild(shapeNode);
+            shapeNode.setSiblingIndex(1);
+            const ut = shapeNode.addComponent(UITransform);
+            ut.setContentSize(150, 180);
+            shapeNode.setScale(1.14, 1.14, 1);
+            this._shape = shapeNode.addComponent(Graphics);
+        }
+
+        const color = this.cardColor(gameId);
+        drawGameIconCard(this._art, color);
+        drawGameIconShape(this._shape, gameId);
     }
     
     private onTouchStart(event: EventTouch) {

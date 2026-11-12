@@ -264,6 +264,7 @@ export class TinyVanguardMain extends Component {
     }
     setBtn(this.continueButton?.node ?? null, 'secondary');
     // 续档按钮是 Canvas 根级子节点，不在任何面板的批量描边里；不补外框就只剩一块纯灰底色
+    this.normalizeContinueButton();
     this.decorateFlatButton(this.continueButton?.node ?? null, COLOR.INFO);
     // 商店 / 圣泉：改造后各自只剩一个"离开"按钮，商品与强化项都是运行时卡片
     // （卡片自带 Button，过渡色在 PanelCards 里统一为 secondary）
@@ -287,12 +288,40 @@ export class TinyVanguardMain extends Component {
     this.normalizeSmallPanelButtons();
   }
 
-  /** 给不在面板批量描边里的零散按钮补一层统一外框（幂等：已有 frameGfx 就跳过） */
+  /**
+   * 「继续上局」按钮规格统一（试玩报告：它是组队页下方一条 240×48 的细长条，
+   * 与四个职业卡片的视觉重量不匹配，容易被当成装饰）。
+   * 运行时改尺寸并重绘外框，不动场景文件；位置只上抬 6 设计像素，不压组队卡片。
+   */
+  private normalizeContinueButton(): void {
+    const node = this.continueButton?.node;
+    if (!node?.isValid) return;
+    const ui = node.getComponent(UITransform);
+    if (!ui) return;
+
+    const W = 300;
+    const H = 72;
+    if (Math.abs(ui.width - W) > 0.5 || Math.abs(ui.height - H) > 0.5) {
+      ui.setContentSize(W, H);
+      node.setPosition(0, -426, 0);
+      // 文字按钮的 Label 子节点按旧宽度居中；宽度变了要同步，否则长文案会换行挤成两行
+      const label = node.getChildByName('Label') ?? node.children.find(c => !!c.getComponent(Label)) ?? null;
+      const labelUi = label ? label.getComponent(UITransform) : null;
+      if (labelUi) labelUi.setContentSize(W - 28, H);
+      if (label) {
+        const labelComp = label.getComponent(Label);
+        if (labelComp) labelComp.lineHeight = Math.max(labelComp.lineHeight, 30);
+      }
+    }
+  }
+
+  /** 给不在面板批量描边里的零散按钮补一层统一外框（幂等：按当前尺寸重绘） */
   private decorateFlatButton(node: Node | null, accentHex: string): void {
     if (!node?.isValid) return;
     const ui = node.getComponent(UITransform);
     if (!ui || ui.width <= 2 || ui.height <= 2) return;
-    if (node.getChildByName('frameGfx')) return;
+    // 原来「有 frameGfx 就跳过」会把旧尺寸的外框留成永久错位（按钮在别处被放大后），
+    // 现在每次都按当前 UITransform 重绘：drawFrame 内部 ensureChild 会复用节点。
     drawFrame(node, {
       width: ui.width,
       height: ui.height,

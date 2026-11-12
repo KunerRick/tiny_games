@@ -326,28 +326,34 @@ export class TDGame extends Component {
 
         const root = createNode('BuildPanel', this.node, 720, 1280);
         root.on(Node.EventType.TOUCH_START, this.onOverlayTouchStart, this);
-        const dim = root.addComponent(Graphics);
-        dim.fillColor = toColor(UI.overlay, 170);
-        dim.rect(-360, -640, 720, 1280);
-        dim.fill();
+        // 遮罩改淡（170 → 90）：面板贴着塔位时，玩家仍要能看见路径与其它塔
+        const dim = createNode('Dim', root, 720, 1280);
+        const dimG = dim.addComponent(Graphics);
+        dimG.fillColor = toColor(UI.overlay, 90);
+        dimG.rect(-360, -640, 720, 1280);
+        dimG.fill();
+        // 点空白处关闭（面板自己是 root 的子节点，事件会被 onOverlayTouchStart 截住）
+        dim.on(Node.EventType.TOUCH_END, this.onClosePanel, this);
 
-        const panel = createNode('Panel', root, 680, 460);
-        panel.setPosition(designPos(360, 1040));
+        const panelW = 440;
+        const panelH = 400;
+        const panel = createNode('Panel', root, panelW, panelH);
+        panel.setPosition(this._panelAnchor(slotIndex, panelW, panelH));
         const pg = panel.addComponent(Graphics);
-        drawRoundRect(pg, 680, 460, 24, toColor(UI.panel), toColor(UI.panelStroke), 2);
+        drawRoundRect(pg, panelW, panelH, 22, toColor(UI.panel), toColor(UI.panelStroke), 2);
 
-        createLabel(panel, '建造炮塔', 30, {
-            x: 0, y: 182, bold: true, color: UI.text, width: 560, height: 40,
+        createLabel(panel, '建造炮塔', 28, {
+            x: 0, y: 168, bold: true, color: UI.text, width: 380, height: 38,
         });
-        createLabel(panel, `金币 ${core.gold}`, 19, {
-            x: 0, y: 144, color: UI.warning, width: 300, height: 28,
+        createLabel(panel, `金币 ${core.gold}`, 18, {
+            x: 0, y: 134, color: UI.warning, width: 300, height: 26,
         });
 
         const positions = [
-            { x: -160, y: 58 },
-            { x: 160, y: 58 },
-            { x: -160, y: -86 },
-            { x: 160, y: -86 },
+            { x: -104, y: 56 },
+            { x: 104, y: 56 },
+            { x: -104, y: -62 },
+            { x: 104, y: -62 },
         ];
         for (let i = 0; i < TD_TOWER_ORDER.length; i++) {
             const kind = TD_TOWER_ORDER[i];
@@ -355,10 +361,10 @@ export class TDGame extends Component {
             const cost = def.levels[0].cost;
             const affordable = core.gold >= cost;
             const btn = createButton(panel, {
-                w: 290,
-                h: 124,
+                w: 196,
+                h: 106,
                 text: `${def.name} · ${cost} 金`,
-                fontSize: 25,
+                fontSize: 22,
                 fill: affordable ? '#17243C' : '#101A2B',
                 activeFill: TOWER_COLORS[kind],
                 textColor: affordable ? UI.text : UI.textMuted,
@@ -367,21 +373,47 @@ export class TDGame extends Component {
                 onTap: () => this.onBuild(kind),
             });
             btn.node.setPosition(positions[i].x, positions[i].y, 0);
-            btn.label.node.setPosition(0, 20, 0);
-            createLabel(btn.node, def.desc, 16, {
-                x: 0, y: -30, color: UI.textMuted, width: 260, height: 24,
+            btn.label.node.setPosition(0, 16, 0);
+            createLabel(btn.node, def.desc, 14, {
+                x: 0, y: -28, color: UI.textMuted, width: 180, height: 22,
             });
         }
 
         const close = createButton(panel, {
-            w: 220, h: 58, text: '关闭', fontSize: 23,
+            w: 180, h: 54, text: '关闭', fontSize: 22,
             fill: '#1E293B', activeFill: UI.accentDark, radius: 14, stroke: '#26364F',
             onTap: () => this.onClosePanel(),
         });
-        close.node.setPosition(0, -190, 0);
+        close.node.setPosition(0, -158, 0);
 
         this._playPanelIn(panel);
         this._panel = root;
+    }
+
+    /**
+     * 气泡定位：贴在**被点的塔位**旁边，而不是固定从底部弹出一块。
+     *
+     * 原来的 680×460 面板固定在屏幕下半屏，一打开就盖住下半张地图（第二轮复核 N13），
+     * 玩家看不到自己点的是哪个格子、周围还有没有路。现在：
+     * 1. 默认放在塔位上方（气泡底边距塔位 18 设计像素）；
+     * 2. 上方放不下就翻到下方；
+     * 3. 最后再把 x / y 夹进画布安全区，避免贴边溢出。
+     */
+    private _panelAnchor(slotIndex: number, w: number, h: number): Vec3 {
+        const slot = this.core ? this.core.slots[slotIndex] : null;
+        const sx = slot ? this._lx(slot.x) : 0;
+        // 棋盘节点在 (0, 14)（designPos(BOARD_CX, BOARD_CY)）
+        const sy = slot ? 14 + this._ly(slot.y) : 14;
+        const gap = CELL / 2 + 18;
+
+        let y = sy + gap + h / 2;
+        const topLimit = 640 - 12;
+        const bottomLimit = -640 + 12;
+        if (y + h / 2 > topLimit) y = sy - gap - h / 2;
+        y = Math.max(bottomLimit + h / 2, Math.min(topLimit - h / 2, y));
+
+        const x = Math.max(-360 + w / 2 + 8, Math.min(360 - w / 2 - 8, sx));
+        return new Vec3(x, y, 0);
     }
 
     private onBuild(kind: TDTowerKind): void {
@@ -416,35 +448,43 @@ export class TDGame extends Component {
 
         const root = createNode('TowerPanel', this.node, 720, 1280);
         root.on(Node.EventType.TOUCH_START, this.onOverlayTouchStart, this);
-        const dim = root.addComponent(Graphics);
-        dim.fillColor = toColor(UI.overlay, 170);
-        dim.rect(-360, -640, 720, 1280);
-        dim.fill();
+        const dim = createNode('Dim', root, 720, 1280);
+        const dimG = dim.addComponent(Graphics);
+        dimG.fillColor = toColor(UI.overlay, 90);
+        dimG.rect(-360, -640, 720, 1280);
+        dimG.fill();
+        dim.on(Node.EventType.TOUCH_END, this.onClosePanel, this);
 
-        const panel = createNode('Panel', root, 680, 430);
-        panel.setPosition(designPos(360, 1055));
+        const panelW = 430;
+        const panelH = 340;
+        const panel = createNode('Panel', root, panelW, panelH);
+        panel.setPosition(this._panelAnchor(slotIndex, panelW, panelH));
         const pg = panel.addComponent(Graphics);
-        drawRoundRect(pg, 680, 430, 24, toColor(UI.panel), toColor(UI.panelStroke), 2);
+        drawRoundRect(pg, panelW, panelH, 22, toColor(UI.panel), toColor(UI.panelStroke), 2);
 
-        createLabel(panel, `${def.name} Lv.${tower.level}`, 32, {
-            x: 0, y: 172, bold: true, color: TOWER_COLORS[tower.kind], width: 560, height: 42,
+        createLabel(panel, `${def.name} Lv.${tower.level}`, 30, {
+            x: 0, y: 138, bold: true, color: TOWER_COLORS[tower.kind], width: 380, height: 40,
         });
-        createLabel(panel, def.desc, 18, {
-            x: 0, y: 136, color: UI.textDim, width: 560, height: 26,
+        createLabel(panel, def.desc, 17, {
+            x: 0, y: 104, color: UI.textDim, width: 390, height: 24,
         });
-        const statText =
-            `伤害 ${stats.damage}   射程 ${stats.range.toFixed(1)}   间隔 ${stats.interval.toFixed(2)}s` +
-            (def.splash > 0 ? `   溅射 ${def.splash.toFixed(1)}` : '') +
-            (def.slowFactor > 0 ? `   减速 ${Math.round(def.slowFactor * 100)}%` : '');
-        createLabel(panel, statText, 20, {
-            x: 0, y: 86, color: UI.textDim, width: 620, height: 30,
+        const statParts = [
+            `伤害 ${stats.damage}`,
+            `射程 ${stats.range.toFixed(1)}`,
+            `间隔 ${stats.interval.toFixed(2)}s`,
+        ];
+        if (def.splash > 0) statParts.push(`溅射 ${def.splash.toFixed(1)}`);
+        if (def.slowFactor > 0) statParts.push(`减速 ${Math.round(def.slowFactor * 100)}%`);
+        const statText = statParts.join('   ');
+        createLabel(panel, statText, 17, {
+            x: 0, y: 56, color: UI.textDim, width: 390, height: 48,
         });
 
         const upgradeBtn = createButton(panel, {
-            w: 290,
-            h: 100,
+            w: 190,
+            h: 88,
             text: maxLevel ? '已满级' : `升级 ${upCost} 金`,
-            fontSize: 25,
+            fontSize: 23,
             fill: maxLevel ? '#101A2B' : '#17243C',
             activeFill: UI.success,
             textColor: maxLevel ? UI.textMuted : UI.text,
@@ -452,27 +492,27 @@ export class TDGame extends Component {
             stroke: '#2A3A57',
             onTap: () => this.onUpgrade(),
         });
-        upgradeBtn.node.setPosition(-160, -10, 0);
+        upgradeBtn.node.setPosition(-100, -20, 0);
 
         const sellBtn = createButton(panel, {
-            w: 290,
-            h: 100,
+            w: 190,
+            h: 88,
             text: `出售 +${refund}`,
-            fontSize: 25,
+            fontSize: 23,
             fill: '#17243C',
             activeFill: UI.danger,
             radius: 16,
             stroke: '#2A3A57',
             onTap: () => this.onSell(),
         });
-        sellBtn.node.setPosition(160, -10, 0);
+        sellBtn.node.setPosition(100, -20, 0);
 
         const close = createButton(panel, {
-            w: 200, h: 62, text: '关闭', fontSize: 24,
+            w: 170, h: 50, text: '关闭', fontSize: 21,
             fill: '#1E293B', activeFill: '#0E7490', radius: 14, stroke: '#26364F',
             onTap: () => this.onClosePanel(),
         });
-        close.node.setPosition(0, -160, 0);
+        close.node.setPosition(0, -124, 0);
 
         this._playPanelIn(panel);
         this._panel = root;

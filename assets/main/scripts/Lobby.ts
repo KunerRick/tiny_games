@@ -1,10 +1,14 @@
-import { _decorator, Component, Node, Layout, UITransform } from 'cc';
+import {
+    _decorator, Component, Graphics, Node, Layout, UITransform, EditBox, Label,
+    HorizontalTextAlignment, VerticalTextAlignment,
+} from 'cc';
 import { GAME_CATEGORIES, GAME_LIST, getGameById } from '../../common/managers/GameConfig';
-import type { GameCategory } from '../../common/managers/GameConfig';
+import type { GameCategory, GameConfig } from '../../common/managers/GameConfig';
 import { StorageManager } from '../../common/managers/StorageManager';
 import { SceneManager } from '../../common/managers/SceneManager';
-import { createButton, createNode } from '../../common/ui/GameUIKit';
+import { createButton, createNode, createRoundRect, toColor } from '../../common/ui/GameUIKit';
 import type { UiButton } from '../../common/ui/GameUIKit';
+import { UI } from '../../common/ui/UITheme';
 import { GameGrid } from './GameGrid';
 
 const { ccclass, property } = _decorator;
@@ -30,6 +34,11 @@ export class Lobby extends Component {
     private _filter: 'all' | GameCategory = 'all';
     private _chips: { id: 'all' | GameCategory; btn: UiButton }[] = [];
     private _chipBar: Node | null = null;
+
+    /** 搜索关键词（去空白、转小写）；空串 = 不搜索 */
+    private _keyword = '';
+    private _searchBox: EditBox | null = null;
+    private _searchBar: Node | null = null;
 
     onLoad() {
         this.refreshUI();
@@ -87,14 +96,94 @@ export class Lobby extends Component {
         this._refreshAllGames();
     }
 
+    // ==================== 搜索框（试玩报告 §3.1：24 款靠分类找起来仍慢） ====================
+
+    /**
+     * 关键词搜索：输字即筛，与分类标签叠加生效；清空即恢复。
+     * 用原生 `EditBox`（微信小游戏会弹系统键盘），不自己接管文字输入。
+     * 搜索期间「最近玩过」同样按关键词过滤，筛空自动隐藏。
+     */
+    private _ensureSearchBar(): void {
+        if (this._searchBox && this._searchBox.isValid) return;
+        const content = this.content;
+        if (!content || !content.isValid) return;
+
+        const bar = createNode('SearchBar', content, 720, 96);
+        bar.setSiblingIndex(0);
+        this._searchBar = bar;
+
+        const boxW = 640;
+        const boxH = 64;
+        const boxNode = createNode('SearchBox', bar, boxW, boxH);
+        createRoundRect(boxNode, 'Bg', boxW, boxH, 32, UI.panel, UI.panelStroke, 2);
+
+        // 放大镜：一个空心圆 + 斜向手柄（不用字符图标，红线 10）
+        const iconNode = createNode('SearchIcon', boxNode, 40, 40);
+        iconNode.setPosition(-boxW / 2 + 36, 0, 0);
+        const icon = iconNode.addComponent(Graphics);
+        icon.lineWidth = 3;
+        icon.strokeColor = toColor(UI.textDim);
+        icon.circle(-2, 3, 10);
+        icon.stroke();
+        icon.moveTo(6, -6);
+        icon.lineTo(14, -14);
+        icon.stroke();
+
+        const editNode = createNode('EditBox', boxNode, boxW - 100, boxH - 8);
+        editNode.setPosition(24, 0, 0);
+        // 先停用时再挂组件：EditBox.onLoad 会在 textLabel 为空时自动建一个
+        // 40 号字、内容 "label" 的默认 Label，抢在赋值之前就把画面弄脏了。
+        editNode.active = false;
+        const edit = editNode.addComponent(EditBox);
+
+        const textLabel = createLabelNode(editNode, 'TEXT_LABEL', UI.text);
+        const placeLabel = createLabelNode(editNode, 'PLACEHOLDER_LABEL', UI.textDim);
+        // 左对齐锚点：EditBox 按 textLabel 的锚点决定文字从哪边长
+        for (const label of [textLabel, placeLabel]) {
+            const ut = label.node.getComponent(UITransform);
+            if (ut) {
+                ut.setAnchorPoint(0, 0.5);
+                label.node.setPosition(-(boxW - 100) / 2 + 8, 0, 0);
+            }
+        }
+        edit.textLabel = textLabel;
+        edit.placeholderLabel = placeLabel;
+        edit.placeholder = '搜索游戏名 / 关键词';
+        edit.maxLength = 12;
+        edit.string = '';
+        edit.node.on(EditBox.EventType.TEXT_CHANGED, this.onSearchChanged, this);
+        editNode.active = true;
+        this._searchBox = edit;
+    }
+
+    private onSearchChanged(edit: EditBox): void {
+        const keyword = (edit.string || '').trim().toLowerCase();
+        if (keyword === this._keyword) return;
+        this._keyword = keyword;
+        this._refreshRecent();
+        this._refreshAllGames();
+    }
+
     private _syncChips(): void {
         for (const chip of this._chips) chip.btn.setActive(chip.id === this._filter);
     }
 
     private _filteredGames(): typeof GAME_LIST {
-        if (this._filter === 'all') return GAME_LIST;
-        // 没登记分类的新游戏只在「全部」里出现，避免悄悄消失
-        return GAME_LIST.filter((game) => game.category === this._filter);
+        let list = this._filter === 'all'
+            ? GAME_LIST
+            // 没登记分类的新游戏只在「全部」里出现，避免悄悄消失
+            : GAME_LIST.filter((game) => game.category === this._filter);
+        if (this._keyword) list = list.filter(game => this._matches(game));
+        return list;
+    }
+
+    /** 搜索匹配：名称 / 描述 / id 任一包含关键词（已转小写） */
+    private _matches(game: GameConfig): boolean {
+        const kw = this._keyword;
+        if (!kw) return true;
+        return game.name.toLowerCase().indexOf(kw) >= 0
+            || game.id.toLowerCase().indexOf(kw) >= 0
+            || (game.description || '').toLowerCase().indexOf(kw) >= 0;
     }
 
     /**
@@ -110,6 +199,7 @@ export class Lobby extends Component {
         if (this._filter !== 'all') {
             recentGames = recentGames.filter(game => game.category === this._filter);
         }
+        if (this._keyword) recentGames = recentGames.filter(game => this._matches(game));
         if (recentGames.length > 0) {
             this.recentSection.active = true;
             this.recentGrid.setup(recentGames, this.onGameClick.bind(this));
@@ -128,8 +218,11 @@ export class Lobby extends Component {
         // 最近玩过（跟随分类）
         this._refreshRecent();
 
-        // 分类条 + 按当前分类刷新的全部游戏
+        // 搜索框 + 分类条 + 按当前分类刷新的全部游戏
+        this._ensureSearchBar();
         this._ensureCategoryBar();
+        // 分类条自己会把索引钉到 0；搜索框要压在它上面，这里再抢一次
+        if (this._searchBar?.isValid) this._searchBar.setSiblingIndex(0);
         if (this.allGamesGrid) {
             this.allGamesGrid.setup(this._filteredGames(), this.onGameClick.bind(this));
         }
@@ -173,6 +266,13 @@ export class Lobby extends Component {
         hint.active = contentHeight > viewHeight + 1;
     }
 
+    onDestroy() {
+        // 只解绑缓存到的引用；不碰 @property(Node)（红线 4）
+        if (this._searchBox && this._searchBox.isValid) {
+            this._searchBox.node.off(EditBox.EventType.TEXT_CHANGED, this.onSearchChanged, this);
+        }
+    }
+
     onGameClick(gameId: string) {
         const game = getGameById(gameId);
         if (!game) return;
@@ -183,4 +283,17 @@ export class Lobby extends Component {
         // Goto game scene
         SceneManager.gotoGame(gameId, game.sceneName);
     }
+}
+
+/** EditBox 需要一个独立的 Label 子节点承载文字 / 占位文案 */
+function createLabelNode(parent: Node, name: string, colorHex: string): Label {
+    const node = createNode(name, parent, parent.getComponent(UITransform)?.width ?? 540, 40);
+    const label = node.addComponent(Label);
+    label.string = '';
+    label.fontSize = 24;
+    label.lineHeight = 28;
+    label.color = toColor(colorHex);
+    label.horizontalAlign = HorizontalTextAlignment.LEFT;
+    label.verticalAlign = VerticalTextAlignment.CENTER;
+    return label;
 }
