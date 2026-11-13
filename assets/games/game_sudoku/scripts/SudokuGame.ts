@@ -97,6 +97,7 @@ export class SudokuGame extends Component {
     private _padCounts: Label[] = [];
     private _noteBtn: UiButton | null = null;
     private _undoBtn: UiButton | null = null;
+    private _backBtn: UiButton | null = null;
     private _diffBtns: Partial<Record<SudokuDifficulty, UiButton>> = {};
     private _board: Node | null = null;
     private _gridLines: Graphics | null = null;
@@ -130,6 +131,7 @@ export class SudokuGame extends Component {
         this._padCounts = [];
         this._noteBtn = null;
         this._undoBtn = null;
+        this._backBtn = null;
         this._diffBtns = {};
         this._overlay = null;
     }
@@ -227,7 +229,7 @@ export class SudokuGame extends Component {
         glow.circle(300, -400, 380);
         glow.fill();
 
-        createBackButton(this.node, () => this.onBack());
+        this._backBtn = createBackButton(this.node, () => this.onBack());
         createLabel(this.node, '数 独', 44, {
             ...this._at(360, 66),
             bold: true,
@@ -600,7 +602,7 @@ export class SudokuGame extends Component {
 
         const overlay = createNode('Overlay', this.node, 720, 1280);
         const dim = overlay.addComponent(Graphics);
-        drawRoundRect(dim, 720, 1280, 0, toColor('#050912', 215));
+        drawRoundRect(dim, 720, 1280, 0, toColor('#050912', 235));
         overlay.on(Node.EventType.TOUCH_START, onOverlayTouchStart);
         this._overlay = overlay;
 
@@ -651,32 +653,52 @@ export class SudokuGame extends Component {
         }
 
         const again = createButton(panel, {
-            w: 220,
-            h: 76,
+            w: 164,
+            h: 72,
             text: '再来一局',
-            fontSize: 27,
+            fontSize: 25,
             fill: '#1D4ED8',
             radius: 18,
             onTap: () => this.newGame(),
         });
-        again.node.setPosition(-120, -172, 0);
+        again.node.setPosition(-178, -170, 0);
 
         const change = createButton(panel, {
-            w: 220,
-            h: 76,
+            w: 164,
+            h: 72,
             text: '换个难度',
-            fontSize: 27,
+            fontSize: 25,
             fill: '#182338',
             stroke: '#2C3D5C',
             radius: 18,
             onTap: this._onOverlayChangeDiff,
         });
-        change.node.setPosition(120, -172, 0);
+        change.node.setPosition(0, -170, 0);
+
+        // 结算面板必须自带「返回大厅」：全屏遮罩会吞掉左上返回键的触摸，
+        // 只靠左上角的话玩家会被锁在结算页（试玩报告 2026-11-13 P1-1）
+        const lobby = createButton(panel, {
+            w: 164,
+            h: 72,
+            text: '返回大厅',
+            fontSize: 25,
+            fill: '#182338',
+            stroke: '#2C3D5C',
+            radius: 18,
+            onTap: () => this.onBack(),
+        });
+        lobby.node.setPosition(178, -170, 0);
 
         overlay.setScale(0.94, 0.94, 1);
         tween(overlay)
             .to(0.16, { scale: new Vec3(1, 1, 1) })
             .start();
+
+        // 左上返回键抬到遮罩之上：结算态下仍可见、可点（P1-1）
+        const back = this._backBtn && this._backBtn.node;
+        if (back && back.isValid && back.parent === this.node) {
+            back.setSiblingIndex(this.node.children.length - 1);
+        }
     }
 
     private _onOverlayChangeDiff = (): void => {

@@ -53,7 +53,18 @@ export class FridgeHud extends Component {
     private _sub: Label | null = null;
     private _items: Label | null = null;
     private _hint: Label | null = null;
+    /** 死亡结算：标题（成功 / 失败配色） */
     private _dead: Label | null = null;
+    /** 死亡结算：数据行（层数 / 时长 / 得分 / 击杀） */
+    private _deadBody: Label | null = null;
+    /** 死亡结算：历史最高 */
+    private _deadBest: Label | null = null;
+    /** 死亡结算：冰箱贴收益（金色强调，试玩报告 P2-2） */
+    private _deadReward: Label | null = null;
+    /** 死亡结算：图鉴新增 / 新解锁 */
+    private _deadExtra: Label | null = null;
+    /** 死亡结算：操作提示 */
+    private _deadHint: Label | null = null;
     private _deadDim: Node | null = null;
     /** 死亡遮罩上的「再来一局」按钮（只它重开，遮罩空白处仍是回主菜单） */
     private _deadAgain: Node | null = null;
@@ -146,8 +157,22 @@ export class FridgeHud extends Component {
         this._items = this._makeLabel('Items', 0, -300, 20, Label.HorizontalAlign.CENTER, 680);
         this._hint = this._makeLabel('Hint', 0, -370, 18, Label.HorizontalAlign.CENTER, 680);
         this._hint.string = '左半屏拖动移动 · 右半屏拖动瞄准 / 射击 · 点技能 / 炸弹（Q / E）';
-        this._dead = this._makeLabel('Dead', 0, 40, 34, Label.HorizontalAlign.CENTER, 640);
-        this._dead.node.active = false;
+        // 死亡结算拆成多行多字号：34 号 5 行会顶满 720 宽（试玩报告 2026-11-13 P2-2）
+        this._dead = this._makeLabel('DeadTitle', 0, 126, 34, Label.HorizontalAlign.CENTER, 640);
+        this._deadBody = this._makeLabel('DeadBody', 0, 84, 23, Label.HorizontalAlign.CENTER, 640);
+        this._deadBest = this._makeLabel('DeadBest', 0, 56, 20, Label.HorizontalAlign.CENTER, 640);
+        this._deadReward = this._makeLabel('DeadReward', 0, 20, 23, Label.HorizontalAlign.CENTER, 640);
+        this._deadReward.color = hex(PAL.coin);
+        this._deadExtra = this._makeLabel('DeadExtra', 0, -20, 19, Label.HorizontalAlign.CENTER, 660);
+        this._deadExtra.color = hex(COLOR.TEXT_SECONDARY);
+        this._deadHint = this._makeLabel('DeadHint', 0, -62, 17, Label.HorizontalAlign.CENTER, 640);
+        this._deadHint.color = hex(COLOR.TEXT_SECONDARY);
+        const deadLabels: Array<Label | null> = [
+            this._dead, this._deadBody, this._deadBest, this._deadReward, this._deadExtra, this._deadHint,
+        ];
+        for (const l of deadLabels) {
+            if (l) l.node.active = false;
+        }
         this._toast = this._makeLabel('Toast', 0, 500, 24, Label.HorizontalAlign.CENTER, 640);
         this._toast.node.active = false;
         this._buildActiveButton();
@@ -197,6 +222,11 @@ export class FridgeHud extends Component {
         this._items = null;
         this._hint = null;
         this._dead = null;
+        this._deadBody = null;
+        this._deadBest = null;
+        this._deadReward = null;
+        this._deadExtra = null;
+        this._deadHint = null;
         this._deadDim = null;
         this._deadAgain = null;
         this._activeNode = null;
@@ -314,15 +344,25 @@ export class FridgeHud extends Component {
             }
         }
         if (this._dead) {
-            if (this._dead.node.active !== over) this._dead.node.active = over;
+            const deadLabels: Array<Label | null> = [
+                this._dead, this._deadBody, this._deadBest, this._deadReward, this._deadExtra, this._deadHint,
+            ];
+            for (const l of deadLabels) {
+                if (l && l.node.active !== over) l.node.active = over;
+            }
             if (over) {
+                const won = snap.phase === 'won';
                 const bestText = this._newRecord ? `历史最高 ${this._best}（新纪录！）` : `历史最高 ${this._best}`;
-                const head = snap.phase === 'won' ? '逃出冰箱！' : '被吃掉了…';
                 const floorText = map ? `第 ${snap.floor} 层 · ` : '';
-                const extra = this._resultLines.length > 0 ? `\n${this._resultLines.join('\n')}` : '';
-                this._dead.string =
-                    `${head}\n${floorText}得分 ${score} · 击杀 ${snap.kills} · 坚持 ${Math.floor(snap.time)} 秒\n` +
-                    `${bestText}${extra}\n点空白处回主菜单 · 点「再来一局」立即重开`;
+                this._dead.string = won ? '逃出冰箱！' : '被吃掉了…';
+                this._dead.color = won ? hex(COLOR.SUCCESS) : hex(COLOR.DANGER);
+                this._deadBody.string =
+                    `${floorText}坚持 ${Math.floor(snap.time)} 秒 · 得分 ${score} · 击杀 ${snap.kills}`;
+                this._deadBest.string = bestText;
+                this._deadBest.color = this._newRecord ? hex(COLOR.WARNING) : hex(COLOR.TEXT_SECONDARY);
+                this._deadReward.string = this._resultLines.length > 0 ? this._resultLines[0] : '';
+                this._deadExtra.string = this._resultLines.length > 1 ? this._resultLines.slice(1).join('\n') : '';
+                this._deadHint.string = '点空白处回主菜单 · 点「再来一局」立即重开';
             }
         }
         if (this._deadDim) {
@@ -1158,13 +1198,13 @@ export class FridgeHud extends Component {
         g.rect(-360, -530, 720, 1060);
         g.fill();
 
-        // 提示卡片
+        // 提示卡片（240 高：给「标题 / 数据 / 历史 / 冰箱贴 / 图鉴 / 提示」六行留位置）
         g.fillColor = hex(PAL.panel, 235);
-        g.roundRect(-300, -30, 600, 220, 22);
+        g.roundRect(-300, -50, 600, 240, 22);
         g.fill();
         g.lineWidth = 3;
         g.strokeColor = hex(PAL.accent, 160);
-        g.roundRect(-300, -30, 600, 220, 22);
+        g.roundRect(-300, -50, 600, 240, 22);
         g.stroke();
 
         // 「再来一局」按钮底
@@ -1198,7 +1238,12 @@ export class FridgeHud extends Component {
     /** 回主菜单时收起死亡遮罩（否则下次进入会看到残留的半透明层） */
     hideGameOver(): void {
         if (this._deadDim && this._deadDim.isValid) this._deadDim.active = false;
-        if (this._dead && this._dead.node.isValid) this._dead.node.active = false;
+        const deadLabels: Array<Label | null> = [
+            this._dead, this._deadBody, this._deadBest, this._deadReward, this._deadExtra, this._deadHint,
+        ];
+        for (const l of deadLabels) {
+            if (l && l.node.isValid) l.node.active = false;
+        }
     }
 
     private onDeadDimTouch(): void {

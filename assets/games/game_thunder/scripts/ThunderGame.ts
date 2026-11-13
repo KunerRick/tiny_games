@@ -107,6 +107,8 @@ export class ThunderGame extends Component {
     private _screen: UiScreen = 'levels';
     private _paused = false;
     private _finished = false;
+    /** 玩家主动「退出本关」：不发失败保底金币、结算文案不写「被击落」（试玩报告 2026-11-13 N19） */
+    private _quitByPlayer = false;
 
     private _bgGfx: Graphics | null = null;
     private _fieldGfx: Graphics | null = null;
@@ -607,6 +609,7 @@ export class ThunderGame extends Component {
         this._screen = 'battle';
         this._paused = false;
         this._finished = false;
+        this._quitByPlayer = false;
         this._dragging = false;
         this._reviveShown = false;
         this._bombFxT = 0;
@@ -629,6 +632,7 @@ export class ThunderGame extends Component {
         if (this._pauseBtn && this._pauseBtn.isValid) this._pauseBtn.active = true;
         if (this._levelLabel) this._levelLabel.node.active = true;
         if (this._scoreLabel) this._scoreLabel.node.active = true;
+        if (this._livesLabel) this._livesLabel.node.active = true;
     }
 
     private _hideBattleChrome(): void {
@@ -636,6 +640,7 @@ export class ThunderGame extends Component {
         if (this._pauseBtn && this._pauseBtn.isValid) this._pauseBtn.active = false;
         if (this._levelLabel) this._levelLabel.node.active = false;
         if (this._scoreLabel) this._scoreLabel.node.active = false;
+        if (this._livesLabel) this._livesLabel.node.active = false;
         const field = this._fieldGfx;
         if (field) field.clear();
         const hud = this._hudGfx;
@@ -704,6 +709,8 @@ export class ThunderGame extends Component {
     private _quitBattle(): void {
         const w = this._world;
         if (!w) return;
+        // 主动退出与被打死要分开结算：否则「进关 → 暂停 → 退出」能无限刷失败保底（N19）
+        this._quitByPlayer = true;
         w.phase = 'lost';
         this._paused = false;
         this._clearOverlay();
@@ -783,11 +790,14 @@ export class ThunderGame extends Component {
         this._paused = false;
         this._hideBattleChrome();
 
+        const quit = this._quitByPlayer;
+        this._quitByPlayer = false;
         const stars = starsFor(won, w.usedRevive, w.usedBomb);
         const reward = clearReward(this._levelIndex, stars);
         // 试玩报告 §3.25：飞 15 秒被击落只拿 3 金币，而首个升级要 100 → 约 30 局才能升一级。
         // 失败局保底 30 金币，让「打不过」也在推进机库养成；胜利仍按星级另算奖励。
-        const consolation = won ? 0 : Math.max(0, 30 - w.coinsEarned);
+        // 主动退出不给保底（N19）：否则暂停 → 退出即可无限刷金币。
+        const consolation = won || quit ? 0 : Math.max(0, 30 - w.coinsEarned);
         const earned = w.coinsEarned + consolation + (won ? reward.clearCoins + reward.starCoins : 0);
 
         this._save.coins += earned;
@@ -799,33 +809,35 @@ export class ThunderGame extends Component {
         }
         this._saveGame();
 
-        this._showSettle(won, stars, earned);
+        this._showSettle(won, stars, earned, quit);
     }
 
-    private _showSettle(won: boolean, stars: number, earned: number): void {
+    private _showSettle(won: boolean, stars: number, earned: number, quit = false): void {
         this._clearOverlay();
         const w = this._world;
 
         const overlay = createNode('SettleOverlay', this.node, FIELD_W, FIELD_H);
         const g = overlay.addComponent(Graphics);
-        g.fillColor = hex('#050A14', 232);
+        g.fillColor = hex('#050A14', 235);
         g.rect(-FIELD_W / 2, -FIELD_H / 2, FIELD_W, FIELD_H);
         g.fill();
 
         const panel = createNode('Panel', overlay, 600, 680);
         const pg = panel.addComponent(Graphics);
-        drawRoundRect(pg, 600, 680, 28, hex(C.panel), hex(won ? C.player : '#7F1D1D'), 2);
+        drawRoundRect(pg, 600, 680, 28, hex(C.panel), hex(won ? C.player : quit ? COLOR.TEXT_DISABLED : '#7F1D1D'), 2);
 
-        createLabel(panel, won ? '关卡完成' : '任务失败', FONT_TITLE.fontSize, {
-            x: 0, y: 258, color: won ? C.player : COLOR.DANGER, bold: true,
+        createLabel(panel, quit ? '已退出本关' : won ? '关卡完成' : '任务失败', FONT_TITLE.fontSize, {
+            x: 0, y: 258, color: won ? C.player : quit ? COLOR.TEXT_SECONDARY : COLOR.DANGER, bold: true,
         });
         createLabel(panel, `${this._levelIndex + 1} · ${THUNDER_LEVELS[this._levelIndex].name}`, FONT_CAPTION.fontSize, {
             x: 0, y: 212, color: COLOR.TEXT_SECONDARY,
         });
-        createLabel(panel, won
-            ? '击破关底 Boss'
-            : `在「${w ? w.wave.name : '战场'}」被击落`, FONT_CAPTION.fontSize, {
-            x: 0, y: 184, color: won ? C.player : COLOR.DANGER,
+        createLabel(panel, quit
+            ? '主动退出 · 不计失败保底'
+            : won
+                ? '击破关底 Boss'
+                : `在「${w ? w.wave.name : '战场'}」被击落`, FONT_CAPTION.fontSize, {
+            x: 0, y: 184, color: won ? C.player : quit ? COLOR.TEXT_SECONDARY : COLOR.DANGER,
         });
 
         createLabel(panel, won ? '★'.repeat(stars) + '☆'.repeat(3 - stars) : '☆☆☆', FONT_DISPLAY.fontSize, {

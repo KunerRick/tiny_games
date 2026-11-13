@@ -74,9 +74,10 @@ import {
 } from './SolitaireLayout';
 import { SolitaireCard } from './SolitaireCard';
 import { StorageManager } from '../../../common/managers/StorageManager';
-import { drawDivider, ensureChild } from '../../../common/ui/GameUIKit';
+import { SceneManager } from '../../../common/managers/SceneManager';
+import { drawDivider, ensureChild, makeLabel } from '../../../common/ui/GameUIKit';
 import {
-    COLOR, FONT_CAPTION, FONT_DISPLAY, FONT_TITLE,
+    COLOR, FONT_BODY, FONT_CAPTION, FONT_DISPLAY, FONT_TITLE,
 } from '../../../common/ui/UITheme';
 import {
     paintLabel, skinBackButton, skinButton, skinCard, skinOverlay,
@@ -378,7 +379,20 @@ export class SolitaireGame extends Component {
         });
         paintLabel(root, 'WinPanel/Panel/TitleLabel', FONT_DISPLAY, COLOR.SUCCESS);
         paintLabel(root, 'WinPanel/Panel/StatsLabel', FONT_CAPTION, COLOR.TEXT_SECONDARY);
-        skinButton(root, 'WinPanel/Panel/WinNewBtn', 'primary', 220, 64);
+        skinButton(root, 'WinPanel/Panel/WinNewBtn', 'primary', 200, 64);
+
+        // 通关面板补「返回大厅」并排到「再来一局」右侧：原先唯一出口是再来一局，
+        // 而左上返回键被面板压暗，与全站终局三件套不一致（试玩报告 2026-11-13 N22）
+        const winPanel = root.getChildByPath('WinPanel/Panel');
+        if (winPanel) {
+            const newBtn = winPanel.getChildByName('WinNewBtn');
+            if (newBtn) newBtn.setPosition(-110, -120, 0);
+            const lobbyBtn = ensureChild(winPanel, 'WinLobbyBtn', 200, 64);
+            lobbyBtn.setPosition(110, -120, 0);
+            makeLabel(lobbyBtn, 'Label', '返回大厅', FONT_BODY, '#FFFFFF', 'center', 140);
+            skinButton(winPanel, 'WinLobbyBtn', 'secondary', 200, 64);
+            this._bindTap(lobbyBtn, this._onLobbyClicked);
+        }
 
         // 设置面板
         skinOverlay(root, 'MenuPanel/Bg', 200);
@@ -483,10 +497,12 @@ export class SolitaireGame extends Component {
                 // 存档损坏直接新开一局，不向玩家报错
             }
         }
-        this._startNewGame(false);
+        this._startNewGame();
     }
 
-    private _startNewGame(countAsPlayed = true): void {
+    /** 发一局新牌。每一次发牌都算「开了一局」——包括进场景时的首局，
+     *  否则首局赢了会算出 won > played（试玩报告 2026-11-13 P2-1）。 */
+    private _startNewGame(): void {
         const seed = ((Date.now() & 0x7fffffff) ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0;
         this._core.deal(seed, this._settings.drawCount, this._settings.limitRedeal);
         // 发牌后会直接送掉露在外面的 A（+10 分、翻牌 +5 分），
@@ -508,10 +524,8 @@ export class SolitaireGame extends Component {
         if (this.menuPanel) this.menuPanel.active = false;
         if (this.collectBtn) this.collectBtn.active = false;
 
-        if (countAsPlayed) {
-            this._stats.played += 1;
-            this._saveStats();
-        }
+        this._stats.played += 1;
+        this._saveStats();
 
         this._render(false);
         this._refreshHud(true);
@@ -544,6 +558,11 @@ export class SolitaireGame extends Component {
     private _bindTap(node: Node | null, handler: () => void): void {
         if (!node) return;
         node.on(Node.EventType.TOUCH_END, handler, this);
+    }
+
+    /** 通关面板「返回大厅」 */
+    private _onLobbyClicked(): void {
+        SceneManager.gotoLobby();
     }
 
     // ==================== 布局与渲染 ====================
@@ -1401,7 +1420,7 @@ export class SolitaireGame extends Component {
             return;
         }
         this._confirmNewUntil = 0;
-        this._startNewGame(true);
+        this._startNewGame();
     }
 
     private _onUndoClicked(): void {
@@ -1641,13 +1660,15 @@ export class SolitaireGame extends Component {
         }
         if (this.menuStatsLabel) {
             const s = this._stats;
-            const rate = s.played > 0 ? Math.round((s.won / s.played) * 100) : 0;
+            // 防呆：分子永远不超过分母，避免旧存档显示「胜局 1 / 0（0%）」
+            const won = Math.min(s.won, Math.max(0, s.played));
+            const rate = s.played > 0 ? Math.round((won / s.played) * 100) : 0;
             const b1 = this._modeBest(1);
             const b3 = this._modeBest(3);
             const line = (b: ModeBest): string =>
                 `最快 ${b.time > 0 ? this._formatTime(b.time) : '—'} · 最少 ${b.moves > 0 ? b.moves : '—'} 步`;
             this.menuStatsLabel.string =
-                `胜局 ${s.won} / ${s.played}（${rate}%）\n` +
+                `胜局 ${won} / ${s.played}（${rate}%）\n` +
                 `最长连胜 ${s.bestStreak}\n` +
                 `抽 1 张：${line(b1)}\n` +
                 `抽 3 张：${line(b3)}`;
@@ -1793,9 +1814,13 @@ export class SolitaireGame extends Component {
                     };
                 }
             }
+            const played = Number(parsed.played) || 0;
+            const won = Number(parsed.won) || 0;
             this._stats = {
-                played: Number(parsed.played) || 0,
-                won: Number(parsed.won) || 0,
+                // 自愈：旧版本首局发牌不计入 played，可能存下 won > played 的矛盾数据；
+                // 赢过的局一定是玩过的局，所以把 played 抬到 won（试玩报告 2026-11-13 P2-1）
+                played: Math.max(played, won),
+                won,
                 best,
                 streak: Number(parsed.streak) || 0,
                 bestStreak: Number(parsed.bestStreak) || 0,

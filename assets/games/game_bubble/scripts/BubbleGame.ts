@@ -770,7 +770,8 @@ export class BubbleGame extends Component {
                 fill: id === this._level.id ? COLOR.PRIMARY : unlocked ? COLOR.SURFACE : COLOR.PRIMARY_DISABLED,
                 textColor: unlocked ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED,
                 radius: 12,
-                onTap: unlocked ? () => this._onPickLevel(id) : () => undefined,
+                // 锁定关卡被点也要有反馈，否则玩家以为按钮坏了（试玩报告 2026-11-13 N20）
+                onTap: unlocked ? () => this._onPickLevel(id) : () => toast(this.node, `通关第 ${id - 1} 关解锁`, 1.2),
             });
             btn.node.setPosition(x, y);
         }

@@ -494,7 +494,7 @@ export class IdleGame extends Component {
         root.on(Node.EventType.TOUCH_START, onOverlayTouchStart);
         (root as unknown as { __idleDismiss?: IdleDismissData }).__idleDismiss = { dismiss: () => this._dismissOfflineOverlay() };
         const dim = root.addComponent(Graphics);
-        dim.fillColor = toColor(UI.overlay, 215);
+        dim.fillColor = toColor(UI.overlay, 235);
         dim.rect(-360, -640, 720, 1280);
         dim.fill();
 

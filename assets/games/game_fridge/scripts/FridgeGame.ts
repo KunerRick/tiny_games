@@ -326,7 +326,8 @@ export class FridgeGame extends Component {
         this._meta = meta;
 
         const lines: string[] = [];
-        lines.push(summary.won ? `逃出生天！冰箱贴 +${magnets}` : `冰箱贴 +${magnets}（失败折半）`);
+        // 标题行已经写了「逃出冰箱！」，这里只放收益本身，避免重复
+        lines.push(summary.won ? `冰箱贴 +${magnets}` : `冰箱贴 +${magnets}（失败折半）`);
         if (newItems.length > 0) {
             const names: string[] = [];
             for (const id of newItems.slice(0, 4)) {

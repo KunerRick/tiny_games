@@ -107,6 +107,7 @@ export class IdiomGame extends Component {
     private _bankKey = '';
     private _diffBtns: Partial<Record<IdiomDifficulty, UiButton>> = {};
     private _againBtn: UiButton | null = null;
+    private _backBtn: UiButton | null = null;
     private _uiBuilt = false;
     private _deferOverlayPending = false;
     private _flashToken = 0;
@@ -139,6 +140,7 @@ export class IdiomGame extends Component {
         this._bankLabel = null;
         this._diffBtns = {};
         this._againBtn = null;
+        this._backBtn = null;
         this._overlay = null;
     }
 
@@ -295,7 +297,7 @@ export class IdiomGame extends Component {
         glow.circle(300, -420, 380);
         glow.fill();
 
-        createBackButton(this.node, () => this.onBack());
+        this._backBtn = createBackButton(this.node, () => this.onBack());
         createLabel(this.node, '成语填字', 44, {
             ...this._at(360, 64),
             bold: true,
@@ -628,7 +630,7 @@ export class IdiomGame extends Component {
 
         const overlay = createNode('Overlay', this.node, 720, 1280);
         const dim = overlay.addComponent(Graphics);
-        drawRoundRect(dim, 720, 1280, 0, toColor('#050912', 215));
+        drawRoundRect(dim, 720, 1280, 0, toColor('#050912', 235));
         overlay.on(Node.EventType.TOUCH_START, onOverlayTouchStart);
         this._overlay = overlay;
 
@@ -687,33 +689,53 @@ export class IdiomGame extends Component {
         }
 
         const again = createButton(panel, {
-            w: 236,
-            h: 74,
+            w: 180,
+            h: 72,
             text: '再来一局',
-            fontSize: 26,
+            fontSize: 25,
             fill: '#1D4ED8',
             radius: 18,
             onTap: () => this.newGame(),
         });
-        again.node.setPosition(-128, -248, 0);
+        again.node.setPosition(-196, -248, 0);
         this._againBtn = again;
 
         const change = createButton(panel, {
-            w: 236,
-            h: 74,
+            w: 180,
+            h: 72,
             text: '换个难度',
-            fontSize: 26,
+            fontSize: 25,
             fill: '#182338',
             stroke: '#2C3D5C',
             radius: 18,
             onTap: this._onOverlayChangeDiff,
         });
-        change.node.setPosition(128, -248, 0);
+        change.node.setPosition(0, -248, 0);
+
+        // 结算面板必须自带「返回大厅」：全屏遮罩会吞掉左上返回键的触摸，
+        // 只靠左上角的话玩家会被锁在结算页（试玩报告 2026-11-13 P1-1）
+        const lobby = createButton(panel, {
+            w: 180,
+            h: 72,
+            text: '返回大厅',
+            fontSize: 25,
+            fill: '#182338',
+            stroke: '#2C3D5C',
+            radius: 18,
+            onTap: () => this.onBack(),
+        });
+        lobby.node.setPosition(196, -248, 0);
 
         overlay.setScale(0.94, 0.94, 1);
         tween(overlay)
             .to(0.16, { scale: new Vec3(1, 1, 1) })
             .start();
+
+        // 左上返回键抬到遮罩之上：结算态下仍可见、可点（P1-1）
+        const back = this._backBtn && this._backBtn.node;
+        if (back && back.isValid && back.parent === this.node) {
+            back.setSiblingIndex(this.node.children.length - 1);
+        }
     }
 
     private _onOverlayChangeDiff = (): void => {

@@ -98,6 +98,7 @@ export class Match3Game extends Component {
     private _scoreLabel: Label | null = null;
     private _chainLabel: Label | null = null;
     private _hintBtn: UiButton | null = null;
+    private _backBtn: UiButton | null = null;
     private _overlay: Node | null = null;
 
     private _flashCells: number[] = [];
@@ -152,6 +153,7 @@ export class Match3Game extends Component {
         this._scoreLabel = null;
         this._chainLabel = null;
         this._hintBtn = null;
+        this._backBtn = null;
         this._overlay = null;
     }
 
@@ -375,7 +377,7 @@ export class Match3Game extends Component {
         glow.circle(280, -460, 340);
         glow.fill();
 
-        createBackButton(this.node, () => this.onBack());
+        this._backBtn = createBackButton(this.node, () => this.onBack());
         createLabel(this.node, '缤纷消除', 44, { ...this._at(360, 64), bold: true, width: 360, height: 66 });
         createLabel(this.node, 'MATCH 3', 15, { ...this._at(360, 104), color: UI.textMuted, width: 300, height: 24 });
 
@@ -698,7 +700,7 @@ export class Match3Game extends Component {
         const root = createNode('ResultOverlay', this.node, 720, 1280);
         root.on(Node.EventType.TOUCH_START, this.onOverlayTouchStart, this);
         const dim = root.addComponent(Graphics);
-        dim.fillColor = toColor(UI.overlay, 215);
+        dim.fillColor = toColor(UI.overlay, 235);
         dim.rect(-360, -640, 720, 1280);
         dim.fill();
 
@@ -729,27 +731,45 @@ export class Match3Game extends Component {
         const hasNext = win && this.level.id < MATCH3_LEVEL_COUNT;
         if (hasNext) {
             const nextBtn = createButton(panel, {
-                w: 230, h: 78, text: '下一关', fontSize: 26,
+                w: 160, h: 72, text: '下一关', fontSize: 24,
                 fill: UI.primary, activeFill: UI.primary, radius: 16,
                 onTap: () => this._nextLevel(),
             });
-            nextBtn.node.setPosition(-125, -140, 0);
+            nextBtn.node.setPosition(-178, -140, 0);
             const againBtn = createButton(panel, {
-                w: 230, h: 78, text: '重来', fontSize: 26,
+                w: 160, h: 72, text: '重来', fontSize: 24,
                 fill: '#1E293B', activeFill: '#0E7490', radius: 16, stroke: '#26364F',
                 onTap: () => this._restartLevel(),
             });
-            againBtn.node.setPosition(125, -140, 0);
+            againBtn.node.setPosition(0, -140, 0);
         } else {
             const againBtn = createButton(panel, {
-                w: 300, h: 78, text: win ? '再玩一次' : '重来', fontSize: 26,
+                w: 230, h: 72, text: win ? '再玩一次' : '重来', fontSize: 25,
                 fill: UI.primary, activeFill: UI.primary, radius: 16,
                 onTap: () => this._restartLevel(),
             });
-            againBtn.node.setPosition(0, -140, 0);
+            againBtn.node.setPosition(-125, -140, 0);
         }
 
+        // 结算面板必须自带「返回大厅」：全屏遮罩会吞掉左上返回键的触摸，
+        // 只靠左上角的话玩家会被锁在结算页（试玩报告 2026-11-13 P1-1）
+        const lobbyBtn = createButton(panel, {
+            w: hasNext ? 160 : 230, h: 72, text: '返回大厅', fontSize: hasNext ? 24 : 25,
+            fill: '#1E293B', activeFill: '#1E293B', radius: 16, stroke: '#26364F',
+            onTap: () => this.onBack(),
+        });
+        lobbyBtn.node.setPosition(hasNext ? 178 : 125, -140, 0);
+
         this._overlay = root;
+        this._raiseBackButton();
+    }
+
+    /** 把左上返回键抬到全屏遮罩之上：结算态下它仍然可见、可点（P1-1） */
+    private _raiseBackButton(): void {
+        const back = this._backBtn && this._backBtn.node;
+        if (back && back.isValid && back.parent === this.node) {
+            back.setSiblingIndex(this.node.children.length - 1);
+        }
     }
 
     private _destroyOverlay(): void {
