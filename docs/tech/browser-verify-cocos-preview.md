@@ -602,6 +602,44 @@ input.on(Input.EventType.MOUSE_UP, this.onAnyMouseUp, this);     // 桌面（少
 
 ---
 
+## 12. 场景切换 / 异步探针的四个新坑（2026-11-13 第五、六轮实测）
+
+> **来源**：终局结算专项验证（`docs/plans/2026-11-13-playtest-round5-endstates.md`、
+> `docs/plans/2026-11-13-playtest-round6-player.md`）。这些坑都会让探针**报错或挂起**，
+> 而游戏本身没问题 —— 先排除探针再判定缺陷。
+
+### 12.1 切场景后旧节点已销毁：别在 `loadScene` 之后读旧面板的组件
+
+```js
+// ❌ 点击后场景已切到 Lobby，lobbyBtn 已被销毁
+clickNode(lobbyBtn);
+await wait(700);
+return { size: lobbyBtn.getComponent('cc.UITransform').width };
+// → TypeError: Cannot read properties of null (reading 'length')  (_findComponent)
+```
+
+**规则**：点击可能触发 `director.loadScene` 时，**先把要读的数据全部收集到普通对象里**，
+再点、再等待、再读场景名。切场景后旧引用一律视为脏数据。
+
+### 12.2 `loadScene` 切换瞬间 `getScene()` 可能为 `null`
+
+遍历场景前判空；`await new Promise(r => cc.director.loadScene(name, r))` 之后仍建议等 300–600 ms
+再取组件（`start()` 尚未跑完时，运行时创建的按钮/标签可能还没出现）。
+
+### 12.3 `setTimeout` 里读不存在的字段会让 Promise 永不 resolve
+
+把 `_weapons` 误当数组 `map` 之类的异常，如果发生在 `setTimeout` 回调里，
+外层 Promise 不会 reject，MCP evaluate 会挂到 120 s 超时。
+**规则**：所有读回都加 `try/catch` + 空值保护，异常信息作为结果返回，而不是抛在定时器里。
+
+### 12.4 Label 世界坐标换算必须基于 Canvas 的 `UITransform` 原点
+
+直接 `worldPosition + (360, 640)` 会让点击坐标整体偏移 (360, 640)、落到画布外。
+按 §4.1 的公式走：`convertToWorldSpaceAR → camera.worldToScreen（y 翻转）→ CSS`。
+测试全局坐标时，还要先减去 Canvas / 父容器的世界原点。
+
+---
+
 ## 附：本轮用到的 MCP 工具
 
 `project_refresh_assets`、`debug_get_console_logs`、`debug_clear_console`、`debug_search_project_logs`、`scene_get_current_scene`、`scene_get_scene_hierarchy`、`node_get_all_nodes`、`component_get_component_info`、`debug_validate_scene`。

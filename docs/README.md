@@ -13,6 +13,7 @@
 | 修改场景/节点/MCP 操作 | [`../AGENTS.md`](../AGENTS.md) 的 **MCP 使用守则** |
 | 要验证真实交互（点击/流程/报错） | [`tech/browser-verify-cocos-preview.md`](./tech/browser-verify-cocos-preview.md) |
 | 写"等一会儿再做下一拍"的回合/动画链路 | [`tech/cocos-scheduler-and-tween-pitfalls.md`](./tech/cocos-scheduler-and-tween-pitfalls.md) |
+| 做结算 / 暂停 / 全屏遮罩，或玩家被锁在终局页 | [`tech/ui-overlay-exit-and-modal-patterns.md`](./tech/ui-overlay-exit-and-modal-patterns.md) |
 | 用 Graphics 画网格/细线却整片不显示 | [`tech/cocos-graphics-lines-pitfall.md`](./tech/cocos-graphics-lines-pitfall.md) |
 | 要给 Graphics 画的角色/部件加动作（挥砍、旋转、镜像） | [`tech/cocos-graphics-animation-layering.md`](./tech/cocos-graphics-animation-layering.md) |
 | 显示 emoji/符号图标（尤其要在微信上跑） | [`tech/wechat-text-rendering.md`](./tech/wechat-text-rendering.md) |
@@ -24,6 +25,7 @@
 | 规划剩余 8 款的玩法/美术/复核开工顺序 | [`plans/2026-11-07-remaining-games-polish-plan.md`](./plans/2026-11-07-remaining-games-polish-plan.md) |
 | **想知道全部 24 款有哪些体验坑 / 该先修什么** | [`plans/2026-11-10-all-games-playtest-ux-report.md`](./plans/2026-11-10-all-games-playtest-ux-report.md)（玩家视角实机试玩：跨游戏共性问题 + 逐款清单 + P0/P1/P2 批次） |
 | **想知道上一轮修复哪些真生效、哪些没落地** | [`plans/2026-11-11-playtest-fix-review.md`](./plans/2026-11-11-playtest-fix-review.md)（第二轮复核：A 批 10 条全过、B/C 5 处未生效、18 条新问题 + 4 条原报告更正） |
+| **想追最新的试玩轮次与闭环状态** | 见下方 **试玩巡检归档**（第六轮为当前最新） |
 
 ---
 
@@ -34,12 +36,29 @@
 - [`tech/browser-verify-cocos-preview.md`](./tech/browser-verify-cocos-preview.md) — 浏览器操作验证预览：刷新资产库、设备像素坐标、页内探针与日志取证
 - [`tech/mcp-scene-authoring-pitfalls.md`](./tech/mcp-scene-authoring-pitfalls.md) — MCP 操作场景/预制体：按钮绑定类型、Button 组件、渲染组件冲突
 - [`tech/cocos-scheduler-and-tween-pitfalls.md`](./tech/cocos-scheduler-and-tween-pitfalls.md) — 排期/补间陷阱：自排期回调被引擎静默丢弃、`update()` 泵 + 看门狗范式
+- [`tech/ui-overlay-exit-and-modal-patterns.md`](./tech/ui-overlay-exit-and-modal-patterns.md) — 结算遮罩与退出路径：全屏遮罩吞事件 / 同级不冒泡、返回键层级、遮罩 alpha 235、主动退出 vs 失败保底、`onTap` 不带 `this`
 - [`tech/cocos-graphics-lines-pitfall.md`](./tech/cocos-graphics-lines-pitfall.md) — Graphics 画细线：`stroke()` 整片不渲染（路径/顶点都在）时改用 `rect() + fill()`
 - [`tech/cocos-graphics-animation-layering.md`](./tech/cocos-graphics-animation-layering.md) — Graphics 动态部件：无变换栈所以拆子节点、镜像挂在父节点、tick 求值代替补间、特效跟动作相位、闪白留描边
 - [`tech/wechat-text-rendering.md`](./tech/wechat-text-rendering.md) — 微信文本渲染：变体选择符 VS16 导致图标方框、图标单一来源规约
 - [`tech/wechat-build-pitfalls.md`](./tech/wechat-build-pitfalls.md) — 微信小游戏构建产物：开发者工具「编译报错」的时序根因、**「能编译但一打开就崩」的包装器/项目类型根因**、日志与缓存取证、预检脚本与声明纪律
 - [`tech/dev-toolchain-notes.md`](./tech/dev-toolchain-notes.md) — 文本编码（PowerShell 陷阱）、`tsc` 版本注意事项、提交前检查
 - [`design/2026-11-10-ui-art-style-guide.md`](./design/2026-11-10-ui-art-style-guide.md) — 全站 UI / 图标美术规范：设计令牌（`UITheme` / `GameUIKit` / `SceneSkin`）、大厅图标四色法与登记表、新增游戏第四步与 `tools/check-game-icons.js`
+
+---
+
+## 试玩巡检归档（玩家视角，按轮次倒序）
+
+> 每轮结构固定：玩家报告（只验不改）→ 开发方复核修复 → `*-reverify.md` 闭环记录。
+> 追进度只看每轮最后一份复验文档。
+
+| 轮次 | 报告 | 闭环 / 结论 |
+|------|------|-------------|
+| 第六轮（2026-11-13） | [`plans/2026-11-13-playtest-round6-player.md`](./plans/2026-11-13-playtest-round6-player.md) | [`plans/2026-11-13-playtest-round6-reverify.md`](./plans/2026-11-13-playtest-round6-reverify.md) — N19–N24 全修（雷霆退出刷金币 / 锁定关卡反馈 / 遮罩收敛 / 接龙出口） |
+| 第五轮（2026-11-13） | [`plans/2026-11-13-playtest-round5-endstates.md`](./plans/2026-11-13-playtest-round5-endstates.md) | [`plans/2026-11-13-playtest-round5-reverify.md`](./plans/2026-11-13-playtest-round5-reverify.md) — P1-1 / P2-1 / P2-2 / P2-3 全修（结算锁死 / 接龙计数 / 冰箱死亡面板 / 遮罩） |
+| 第四轮（2026-11-12） | [`plans/2026-11-12-playtest-round4-novice.md`](./plans/2026-11-12-playtest-round4-novice.md) | 新手视角全量；视觉统一类项延后（装饰圆、弹幕遮罩、战争进化返回键皮肤） |
+| 第三轮（2026-11-12） | [`plans/2026-11-11-playtest-ux-fix-plan.md`](./plans/2026-11-11-playtest-ux-fix-plan.md)（修复计划） | [`plans/2026-11-12-playtest-round3-reverify.md`](./plans/2026-11-12-playtest-round3-reverify.md) — 8 项闭环 + 塔防翻转分支实测 |
+| 第二轮（2026-11-11） | [`plans/2026-11-11-playtest-fix-review.md`](./plans/2026-11-11-playtest-fix-review.md) | N1–N18；A 批 10 条全过、B/C 5 处未生效 |
+| 第一轮（2026-11-10） | [`plans/2026-11-10-all-games-playtest-ux-report.md`](./plans/2026-11-10-all-games-playtest-ux-report.md) | 24 款全量实机试玩：跨游戏共性问题 + P0/P1/P2 批次 |
 
 ---
 

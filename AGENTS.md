@@ -25,15 +25,16 @@
 
 | # | 教训（一句话） | 详情 |
 |---|---------------|------|
-| B | `@property({ type: Button })` 绑的是 **Button 组件**、不是节点；MCP 绑节点 UUID → 运行时 `Cannot read properties of undefined (reading 'on')`。改用 `@property({ type: Node })` + `Node.EventType.TOUCH_END` | [`tech/mcp-scene-authoring-pitfalls.md`](./docs/tech/mcp-scene-authoring-pitfalls.md) §2 |
 | C | 新建/复制的按钮节点可能**没有 `Button` 组件** → `getComponent(Button)` 返回 null、按钮无响应；补挂 `cc.Button` 时**别再 `addComponent(UITransform)`**。另：设 `contentSize` 必须**在 `spriteFrame` 之后**（顺序反了会被贴图原始尺寸覆盖成 2×2），MCP 写 `anchorPoint` 的 `x=0` 会被吞掉，均须读回核对 | [`tech/mcp-scene-authoring-pitfalls.md`](./docs/tech/mcp-scene-authoring-pitfalls.md) §3、§3.5 |
 | D | 浏览器验证六坑：改完 `.ts` 先 `project_refresh_assets`；**点击入参比例每轮现场标定**（`clientX = 传入 / k`，k 随视口变化，实测出现过 1/2/1.225，曾误判成回归）；页面重载会清掉页内探针；懒初始化面板 `show()` 先置 `_showCalled` 再置 `active`；**桌面拖拽结束派发的是 `TOUCH_CANCEL` 而非 `TOUCH_END`**（当成"中断回位"会让拖拽永不生效；但**抬起时指针仍在起点节点内则是 `TOUCH_END`**），且手势监听要挂到两个子树的**共同父级**；**拖拽阈值 + "已消费"标记会把轻触静默吃掉**（阈值 8 设计像素 ≈ 4.3pt，实测横移 5 CSS 像素即"点了没反应"，修法是让"拖了个空"的手势显式退回点击回调）；**页内注入只认 `MouseEvent`（`PointerEvent` 无效），全局 `input` 收不到桌面鼠标的 `TOUCH_END` 要另绑 `MOUSE_UP`** | [`tech/browser-verify-cocos-preview.md`](./docs/tech/browser-verify-cocos-preview.md) §4、§7.1、§8、§11、§11.6、§11.8 |
 | E | 布局三坑：① 绑 `@property(Label)` 这类**组件引用**要 `propertyType:'component'` + **节点** UUID（写 `'cc.Label'` 会被拒，且内置组件返回的 `uuid` 常为 `null`）；② 跨面板常驻 HUD（`HudTop`）的显隐只能有**一个**管理者，否则 `active=false` 的面板 `onLoad()` 不执行、残留「回合 1」；③ 纵向 `ScrollView` **不校正 content 的 x**，且滚动区占满全屏时第一行会被固定表头压住 | [`tech/mcp-scene-authoring-pitfalls.md`](./docs/tech/mcp-scene-authoring-pitfalls.md) §3.5 ④–⑦ |
 | F | **在正在执行的回调里用同一 `(target, method)` 自排期，会被引擎静默丢弃**（同回调去重 + 一次性计时器随即取消）→ 回合永久卡在 `enemy_turn`，且**不报错**。要等下一拍就用「时间点数字 + `update()` 泵」并加看门狗兜底；判据：把 `scheduleOnce(this.cb, …)` 换成 `scheduleOnce(() => this.cb(), …)`，从只触发 1 次变 N 次即证实 | [`tech/cocos-scheduler-and-tween-pitfalls.md`](./docs/tech/cocos-scheduler-and-tween-pitfalls.md) |
 | G | **微信小游戏「能编译」不等于「能跑」**。① **时序**：Cocos 构建会「先清空目录、再逐个重写」，而开发者工具会随目录变动自动重编译 —— 重叠时它在 `game.json` 还没写出的瞬间去读它，报「未找到 game.json 文件」并**放弃后不再重试**（判据：内容一字未改、只重新编译一次就恢复 ⇒ 时序问题）。② **包装器/项目类型**：工具若把项目按**小程序**编译（`isGame` 取的是 AppID 的**服务端**属性 `attr.gameApp`，本地 `compileType:"game"` 不决定它），会给每个模块套上 `function(require, module, exports, window, top, …)`，而小游戏运行时只传 **3 个实参** ⇒ `window` 为 undefined ⇒ 启动期 `TypeError: Object.defineProperty called on non-object`。**`simulator launch success` 不证明游戏无异常**。构建前先关掉工具里的该项目，构建完成后跑 `node tools/check-wechat-build.js`（9 项，含 AppID 与包装判定）+ `node tools/replay-wechat-bundle.js` 再打开 | [`tech/wechat-build-pitfalls.md`](./docs/tech/wechat-build-pitfalls.md) §1–§8 |
+| H | **全屏遮罩 + `TOUCH_START` 吞事件会让同级的返回键变哑**（同级之间不冒泡）：结算面板必须自带「返回大厅」，并把返回键 `setSiblingIndex` 抬到遮罩之上；遮罩 alpha 统一 235。另：`createButton` 的 `onTap` 调用**不带 `this`**，类方法要包 `() => this.x()` | [`tech/ui-overlay-exit-and-modal-patterns.md`](./docs/tech/ui-overlay-exit-and-modal-patterns.md) |
 
-> 维护约定：本表保持 **3–5 条**高价值教训（当前 6 条已达上限，再加一条前先把最旧的一条迁到 `docs/tech/` 并在此留索引）。
-> 已迁出：原行 A（PowerShell `Set-Content`/`Out-File` 把含中文的 `.ts` 重编码成 GBK/ANSI）—— 规则本身见**红线 1**，详情已迁至 [`tech/dev-toolchain-notes.md`](./docs/tech/dev-toolchain-notes.md) §1。
+> 维护约定：本表保持 **3–5 条**高价值教训（当前 6 条；再加一条前先把最旧的一条迁到 `docs/tech/` 并在此留索引）。
+> 已迁出：原行 A（PowerShell `Set-Content`/`Out-File` 把含中文的 `.ts` 重编码成 GBK/ANSI）—— 规则本身见**红线 1**，详情已迁至 [`tech/dev-toolchain-notes.md`](./docs/tech/dev-toolchain-notes.md) §1；
+> 原行 B（`@property({ type: Button })` 绑的是组件不是节点）—— 规则本身见**红线 3**，详情已迁至 [`tech/mcp-scene-authoring-pitfalls.md`](./docs/tech/mcp-scene-authoring-pitfalls.md) §2。
 
 ---
 
@@ -398,6 +399,7 @@ node tools/sync-build-scenes.js --all            # 顺带修其它平台的构�
 - [文档索引与定位指南](./docs/README.md)
 - [全站 UI / 图标美术规范（令牌 + 大厅图标登记表 + 自检）](./docs/design/2026-11-10-ui-art-style-guide.md)
 - [排期/补间陷阱（自排期回调被丢弃 → 回合卡死）](./docs/tech/cocos-scheduler-and-tween-pitfalls.md)
+- [结算遮罩与退出路径（遮罩吞事件 / 返回键层级 / 主动退出 vs 失败保底）](./docs/tech/ui-overlay-exit-and-modal-patterns.md)
 - [微信文本渲染（变体选择符 VS16 → 图标方框）](./docs/tech/wechat-text-rendering.md)
 - [微信小游戏构建产物（编译报错的时序根因 + 预检流程）](./docs/tech/wechat-build-pitfalls.md)
 - [开发工具链备忘（文本编码、`tsc` 版本、提交前检查）](./docs/tech/dev-toolchain-notes.md)
