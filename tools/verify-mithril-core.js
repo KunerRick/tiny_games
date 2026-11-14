@@ -72,6 +72,10 @@ const failures = [];
 function check(name, cond, detail) {
     if (cond) {
         passed++;
+        // MITHRIL_VERBOSE=1 时打印每条通过项与实测值（调平衡时看时长很有用）
+        if (process.env.MITHRIL_VERBOSE) {
+            console.log(`ok  ${name}${detail !== undefined ? `  [${detail}]` : ''}`);
+        }
     } else {
         failed++;
         failures.push(`${name}${detail !== undefined ? ` —— ${detail}` : ''}`);
@@ -486,6 +490,495 @@ function countBy(list, pick) {
     check('99. 击杀后移除并计数', kill.enemies.length === 0 && kill.kills === 1);
 }
 
+// ==================== 10. M1：战士技能 / AI / BOSS 机制 ====================
+
+const IDLE = { moveX: 0, moveY: 0, aimX: 0, aimY: 0 };
+
+function stepFor(world, seconds, input = IDLE) {
+    const n = Math.max(1, Math.round(seconds / F.FIXED_DT));
+    for (let i = 0; i < n; i++) world.step(F.FIXED_DT, input);
+    return world;
+}
+
+function clearAllEnemies(world) {
+    for (let guard = 0; guard < 200 && world.enemies.length > 0; guard++) {
+        for (let i = world.enemies.length - 1; i >= 0; i--) world.damageEnemy(i, 1e9);
+    }
+    world.drainEvents();
+}
+
+/** 清掉 3 个遭遇，进入 BOSS 并稳定下来 */
+function makeBossWorld(profile = C.makeProfile('warrior', 30, 40), seed = 90210) {
+    const w = new C.MithrilWorld(profile, seed);
+    w.startDungeon('mine');
+    clearAllEnemies(w);
+    stepFor(w, F.ENCOUNTER_GAP + 0.15);
+    clearAllEnemies(w);
+    stepFor(w, F.ENCOUNTER_GAP + 0.15);
+    clearAllEnemies(w);
+    stepFor(w, F.BOSS_INTRO_GAP + 0.15);
+    w.drainEvents();
+    return w;
+}
+
+{
+    // ---- 技能与怒气 ----
+    const w = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 101);
+    const e = w.spawnEnemy('imp', w.player.x, w.player.y + 55, 1000, 0, 0);
+    const hp0 = e.hp;
+    w.step(F.FIXED_DT, { ...IDLE, basic: true });
+    check('100. 普攻命中扇形内敌人并造成伤害', e.hp < hp0, `${hp0} → ${e.hp}`);
+    check('101. 普攻命中积攒怒气', w.player.rage >= F.PLAYER_TUNING.basic.rage, w.player.rage);
+
+    w.player.rage = 99;
+    w.player.cd.basic = 0;
+    w.step(F.FIXED_DT, { ...IDLE, basic: true });
+    check('102. 怒气上限为 100', w.player.rage === 100, w.player.rage);
+
+    // 冲锋位移 + 眩晕
+    const cw = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 102);
+    const ce = cw.spawnEnemy('imp', cw.player.x + 160, cw.player.y, 1000, 0, 0);
+    const cx0 = cw.player.x;
+    cw.step(F.FIXED_DT, { ...IDLE, skill1: true });
+    check('103. 冲锋位移约 220px', near(cw.player.x - cx0, F.PLAYER_TUNING.charge.distance, 2), cw.player.x - cx0);
+    check('104. 冲锋命中眩晕 0.8s', ce.status.stun > 0.7, ce.status.stun);
+
+    // 旋风斩：2 秒内多跳
+    const ww = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 103);
+    const we = ww.spawnEnemy('imp', ww.player.x + 20, ww.player.y, 100000, 0, 0);
+    ww.step(F.FIXED_DT, { ...IDLE, skill2: true });
+    const wHp0 = we.hp;
+    stepFor(ww, 2.1);
+    const whirlHits = Math.ceil(F.PLAYER_TUNING.whirlwind.duration / F.PLAYER_TUNING.whirlwind.tick);
+    check('105. 旋风斩持续 2s 打满 5 跳', whirlHits === 5 && wHp0 - we.hp > 5, wHp0 - we.hp);
+
+    // 破甲：后续伤害 +20%
+    const aw = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 104);
+    const ae = aw.spawnEnemy('imp', aw.player.x + 60, aw.player.y, 1000, 0, 0);
+    aw.step(F.FIXED_DT, { ...IDLE, skill3: true });
+    check('106. 破甲挂上 5 秒减甲', ae.status.armorBreak > 4.9, ae.status.armorBreak);
+    const aHp0 = ae.hp;
+    aw.damageEnemy(0, 100);
+    check('107. 减甲期间伤害 ×1.2', near(aHp0 - ae.hp, 120, 1e-6), aHp0 - ae.hp);
+
+    // 侧步：位移 + 无敌
+    const dw = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 105);
+    const dx0 = dw.player.x;
+    dw.step(F.FIXED_DT, { ...IDLE, moveX: 1, dodge: true });
+    check('108. 侧步位移 280px', near(dw.player.x - dx0, F.PLAYER_TUNING.dodge.distance, 6), dw.player.x - dx0);
+    check('109. 侧步获得 0.4s 无敌', dw.player.invuln >= 0.38, dw.player.invuln);
+
+    // 血怒：满怒气才可用，清空并增伤
+    const bw = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 106);
+    const be = bw.spawnEnemy('imp', bw.player.x, bw.player.y + 55, 100000, 0, 0);
+    bw.player.rage = 40;
+    bw.step(F.FIXED_DT, { ...IDLE, burst: true });
+    check('110. 怒气不足时血怒不触发', bw.player.burst === 0 && bw.player.rage === 40);
+    bw.player.rage = 100;
+    bw.step(F.FIXED_DT, { ...IDLE, burst: true });
+    check('111. 满怒气血怒清空怒气并进入 10s 增伤', bw.player.rage === 0 && bw.player.burst > 9.9, bw.player.burst);
+
+    const bw2 = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 106);
+    const be2 = bw2.spawnEnemy('imp', bw2.player.x, bw2.player.y + 55, 100000, 0, 0);
+    bw2.step(F.FIXED_DT, { ...IDLE, basic: true });
+    bw.step(F.FIXED_DT, { ...IDLE, basic: true });
+    const burstDmg = 100000 - be.hp;
+    const normalDmg = 100000 - be2.hp;
+    check('112. 血怒增伤 30%', near(burstDmg / normalDmg, 1 + F.PLAYER_TUNING.burst.dmgBonus, 0.02), burstDmg / normalDmg);
+
+    const bw3 = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 107);
+    bw3.player.burst = 10;
+    stepFor(bw3, 10.1);
+    check('113. 血怒 10 秒后失效', bw3.player.burst === 0, bw3.player.burst);
+
+    // 冷却阻断
+    const cdw = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 108);
+    cdw.player.cd.whirlwind = 5;
+    cdw.step(F.FIXED_DT, { ...IDLE, skill2: true });
+    check('114. 冷却中不能重复释放技能', cdw.player.whirlwind === 0, cdw.player.whirlwind);
+
+    // ---- 敌人 AI ----
+    const mw = new C.MithrilWorld(C.makeProfile('warrior', 10, 10), 201);
+    const me = mw.spawnEnemy('imp', 100, 900, 200, 105, 4);
+    const md0 = Math.hypot(me.x - mw.player.x, me.y - mw.player.y);
+    stepFor(mw, 0.5);
+    const md1 = Math.hypot(me.x - mw.player.x, me.y - mw.player.y);
+    check('115. 近战敌人会追击玩家', md1 < md0 - 40, `${md0.toFixed(1)} → ${md1.toFixed(1)}`);
+
+    const rw = new C.MithrilWorld(C.makeProfile('warrior', 10, 10), 202);
+    rw.spawnEnemy('wraith', 300, 900, 500, 85, 3);
+    stepFor(rw, 2.85);
+    check('116. 远程敌人会发射子弹', rw.bullets.some((b) => b.owner === 'enemy'), rw.bullets.length);
+
+    const ew = new C.MithrilWorld(C.makeProfile('warrior', 10, 10), 203);
+    ew.spawnEnemy('golem', ew.player.x, ew.player.y + 300, 5000, 0, 0);
+    stepFor(ew, 5.3);
+    check('117. 精英会放地面预警圈', ew.telegraphs.length > 0, ew.telegraphs.length);
+
+    // ---- 副本推进 ----
+    const rw2 = new C.MithrilWorld(C.makeProfile('warrior', 10, 10), 301);
+    rw2.startDungeon('mine');
+    check('118. 开局进入遭遇 1/3 并生成 4 只小怪', rw2.stage === 'encounter' && rw2.encounterIndex === 0 && rw2.enemies.length === 4, `${rw2.encounterIndex}/${rw2.enemies.length}`);
+
+    clearAllEnemies(rw2);
+    stepFor(rw2, F.ENCOUNTER_GAP + 0.2);
+    check('119. 清完遭遇 1 进入遭遇 2/3', rw2.encounterIndex === 1 && rw2.enemies.length === 6, `${rw2.encounterIndex}/${rw2.enemies.length}`);
+
+    clearAllEnemies(rw2);
+    stepFor(rw2, F.ENCOUNTER_GAP + 0.2);
+    check('120. 清完遭遇 2 进入遭遇 3/3', rw2.encounterIndex === 2 && rw2.enemies.length === 8, `${rw2.encounterIndex}/${rw2.enemies.length}`);
+
+    clearAllEnemies(rw2);
+    stepFor(rw2, F.BOSS_INTRO_GAP + 0.2);
+    check('121. 清完 3 遭遇后 BOSS 入场', rw2.stage === 'boss' && !!rw2.boss && rw2.enemies.length === 1);
+
+    const bossProfile = C.makeProfile('warrior', 30, 40);
+
+    // ---- BOSS 阶段推进 ----
+    const pw = makeBossWorld(bossProfile, 302);
+    check('122. BOSS 初始为阶段 1', pw.bossPhase === 0, pw.bossPhase);
+    pw.boss.shotCd = 9999;
+    pw.boss.hp = pw.boss.maxHp * 0.65;
+    pw.step(F.FIXED_DT, IDLE);
+    check('123. 血量低于 2/3 进入阶段 2', pw.bossPhase === 1, pw.bossPhase);
+    pw.boss.hp = pw.boss.maxHp * 0.32;
+    pw.step(F.FIXED_DT, IDLE);
+    check('124. 血量低于 1/3 进入阶段 3', pw.bossPhase === 2, pw.bossPhase);
+
+    // ---- 走位机制：预警圈 ----
+    const mw2 = makeBossWorld(bossProfile, 303);
+    mw2.boss.shotCd = 9999;
+    let guard = 0;
+    while (mw2.telegraphs.length === 0 && guard++ < 480) mw2.step(F.FIXED_DT, IDLE);
+    check('125. 走位阶段生成砸地预警圈', mw2.telegraphs.length > 0, guard);
+    const tele = mw2.telegraphs[0];
+    const hpBefore = mw2.player.hp;
+    stepFor(mw2, tele.warn + 0.3);
+    check('126. 站在预警圈内会被砸中', mw2.player.hp < hpBefore, `${hpBefore} → ${mw2.player.hp}`);
+
+    const mw3 = makeBossWorld(bossProfile, 303);
+    mw3.boss.shotCd = 9999;
+    guard = 0;
+    while (mw3.telegraphs.length === 0 && guard++ < 480) mw3.step(F.FIXED_DT, IDLE);
+    const tele3 = mw3.telegraphs[0];
+    mw3.player.x = tele3.x > F.FIELD_W / 2 ? 60 : F.FIELD_W - 60;
+    mw3.player.y = tele3.y > F.FIELD_H / 2 ? 200 : F.FIELD_H - 200;
+    const hpOut = mw3.player.hp;
+    stepFor(mw3, tele3.warn + 0.3);
+    check('127. 走出预警圈可以免伤', mw3.player.hp === hpOut, `${hpOut} → ${mw3.player.hp}`);
+
+    // ---- 转火机制：召唤小怪 + BOSS 回血 ----
+    const aw2 = makeBossWorld(bossProfile, 304);
+    aw2.boss.shotCd = 9999;
+    aw2.boss.hp = aw2.boss.maxHp * 0.5;
+    aw2.step(F.FIXED_DT, IDLE);
+    stepFor(aw2, F.MINE_BOSS_SCRIPT.addsInterval + 0.2);
+    const miners = aw2.enemies.filter((e) => e.kind === F.MINE_BOSS_SCRIPT.addsEnemyId);
+    check(`128. 转火阶段召唤 ${F.MINE_BOSS_SCRIPT.addsCount} 个矿工`, miners.length === F.MINE_BOSS_SCRIPT.addsCount, miners.length);
+    const bossHp0 = aw2.boss.hp;
+    stepFor(aw2, 2);
+    check(
+        '129. 小怪存活时 BOSS 持续回血',
+        aw2.boss.hp >= bossHp0 + F.MINE_BOSS_SCRIPT.addsRegen * 1.5,
+        `${bossHp0} → ${aw2.boss.hp}（期望 ≥ +${F.MINE_BOSS_SCRIPT.addsRegen * 1.5}）`,
+    );
+    for (let i = aw2.enemies.length - 1; i >= 0; i--) {
+        if (aw2.enemies[i].kind === F.MINE_BOSS_SCRIPT.addsEnemyId) aw2.damageEnemy(i, 1e9);
+    }
+    const bossHp1 = aw2.boss.hp;
+    stepFor(aw2, 2);
+    check('130. 小怪清空后 BOSS 停止回血', near(aw2.boss.hp, bossHp1, 1e-6), `${bossHp1} → ${aw2.boss.hp}`);
+
+    // ---- 打断机制 ----
+    const iw = makeBossWorld(bossProfile, 305);
+    iw.boss.shotCd = 9999;
+    iw.boss.hp = iw.boss.maxHp * 0.2;
+    iw.step(F.FIXED_DT, IDLE);
+    stepFor(iw, F.MINE_BOSS_SCRIPT.interruptInterval + 0.2);
+    check('131. 打断阶段开始读条', !!iw.bossCast && iw.boss.casting, iw.bossCast ? iw.bossCast.remaining : 'null');
+    const bossIndex = iw.enemies.indexOf(iw.boss);
+    iw.damageEnemy(bossIndex, F.MINE_BOSS_SCRIPT.interruptNeed + 10);
+    check('132. 读条期间打满伤害可打断', iw.bossCast === null && iw.bossEnraged === 0);
+
+    const iw2 = makeBossWorld(bossProfile, 306);
+    iw2.boss.shotCd = 9999;
+    iw2.boss.hp = iw2.boss.maxHp * 0.2;
+    iw2.step(F.FIXED_DT, IDLE);
+    stepFor(iw2, F.MINE_BOSS_SCRIPT.interruptInterval + 0.2);
+    const castTotal = iw2.bossCast ? iw2.bossCast.remaining : 0;
+    stepFor(iw2, castTotal + 0.2);
+    check('133. 不打断则进入增伤状态', iw2.bossEnraged > 0, iw2.bossEnraged);
+    stepFor(iw2, F.MINE_BOSS_SCRIPT.enrageDuration + 0.2);
+    check('134. 增伤 10 秒后结束', iw2.bossEnraged === 0, iw2.bossEnraged);
+
+    // ---- 终态 ----
+    const win = makeBossWorld(bossProfile, 307);
+    win.damageEnemy(win.enemies.indexOf(win.boss), 1e9);
+    win.step(F.FIXED_DT, IDLE);
+    check('135. BOSS 死亡后副本通关', win.phase === 'won' && win.stage === 'cleared');
+
+    const lose = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 308);
+    lose.startDungeon('mine');
+    lose.hitPlayer(9999);
+    check('136. 玩家死亡进入 dead 终态', lose.phase === 'dead' && lose.player.hp === 0);
+
+    // ---- 确定性 ----
+    const da = new C.MithrilWorld(C.makeProfile('warrior', 5, 5), 401);
+    const db = new C.MithrilWorld(C.makeProfile('warrior', 5, 5), 401);
+    da.startDungeon('mine');
+    db.startDungeon('mine');
+    const din = { moveX: 0.4, moveY: 0.8, aimX: 0.6, aimY: 0.8, basic: true, skill2: true };
+    for (let i = 0; i < 600; i++) {
+        da.step(F.FIXED_DT, din);
+        db.step(F.FIXED_DT, din);
+    }
+    check('137. 同种子副本推进快照一致', deepEqual(da.snapshot(), db.snapshot()));
+
+    // ---- 事件队列 ----
+    const evw = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 402);
+    evw.spawnEnemy('imp', evw.player.x, evw.player.y + 55, 10, 0, 0);
+    evw.step(F.FIXED_DT, { ...IDLE, basic: true });
+    const evs = evw.drainEvents();
+    check('138. 事件队列可排空', evs.length > 0 && evw.drainEvents().length === 0, evs.length);
+
+    // ---- 自动玩家：平衡闸门 ----
+    function botInput(world) {
+        const p = world.player;
+        if (world.phase !== 'playing') return IDLE;
+        let target = null;
+        let best = Infinity;
+        for (const e of world.enemies) {
+            let score = Math.hypot(e.x - p.x, e.y - p.y);
+            // 转火阶段优先小怪
+            if (world.bossPhase === 1 && e.kind === F.MINE_BOSS_SCRIPT.addsEnemyId) score -= 1000;
+            if (score < best) {
+                best = score;
+                target = e;
+            }
+        }
+        let mx = 0;
+        let my = 0;
+        let aimX = 0;
+        let aimY = 0;
+        let danger = null;
+        for (const t of world.telegraphs) {
+            if (t.done) continue;
+            if (Math.hypot(p.x - t.x, p.y - t.y) < t.radius + 26) {
+                danger = t;
+                break;
+            }
+        }
+        // 飞行物威胁：预测轨迹会穿过玩家附近
+        let bullet = null;
+        let bulletDist = Infinity;
+        for (const b of world.bullets) {
+            if (b.owner !== 'enemy') continue;
+            const dx = p.x - b.x;
+            const dy = p.y - b.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist > 170) continue;
+            const vl = Math.hypot(b.vx, b.vy) || 1;
+            const ux = b.vx / vl;
+            const uy = b.vy / vl;
+            const along = dx * ux + dy * uy;
+            if (along < 0) continue;
+            const perp = Math.abs(-dx * uy + dy * ux);
+            if (perp < 46 && dist < bulletDist) {
+                bullet = b;
+                bulletDist = dist;
+            }
+        }
+        // 低血时优先吃血球
+        let orb = null;
+        let orbDist = Infinity;
+        if (p.hp / p.maxHp < 0.7 && (!target || best > 220)) {
+            for (const o of world.orbs) {
+                const dist = Math.hypot(o.x - p.x, o.y - p.y);
+                if (dist < 420 && dist < orbDist) {
+                    orbDist = dist;
+                    orb = o;
+                }
+            }
+        }
+
+        if (danger) {
+            const dx = p.x - danger.x;
+            const dy = p.y - danger.y;
+            const len = Math.hypot(dx, dy) || 1;
+            mx = dx / len;
+            my = dy / len;
+        } else if (bullet) {
+            const vl = Math.hypot(bullet.vx, bullet.vy) || 1;
+            let sx = -bullet.vy / vl;
+            let sy = bullet.vx / vl;
+            const nx = p.x + sx * 80;
+            const ny = p.y + sy * 80;
+            if (nx < 70 || nx > F.FIELD_W - 70 || ny < 70 || ny > F.FIELD_H - 70) {
+                sx = -sx;
+                sy = -sy;
+            }
+            mx = sx;
+            my = sy;
+        } else if (orb) {
+            const dx = orb.x - p.x;
+            const dy = orb.y - p.y;
+            const dist = Math.hypot(dx, dy) || 1;
+            mx = dx / dist;
+            my = dy / dist;
+        } else if (target) {
+            const dx = target.x - p.x;
+            const dy = target.y - p.y;
+            const dist = Math.hypot(dx, dy) || 1;
+            aimX = dx / dist;
+            aimY = dy / dist;
+            const desired = target.isBoss ? 140 : 82;
+            if (dist > desired + 12) {
+                mx = dx / dist;
+                my = dy / dist;
+            } else if (dist < desired - 20) {
+                mx = -dx / dist;
+                my = -dy / dist;
+            } else {
+                // 绕圈，避免站桩吃投射物
+                mx = (-dy / dist) * 0.6;
+                my = (dx / dist) * 0.6;
+            }
+        }
+        // 贴墙时往回走
+        if (p.x < 70) mx = Math.max(mx, 0.7);
+        if (p.x > F.FIELD_W - 70) mx = Math.min(mx, -0.7);
+        if (p.y < 70) my = Math.max(my, 0.7);
+        if (p.y > F.FIELD_H - 70) my = Math.min(my, -0.7);
+        const distToTarget = target ? best : 9999;
+        const attackRange = target && target.isBoss ? 165 : 125;
+        return {
+            moveX: mx,
+            moveY: my,
+            aimX,
+            aimY,
+            basic: distToTarget < attackRange,
+            skill1: !danger && distToTarget > 140 && p.cd.charge <= 0,
+            skill2: distToTarget < (target && target.isBoss ? 175 : 110) && p.cd.whirlwind <= 0,
+            skill3: distToTarget < 155 && p.cd.armorBreak <= 0,
+            burst: p.rage >= F.PLAYER_TUNING.burst.rageCost && p.cd.burst <= 0,
+            dodge: (!!danger || (!!bullet && bulletDist < 65)) && p.cd.dodge <= 0,
+        };
+    }
+
+    function runBot(profile, seed, maxSeconds, zeroAim = false) {
+        const w = new C.MithrilWorld(profile, seed);
+        w.startDungeon('mine');
+        const seen = new Set();
+        let steps = 0;
+        const maxSteps = Math.round(maxSeconds / F.FIXED_DT);
+        while (w.phase === 'playing' && steps < maxSteps) {
+            const input = botInput(w);
+            // 手机端只有摇杆、没有瞄准：清掉 aim 才是真实输入
+            if (zeroAim) {
+                input.aimX = 0;
+                input.aimY = 0;
+            }
+            w.step(F.FIXED_DT, input);
+            for (const ev of w.drainEvents()) {
+                if (ev.type === 'phase') seen.add(`phase${ev.phase}`);
+                else if (ev.type === 'castStart') seen.add('cast');
+                else if (ev.type === 'regen') seen.add('regen');
+                else if (ev.type === 'boom') seen.add('boom');
+                else if (ev.type === 'castEnd') seen.add(ev.interrupted ? 'interrupt' : 'enrage');
+            }
+            steps++;
+        }
+        return { world: w, seconds: steps * F.FIXED_DT, seen };
+    }
+
+    const run5 = runBot(C.makeProfile('warrior', 5, 5), 501, 360);
+    check('139. 5 级战士自动玩家 6 分钟内通关', run5.world.phase === 'won', `${run5.world.phase} @ ${run5.seconds.toFixed(1)}s`);
+    check('140. 自动玩家观察到三阶段机制（走位/转火/打断）',
+        run5.seen.has('phase2') && run5.seen.has('phase3') && run5.seen.has('boom') && run5.seen.has('regen') && run5.seen.has('cast'),
+        Array.from(run5.seen).join(','));
+
+    // 141/142：手机端输入回归。曾经普攻 / 冲锋 / 破甲索敌都传 includeBoss=false，
+    // 玩家绕圈走位时剑永远指向切向 → BOSS 战实测只有约 5 DPS，BOSS 打不死。
+    const noAim = runBot(C.makeProfile('warrior', 5, 5), 501, 360, true);
+    check('145. 无瞄准输入（仅摇杆）自动玩家同样 6 分钟内通关',
+        noAim.world.phase === 'won', `${noAim.world.phase} @ ${noAim.seconds.toFixed(1)}s`);
+
+    const swingW = makeBossWorld(C.makeProfile('warrior', 10, 10), 991);
+    const swingBoss = swingW.enemies.find((e) => e.isBoss);
+    const side = swingBoss.x + 128 <= F.FIELD_W - 40 ? 1 : -1;
+    swingW.player.x = swingBoss.x + 128 * side;
+    swingW.player.y = swingBoss.y;
+    swingW.player.facing = side > 0 ? Math.PI / 2 : -Math.PI / 2; // 朝向切向
+    swingW.player.cd.basic = 0;
+    const swingHp0 = swingBoss.hp;
+    swingW.step(F.FIXED_DT, { ...IDLE, basic: true, moveX: 0, moveY: -1 });
+    check('146. 切线走位时普攻自动转向 BOSS 并命中', swingBoss.hp < swingHp0, `${swingHp0} → ${swingBoss.hp}`);
+
+    // 147：普攻多目标结算必须倒序。升序结算时，先死的那只 splice 后会把后面所有下标前移，
+    // 后面的伤害就会打到扇形外的旁观敌人身上（或丢伤害）。这里让最近的一只只有 1 血。
+    const mtw = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 147);
+    mtw.startDungeon('mine');
+    mtw.step(F.FIXED_DT, IDLE); // 触发首个遭遇，再清空，避免遭遇怪混进下标
+    clearAllEnemies(mtw);
+    const mp = mtw.player;
+    mp.x = F.FIELD_W / 2;
+    mp.y = 400;
+    mp.facing = Math.PI / 2;
+    mp.cd.basic = 0;
+    const near1Hp = mtw.spawnEnemy('imp', mp.x, mp.y + 60, 1, 0, 0);      // 最近，1 血 → 先死
+    const midEnemy = mtw.spawnEnemy('imp', mp.x + 40, mp.y + 75, 500, 0, 0);
+    const farEnemy = mtw.spawnEnemy('imp', mp.x - 40, mp.y + 75, 500, 0, 0);
+    const behindEnemy = mtw.spawnEnemy('imp', mp.x, mp.y - 80, 500, 0, 0); // 扇形外
+    const midHp0 = midEnemy.hp;
+    const farHp0 = farEnemy.hp;
+    const behindHp0 = behindEnemy.hp;
+    mtw.step(F.FIXED_DT, { ...IDLE, basic: true });
+    check('147. 普攻多目标致死时结算不打偏（倒序 + 扇形外不掉血）',
+        near1Hp.hp <= 0 && midEnemy.hp < midHp0 && farEnemy.hp < farHp0 && behindEnemy.hp === behindHp0,
+        `near ${near1Hp.hp}, mid ${midHp0}→${midEnemy.hp}, far ${farHp0}→${farEnemy.hp}, behind ${behindHp0}→${behindEnemy.hp}`);
+
+    // 副本长跑不变量
+    const lw = new C.MithrilWorld(C.makeProfile('warrior', 5, 5), 601);
+    lw.startDungeon('mine');
+    let lwOk = true;
+    for (let i = 0; i < 10000; i++) {
+        lw.step(F.FIXED_DT, botInput(lw));
+        lw.drainEvents();
+        if (!Number.isFinite(lw.player.x) || !Number.isFinite(lw.player.y) || !Number.isFinite(lw.player.hp)) {
+            lwOk = false;
+            break;
+        }
+        if (lw.boss && !Number.isFinite(lw.boss.hp)) {
+            lwOk = false;
+            break;
+        }
+    }
+    check('141. 副本 10,000 步长跑无 NaN', lwOk);
+
+    // ---- 血球 ----
+    const ow = new C.MithrilWorld(C.makeProfile('warrior', 10, 10), 701);
+    ow.player.hp = 30;
+    for (let i = 0; i < 60; i++) {
+        ow.spawnEnemy('imp', ow.player.x + 4, ow.player.y + 4, 5, 0, 0);
+        ow.damageEnemy(ow.enemies.length - 1, 10);
+    }
+    check('142. 击杀敌人会掉落血球', ow.orbs.length > 0, ow.orbs.length);
+    const orbHp = ow.player.hp;
+    ow.step(F.FIXED_DT, IDLE);
+    check('143. 靠近血球自动拾取回血', ow.player.hp > orbHp, `${orbHp} → ${ow.player.hp}`);
+
+    const ow2 = new C.MithrilWorld(C.makeProfile('warrior', 10, 10), 702);
+    for (let i = 0; i < 80; i++) {
+        ow2.spawnEnemy('imp', 120, 1000, 5, 0, 0);
+        ow2.damageEnemy(ow2.enemies.length - 1, 10);
+    }
+    ow2.player.x = 600;
+    ow2.player.y = 200;
+    const orbCount = ow2.orbs.length;
+    stepFor(ow2, F.ORB_LIFE + 0.2);
+    check('144. 血球 20 秒后自然消失', orbCount > 0 && ow2.orbs.length === 0, `${orbCount} → ${ow2.orbs.length}`);
+}
+
 // ==================== 汇总 ====================
 
 const total = passed + failed;
@@ -494,4 +987,4 @@ if (failed > 0) {
     for (const f of failures) console.error(`  ✗ ${f}`);
     process.exit(1);
 }
-console.log(`MITHRIL_CORE_OK  ${passed}/${total} 项通过（M0）`);
+console.log(`MITHRIL_CORE_OK  ${passed}/${total} 项通过（M1）`);

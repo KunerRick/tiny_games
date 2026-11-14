@@ -839,3 +839,190 @@ export const MAX_BULLETS = 300;
 export const MAX_DROPS = 60;
 export const FIELD_W = 720;
 export const FIELD_H = 1280;
+
+// ==================== 敌人（M1：废弃矿坑的 5 种） ====================
+
+export type EnemyKind = 'melee' | 'ranged' | 'elite' | 'boss';
+
+export interface EnemyDef {
+    id: string;
+    name: string;
+    kind: EnemyKind;
+    hp: number;
+    speed: number;
+    radius: number;
+    contactDamage: number;
+    exp: number;
+    gold: number;
+    /** 远程 / BOSS 投射物 */
+    shotCd?: number;
+    shotDamage?: number;
+    shotSpeed?: number;
+    /** 精英砸地 */
+    slamCd?: number;
+    slamRadius?: number;
+    slamDamage?: number;
+    slamWarn?: number;
+}
+
+/**
+ * 数值锚点：1 级战士约 24 DPS。
+ * 小怪 2–3 刀、精英约 15 秒、BOSS 约 2 分钟，三遭遇 + BOSS 合计 ≈ 4 分钟。
+ */
+export const ENEMIES: EnemyDef[] = [
+    {
+        id: 'imp', name: '矿坑小鬼', kind: 'melee',
+        hp: 60, speed: 105, radius: 16, contactDamage: 4, exp: 12, gold: 2,
+    },
+    {
+        id: 'miner', name: '被奴役矿工', kind: 'melee',
+        hp: 80, speed: 80, radius: 18, contactDamage: 4, exp: 18, gold: 4,
+    },
+    {
+        id: 'wraith', name: '矿道幽魂', kind: 'ranged',
+        hp: 80, speed: 85, radius: 17, contactDamage: 3, exp: 20, gold: 5,
+        shotCd: 2.8, shotDamage: 6, shotSpeed: 250,
+    },
+    {
+        id: 'golem', name: '碎石石魔', kind: 'elite',
+        hp: 350, speed: 55, radius: 26, contactDamage: 8, exp: 45, gold: 10,
+        slamCd: 5, slamRadius: 120, slamDamage: 10, slamWarn: 1.0,
+    },
+    {
+        id: 'troll', name: '矿坑巨魔', kind: 'boss',
+        hp: 3000, speed: 52, radius: 44, contactDamage: 6, exp: 400, gold: 120,
+        shotCd: 4.2, shotDamage: 6, shotSpeed: 250,
+    },
+];
+
+export const ENEMY_BY_ID: Record<string, EnemyDef> = (() => {
+    const out: Record<string, EnemyDef> = {};
+    for (const e of ENEMIES) out[e.id] = e;
+    return out;
+})();
+
+// ==================== 副本编排（M1：废弃矿坑） ====================
+
+export interface EncounterSpawn {
+    enemyId: string;
+    count: number;
+}
+
+export interface EncounterDef {
+    name: string;
+    subtitle: string;
+    spawns: EncounterSpawn[];
+}
+
+/** 3 个遭遇 + 1 个 BOSS；遭遇之间回 25% 生命，给玩家喘息窗口 */
+export const MINE_ENCOUNTERS: EncounterDef[] = [
+    {
+        name: '矿坑入口', subtitle: '小鬼在矿车之间乱窜',
+        spawns: [{ enemyId: 'imp', count: 4 }],
+    },
+    {
+        name: '塌方矿道', subtitle: '碎石堆里有什么在动',
+        spawns: [{ enemyId: 'imp', count: 5 }, { enemyId: 'golem', count: 1 }],
+    },
+    {
+        name: '矿脉深处', subtitle: '幽魂的哭声从岩壁里渗出来',
+        spawns: [
+            { enemyId: 'imp', count: 4 },
+            { enemyId: 'wraith', count: 2 },
+            { enemyId: 'miner', count: 2 },
+        ],
+    },
+];
+
+export type BossMechanic = 'interrupt' | 'adds' | 'move';
+
+export interface BossPhaseDef {
+    mechanic: BossMechanic;
+    name: string;
+    desc: string;
+}
+
+export interface BossScriptDef {
+    enemyId: string;
+    /** 血线阈值（从高到低），低于即进入下一阶段 */
+    thresholds: number[];
+    phases: BossPhaseDef[];
+    /** 走位：预警圈生成间隔 / 半径 / 伤害 / 预警时长 */
+    moveInterval: number;
+    moveRadius: number;
+    moveDamage: number;
+    moveWarn: number;
+    /** 转火：召唤间隔 / 每波数量 / BOSS 回血速度 */
+    addsInterval: number;
+    addsCount: number;
+    addsEnemyId: string;
+    addsRegen: number;
+    /** 打断：读条间隔 / 时长 / 所需伤害 / 失败后的增伤与持续时间 */
+    interruptInterval: number;
+    interruptCast: number;
+    interruptNeed: number;
+    enrageBonus: number;
+    enrageDuration: number;
+}
+
+export const MINE_BOSS_SCRIPT: BossScriptDef = {
+    enemyId: 'troll',
+    thresholds: [2 / 3, 1 / 3],
+    phases: [
+        { mechanic: 'move', name: '砸地 AoE', desc: '地面预警圈，走出范围' },
+        { mechanic: 'adds', name: '召唤矿工', desc: '转火小怪，否则 BOSS 回血' },
+        { mechanic: 'interrupt', name: '狂暴读条', desc: '3 秒内打断，否则伤害翻倍' },
+    ],
+    moveInterval: 6,
+    moveRadius: 130,
+    moveDamage: 10,
+    moveWarn: 1.1,
+    addsInterval: 16,
+    addsCount: 2,
+    addsEnemyId: 'miner',
+    addsRegen: 15,
+    interruptInterval: 9,
+    interruptCast: 3,
+    interruptNeed: 100,
+    enrageBonus: 0.5,
+    enrageDuration: 10,
+};
+
+/** 遭遇之间 / BOSS 入场前的黑场时间（秒） */
+export const ENCOUNTER_GAP = 2.2;
+export const BOSS_INTRO_GAP = 2.4;
+/** 每次遭遇结束恢复最大生命的比例 */
+export const ENCOUNTER_HEAL_PCT = 0.25;
+/** 每次 BOSS 阶段转换的回血（给三阶段战斗留呼吸窗口） */
+export const BOSS_PHASE_HEAL_PCT = 0.2;
+
+// ---- 血球（击杀掉落，补续航；设计 §7.2 的「血球拾取」以此为基） ----
+export const ORB_HEAL_PCT = 0.12;
+export const ORB_DROP_CHANCE = 0.38;
+export const ORB_ADD_DROP_CHANCE = 0.65;
+export const ORB_PICKUP_RADIUS = 30;
+export const ORB_LIFE = 20;
+export const MAX_ORBS = 40;
+
+// ==================== 1 级战士调参（M1 手感基线） ====================
+
+export const PLAYER_TUNING = {
+    /** 普攻：90° 扇形 */
+    basic: { mult: 1.1, radius: 105, halfAngle: Math.PI / 4, rage: 8, cd: 0.6 },
+    /** 冲锋 */
+    charge: { mult: 1.3, distance: 220, radius: 55, stun: 0.8, rage: 10, cd: 8 },
+    /** 旋风斩：持续 2s，每 0.4s 一跳 */
+    whirlwind: { mult: 0.4, radius: 85, cd: 10, duration: 2, tick: 0.4, moveScale: 0.6 },
+    /** 破甲：单体 150%，5s 内受到伤害 +20% */
+    armorBreak: { mult: 1.5, range: 150, bonus: 0.2, duration: 5, rage: 12, cd: 12 },
+    /** 侧步 */
+    dodge: { distance: 280, invuln: 0.4, cd: 6 },
+    /** 血怒：满怒气清空，10s 增伤 30%，受伤 +15% */
+    burst: { rageCost: 100, duration: 10, dmgBonus: 0.3, takenBonus: 0.15, cd: 40 },
+    /** 怒气获取：受伤时 */
+    rageOnHurt: 10,
+    /** 技能每次命中积攒 */
+    ragePerHit: 2,
+    /** 同一敌人的接触伤害冷却（秒），避免贴脸时每 0.5s 连续掉血 */
+    contactCooldown: 0.9,
+} as const;
