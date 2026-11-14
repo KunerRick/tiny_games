@@ -39,6 +39,10 @@ export class Lobby extends Component {
     private _keyword = '';
     private _searchBox: EditBox | null = null;
     private _searchBar: Node | null = null;
+    /** 搜索胶囊底：点图标 / 两端留白也要能聚焦输入框 */
+    private _searchBoxNode: Node | null = null;
+    /** 搜索筛空时的提示文字（运行时创建，不占场景） */
+    private _emptyHint: Label | null = null;
 
     onLoad() {
         this.refreshUI();
@@ -61,6 +65,9 @@ export class Lobby extends Component {
         layout.resizeMode = Layout.ResizeMode.NONE;
         layout.horizontalDirection = Layout.HorizontalDirection.LEFT_TO_RIGHT;
         layout.spacingX = 12;
+        // 5×130 + 4×12 = 698：左侧补 11 让分类条在 720 宽度里居中，
+        // 与搜索条（同宽居中）左右边缘对齐
+        layout.paddingLeft = 11;
         // content 的 Layout 会把整条按顺序摆；这里再把它钉到第一位
         bar.setSiblingIndex(0);
         this._chipBar = bar;
@@ -112,10 +119,15 @@ export class Lobby extends Component {
         bar.setSiblingIndex(0);
         this._searchBar = bar;
 
-        const boxW = 640;
+        // 与分类条同宽（5×130 + 4×12 = 698）：上下两条的边缘对齐，视觉上不再错位
+        const boxW = 698;
         const boxH = 64;
         const boxNode = createNode('SearchBox', bar, boxW, boxH);
         createRoundRect(boxNode, 'Bg', boxW, boxH, 32, UI.panel, UI.panelStroke, 2);
+        // EditBox 只在自己 540 宽的节点内响应触摸，放大镜与胶囊两端本来是死区；
+        // 在胶囊底上接一次 TOUCH_END，让整条搜索框都能唤起键盘
+        boxNode.on(Node.EventType.TOUCH_END, this.onSearchBoxTouch, this);
+        this._searchBoxNode = boxNode;
 
         // 放大镜：一个空心圆 + 斜向手柄（不用字符图标，红线 10）
         const iconNode = createNode('SearchIcon', boxNode, 40, 40);
@@ -138,13 +150,12 @@ export class Lobby extends Component {
 
         const textLabel = createLabelNode(editNode, 'TEXT_LABEL', UI.text);
         const placeLabel = createLabelNode(editNode, 'PLACEHOLDER_LABEL', UI.textDim);
-        // 左对齐锚点：EditBox 按 textLabel 的锚点决定文字从哪边长
+        // EditBox 把子 Label 摆在自己顶边（_updateLabelPosition: y = +height/2），
+        // 所以锚点必须是 (0, 1) 让文字向下铺满输入框；用 (0, 0.5) 会把整行文字抬到框顶外，
+        // 就是试玩反馈里「搜索文字没对齐」的根源。
         for (const label of [textLabel, placeLabel]) {
             const ut = label.node.getComponent(UITransform);
-            if (ut) {
-                ut.setAnchorPoint(0, 0.5);
-                label.node.setPosition(-(boxW - 100) / 2 + 8, 0, 0);
-            }
+            if (ut) ut.setAnchorPoint(0, 1);
         }
         edit.textLabel = textLabel;
         edit.placeholderLabel = placeLabel;
@@ -152,8 +163,37 @@ export class Lobby extends Component {
         edit.maxLength = 12;
         edit.string = '';
         edit.node.on(EditBox.EventType.TEXT_CHANGED, this.onSearchChanged, this);
+        // 聚焦时文字交给网页/小游戏的 DOM 输入框，再校正一次行高
+        edit.node.on(EditBox.EventType.EDITING_DID_BEGAN, this.onSearchEditingBegan, this);
         editNode.active = true;
+        this._centerDomInput(edit);
         this._searchBox = edit;
+    }
+
+    /** 整条胶囊都可点：点图标 / 留白时把焦点交给输入框 */
+    private onSearchBoxTouch(): void {
+        const edit = this._searchBox;
+        if (!edit || !edit.isValid || edit.isFocused()) return;
+        edit.setFocus();
+    }
+
+    /** 聚焦瞬间：网页预览的 DOM 输入框还没有行高，这里补上 */
+    private onSearchEditingBegan(): void {
+        if (this._searchBox && this._searchBox.isValid) this._centerDomInput(this._searchBox);
+    }
+
+    /**
+     * 网页预览 / 小游戏里 EditBox 用 DOM 输入框接管文字，Cocos 只同步了字号与颜色、没设行高，
+     * 文字会贴输入框顶部。把行高设成框高让它垂直居中，和未聚焦时的 Label 对齐；
+     * 原生平台没有 `_edTxt`，这里直接跳过。
+     */
+    private _centerDomInput(edit: EditBox): void {
+        const impl = edit._impl as unknown as { _edTxt?: { style?: CSSStyleDeclaration } } | null;
+        const el = impl && impl._edTxt;
+        if (!el || !el.style) return;
+        const ut = edit.node.getComponent(UITransform);
+        const height = ut ? Math.round(ut.height) : 0;
+        if (height > 0) el.style.lineHeight = `${height}px`;
     }
 
     private onSearchChanged(edit: EditBox): void {
@@ -210,8 +250,50 @@ export class Lobby extends Component {
 
     private _refreshAllGames(): void {
         if (!this.allGamesGrid) return;
-        this.allGamesGrid.setup(this._filteredGames(), this.onGameClick.bind(this));
+        const list = this._filteredGames();
+        this.allGamesGrid.setup(list, this.onGameClick.bind(this));
+        this._updateEmptyHint(list.length);
         this.updateLayouts();
+    }
+
+    /** 搜索筛空时的提示：没有它界面只剩一个「全部游戏」标题，看着像坏了 */
+    private _ensureEmptyHint(): Label | null {
+        if (this._emptyHint && this._emptyHint.isValid) return this._emptyHint;
+        const grid = this.allGamesGrid;
+        if (!grid || !grid.node || !grid.node.parent) return null;
+        const node = createNode('SearchEmptyHint', grid.node.parent, 600, 60);
+        const label = node.addComponent(Label);
+        label.string = '';
+        label.fontSize = 22;
+        label.lineHeight = 30;
+        label.color = toColor(UI.textDim);
+        label.horizontalAlign = HorizontalTextAlignment.CENTER;
+        label.verticalAlign = VerticalTextAlignment.CENTER;
+        label.overflow = Label.Overflow.CLAMP;
+        label.enableWrapText = true;
+        // 视觉顺序：分区标题 → 提示 → 格子
+        node.setSiblingIndex(grid.node.getSiblingIndex());
+        node.active = false;
+        this._emptyHint = label;
+        return label;
+    }
+
+    private _updateEmptyHint(count: number): void {
+        const hint = this._ensureEmptyHint();
+        if (!hint || !hint.isValid) return;
+        if (count > 0 || !this._keyword) {
+            hint.node.active = false;
+            return;
+        }
+        // 分类与关键词是叠加筛的：分类之外有匹配时必须说清原因，
+        // 否则玩家会把「动作分类下搜消」当成整库没有这款游戏
+        const category = this._filter === 'all'
+            ? null
+            : GAME_CATEGORIES.find(entry => entry.id === this._filter) || null;
+        hint.string = category
+            ? `「${category.label}」分类下没有匹配「${this._keyword}」的游戏，切到「全部」再看看`
+            : `没有找到匹配「${this._keyword}」的游戏，换个关键词试试`;
+        hint.node.active = true;
     }
 
     refreshUI() {
@@ -223,9 +305,7 @@ export class Lobby extends Component {
         this._ensureCategoryBar();
         // 分类条自己会把索引钉到 0；搜索框要压在它上面，这里再抢一次
         if (this._searchBar?.isValid) this._searchBar.setSiblingIndex(0);
-        if (this.allGamesGrid) {
-            this.allGamesGrid.setup(this._filteredGames(), this.onGameClick.bind(this));
-        }
+        this._refreshAllGames();
 
         // 格子只刷新了自己的 Layout，外层分区与 content 还是旧尺寸
         this.updateLayouts();
@@ -270,7 +350,13 @@ export class Lobby extends Component {
         // 只解绑缓存到的引用；不碰 @property(Node)（红线 4）
         if (this._searchBox && this._searchBox.isValid) {
             this._searchBox.node.off(EditBox.EventType.TEXT_CHANGED, this.onSearchChanged, this);
+            this._searchBox.node.off(EditBox.EventType.EDITING_DID_BEGAN, this.onSearchEditingBegan, this);
         }
+        if (this._searchBoxNode && this._searchBoxNode.isValid) {
+            this._searchBoxNode.off(Node.EventType.TOUCH_END, this.onSearchBoxTouch, this);
+        }
+        this._searchBoxNode = null;
+        this._emptyHint = null;
     }
 
     onGameClick(gameId: string) {
@@ -295,5 +381,8 @@ function createLabelNode(parent: Node, name: string, colorHex: string): Label {
     label.color = toColor(colorHex);
     label.horizontalAlign = HorizontalTextAlignment.LEFT;
     label.verticalAlign = VerticalTextAlignment.CENTER;
+    // 固定成输入框大小（EditBox 会再设一次 contentSize），让垂直居中真正生效；
+    // 默认 NONE 会按文字尺寸收缩节点，配合 (0,1) 锚点又贴回框顶
+    label.overflow = Label.Overflow.CLAMP;
     return label;
 }
