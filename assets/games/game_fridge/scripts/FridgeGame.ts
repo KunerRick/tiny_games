@@ -18,7 +18,7 @@ import {
 import { FridgeWorld } from './FridgeCore';
 import type { FridgeInput } from './FridgeCore';
 import { showTutorialOnce } from '../../../common/ui/GameUIKit';
-import { FIXED_DT, FIELD_H, FIELD_W, ITEM_BY_ID, UNLOCK_BY_ID, dailyDateKey, evaluateUnlocks } from './FridgeConfig';
+import { FIXED_DT, FIELD_H, FIELD_W, ITEM_BY_ID, UNLOCK_BY_ID, dailyDateKey, dailySeed, evaluateUnlocks } from './FridgeConfig';
 import type { CoreEvent } from './FridgeConfig';
 import { discardRun, loadMeta, loadRun, saveMeta, saveRun } from './FridgeDungeon';
 import type { FridgeSave } from './FridgeDungeon';
@@ -192,8 +192,14 @@ export class FridgeGame extends Component {
 
     /** 开新局（菜单选好模式 / 角色 / 起始层） */
     startNewRun(opts: MenuStartOptions): void {
+        // 开新局会覆盖旧档：先记下旧档是什么局，再决定提示哪一句（N25 / N35）
+        const oldSave = loadRun();
         discardRun();
-        const seed = this.seed || (Date.now() % 2147483647);
+        // 每日挑战必须用日期派生的固定种子（菜单承诺「固定种子 + 固定角色」）；
+        // 以前这里无条件用 Date.now()，重开一次就能换一张地牢。
+        const seed = this.seed || (opts.mode === 'daily'
+            ? dailySeed(dailyDateKey(new Date()))
+            : Date.now() % 2147483647);
         const core = FridgeWorld.newRun(seed, opts.charId, {
             mode: opts.mode,
             startFloor: opts.startFloor,
@@ -202,6 +208,11 @@ export class FridgeGame extends Component {
         });
         this._lastOpts = opts;
         this._beginCore(core);
+        if (oldSave && opts.mode === 'daily') {
+            this._hud?.showToast(oldSave.mode === 'daily'
+                ? '已重新开始今日挑战（上一局进度作废）'
+                : '普通局进度已丢弃，开始今日挑战');
+        }
         // 首次进入：浮层说明左右半屏的分工（菜单里没有图解）
         showTutorialOnce(this.node, 'fridge', '左半屏拖动移动 · 右半屏拖动瞄准射击');
     }
@@ -292,7 +303,8 @@ export class FridgeGame extends Component {
         }
 
         // 条件解锁必须在统计累加之前判定（它自己会把本局 summary 一起算进去）
-        const newUnlocks = evaluateUnlocks(meta, summary);
+        // 只认解锁树里真实存在的节点，避免把内部 id 写进 meta / 结算面板
+        const newUnlocks = evaluateUnlocks(meta, summary).filter((id) => !!UNLOCK_BY_ID[id]);
         for (const id of newUnlocks) {
             if (meta.unlocks.indexOf(id) < 0) meta.unlocks.push(id);
         }
@@ -495,8 +507,15 @@ export class FridgeGame extends Component {
         this._handleEvents(core.drainEvents());
         if (!used) {
             const cost = core.activeCost();
-            if (core.phase === 'playing' && !core.pendingTreasure && core.player.charges < cost) {
-                this._hud?.showToast(`充能不足（${core.player.charges}/${cost}）`);
+            const panelOpen = !!core.pendingTreasure || !!core.pendingShop || !!core.pendingAltar || !!core.pendingCore;
+            if (core.phase === 'playing' && !panelOpen) {
+                if (core.player.charges < cost) {
+                    this._hud?.showToast(`充能不足（${core.player.charges}/${cost}）`);
+                } else if (core.charId === 'yogurt') {
+                    this._hud?.showToast('没有可引爆的中毒');
+                } else if (core.charId === 'magneto') {
+                    this._hud?.showToast('没有可吸收的敌弹');
+                }
             }
         }
         this._hud?.refresh(core.snapshot());
@@ -531,12 +550,14 @@ export class FridgeGame extends Component {
             sfx.play('coin');
             saveRun(core);
         } else {
-            const shop = core.pendingShop;
-            if (shop) {
-                const sold = shop.sold[index];
-                this._hud?.showToast(sold ? '这个已经卖掉了' : '金币不够');
-                sfx.play('click');
-            }
+            // 灰掉的卡片也能点：按真实原因给文案（满血买心曾被错报成「金币不够」，N34）
+            const reason = core.shopBlockReason(index);
+            const why = reason === 'sold' ? '这个已经卖掉了'
+                : reason === 'fullhp' ? '生命已满，买不了半颗心'
+                : reason === 'coins' ? '金币不够'
+                : '';
+            if (why) this._hud?.showToast(why);
+            sfx.play('click');
         }
         this._hud?.refresh(core.snapshot());
     }
@@ -664,7 +685,12 @@ export class FridgeGame extends Component {
         if (core.rerollTreasure()) {
             saveRun(core);
             sfx.play('click');
+            return;
         }
+        // 静默失败会让玩家以为按钮坏了：按原因给一句提示
+        if (!core.pendingTreasure) return;
+        if (core.pendingTreasure.rerolled) this._hud?.showToast('每层只能换一批');
+        else this._hud?.showToast('金币不够');
     }
 
     // ==================== 运行时节点 ====================

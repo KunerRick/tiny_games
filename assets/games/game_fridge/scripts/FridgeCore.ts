@@ -219,7 +219,9 @@ export class FridgeWorld {
         w.enemies = [];
         w.bullets = [];
         w.pickups = [];
-        w.time = 0;
+        // 击杀 / 用时随档恢复：否则中途续玩等于把已得分（结算分数）抹掉
+        w.time = Math.max(0, Number(save.time) || 0);
+        w.kills = Math.max(0, Math.floor(Number(save.kills) || 0));
         w.wave = 0;
         const room = w.rooms()[w.roomId];
         room.visited = true;
@@ -238,13 +240,30 @@ export class FridgeWorld {
         if (room.kind === 'altar' && save.altar && !save.altar.used) {
             w.pendingAltar = { itemId: save.altar.itemId, used: false };
         }
-        // 核心三选一 / 传送口：Boss 房已清但还没选核心 → 冻结在三选一；选完 → 楼梯已开
+        // 核心三选一 / 传送口：
+        // - 存档里有待选核心 → 冻结在三选一；
+        // - Boss 房已清且核心已选（stairsOpen）→ 补出传送口；
+        // - Boss 房已清但核心没选（炸弹炸墙曾把 cleared 提前置 true 的坏档）→ 补一次三选一，
+        //   第 4 层则直接判胜，避免最终 Boss 打完仍然卡在 playing。
+        //   旧档没有 stairsOpen 字段，按「已选核心」处理，保持原行为。
         if (Array.isArray(save.pendingCore) && save.pendingCore.length === 3) {
             w.pendingCore = save.pendingCore.slice();
             room.cleared = true;
         }
-        if (room.kind === 'boss' && room.cleared && !w.pendingCore && w.floor < 4) {
-            w.stairs = { x: 0, y: 120 };
+        const bossId = w.map.bossId;
+        let bossRoom: RoomNode | null = null;
+        for (const r of w.map.rooms) if (r.id === bossId) { bossRoom = r; break; }
+        if (w.floor >= 4 && bossRoom && bossRoom.cleared) {
+            // 第 4 层 Boss 房已清 = 最终 Boss 已死（正常情况下当场就该 won）
+            w.phase = 'won';
+            w._events.push({ type: 'won' });
+        } else if (room.kind === 'boss' && room.cleared && !w.pendingCore) {
+            if (save.stairsOpen === false) {
+                w.pendingCore = w._rollCores();
+                w._events.push({ type: 'core', roomId: room.id, options: w.pendingCore.slice() });
+            } else {
+                w.stairs = { x: 0, y: 120 };
+            }
         }
         w.roomCleared = room.cleared;
         w._placeAtDoor(w.enteringFrom);
@@ -289,6 +308,9 @@ export class FridgeWorld {
         this.bombsUsed = 0;
         this.player.deathWardUsed = false; // 保鲜膜：每层重置
         this._patchShots = 3;
+        // 角色开局道具（规格 §10.1）：以前 startItem 只是配置，从未真正发放，
+        // 导致六个角色开局完全一样、酸奶的「发酵」整局没有中毒来源
+        if (this.char.startItem && ITEM_BY_ID[this.char.startItem]) this.addItem(this.char.startItem);
         this._applyRoomEntryEffects(false);
         this._syncSynergies(false);
     }
@@ -379,7 +401,11 @@ export class FridgeWorld {
     isRoomLocked(): boolean {
         const room = this.currentRoom();
         if (!room) return false;
-        return this._isCombatRoom(room) && !room.cleared;
+        if (!this._isCombatRoom(room)) return false;
+        // 只要还有活着的敌人就锁门：不能只信 cleared 标记（炸弹炸秘密墙曾把它提前置 true，
+        // 玩家于是能带着 Boss 走出去，回来时房间不再刷怪）
+        for (const e of this.enemies) if (e.hp > 0) return true;
+        return !room.cleared;
     }
 
     private _isCombatRoom(room: RoomNode): boolean {
@@ -555,17 +581,28 @@ export class FridgeWorld {
     // ---------- 商店（规格 §8.3） ----------
 
     /**
+     * 第 index 个货位为什么买不了（'' = 能买）。
+     * HUD 灰显与 FridgeGame 的 toast 共用这一套判定，避免「满血」被错报成「金币不够」（N34）。
+     * 满血优先于缺钱：满血时无论金币够不够，真实原因都是生命已满。
+     */
+    shopBlockReason(index: number): '' | 'sold' | 'fullhp' | 'coins' | 'none' {
+        const shop = this.pendingShop;
+        if (!shop || !Number.isInteger(index) || index < 0 || index >= shop.offers.length) return 'none';
+        if (shop.sold[index]) return 'sold';
+        const offer = shop.offers[index];
+        if (offer.kind === 'heart' && this.player.hp >= this.player.maxHp) return 'fullhp';
+        if (this.coins < offer.price) return 'coins';
+        return '';
+    }
+
+    /**
      * 买第 index 个货位。成功返回成交的货位（FridgeGame 用来弹提示），失败返回 null。
-     * 买不起 / 已售出 / 面板没开都不扣币。
+     * 买不起 / 已售出 / 满血买心 / 面板没开都不扣币。
      */
     buyShop(index: number): ShopOffer | null {
         const shop = this.pendingShop;
-        if (!shop || !Number.isInteger(index) || index < 0 || index >= shop.offers.length) return null;
-        if (shop.sold[index]) return null;
+        if (!shop || this.shopBlockReason(index) !== '') return null;
         const offer = shop.offers[index];
-        if (this.coins < offer.price) return null;
-        // 半心满血时不允许白买：直接视为失败（HUD 会灰显）
-        if (offer.kind === 'heart' && this.player.hp >= this.player.maxHp) return null;
 
         this.coins -= offer.price;
         this.shopSpent += offer.price;
@@ -663,7 +700,9 @@ export class FridgeWorld {
             if (Math.hypot(x - wx, y - wy) > BOMB_RADIUS) continue;
             if (room.doors.indexOf(dir) < 0) room.doors.push(dir);
             secret.visited = true;
-            room.cleared = true;
+            // 注意：这里不能标记 room.cleared。炸弹只是开了一堵墙，房间里的敌人还活着；
+            // 提前置 cleared 会跳过 _clearRoom（核心三选一 / 传送口 / 充能 / 掉落 / 通关判定全丢），
+            // 还会解锁房门让玩家带着 Boss 离开。清房只能由 _clearRoom 负责。
             opened = true;
             this.secretOpened++;
             this.magnets += MAGNET_PER_SECRET;
@@ -1047,6 +1086,9 @@ export class FridgeWorld {
             activeItem: this.activeItem,
             cores: this.cores.slice(),
             synergies: this.synergiesSeen.slice(),
+            kills: this.kills,
+            time: this.time,
+            stairsOpen: !!this.stairs,
             pendingCore: this.pendingCore ? this.pendingCore.slice() : null,
             magnets: this.magnets,
             secretOpened: this.secretOpened,
@@ -1388,14 +1430,22 @@ export class FridgeWorld {
                 }
             }
         } else if (this.charId === 'yogurt') {
+            // 没有中毒敌人时整条技能空转：不扣充能（以前照样扣满 5）
+            let any = false;
             for (const e of this.enemies) {
                 if (e.poisonT > 0) {
+                    any = true;
                     this._damageEnemy(e, e.poisonDps * e.poisonT);
                     e.poisonT = 0;
                     e.poisonDps = 0;
                 }
             }
+            if (!any) return false;
         } else if (this.charId === 'magneto') {
+            // 场上没有敌弹时同样不扣充能（以前白扔 6 点）
+            let enemyBullets = 0;
+            for (const b of this.bullets) if (b.owner === 'enemy') enemyBullets++;
+            if (enemyBullets === 0) return false;
             let gained = 0;
             const keep: Bullet[] = [];
             for (const b of this.bullets) {

@@ -66,8 +66,8 @@ export class FridgeMenu extends Component {
     private _btnCodex: Node | null = null;
     private _btnUnlock: Node | null = null;
     private _btnChars: Node | null = null;
-    private _mainTip: Label | null = null;
-
+    /** 所有视图共用的提示行（购买成功 / 买不起 / 每日已挑战） */
+    private _tipLabel: Label | null = null;
     /** 角色卡片 */
     private _charCards: Node[] = [];
     private _charNameLabels: Label[] = [];
@@ -107,6 +107,8 @@ export class FridgeMenu extends Component {
         this._buildChars();
         this._buildCodex();
         this._buildUnlocks();
+        // 提示行挂在 MenuRoot 上（不是 MainView）：角色 / 解锁树里的购买反馈也能看见
+        this._buildSharedTip();
         this._switchView('main');
         this._root!.active = false;
         // 整屏点一下给个「咔」：子按钮的 TOUCH_END 会冒泡到根节点，不必逐个绑（M5）
@@ -143,7 +145,7 @@ export class FridgeMenu extends Component {
         this._btnCodex = null;
         this._btnUnlock = null;
         this._btnChars = null;
-        this._mainTip = null;
+        this._tipLabel = null;
         this._charCards = [];
         this._charNameLabels = [];
         this._charInfoLabels = [];
@@ -224,6 +226,7 @@ export class FridgeMenu extends Component {
         else if (this._view === 'chars') this._renderChars(meta);
         else if (this._view === 'codex') this._renderCodex(meta);
         else this._renderUnlocks(meta);
+        if (this._tipLabel) this._tipLabel.string = this._tip;
     }
 
     private _renderMain(meta: FridgeSave): void {
@@ -256,7 +259,6 @@ export class FridgeMenu extends Component {
         this._paintButton(this._btnHeat, '热度模式', heatUnlocked ? '热度模式（3 诅咒 · 贴 +50%）' : '热度模式（未解锁）', heatUnlocked);
         const char = CHAR_BY_ID[this._charId];
         this._paintButton(this._btnStart, '开始', `开始冒险 · ${char ? char.name : '布丁'}`, true);
-        if (this._mainTip) this._mainTip.string = this._tip;
     }
 
     private _renderChars(meta: FridgeSave): void {
@@ -364,6 +366,18 @@ export class FridgeMenu extends Component {
         this._sub.color = this._cDim;
     }
 
+    /**
+     * 所有视图共享的提示行：购买成功 / 买不起 / 每日已挑战都写这里。
+     * 以前 MenuTip 只挂在 MainView 下，角色页和解锁树里 setTip() 全部不可见。
+     * 位置在解锁树最后一行（y≈-300）与返回按钮（-440）之间，其它视图该处也是空的。
+     */
+    private _buildSharedTip(): void {
+        const root = this._root;
+        if (!root) return;
+        this._tipLabel = this._makeLabel(root, 'MenuTip', 0, -380, 18, Label.HorizontalAlign.CENTER, 660);
+        this._tipLabel.color = hex('#FFD65C');
+    }
+
     private _buildMain(): void {
         const root = this._root;
         if (!root) return;
@@ -388,9 +402,6 @@ export class FridgeMenu extends Component {
 
         this._stats = this._makeLabel(view, 'MenuStats', 0, -330, 16, Label.HorizontalAlign.CENTER, 660);
         this._stats.color = this._cDim;
-
-        this._mainTip = this._makeLabel(view, 'MenuTip', 0, -380, 18, Label.HorizontalAlign.CENTER, 660);
-        this._mainTip.color = hex('#FFD65C');
 
         this._btnContinue.on(Node.EventType.TOUCH_END, this.onContinueTouch, this);
         this._btnStart.on(Node.EventType.TOUCH_END, this.onStartTouch, this);

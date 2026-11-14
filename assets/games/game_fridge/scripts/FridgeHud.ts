@@ -91,6 +91,8 @@ export class FridgeHud extends Component {
     private _treasureNameLabels: Label[] = [];
     private _treasureDescLabels: Label[] = [];
     private _treasureReroll: Node | null = null;
+    private _treasureRerollLabel: Label | null = null;
+    private _treasureRerollBg: Graphics | null = null;
     private _treasureKey = '';
 
     /** 炸弹按钮 */
@@ -376,7 +378,12 @@ export class FridgeHud extends Component {
         const panelOpen = treasureOpen || shopOpen || altarOpen || coreOpen;
         if (this._items) {
             if (snap.items.length === 0) {
-                this._items.string = map ? '道具：无（清房后回中心拾取）' : '道具：无（走到中间的辣椒酱上拾取）';
+                // 只有房间里确实有未拾取的道具时才提示去中心；
+                // 房间已清空还写「清房后回中心拾取」会让人原地找东西
+                const hasItemPickup = snap.pickups.some((p) => p.kind === 'item');
+                if (!map) this._items.string = '道具：无（走到中间的辣椒酱上拾取）';
+                else if (hasItemPickup) this._items.string = '道具：无（走到中间的掉落物上拾取）';
+                else this._items.string = '道具：无';
             } else {
                 const names: string[] = [];
                 for (const id of snap.items) {
@@ -910,6 +917,8 @@ export class FridgeHud extends Component {
         reroll.on(Node.EventType.TOUCH_END, this.onTreasureRerollTouch, this);
         node.addChild(reroll);
         this._treasureReroll = reroll;
+        this._treasureRerollLabel = rl;
+        this._treasureRerollBg = rg;
 
         const tip = this._makeLabel('TreasureTip', 0, -180, 16, Label.HorizontalAlign.CENTER, 600);
         tip.string = '点卡片领取 · 领完从门离开';
@@ -929,9 +938,25 @@ export class FridgeHud extends Component {
             this._treasureKey = '';
             return;
         }
-        const key = offer.offered.join(',') + (offer.rerolled ? '#r' : '');
+        const key = offer.offered.join(',') + (offer.rerolled ? '#r' : '')
+            + (snap.coins >= REROLL_COST ? '#c' : '#n');
         if (key === this._treasureKey) return;
         this._treasureKey = key;
+        // 换一批按钮：用过 / 买不起都要看得出来（以前文案永远不变，第二次点击静默无响应）
+        const canReroll = !offer.rerolled && snap.coins >= REROLL_COST;
+        if (this._treasureRerollLabel) {
+            this._treasureRerollLabel.string = offer.rerolled
+                ? '本层已换过'
+                : `换一批（${REROLL_COST} 金币）`;
+            this._treasureRerollLabel.color = canReroll ? hex(PAL.ink) : hex(COLOR.TEXT_SECONDARY);
+        }
+        const bg = this._treasureRerollBg;
+        if (bg) {
+            bg.clear();
+            bg.fillColor = canReroll ? hex(PAL.accent, 235) : hex(PAL.card, 235);
+            bg.roundRect(-150, -32, 300, 64, 32);
+            bg.fill();
+        }
         for (let i = 0; i < 3; i++) {
             const id = offer.offered[i];
             const def = id ? ITEM_BY_ID[id] : null;
@@ -940,7 +965,6 @@ export class FridgeHud extends Component {
             if (nl) nl.string = def ? def.name : '—';
             if (dl) dl.string = def ? def.desc : '';
         }
-        void snap.coins;
     }
 
     private onTreasureCardTouch(ev: EventTouch): void {

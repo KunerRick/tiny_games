@@ -488,8 +488,9 @@ function normalRoomCount(map) {
     check('80. 三个候选互不相同', !!offer && new Set(offer.offered).size === 3);
     const invalid = w.takeTreasure(9);
     check('81. 越界索引被拒', invalid === false && !!w.pendingTreasure);
+    const items0 = w.items.length;
     const ok = w.takeTreasure(1);
-    check('82. 选中的道具进背包并关闭面板', ok === true && w.pendingTreasure === null && w.items.length === 1, w.items.join(','));
+    check('82. 选中的道具进背包并关闭面板', ok === true && w.pendingTreasure === null && w.items.length === items0 + 1, w.items.join(','));
 
     // 重掷：有金币 → 扣 2 币并换一批；没金币 → 拒绝
     const w2 = C.FridgeWorld.newRun(2024, 'pudding');
@@ -1452,8 +1453,154 @@ function roomOf(w, kind) {
     check('255. 未来版本 meta 回落默认值', m2.schemaVersion === 3 && m2.magnets === 0);
 }
 
-// ==================== 汇总 ====================
+// ==================== 25. 第七 / 八轮试玩回归（N25 / N30–N33） ====================
 
+/** 把玩家放到 Boss 房通往秘密房那面墙前 100px，并放一颗炸弹 */
+function bombSecretWall(w) {
+    const boss = roomOf(w, 'boss');
+    const secret = roomOf(w, 'secret');
+    if (!boss || !secret) return false;
+    w._changeRoom(boss.id, null);
+    const dx = secret.x - boss.x;
+    const dy = secret.y - boss.y;
+    if (Math.abs(dx) + Math.abs(dy) !== 1) return false;
+    // 离墙 100px：在炸弹半径（140）内，又不会触发门口的自动进门判定
+    if (dx === 1) { w.player.x = F.ARENA_MAX_X - 100; w.player.y = 0; }
+    else if (dx === -1) { w.player.x = F.ARENA_MIN_X + 100; w.player.y = 0; }
+    else if (dy === 1) { w.player.x = 0; w.player.y = F.ARENA_MAX_Y - 100; }
+    else { w.player.x = 0; w.player.y = F.ARENA_MIN_Y + 100; }
+    w.player.bombs = 1;
+    return w.useBomb();
+}
+
+{
+    // N32：六个角色开局都带自己的 startItem
+    let startOk = true;
+    const startDetail = [];
+    for (const c of F.CHARACTERS) {
+        const w = C.FridgeWorld.newRun(7301, c.id);
+        if (w.items.indexOf(c.startItem) < 0) {
+            startOk = false;
+            startDetail.push(`${c.id}:${w.items.join(',')}`);
+        }
+    }
+    check('256. 六个角色开局携带 startItem', startOk, startDetail.join(' | '));
+
+    // N31：第 1 层 Boss 房炸秘密墙不再提前清房
+    const w = C.FridgeWorld.newRun(1, 'pudding');
+    const placed = bombSecretWall(w);
+    w.simulate(F.BOMB_FUSE + 0.1);
+    const room = w.currentRoom();
+    check('257. seed 1 第 1 层秘密房与 Boss 房相邻（前置条件）', placed === true);
+    check('258. 炸墙后 Boss 房仍未清空', !!room && room.kind === 'boss' && room.cleared === false && w.enemies.length > 0,
+        room ? `${room.kind}/${room.cleared}/${w.enemies.length}` : 'no room');
+    check('259. 炸墙后房门仍锁着（不能带着 Boss 离开）', w.isRoomLocked() === true);
+    for (const e of w.enemies) e.hp = 0;
+    w.step(F.FIXED_DT, INPUT());
+    check('260. 炸过墙的 Boss 房清空后仍给核心三选一',
+        Array.isArray(w.pendingCore) && w.pendingCore.length === 3 && w.stairs === null);
+    check('261. 选完核心后出现传送口', w.chooseCore(0) === true && !!w.stairs);
+
+    // N31：第 4 层炸墙后仍能击杀最终 Boss 并通关
+    const w4 = C.FridgeWorld.newRun(22, 'pudding', { startFloor: 4 });
+    const placed4 = bombSecretWall(w4);
+    w4.simulate(F.BOMB_FUSE + 0.1);
+    const room4 = w4.currentRoom();
+    check('262. seed 22 第 4 层秘密房与最终 Boss 房相邻（前置条件）', placed4 === true);
+    check('263. 第 4 层炸墙后 Boss 房仍未清空', !!room4 && room4.cleared === false && w4.enemies.length > 0);
+    for (const e of w4.enemies) e.hp = 0;
+    w4.step(F.FIXED_DT, INPUT());
+    check('264. 第 4 层炸过墙仍能击杀最终 Boss 并通关', w4.phase === 'won', w4.phase);
+}
+
+{
+    // N31 兜底：旧坏档（Boss 房已清但核心/楼梯都没写）续玩要能继续
+    const w = C.FridgeWorld.newRun(1, 'pudding');
+    w._changeRoom(w.map.bossId, null);
+    w.currentRoom().cleared = true;
+    w.enemies = [];
+    w.pendingCore = null;
+    w.stairs = null;
+    const store = D.createMemoryStore();
+    D.saveRun(w, store);
+    const loaded = C.FridgeWorld.fromSave(D.loadRun(store));
+    check('265. 第 1 层坏档续玩补回核心三选一',
+        Array.isArray(loaded.pendingCore) && loaded.pendingCore.length === 3 && loaded.stairs === null);
+    D.discardRun(store);
+
+    const w4 = C.FridgeWorld.newRun(22, 'pudding', { startFloor: 4 });
+    w4._changeRoom(w4.map.bossId, null);
+    w4.currentRoom().cleared = true;
+    w4.enemies = [];
+    w4.pendingCore = null;
+    w4.stairs = null;
+    const s4 = D.createMemoryStore();
+    D.saveRun(w4, s4);
+    const l4 = C.FridgeWorld.fromSave(D.loadRun(s4));
+    check('266. 第 4 层坏档续玩直接判胜', l4.phase === 'won', l4.phase);
+    D.discardRun(s4);
+}
+
+{
+    // N30：击杀 / 用时写进存档
+    const w = C.FridgeWorld.newRun(7501, 'pudding');
+    w.kills = 7;
+    w.time = 42.5;
+    const store = D.createMemoryStore();
+    D.saveRun(w, store);
+    const w2 = C.FridgeWorld.fromSave(D.loadRun(store));
+    check('267. 续玩保留击杀数与用时', w2.kills === 7 && near(w2.time, 42.5), `${w2.kills}/${w2.time}`);
+    D.discardRun(store);
+}
+
+{
+    // N33：主动技能没有作用对象时不扣充能
+    const wy = C.FridgeWorld.newRun(7601, 'yogurt');
+    wy.player.charges = 5;
+    wy.spawnEnemy('moldball', 0, 120);
+    const noPoison = wy.useActive();
+    check('268. 酸奶没有中毒目标时不扣充能', noPoison === false && wy.player.charges === 5,
+        `${noPoison}/${wy.player.charges}`);
+    wy.enemies[0].poisonT = 2;
+    wy.enemies[0].poisonDps = 3;
+    const used = wy.useActive();
+    check('269. 酸奶有中毒目标时正常引爆并扣充能', used === true && wy.player.charges === 0,
+        `${used}/${wy.player.charges}`);
+
+    const wm = C.FridgeWorld.newRun(7602, 'magneto');
+    wm.bullets = [];
+    wm.player.charges = 6;
+    const noBullet = wm.useActive();
+    check('270. 磁铁人没有敌弹时不扣充能', noBullet === false && wm.player.charges === 6,
+        `${noBullet}/${wm.player.charges}`);
+}
+
+{
+    // N34：商店买不了的「原因」要精确（满血买心曾被错报成「金币不够」）
+    const ws = C.FridgeWorld.newRun(7701, 'pudding');
+    ws.coins = 50;
+    ws.player.hp = ws.player.maxHp;
+    ws.pendingShop = {
+        offers: [{ kind: 'heart', price: 4 }, { kind: 'bomb', price: 3 }, { kind: 'heart', price: 4 }],
+        sold: [false, false, true],
+    };
+    check('271. 满血时半心货位报 fullhp', ws.shopBlockReason(0) === 'fullhp', ws.shopBlockReason(0));
+    check('272. 满血买心不扣币也不置售出',
+        ws.buyShop(0) === null && ws.coins === 50 && ws.pendingShop.sold[0] === false,
+        `${ws.coins}/${ws.pendingShop.sold[0]}`);
+    check('273. 买得起的货位没有阻塞原因', ws.shopBlockReason(1) === '', ws.shopBlockReason(1));
+    check('274. 已售货位报 sold', ws.shopBlockReason(2) === 'sold', ws.shopBlockReason(2));
+    ws.coins = 0;
+    check('275. 缺钱报 coins', ws.shopBlockReason(1) === 'coins', ws.shopBlockReason(1));
+    ws.coins = 3;
+    const bought = ws.buyShop(1);
+    check('276. 正常购买仍然成功',
+        !!bought && ws.coins === 0 && ws.pendingShop.sold[1] === true, `${ws.coins}/${ws.pendingShop.sold[1]}`);
+    ws.closeShop();
+    check('277. 面板关闭时报 none', ws.shopBlockReason(1) === 'none', ws.shopBlockReason(1));
+}
+
+// ==================== 汇总 ====================
 if (failed === 0) {
     console.log(`FRIDGE_CORE_OK  ${passed}/${passed} 项通过（M1 + M2 + M3 + M4 覆盖）`);
     process.exit(0);

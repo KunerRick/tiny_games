@@ -761,7 +761,9 @@ export function evaluateUnlocks(
     if (run.kills >= 200 || meta.stats.kills + run.kills >= 1000) add('char_icecube'); // 200 击杀
     if (spent >= 300) add('char_soda');               // 商店累计消费 300
     if (secrets >= 5) add('char_magneto');            // 累计打开 5 个秘密房
-    if (meta.seenItems.length >= 30) add('collector'); // 图鉴集齐 30（占位：收藏家挑战）
+    // 图鉴集齐 30：解锁树里还没有 collector 节点（仅占位），写进 meta 只会让结算
+    // 打出内部 id、并在 unlocks 里留下界面看不到的项；节点补齐前不写入。
+    if (meta.seenItems.length >= 30 && UNLOCK_BY_ID.collector) add('collector');
     return out;
 }
 

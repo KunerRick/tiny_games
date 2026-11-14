@@ -365,6 +365,12 @@ export interface RunSave {
     cores: string[];
     /** 本局已点亮的协同 id（M3） */
     synergies?: string[];
+    /** 本局击杀数（续玩不清零，结算分数用） */
+    kills?: number;
+    /** 本局用时秒数（续玩不清零，结算分数用） */
+    time?: number;
+    /** 传送口是否已开：区分「Boss 已清但核心还没选」与「选完核心、楼梯已开」 */
+    stairsOpen?: boolean;
     /** Boss 核心三选一待选（M4，非 null 时续玩仍冻结在三选一） */
     pendingCore?: string[] | null;
     /** 本局冰箱贴 / 秘密房 / 商店消费 / 炸弹（M4 结算用） */
@@ -590,6 +596,9 @@ export function sanitizeRun(raw: unknown): RunSave | null {
 
     const enteringFrom = isDir(o.enteringFrom) ? o.enteringFrom : null;
     const rngState = Number(o.rngState);
+    const timeRaw = Number(o.time);
+    // 旧档没有 stairsOpen：保持 undefined，续玩时按「核心已选」的旧行为处理
+    const stairsOpen = typeof o.stairsOpen === 'boolean' ? o.stairsOpen : undefined;
     return {
         schemaVersion: 3,
         runId: typeof o.runId === 'string' && o.runId ? o.runId : `run-${seed}`,
@@ -612,6 +621,9 @@ export function sanitizeRun(raw: unknown): RunSave | null {
         activeItem,
         cores,
         synergies,
+        kills: counter(o.kills),
+        time: Number.isFinite(timeRaw) && timeRaw > 0 ? timeRaw : 0,
+        stairsOpen,
         pendingCore,
         magnets: counter(o.magnets),
         secretOpened: counter(o.secretOpened),
