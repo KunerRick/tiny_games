@@ -15,12 +15,21 @@ import {
     _decorator, Component, EventKeyboard, Game, game, Input, input, KeyCode, Node, UITransform,
 } from 'cc';
 import { SceneManager } from '../../../common/managers/SceneManager';
-import { showTutorialOnce } from '../../../common/ui/GameUIKit';
-import { FIXED_DT, MithrilWorld, PLAYER_START_X, PLAYER_START_Y, makeProfile } from './MithrilCore';
+import { StorageManager } from '../../../common/managers/StorageManager';
+import { showTutorialOnce, toast } from '../../../common/ui/GameUIKit';
+import {
+    FIXED_DT, MithrilWorld, PLAYER_START_X, PLAYER_START_Y, mulberry32, profileFromSave,
+} from './MithrilCore';
 import type { MithrilInput, MithrilSnapshot } from './MithrilCore';
-import { defaultSave } from './MithrilProgress';
+import { addToInventory, bossLoot } from './MithrilLoot';
+import {
+    SAVE_STORAGE_KEY, parseSave, serializeSave,
+} from './MithrilProgress';
+import type { MithrilSave } from './MithrilProgress';
+import type { EquipItem } from './MithrilConfig';
 import { MithrilHud } from './MithrilHud';
 import { MithrilJoystick } from './MithrilJoystick';
+import { MithrilMenu } from './MithrilMenu';
 import { MithrilRenderer } from './MithrilRenderer';
 
 const { ccclass, property } = _decorator;
@@ -47,22 +56,37 @@ export class MithrilGame extends Component {
     _core: MithrilWorld | null = null;
     _joystick: MithrilJoystick | null = null;
     _hudRef: MithrilHud | null = null;
+    _menuRef: MithrilMenu | null = null;
+    _save: MithrilSave | null = null;
     _lastSnapshot: MithrilSnapshot | null = null;
 
     private _acc = 0;
     private _hudTimer = 0;
     private _keys = new Set<KeyCode>();
     private _input: MithrilInput = { moveX: 0, moveY: 0, aimX: 0, aimY: 0 };
+    private _runSeed = 0;
+    /** 本局是否首通（决定 BOSS 掉落走固定紫装还是随机保底紫） */
+    private _firstClear = true;
+    /** 结算只处理一次（update 每帧都会看到非 playing） */
+    private _settled = false;
 
     onLoad(): void {
+        this._save = parseSave(StorageManager.instance.getItem('mithril', SAVE_STORAGE_KEY));
         this._ensureField();
         this._ensureControls();
         this._ensureHud();
+        this._ensureMenu();
 
         const hud = this._hudRef;
         if (hud) {
             hud.onExit = () => this.exitToLobby();
             hud.onRestart = () => this.startNewRun();
+            hud.onOpenBag = () => this.openMenu();
+        }
+        const menu = this._menuRef;
+        if (menu) {
+            menu.onClose = () => this.onMenuClosed();
+            menu.onChanged = () => this.onEquipmentChanged();
         }
 
         input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
@@ -80,6 +104,8 @@ export class MithrilGame extends Component {
         this._core = null;
         this._joystick = null;
         this._hudRef = null;
+        this._menuRef = null;
+        this._save = null;
         this._lastSnapshot = null;
         this._keys.clear();
     }
@@ -87,6 +113,8 @@ export class MithrilGame extends Component {
     update(dt: number): void {
         const core = this._core;
         if (!core) return;
+        // 装备面板打开时整局冻结：不推进核心、不刷 HUD（面板自己管显示）
+        if (this._menuRef && this._menuRef.isOpen()) return;
 
         // 切后台回来 / 长卡顿时 dt 可能是 NaN 或巨大值：
         // NaN 会永久污染 _acc（`_acc >= FIXED_DT` 恒假且再也不会回正），巨大值会让蓄积步数无限涨。
@@ -109,6 +137,8 @@ export class MithrilGame extends Component {
         const events = core.drainEvents();
         const snap = core.snapshot();
         this._lastSnapshot = snap;
+        // 结算必须在 HUD 刷结果面板之前：掉落行要随结果面板一起出现
+        if (snap.phase !== 'playing' && !this._settled) this._settle(snap.phase === 'won');
         if (this.renderer) {
             this.renderer.onEvents(events);
             this.renderer.render(snap, dt);
@@ -127,28 +157,105 @@ export class MithrilGame extends Component {
     // ==================== 生命周期 ====================
 
     private startNewRun(): void {
-        const save = defaultSave('warrior');
-        save.level = SLICE_LEVEL;
-        // M1 还没有装备界面，按「装等 = 等级」出战，与自检脚本的平衡闸门
-        // `makeProfile('warrior', 5, 5)` 完全一致。若走 profileFromSave，
-        // 空存档的平均装等是 1，副属性全为 0，对 BOSS 只有约 4 DPS。
-        const profile = makeProfile(save.classId, save.level, SLICE_LEVEL);
+        const save = this._save;
+        if (!save) return;
+        // 切片期等级下限：存档等级不足 5 时按 5 出战（M1 的平衡基线）
+        if (save.level < SLICE_LEVEL) save.level = SLICE_LEVEL;
+        // 装等由存档逐件求和推导（profileFromSave），地板取 SLICE_LEVEL：
+        // 空档平均装等是 1、副属性全 0，直接按 1 算对 BOSS 只有约 4 DPS。
+        const profile = profileFromSave(save, SLICE_LEVEL);
         const seed = this.seed > 0 ? this.seed : (Date.now() & 0x7fffffff);
         const core = new MithrilWorld(profile, seed);
         core.startDungeon('mine');
         this._core = core;
         this._acc = 0;
         this._hudTimer = 0;
+        this._runSeed = seed;
+        this._firstClear = save.dungeonsCleared.indexOf('mine') < 0;
+        this._settled = false;
         this._input = { moveX: 0, moveY: 0, aimX: 0, aimY: 0 };
         this._keys.clear();
         this._joystick?.release();
         this._hudRef?.resetForNewRun();
+        this._hudRef?.setLootItems([]);
         this.renderer?.resetView();
         // 立刻渲染一帧，避免重开后短暂黑屏
         const snap = core.snapshot();
         this._lastSnapshot = snap;
         this.renderer?.render(snap, 0);
         this._hudRef?.updateHud(snap);
+    }
+
+    /**
+     * 一局结束（胜/负）的结算：只有胜利发装备。
+     * 掉落 rng 与战斗 rng 分开（runSeed 派生），避免结算消耗战斗随机数影响同种子复现。
+     */
+    private _settle(won: boolean): void {
+        this._settled = true;
+        const save = this._save;
+        if (!save || !won) return;
+
+        const rng = mulberry32((this._runSeed ^ 0x5bd1e995) >>> 0);
+        const firstClear = this._firstClear;
+        const item = bossLoot(rng, {
+            classId: save.classId,
+            dungeonId: 'mine',
+            firstClear,
+        });
+        if (!item) return;
+
+        const granted: EquipItem[] = [];
+        if (addToInventory(save, item)) {
+            granted.push(item);
+            // 首通只在奖励真正入包时才消耗：满包折金币那一轮，首通紫装保留到下次
+            if (firstClear) {
+                save.dungeonsCleared.push('mine');
+                this._firstClear = false;
+            }
+        } else {
+            // 背包满：折金币，别让玩家白打一把
+            const gold = 20 + item.ilvl * 2;
+            save.gold = Math.max(0, Math.floor(save.gold || 0) + gold);
+            toast(this.node, `背包已满，掉落折算为 ${gold} 金币（首通奖励已保留）`, 2.6);
+        }
+        this._persist();
+        // HUD 在同一个 update 里随后刷新结果面板，掉落行会一起出现
+        this._hudRef?.setLootItems(granted);
+    }
+
+    private _persist(): void {
+        if (!this._save) return;
+        StorageManager.instance.setItem('mithril', SAVE_STORAGE_KEY, serializeSave(this._save));
+    }
+
+    // ==================== 装备面板 ====================
+
+    private openMenu(): void {
+        const menu = this._menuRef;
+        const save = this._save;
+        if (!menu || !save) return;
+        menu.open(save, SLICE_LEVEL);
+        // 打开面板时清掉输入，避免关面板后还带着按下状态
+        this._joystick?.release();
+        this._keys.clear();
+        this._hudRef?.releaseAllHeld();
+    }
+
+    private closeMenu(): void {
+        this._menuRef?.close();
+        this._acc = 0;
+    }
+
+    private onMenuClosed(): void {
+        this.closeMenu();
+    }
+
+    /**
+     * 装备变化：立刻落盘（防切后台丢档），但**不改当前这一局**的 profile ——
+     * 换装生效点统一在 startNewRun，HUD / 面板上都写明了这一点。
+     */
+    private onEquipmentChanged(): void {
+        this._persist();
     }
 
     private exitToLobby(): void {
@@ -200,6 +307,12 @@ export class MithrilGame extends Component {
     }
 
     private onKeyDown(ev: EventKeyboard): void {
+        // B 键 = 装备面板（桌面调试 / 无鼠标时的入口；手机走结算面板的「装备」按钮）
+        if (ev.keyCode === KeyCode.KEY_B) {
+            if (this._menuRef && this._menuRef.isOpen()) this.closeMenu();
+            else this.openMenu();
+            return;
+        }
         this._keys.add(ev.keyCode);
     }
 
@@ -265,6 +378,20 @@ export class MithrilGame extends Component {
         }
         this._hudRef = root.getComponent(MithrilHud) || root.addComponent(MithrilHud);
         this.hud = this._hudRef;
+    }
+
+    private _ensureMenu(): void {
+        let root = this.node.getChildByName('EquipMenu');
+        if (!root) {
+            root = new Node('EquipMenu');
+            root.layer = this.node.layer;
+            root.addComponent(UITransform).setContentSize(720, 1280);
+            this.node.addChild(root);
+        }
+        // 装备面板必须盖在 HUD / 结算面板之上：同级节点之间不冒泡，
+        // 结算遮罩挡住的话「装备」按钮会变哑（AGENTS 教训 H）
+        root.setSiblingIndex(this.node.children.length - 1);
+        this._menuRef = root.getComponent(MithrilMenu) || root.addComponent(MithrilMenu);
     }
 
     // ==================== 调试接口（浏览器探针） ====================

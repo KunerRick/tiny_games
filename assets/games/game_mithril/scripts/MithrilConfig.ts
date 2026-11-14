@@ -481,6 +481,39 @@ export const GEAR_BASE_BY_ID: Record<string, GearBaseDef> = (() => {
     return out;
 })();
 
+/** 背包上限（自检锁死：满了不能再捡，已装备的不占格） */
+export const INVENTORY_CAP = 60;
+
+/**
+ * 耐力：每件装备固定附带、不占词条位。取 ilvl 的一半（ilvl40 → 20 点 = 200 生命）。
+ * 全身满装约 1600 点生命加成，相对 30 级基础 582 血约 3.7×——生存成长略快于伤害成长，
+ * 符合「装备拉开上限」的定位，同时不会让伤害公式失衡。
+ */
+export const STAMINA_PER_ILVL = 0.5;
+
+/** 单个词条最多能分配的点数（8 点 = 暴击 30% / 急速 20% / 精通 20% / 全能 10%） */
+export const AFFIX_POINT_CAP = 8;
+
+/** 副本推荐装等 / 首通固定紫装（槽位 + 各职业基型） */
+export interface DungeonLootDef {
+    ilvl: number;
+    firstClearSlot: GearSlot;
+    firstClearBase: Record<ClassId, string>;
+}
+
+export const DUNGEON_LOOT: Record<string, DungeonLootDef> = {
+    mine: {
+        ilvl: 8,
+        firstClearSlot: 'mainHand',
+        firstClearBase: {
+            warrior: 'mainHand_0',   // 秘银巨剑
+            mage: 'mainHand_2',      // 橡木法杖
+            ranger: 'mainHand_4',    // 长弓
+            priest: 'mainHand_6',    // 圣光槌
+        },
+    },
+};
+
 export interface AffixRoll {
     id: AffixId;
     points: number;

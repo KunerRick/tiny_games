@@ -14,6 +14,7 @@ import {
     GEAR_SLOTS,
     GEAR_BASE_BY_ID,
     ILVL_MAX,
+    INVENTORY_CAP,
     MODIFIER_BY_ID,
     QUALITY_BY_ID,
     SKILL_BY_ID,
@@ -73,6 +74,15 @@ function clampLevel(level: number): number {
 export function attackPowerAt(level: number): number {
     const lv = clampLevel(level);
     return LEVEL_AP_BASE * (1 + (lv - 1) / (LEVEL_MAX - 1));
+}
+
+/**
+ * 装备主属性对攻击强度的倍率（设计 §4.1：ilvl 1 → 1.00×，ilvl 40 → 1.60×）。
+ * 空装按 ilvl 1 计，因此 M1 切片（无装备）基线不变。
+ */
+export function gearApMultiplier(ilvl: number): number {
+    const v = Math.max(1, Math.min(ILVL_MAX, Number.isFinite(ilvl) ? ilvl : 1));
+    return 1 + (GEAR_AP_MUL_MAX - 1) * (v - 1) / (ILVL_MAX - 1);
 }
 
 export function maxHpAt(level: number): number {
@@ -384,6 +394,8 @@ export interface MithrilSave {
     gold: number;
     materials: Record<string, number>;
     equips: Partial<Record<GearSlot, EquipItem | null>>;
+    /** 背包（不含已装备的；上限 INVENTORY_CAP） */
+    inventory: EquipItem[];
     trinkets: [string | null, string | null];
     talents: TalentState;
     skills: Record<string, number>;
@@ -408,6 +420,7 @@ export function defaultSave(classId: ClassId = 'warrior'): MithrilSave {
         gold: 0,
         materials: {},
         equips,
+        inventory: [],
         trinkets: [null, null],
         talents: {},
         skills,
@@ -531,9 +544,40 @@ export function sanitizeSave(raw: unknown): MithrilSave {
         }
     }
 
+    // 装备栏：逐槽校验 + uid 去重（坏档里两槽同 uid 会让「按 uid 操作」认错件）
     if (src.equips && typeof src.equips === 'object') {
         const e = src.equips as Record<string, unknown>;
-        for (const slot of GEAR_SLOTS) out.equips[slot] = sanitizeEquip(e[slot]);
+        const used: Record<string, true> = {};
+        for (const slot of GEAR_SLOTS) {
+            const item = sanitizeEquip(e[slot]);
+            if (!item) continue;
+            let uid = item.uid;
+            let n = 1;
+            while (used[uid]) uid = `${item.uid}-${n++}`;
+            item.uid = uid;
+            used[uid] = true;
+            out.equips[slot] = item;
+        }
+    }
+
+    // 背包：逐件校验 + uid 去重（与已装备的也不能撞，否则「按 uid 脱下」会脱错件）
+    if (Array.isArray(src.inventory)) {
+        const usedUid: Record<string, true> = {};
+        for (const slot of GEAR_SLOTS) {
+            const item = out.equips[slot];
+            if (item) usedUid[item.uid] = true;
+        }
+        for (const entry of src.inventory) {
+            if (out.inventory.length >= INVENTORY_CAP) break;
+            const item = sanitizeEquip(entry);
+            if (!item) continue;
+            let uid = item.uid;
+            let n = 1;
+            while (usedUid[uid]) uid = `${item.uid}-${n++}`;
+            item.uid = uid;
+            usedUid[uid] = true;
+            out.inventory.push(item);
+        }
     }
 
     if (Array.isArray(src.trinkets)) {
@@ -600,6 +644,31 @@ export function sanitizeSave(raw: unknown): MithrilSave {
 /** 便捷：某个职业在当前等级下的技能列表 */
 export function skillsForSave(save: MithrilSave): SkillDef[] {
     return SKILLS.filter((sk) => sk.classId === save.classId);
+}
+
+// ==================== 存档序列化（不依赖 localStorage，便于自检） ====================
+
+/** 存档键名（StorageManager 会加 `tiny_games_mithril_` 前缀） */
+export const SAVE_STORAGE_KEY = 'save';
+
+/** 写档文本：`MithrilSave` 对象本身就是 schema（读侧 sanitizeSave 负责兜底坏字段） */
+export function serializeSave(save: MithrilSave): string {
+    return JSON.stringify(save);
+}
+
+/**
+ * 读档：任何异常（无档 / JSON 坏 / 旧 schema）都回落到默认档，绝不抛。
+ * 坏字段交给 sanitizeSave 逐字段兜底。
+ */
+export function parseSave(raw: string | null | undefined): MithrilSave {
+    if (!raw) return defaultSave('warrior');
+    let data: unknown = null;
+    try {
+        data = JSON.parse(raw);
+    } catch (e) {
+        return defaultSave('warrior');
+    }
+    return sanitizeSave(data);
 }
 
 /** 便捷：某个职业的全部天赋 */

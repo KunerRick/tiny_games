@@ -19,6 +19,7 @@ const SCRIPTS = path.join(ROOT, 'assets/games/game_mithril/scripts');
 const CONFIG = path.join(SCRIPTS, 'MithrilConfig.ts');
 const PROGRESS = path.join(SCRIPTS, 'MithrilProgress.ts');
 const CORE = path.join(SCRIPTS, 'MithrilCore.ts');
+const LOOT = path.join(SCRIPTS, 'MithrilLoot.ts');
 
 function findTsc() {
     const candidates = [
@@ -38,7 +39,7 @@ function loadModules() {
         console.error('找不到 tsc：设置 $TSC 或安装 typescript');
         process.exit(2);
     }
-    for (const f of [CONFIG, PROGRESS, CORE]) {
+    for (const f of [CONFIG, PROGRESS, CORE, LOOT]) {
         if (!fs.existsSync(f)) {
             console.error(`缺少源文件：${f}`);
             process.exit(2);
@@ -50,6 +51,7 @@ function loadModules() {
         CONFIG,
         PROGRESS,
         CORE,
+        LOOT,
         '--outDir', outDir,
         '--target', 'ES2019',
         '--module', 'commonjs',
@@ -60,10 +62,11 @@ function loadModules() {
         cfg: require(path.join(outDir, 'MithrilConfig.js')),
         prog: require(path.join(outDir, 'MithrilProgress.js')),
         core: require(path.join(outDir, 'MithrilCore.js')),
+        loot: require(path.join(outDir, 'MithrilLoot.js')),
     };
 }
 
-const { cfg: F, prog: P, core: C } = loadModules();
+const { cfg: F, prog: P, core: C, loot: L } = loadModules();
 
 let passed = 0;
 let failed = 0;
@@ -979,6 +982,264 @@ function makeBossWorld(profile = C.makeProfile('warrior', 30, 40), seed = 90210)
     check('144. 血球 20 秒后自然消失', orbCount > 0 && ow2.orbs.length === 0, `${orbCount} → ${ow2.orbs.length}`);
 }
 
+// ==================== 11. M2：掉落 / 背包 / 存档 / profile ====================
+
+/** 空背包存档（warrior 1 级） */
+function mkBagSave() {
+    const s = P.defaultSave('warrior');
+    s.inventory = [];
+    return s;
+}
+
+/** 手搓一件装备（只用于聚合 / 背包规则，不走 sanitize 校验） */
+function mkEquip(patch) {
+    return Object.assign({
+        uid: 'u1', baseId: 'head_0', slot: 'head', ilvl: 10, quality: 'epic', affixes: [],
+    }, patch);
+}
+
+{
+    // ---- 品质分布 ----
+    const qw1 = L.qualityWeights(1);
+    const qw40 = L.qualityWeights(40);
+    check('148. 品质权重随装等上移（白降、紫橙升）',
+        qw40[0] < qw1[0] && qw40[3] > qw1[3] && qw40[5] > qw1[5] && qw1.every((w) => w > 0),
+        `common ${qw1[0].toFixed(1)}→${qw40[0].toFixed(1)}, epic ${qw1[3].toFixed(1)}→${qw40[3].toFixed(1)}`);
+
+    const qrng = C.mulberry32(4242);
+    let qLegal = true;
+    let epicLow = 0;
+    let epicHigh = 0;
+    for (let i = 0; i < 2000; i++) {
+        const q1 = L.rollQuality(qrng, 1);
+        const q2 = L.rollQuality(qrng, 40);
+        if (L.QUALITY_ORDER.indexOf(q1) < 0 || L.QUALITY_ORDER.indexOf(q2) < 0) qLegal = false;
+        if (q1 === 'epic') epicLow++;
+        if (q2 === 'epic') epicHigh++;
+    }
+    check('149. rollQuality 只出合法品质，且高装等紫装显著更多',
+        qLegal && epicHigh > epicLow * 2, `epic: ilvl1 ${epicLow} / ilvl40 ${epicHigh}`);
+
+    let minOk = true;
+    for (let i = 0; i < 500; i++) {
+        if (L.qualityIndex(L.rollQuality(qrng, 20, 'epic')) < 3) minOk = false;
+    }
+    check('150. minQuality 保底生效（500 次不落紫以下）', minOk);
+
+    // ---- rollItem 不变量 ----
+    const irng = C.mulberry32(777);
+    let budgetOk = true;
+    let countOk = true;
+    let affixOk = true;
+    let capOk = true;
+    for (let i = 0; i < 1000; i++) {
+        const it = L.rollItem(irng, { ilvl: 40, classId: 'warrior' });
+        if (!it) { budgetOk = false; break; }
+        const pts = it.affixes.reduce((sum, r) => sum + r.points, 0);
+        if (pts !== L.itemAffixPoints(40)) budgetOk = false;
+        const want = Math.min(4, F.QUALITY_BY_ID[it.quality].affixCount, L.itemAffixPoints(40));
+        if (it.affixes.length !== want) countOk = false;
+        const ids = it.affixes.map((r) => r.id);
+        if (new Set(ids).size !== ids.length) affixOk = false;
+        if (ids.some((id) => id !== 'crit' && id !== 'haste' && id !== 'mastery' && id !== 'vers')) affixOk = false;
+        if (it.affixes.some((r) => r.points > F.AFFIX_POINT_CAP)) capOk = false;
+    }
+    check('151. 1,000 件掉落：词条点数总和 = 装等预算', budgetOk);
+    // 低装等档专门验一次「预算才是紧约束」：ilvl10 只有 1 点，紫装/橙装也只能 1 条
+    const crng = C.mulberry32(778);
+    let countLowOk = true;
+    for (let i = 0; i < 500; i++) {
+        const it = L.rollItem(crng, { ilvl: 10, classId: 'warrior' });
+        const want = Math.min(4, F.QUALITY_BY_ID[it.quality].affixCount, L.itemAffixPoints(10));
+        if (it.affixes.length !== want) { countLowOk = false; break; }
+    }
+    check('152. 词条数 = min(品质条数, 预算, 4)（ilvl40 + ilvl10 双档）', countOk && countLowOk);
+    check('153. 词条 id 合法且互不重复', affixOk);
+
+    // 单件点数本来就不会超上限（预算最多 4），真正的 cap 在聚合时：10 点只算 8 点
+    const stCap = L.equipStats({
+        head: mkEquip({ uid: 'cap1', affixes: [{ id: 'crit', points: 5 }] }),
+        chest: mkEquip({
+            uid: 'cap2', slot: 'chest', baseId: 'chest_0', affixes: [{ id: 'crit', points: 5 }],
+        }),
+    });
+    check('154. 词条收益在单点上限收敛（10 点只结算 8 点）',
+        capOk && near(stCap.crit, F.AFFIX_POINT_CAP * 0.0375) && stCap.points.crit === 10,
+        `crit ${stCap.crit.toFixed(4)}（${stCap.points.crit} 点）`);
+
+    const lowEpic = L.rollItem(C.mulberry32(9), { ilvl: 10, quality: 'epic' });
+    check('155. 低装等紫装不凭空多点数（ilvl10 → 1 词条 1 点）',
+        !!lowEpic && lowEpic.affixes.length === 1 && lowEpic.affixes[0].points === 1,
+        lowEpic ? `${lowEpic.affixes.length} 条 / ${lowEpic.affixes[0].points} 点` : 'null');
+
+    const itA = L.rollItem(C.mulberry32(123), { ilvl: 25, classId: 'mage', slot: 'mainHand' });
+    const itB = L.rollItem(C.mulberry32(123), { ilvl: 25, classId: 'mage', slot: 'mainHand' });
+    check('156. 同种子同参数掉落完全一致', deepEqual(itA, itB));
+
+    const brng = C.mulberry32(321);
+    let bandOk = true;
+    for (let i = 0; i < 300; i++) {
+        const it = L.rollItem(brng, { ilvl: 20, classId: 'ranger', slot: 'mainHand' });
+        const idx = Number(it.baseId.split('_')[1]);
+        if (idx !== 4 && idx !== 5) { bandOk = false; break; }
+    }
+    check('157. 主手基型按职业分带（游侠只出 4/5 号）', bandOk);
+
+    // ---- 副本掉落 ----
+    const fc = L.firstClearDrop(C.mulberry32(55), 'warrior', 'mine');
+    const fcBoss = L.bossLoot(C.mulberry32(57), { classId: 'warrior', dungeonId: 'mine', firstClear: true });
+    check('158. 首通固定紫装主手（装等 = 副本 +4；firstClearDrop / bossLoot 同口径）',
+        !!fc && fc.quality === 'epic'
+        && F.GEAR_BASE_BY_ID[fc.baseId].slot === 'mainHand'
+        && Number(fc.baseId.split('_')[1]) === 0
+        && fc.ilvl === F.DUNGEON_LOOT.mine.ilvl + 4
+        && !!fcBoss && fcBoss.quality === 'epic' && fcBoss.slot
+        && fcBoss.baseId === fc.baseId && fcBoss.ilvl === fc.ilvl,
+        fc ? `${fc.baseId} ilvl${fc.ilvl}` : 'null');
+
+    const rrng = C.mulberry32(56);
+    let floorOk = true;
+    for (let i = 0; i < 500; i++) {
+        const it = L.bossLoot(rrng, { classId: 'warrior', dungeonId: 'mine', firstClear: false });
+        if (!it || L.qualityIndex(it.quality) < 3) { floorOk = false; break; }
+    }
+    check('159. 重复刷本保底紫装（500 次）', floorOk);
+
+    // ---- 属性聚合 ----
+    const st0 = L.equipStats({});
+    check('160. 空装备：副属性 0 / 装等 1 / 0 件 / 无生命加成',
+        st0.crit === 0 && st0.haste === 0 && st0.ilvl === 1 && st0.equipped === 0 && st0.bonusHp === 0);
+
+    const st2 = L.equipStats({
+        head: mkEquip({ uid: 'a', affixes: [{ id: 'crit', points: 2 }] }),
+        chest: mkEquip({
+            uid: 'b', slot: 'chest', baseId: 'chest_0',
+            affixes: [{ id: 'crit', points: 3 }, { id: 'haste', points: 1 }],
+        }),
+    });
+    check('161. 装备逐件求和：暴击按点累加、耐力换算生命',
+        near(st2.crit, 5 * 0.0375) && near(st2.haste, 0.025)
+        && st2.stamina === 10 && st2.bonusHp === 100 && st2.equipped === 2,
+        `crit ${st2.crit.toFixed(4)}, haste ${st2.haste}, hp+${st2.bonusHp}`);
+
+    // ---- 背包规则 ----
+    const bag = mkBagSave();
+    for (let i = 0; i < F.INVENTORY_CAP; i++) L.addToInventory(bag, mkEquip({ uid: `f${i}` }));
+    const overflowRejected = !L.addToInventory(bag, mkEquip({ uid: 'overflow' }));
+    check('162. 背包满后拒绝入包', overflowRejected && bag.inventory.length === F.INVENTORY_CAP,
+        bag.inventory.length);
+
+    // 固定种子重刷会生成同 uid 的货：改名保留，不能当成「背包满」丢掉（review #2）
+    const dupBag = mkBagSave();
+    L.addToInventory(dupBag, mkEquip({ uid: 'dup' }));
+    const dupOk = L.addToInventory(dupBag, mkEquip({ uid: 'dup' }));
+    const dupUids = dupBag.inventory.map((i) => i.uid);
+    const wornBag = mkBagSave();
+    wornBag.equips.head = mkEquip({ uid: 'worn' });
+    const wornDupOk = L.addToInventory(wornBag, mkEquip({ uid: 'worn' }));
+    check('163. uid 撞车改名保留（背包内 / 与已装备件都不丢）',
+        dupOk && dupBag.inventory.length === 2 && new Set(dupUids).size === 2
+        && dupUids[0] === 'dup'
+        && wornDupOk && wornBag.inventory.length === 1
+        && wornBag.inventory[0].uid !== 'worn' && wornBag.equips.head.uid === 'worn',
+        dupUids.join(','));
+
+    const sw = mkBagSave();
+    const oldItem = mkEquip({ uid: 'old', affixes: [{ id: 'haste', points: 1 }] });
+    sw.equips.head = oldItem;
+    L.addToInventory(sw, mkEquip({ uid: 'new' }));
+    const wornItem = L.equipFromInventory(sw, 'new');
+    check('164. 换装：新装备上身、旧装备回到原位置、背包件数不变',
+        !!wornItem && sw.equips.head.uid === 'new' && sw.inventory.length === 1 && sw.inventory[0].uid === 'old',
+        sw.inventory.map((i) => i.uid).join(','));
+
+    const ue = mkBagSave();
+    ue.equips.head = mkEquip({ uid: 'x' });
+    const unequipOk = L.unequipToInventory(ue, 'head');
+    const ueFull = mkBagSave();
+    ueFull.equips.head = mkEquip({ uid: 'y' });
+    for (let i = 0; i < F.INVENTORY_CAP; i++) L.addToInventory(ueFull, mkEquip({ uid: `g${i}` }));
+    const unequipFullFails = !L.unequipToInventory(ueFull, 'head');
+    check('165. 卸下成功入包；满包时卸下失败且装备不丢',
+        unequipOk && ue.equips.head === null && ue.inventory.length === 1
+        && unequipFullFails && ueFull.equips.head !== null && ueFull.inventory.length === F.INVENTORY_CAP);
+
+    const sp = mkBagSave();
+    const sellItem = mkEquip({ uid: 'sell', quality: 'epic', ilvl: 20 });
+    L.addToInventory(sp, sellItem);
+    const goldBefore = sp.gold;
+    const gotGold = L.sellFromInventory(sp, 'sell');
+    check('166. 出售：加金币并按价格移出背包',
+        gotGold === L.sellPrice(sellItem) && gotGold > 0
+        && sp.gold === goldBefore + gotGold && sp.inventory.length === 0,
+        `+${gotGold} 金币`);
+
+    const sr = mkBagSave();
+    L.addToInventory(sr, mkEquip({ uid: 'i5', ilvl: 5 }));
+    L.addToInventory(sr, mkEquip({ uid: 'i30', ilvl: 30, quality: 'common' }));
+    L.addToInventory(sr, mkEquip({ uid: 'i30e', ilvl: 30, quality: 'epic' }));
+    const sortedUids = L.sortedInventory(sr).map((i) => i.uid);
+    check('167. 背包按装等 → 品质降序',
+        sortedUids[0] === 'i30e' && sortedUids[1] === 'i30' && sortedUids[2] === 'i5', sortedUids.join(','));
+
+    // ---- 存档 ----
+    const rt = mkBagSave();
+    rt.level = 7;
+    rt.gold = 123;
+    const rtItem = L.rollItem(C.mulberry32(88), { ilvl: 12, classId: 'warrior' });
+    L.addToInventory(rt, rtItem);
+    const parsedRt = P.parseSave(P.serializeSave(rt));
+    check('168. 存档往返：背包 / 等级 / 金币 / 词条全部保留',
+        parsedRt.inventory.length === 1 && parsedRt.level === 7 && parsedRt.gold === 123
+        && deepEqual(parsedRt.inventory[0], rtItem));
+
+    const badSave = P.parseSave('{not json');
+    const nullSave = P.parseSave(null);
+    check('169. 坏档 / 无档回落默认档（不抛异常）',
+        badSave.level === 1 && badSave.inventory.length === 0 && badSave.equips.head === null
+        && nullSave.level === 1);
+
+    const dupSave = mkBagSave();
+    const wornRt = L.rollItem(C.mulberry32(89), { ilvl: 12, classId: 'warrior', slot: 'head' });
+    dupSave.equips.head = wornRt;
+    dupSave.inventory = [JSON.parse(JSON.stringify(wornRt))];
+    const fixedSave = P.sanitizeSave(JSON.parse(P.serializeSave(dupSave)));
+    check('170. 存档里背包与装备 uid 冲突时改名而不是丢件',
+        fixedSave.inventory.length === 1
+        && fixedSave.inventory[0].uid !== wornRt.uid
+        && fixedSave.equips.head.uid === wornRt.uid,
+        fixedSave.inventory[0] ? fixedSave.inventory[0].uid : 'null');
+
+    // ---- profileFromSave ----
+    const ps = mkBagSave();
+    ps.level = 10;
+    const bareProf = C.profileFromSave(ps);
+    ps.equips.head = mkEquip({
+        uid: 'p', ilvl: 40, affixes: [{ id: 'crit', points: 8 }, { id: 'haste', points: 8 }],
+    });
+    const gearedProf = C.profileFromSave(ps);
+    // 装等 40 的主属性倍率 = 1.60×（设计 §4.1）：攻击强度必须严格上涨，不是摆设
+    check('171. 穿上装备直接抬升 profile（攻击强度 / 生命 / 暴击 / 急速）',
+        gearedProf.maxHp > bareProf.maxHp
+        && near(gearedProf.critChance, 0.30) && near(gearedProf.haste, 0.20)
+        && near(gearedProf.attackPower, bareProf.attackPower * P.GEAR_AP_MUL_MAX),
+        `ap ${bareProf.attackPower.toFixed(2)}→${gearedProf.attackPower.toFixed(2)}, `
+        + `hp ${bareProf.maxHp}→${gearedProf.maxHp}, crit ${gearedProf.critChance}`);
+
+    const plainSave = mkBagSave();
+    const floorProf = C.profileFromSave(plainSave, 5);
+    const noFloorProf = C.profileFromSave(plainSave);
+    // 注意：minIlvl 地板只抬副属性（空装的主属性倍率按 ilvl1 计），
+    // 所以地板的效果体现在副属性上，而不是血条 / 攻击强度上。
+    check('172. minIlvl 地板生效（空档按 5 装等出战有副属性；不传地板则全 0）',
+        floorProf.critChance > 0 && noFloorProf.critChance === 0
+        && near(floorProf.maxHp, noFloorProf.maxHp)
+        && near(floorProf.maxHp, C.makeProfile('warrior', 1, 5).maxHp)
+        // 地板不许改主属性：空装主属性倍率按 ilvl1 计，切片难度与 M1 一致
+        && near(floorProf.attackPower, noFloorProf.attackPower),
+        `crit ${noFloorProf.critChance} → ${floorProf.critChance.toFixed(4)}`);
+}
+
 // ==================== 汇总 ====================
 
 const total = passed + failed;
@@ -987,4 +1248,4 @@ if (failed > 0) {
     for (const f of failures) console.error(`  ✗ ${f}`);
     process.exit(1);
 }
-console.log(`MITHRIL_CORE_OK  ${passed}/${total} 项通过（M1）`);
+console.log(`MITHRIL_CORE_OK  ${passed}/${total} 项通过（M1 + M2）`);

@@ -1,6 +1,6 @@
 # 《秘银远征》M1 垂直切片验收记录（2026-11-14）
 
-> 设计规格：[`specs/2026-11-14-game-mithril-design.md`](../specs/2026-11-14-game-mithril-design.md)
+> 设计规格：[`plans/2026-11-14-game-mithril-design.md`](./2026-11-14-game-mithril-design.md)
 > 里程碑：**M1 = 战士 + 废弃矿坑 + 矿坑巨魔**，5 分钟内可玩通、零报错。
 > 设计闸门原文：**「M1 不通过不进入 M2。战斗手感是唯一无法事后补的东西。」**
 

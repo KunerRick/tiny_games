@@ -38,10 +38,12 @@ import {
     BALANCED_ALLOC,
     CRIT_MULT,
     attackPowerAt,
+    gearApMultiplier,
     maxHpAt,
     secondaryStats,
 } from './MithrilProgress';
 import type { AffixAlloc, MithrilSave } from './MithrilProgress';
+import { equipStats } from './MithrilLoot';
 
 export { FIELD_H, FIELD_W, FIXED_DT, MAX_BULLETS, MAX_ENEMIES };
 
@@ -105,18 +107,26 @@ export function makeProfile(
     };
 }
 
-/** 从存档推导（M0 用平均装等近似；M2 改成逐件求和） */
-export function profileFromSave(save: MithrilSave): CombatProfile {
-    let sum = 0;
-    let count = 0;
-    for (const slot of Object.keys(save.equips) as GearSlot[]) {
-        const item: EquipItem | null | undefined = save.equips[slot];
-        if (!item) continue;
-        sum += item.ilvl;
-        count++;
-    }
-    const ilvl = count > 0 ? sum / count : 1;
-    return makeProfile(save.classId, save.level, ilvl);
+/** 从存档逐件求和（装备的词条点 + 耐力），而不是拿平均装等近似 */
+export function profileFromSave(save: MithrilSave, minIlvl = 0): CombatProfile {
+    const st = equipStats(save.equips);
+    const base = makeProfile(save.classId, save.level, st.ilvl);
+    // 副属性来自装备词条（设计 §4.3「地板」）：逐件求和后按 cap 收敛。
+    // `minIlvl` 是「空档地板」——切片期换装前只有 0% 暴击，而 BOSS 是按 ilvl5 均衡配点
+    // 调的平衡基线，所以给一条按 ilvl 均衡配点算出的副属性下限，装备超过下限就自然接管。
+    // 注意不能用「基线 + 装备」相加：ilvl40 均衡配点本身已触顶，相加会让装备词条全部浪费。
+    const floor = makeProfile(save.classId, save.level, Math.max(0, minIlvl));
+    return {
+        ...base,
+        // 装备·主属性（设计 §4.1，ilvl 1–40 = 1.00×→1.60×）：空装 ilvl=1 ⇒ 1.00×，
+        // 所以切片基线不受影响；穿上第一件紫装攻击强度立刻可见地涨。
+        attackPower: base.attackPower * gearApMultiplier(st.ilvl),
+        maxHp: base.maxHp + st.bonusHp,
+        critChance: Math.max(st.crit, floor.critChance),
+        haste: Math.max(st.haste, floor.haste),
+        mastery: Math.max(st.mastery, floor.mastery),
+        vers: Math.max(st.vers, floor.vers),
+    };
 }
 
 export interface DamageResult {

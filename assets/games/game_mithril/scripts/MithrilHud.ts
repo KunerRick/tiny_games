@@ -13,7 +13,8 @@ import {
     COLOR, createBackButton, createButton, createLabel, hex,
 } from '../../../common/ui/GameUIKit';
 import type { CoreEvent, MithrilSnapshot } from './MithrilCore';
-import { PLAYER_TUNING } from './MithrilConfig';
+import { PLAYER_TUNING, GEAR_BASE_BY_ID, GEAR_SLOT_NAMES, QUALITY_BY_ID } from './MithrilConfig';
+import type { EquipItem } from './MithrilConfig';
 
 const { ccclass } = _decorator;
 
@@ -47,6 +48,8 @@ export class MithrilHud extends Component {
     onExit: (() => void) | null = null;
     /** 结算面板「再来一次」 */
     onRestart: (() => void) | null = null;
+    /** 结算面板「装备」 */
+    onOpenBag: (() => void) | null = null;
 
     /** 各技能键当前是否按住（主组件每帧读取） */
     readonly held: Record<SkillKey, boolean> = {
@@ -77,6 +80,12 @@ export class MithrilHud extends Component {
     private _resultTitle: Label | null = null;
     private _resultBody: Label | null = null;
     private _resultShown = false;
+    private _lootLines: string[] = [];
+    private _lastWin = false;
+    private _lastTimeText = '0:00';
+    private _lastKills = 0;
+    private _lastDungeonName = '';
+    private _lastProgress = '';
 
     private _lastHp = -1;
     private _lastRage = -1;
@@ -132,11 +141,28 @@ export class MithrilHud extends Component {
     /** 重开一局：收掉结算面板并重置按钮状态 */
     resetForNewRun(): void {
         this._resultShown = false;
+        this._lootLines = [];
         if (this._resultRoot) this._resultRoot.active = false;
         for (const key of Object.keys(this.held) as SkillKey[]) this.held[key] = false;
         for (const b of this._skills) b.pressed = false;
         this._lastHp = -1;
         this._lastRage = -1;
+    }
+
+    /**
+     * 结算面板展示本局掉落。由 MithrilGame 在判定通关后、updateHud 之前调用，
+     * 所以正常路径下 `_showResult` 首次构建正文时就能读到这些行。
+     */
+    setLootItems(items: EquipItem[]): void {
+        this._lootLines = [];
+        for (const item of items.slice(0, 3)) {
+            const base = GEAR_BASE_BY_ID[item.baseId];
+            const q = QUALITY_BY_ID[item.quality];
+            this._lootLines.push(
+                `获得 ${q ? q.name : ''}·${base ? base.name : item.baseId}（${GEAR_SLOT_NAMES[item.slot]} ${item.ilvl}）`,
+            );
+        }
+        if (this._resultShown) this._refreshResultBody();
     }
 
     // ==================== 顶栏 ====================
@@ -528,16 +554,26 @@ export class MithrilHud extends Component {
         if (!root) return;
         root.active = true;
         const won = snap.phase === 'won';
+        this._lastWin = won;
+        const t = Math.max(0, Math.floor(snap.time));
+        this._lastTimeText = `${Math.floor(t / 60)}:${t % 60 < 10 ? '0' : ''}${t % 60}`;
+        this._lastKills = snap.kills;
+        this._lastDungeonName = snap.dungeonName;
+        this._lastProgress = snap.dungeonProgress;
         this._resultTitle!.string = won ? '副本通关' : '你倒下了';
         this._resultTitle!.color = hex(won ? COLOR.SUCCESS : COLOR.DANGER);
-        const t = Math.max(0, Math.floor(snap.time));
-        const mm = Math.floor(t / 60);
-        const ss = t % 60;
-        this._resultBody!.string = [
-            `${snap.dungeonName}`,
-            `用时 ${mm}:${ss < 10 ? '0' : ''}${ss}    击杀 ${snap.kills}`,
-            won ? '矿坑巨魔已被击败' : `推进到 ${snap.dungeonProgress}`,
-        ].join('\n');
+        this._refreshResultBody();
+    }
+
+    private _refreshResultBody(): void {
+        if (!this._resultBody) return;
+        const lines = [
+            `${this._lastDungeonName}`,
+            `用时 ${this._lastTimeText}    击杀 ${this._lastKills}`,
+            this._lastWin ? '矿坑巨魔已被击败' : `推进到 ${this._lastProgress}`,
+        ];
+        if (this._lootLines.length > 0) lines.push(...this._lootLines);
+        this._resultBody.string = lines.join('\n');
     }
 
     private _ensureResult(): void {
@@ -565,44 +601,55 @@ export class MithrilHud extends Component {
         const panel = new Node('Panel');
         panel.layer = this.node.layer;
         const put = panel.addComponent(UITransform);
-        put.setContentSize(520, 400);
+        put.setContentSize(520, 500);
         const pg = panel.addComponent(Graphics);
         pg.fillColor = hex(COLOR.PANEL_BG, 255);
-        pg.roundRect(-260, -200, 520, 400, 24);
+        pg.roundRect(-260, -250, 520, 500, 24);
         pg.fill();
         pg.strokeColor = hex(COLOR.PANEL_BORDER, 255);
         pg.lineWidth = 3;
-        pg.roundRect(-260, -200, 520, 400, 24);
+        pg.roundRect(-260, -250, 520, 500, 24);
         pg.stroke();
         root.addChild(panel);
 
         this._resultTitle = createLabel(panel, '', 44, {
-            width: 460, height: 60, color: COLOR.TEXT_PRIMARY, bold: true, y: 130,
+            width: 460, height: 60, color: COLOR.TEXT_PRIMARY, bold: true, y: 190,
         });
-        this._resultBody = createLabel(panel, '', 21, {
-            width: 460, height: 110, color: COLOR.TEXT_SECONDARY, y: 30,
-            lineHeight: 32,
+        this._resultBody = createLabel(panel, '', 18, {
+            width: 470, height: 180, color: COLOR.TEXT_SECONDARY, y: 60,
+            lineHeight: 28,
         });
 
         const again = createButton(panel, {
-            w: 220, h: 62, text: '再来一次', fontSize: 26,
+            w: 150, h: 58, text: '再来一次', fontSize: 24,
             fill: COLOR.PRIMARY, textColor: '#FFFFFF', activeFill: COLOR.PRIMARY_DARK,
             radius: 14, onTap: () => this._onRestartTap(),
         });
-        again.node.setPosition(-120, -120, 0);
+        again.node.setPosition(-172, -190, 0);
+
+        const bag = createButton(panel, {
+            w: 150, h: 58, text: '装备', fontSize: 24,
+            fill: '#A855F7', textColor: '#FFFFFF', activeFill: '#7E3AF2',
+            radius: 14, onTap: () => this._onBagTap(),
+        });
+        bag.node.setPosition(0, -190, 0);
 
         const exit = createButton(panel, {
-            w: 220, h: 62, text: '返回大厅', fontSize: 26,
+            w: 150, h: 58, text: '返回大厅', fontSize: 24,
             fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
             radius: 14, onTap: () => this._onExitTap(),
         });
-        exit.node.setPosition(120, -120, 0);
+        exit.node.setPosition(172, -190, 0);
 
         root.active = false;
     }
 
     private _onRestartTap = (): void => {
         if (this.onRestart) this.onRestart();
+    };
+
+    private _onBagTap = (): void => {
+        if (this.onOpenBag) this.onOpenBag();
     };
 
     // ==================== 小工具 ====================
