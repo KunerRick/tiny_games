@@ -17,21 +17,10 @@ const os = require('os');
 const { execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
+const { findTsc } = require('./lib/core-compile');
 const CORE = path.join(ROOT, 'assets/games/game_fridge/scripts/FridgeCore.ts');
 const CONFIG = path.join(ROOT, 'assets/games/game_fridge/scripts/FridgeConfig.ts');
 const DUNGEON = path.join(ROOT, 'assets/games/game_fridge/scripts/FridgeDungeon.ts');
-
-function findTsc() {
-    const candidates = [
-        process.env.TSC,
-        path.join(ROOT, 'node_modules/typescript/bin/tsc'),
-        '/Applications/Cocos/Creator/3.8.8/CocosCreator.app/Contents/Resources/app.asar.unpacked/node_modules/typescript/bin/tsc',
-    ].filter(Boolean);
-    for (const c of candidates) {
-        if (fs.existsSync(c)) return c;
-    }
-    return null;
-}
 
 function loadModules() {
     const tsc = findTsc();

@@ -17,21 +17,9 @@ const fs = require('fs');
 const { execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
+const { requireTsc } = require('./lib/core-compile');
 const SRC = path.join(ROOT, 'assets', 'games', 'game_survivor', 'scripts');
 const OUT = path.join(ROOT, 'temp', 'survivor-core-test');
-
-const TSC_CANDIDATES = [
-    process.env.TSC,
-    path.join(ROOT, 'node_modules', 'typescript', 'bin', 'tsc'),
-    '/Applications/Cocos/Creator/3.8.8/CocosCreator.app/Contents/Resources/app.asar.unpacked/node_modules/typescript/bin/tsc',
-].filter(Boolean);
-
-function findTsc() {
-    for (const p of TSC_CANDIDATES) {
-        if (fs.existsSync(p)) return p;
-    }
-    throw new Error('找不到 tsc：请设置 TSC 环境变量或 npm install');
-}
 
 function build() {
     fs.rmSync(OUT, { recursive: true, force: true });
@@ -40,7 +28,7 @@ function build() {
     execFileSync(
         process.execPath,
         [
-            findTsc(),
+            requireTsc(),
             ...files,
             '--outDir',
             OUT,

@@ -18,28 +18,16 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const { execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
+const { runTsc, requireTsc } = require('./lib/core-compile');
 const SRC = path.join(ROOT, 'assets', 'games', 'game_solitaire', 'scripts');
 const OUT = path.join(ROOT, 'temp', 'solitaire-core-test');
 
-const TSC_CANDIDATES = [
-    process.env.TSC,
-    path.join(ROOT, 'node_modules', 'typescript', 'bin', 'tsc'),
-    '/Applications/Cocos/Creator/3.8.8/CocosCreator.app/Contents/Resources/app.asar.unpacked/node_modules/typescript/bin/tsc',
-].filter(Boolean);
-
-const tscPath = TSC_CANDIDATES.find(p => fs.existsSync(p));
-if (!tscPath) {
-    console.error('找不到 tsc。请设置 TSC 环境变量，或在项目内 npm install。');
-    process.exit(2);
-}
 
 fs.rmSync(OUT, { recursive: true, force: true });
 console.log(`编译纯逻辑模块 → ${path.relative(ROOT, OUT)}`);
-execFileSync(process.execPath, [
-    tscPath,
+runTsc([
     path.join(SRC, 'SolitaireConfig.ts'),
     path.join(SRC, 'SolitaireCore.ts'),
     path.join(SRC, 'SolitaireLayout.ts'),
@@ -48,7 +36,7 @@ execFileSync(process.execPath, [
     '--module', 'commonjs',
     '--target', 'es2019',
     '--skipLibCheck',
-], { stdio: 'inherit' });
+]);
 
 const { SolitaireCore, PILE_WASTE, PILE_FOUNDATION_BASE, SUITS } = require(path.join(OUT, 'SolitaireCore.js'));
 const L = require(path.join(OUT, 'SolitaireLayout.js'));
@@ -1016,17 +1004,21 @@ test('背面间距 14、正面顶牌间距 30', () => {
     assert.strictEqual(col6[1].top - col6[0].top, CFG.FAN_DOWN);
 });
 
-test('超长列正面间距会压缩到可用高度内', () => {
+test('满列（6 背 + 13 正）正面间距压缩到可用高度内且不越界', () => {
+    // 一列的真实上限：初始发牌最多 6 张背面，正面最多 13 张（K→A）→ 19 张
     const cards = [];
-    for (let i = 0; i < 30; i++) cards.push(card('S', (i % 13) + 1));
+    for (let i = 0; i < 6; i++) cards.push(card('H', 13 - i, false));
+    for (let i = 0; i < 13; i++) cards.push(card('S', 13 - i));
     const state = makeState({ tableau: [cards, [], [], [], [], [], []] });
     const places = L.buildLayout(state).filter(x => x.pile === 0);
-    const gap = places[1].top - places[0].top;
+    const down = 6;
+    const up = 13;
     const available = CFG.COLUMN_BOTTOM_Y - CFG.COLUMN_TOP_Y;
-    assert.ok(gap < CFG.FAN_UP, `30 张正面应压缩，实际 ${gap}`);
+    const gap = places[down + 1].top - places[down].top;
+    assert.ok(gap < CFG.FAN_UP, `满列正面应压缩，实际 ${gap}`);
     assert.ok(gap >= CFG.FAN_UP_MIN, `不低于下限，实际 ${gap}`);
-    assert.ok(places[29].top + CFG.CARD_H <= CFG.COLUMN_BOTTOM_Y, '最后一张不越界');
-    assert.strictEqual(gap, Math.floor((available - CFG.CARD_H) / 29));
+    assert.ok(places[places.length - 1].top + CFG.CARD_H <= CFG.COLUMN_BOTTOM_Y, '最后一张不越界');
+    assert.strictEqual(gap, Math.floor((available - CFG.CARD_H - CFG.FAN_DOWN * down) / (up - 1)));
 });
 
 test('压缩间距不低于 FAN_UP_MIN', () => {

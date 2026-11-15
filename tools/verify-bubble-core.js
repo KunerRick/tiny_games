@@ -14,35 +14,23 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const { execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
+const { runTsc, requireTsc } = require('./lib/core-compile');
 const GAMES = path.join(ROOT, 'assets', 'games');
 const OUT = path.join(ROOT, 'temp', 'bubble-core-test');
 
-const TSC_CANDIDATES = [
-    process.env.TSC,
-    path.join(ROOT, 'node_modules', 'typescript', 'bin', 'tsc'),
-    '/Applications/Cocos/Creator/3.8.8/CocosCreator.app/Contents/Resources/app.asar.unpacked/node_modules/typescript/bin/tsc',
-].filter(Boolean);
-
-const tscPath = TSC_CANDIDATES.find((p) => p && fs.existsSync(p));
-if (!tscPath) {
-    console.error('找不到 tsc。请设置 TSC 环境变量，或在项目内 npm install。');
-    process.exit(2);
-}
 
 fs.rmSync(OUT, { recursive: true, force: true });
 console.log(`编译纯逻辑模块 → ${path.relative(ROOT, OUT)}`);
-execFileSync(process.execPath, [
-    tscPath,
+runTsc([
     path.join(GAMES, 'game_bubble', 'scripts', 'BubbleCore.ts'),
     '--outDir', OUT,
     '--rootDir', GAMES,
     '--module', 'commonjs',
     '--target', 'es2019',
     '--skipLibCheck',
-], { stdio: 'inherit' });
+]);
 
 const C = require(path.join(OUT, 'game_bubble', 'scripts', 'BubbleCore.js'));
 

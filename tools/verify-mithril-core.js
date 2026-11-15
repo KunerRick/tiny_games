@@ -17,24 +17,13 @@ const os = require('os');
 const { execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
+const { findTsc } = require('./lib/core-compile');
 const SCRIPTS = path.join(ROOT, 'assets/games/game_mithril/scripts');
 const CONFIG = path.join(SCRIPTS, 'MithrilConfig.ts');
 const PROGRESS = path.join(SCRIPTS, 'MithrilProgress.ts');
 const CORE = path.join(SCRIPTS, 'MithrilCore.ts');
 const LOOT = path.join(SCRIPTS, 'MithrilLoot.ts');
 const TALENTS = path.join(SCRIPTS, 'MithrilTalents.ts');
-
-function findTsc() {
-    const candidates = [
-        process.env.TSC,
-        path.join(ROOT, 'node_modules/typescript/bin/tsc'),
-        '/Applications/Cocos/Creator/3.8.8/CocosCreator.app/Contents/Resources/app.asar.unpacked/node_modules/typescript/bin/tsc',
-    ].filter(Boolean);
-    for (const c of candidates) {
-        if (fs.existsSync(c)) return c;
-    }
-    return null;
-}
 
 function loadModules() {
     const tsc = findTsc();
