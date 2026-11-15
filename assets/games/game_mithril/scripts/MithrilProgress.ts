@@ -38,6 +38,7 @@ import {
     TRAINING_FREE_LEVEL,
     TRAINING_HALF_PRICE_LEVEL,
     TRINKET_BY_ID,
+    TRINKETS,
     talentTierGate,
 } from './MithrilConfig';
 import type {
@@ -80,6 +81,10 @@ export const CRIT_MULT = 1.6;
 export const LEVEL_MUL_MAX = 2.0;
 export const GEAR_AP_MUL_MAX = 1.6;
 export const TALENT_MUL_MAX = 1.35;
+/**
+ * 饰品的**条件上限**（M7：两件饰品靠规则触发，实测木桩 ≈1.25–1.35×）。
+ * 这里只用于成长面板的 DPS 估算，核心不再有「按件数乘攻强」的无条件乘区。
+ */
 export const TRINKET_MUL_MAX = 1.2;
 export const BASE_DPS = 100;
 /** 毕业 / 起点必须落在 [8, 11] */
@@ -539,6 +544,8 @@ export interface MithrilSave {
     /** 背包（不含已装备的；上限 INVENTORY_CAP） */
     inventory: EquipItem[];
     trinkets: [string | null, string | null];
+    /** 已拥有但未装备的饰品 id（M7：掉落先进这里，两格装备只能从这里挑） */
+    trinketBag: string[];
     talents: TalentState;
     skills: Record<string, number>;
     variants: Record<string, VariantState>;
@@ -580,6 +587,7 @@ export function defaultSave(classId: ClassId = 'warrior'): MithrilSave {
         equips,
         inventory: [],
         trinkets: [null, null],
+        trinketBag: [],
         talents: {},
         skills,
         variants: {},
@@ -750,6 +758,17 @@ export function sanitizeSave(raw: unknown): MithrilSave {
         }
     }
 
+    // 饰品背包（M7）：未装备的拥有件；非法 id / 重复都丢弃
+    if (Array.isArray(src.trinketBag)) {
+        const seen: Record<string, true> = {};
+        for (const id of src.trinketBag) {
+            if (out.trinketBag.length >= TRINKETS.length) break;
+            if (typeof id !== 'string' || !TRINKET_BY_ID[id] || seen[id]) continue;
+            seen[id] = true;
+            out.trinketBag.push(id);
+        }
+    }
+
     if (Array.isArray(src.trinkets)) {
         const used: Record<string, true> = {};
         for (let i = 0; i < 2; i++) {
@@ -757,6 +776,8 @@ export function sanitizeSave(raw: unknown): MithrilSave {
             if (typeof id === 'string' && TRINKET_BY_ID[id] && !used[id]) {
                 out.trinkets[i] = id;
                 used[id] = true;
+                // 装备中的件视为已拥有（旧档只有两格，没有 trinketBag）
+                if (out.trinketBag.indexOf(id) < 0) out.trinketBag.push(id);
             } else {
                 out.trinkets[i] = null;
             }

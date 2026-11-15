@@ -25,6 +25,8 @@ import {
     QUALITY_BY_ID,
     STAMINA_HP_PER_POINT,
     STAMINA_PER_ILVL,
+    TRINKET_BY_ID,
+    TRINKET_LOOT,
 } from './MithrilConfig';
 import type {
     AffixId,
@@ -207,6 +209,117 @@ export function bossLoot(
     const loot = DUNGEON_LOOT[opts.dungeonId];
     const ilvl = loot ? loot.ilvl : 1;
     return rollItem(rng, { ilvl, classId: opts.classId, minQuality: 'epic' });
+}
+
+/** 把品质降一档（已是最低档则不变）；品质名头变差，词条保持原样 */
+export function lowerQualityOne(item: EquipItem): EquipItem {
+    const i = qualityIndex(item.quality);
+    if (i > 0) item.quality = QUALITY_ORDER[i - 1];
+    return item;
+}
+
+/**
+ * 贪婪之眼：按概率把一件掉落降一档品质。
+ * 在**入包之前**调用，让结算行写出来的就是最终品质（否则玩家看到紫装被悄悄改白装）。
+ */
+export function maybeLowerQuality(rng: () => number, item: EquipItem, chance: number): EquipItem {
+    if (!item || !(chance > 0)) return item;
+    if (rng() >= chance) return item;
+    return lowerQualityOne(item);
+}
+
+// ==================== 饰品（M7） ====================
+
+/** 重复通关掉饰品的概率（首通 100%） */
+export const TRINKET_REPEAT_CHANCE = 0.25;
+/** 20 件全收集 之后饰品退化的金币底价（再按副本装等加价） */
+export const TRINKET_DUP_GOLD = 50;
+
+/** 本副本掉落池里「还没有拥有」的饰品 id（装备中的也算拥有） */
+export function unownedTrinkets(save: MithrilSave, dungeonId: string): string[] {
+    const pool = TRINKET_LOOT[dungeonId] || [];
+    return pool.filter((id) => save.trinketBag.indexOf(id) < 0 && save.trinkets.indexOf(id) < 0);
+}
+
+/**
+ * 抽一件本副本饰品：优先未拥有；全部拥有返回 null（调用方退化为金币）。
+ * 掉落池只含该副本的 3–4 件，所以「20 件各在一处」由配置保证。
+ */
+export function rollTrinket(rng: () => number, save: MithrilSave, dungeonId: string): string | null {
+    const pool = unownedTrinkets(save, dungeonId);
+    if (pool.length === 0) return null;
+    return pool[Math.min(pool.length - 1, Math.floor(rng() * pool.length))];
+}
+
+/**
+ * BOSS 饰品掉落：首通必给本副本未拥有的一件；重复通关 25% 给。
+ * 20 件全收集 之后返回 null（结算行改写成金币）。
+ */
+export function bossTrinket(
+    rng: () => number,
+    save: MithrilSave,
+    dungeonId: string,
+    firstClear: boolean,
+): string | null {
+    if (!firstClear && rng() >= TRINKET_REPEAT_CHANCE) return null;
+    return rollTrinket(rng, save, dungeonId);
+}
+
+/** 重复饰品折成的金币（按副本装等略加价） */
+export function trinketGoldValue(dungeonId: string): number {
+    const loot = DUNGEON_LOOT[dungeonId];
+    return TRINKET_DUP_GOLD + (loot ? loot.ilvl * 2 : 0);
+}
+
+/** 把饰品记进拥有列表（已在装备栏或背包里则不重复）；返回是否新增 */
+export function addTrinket(save: MithrilSave, id: string): boolean {
+    if (!TRINKET_BY_ID[id]) return false;
+    if (save.trinketBag.indexOf(id) >= 0) return false;
+    if (save.trinkets.indexOf(id) >= 0) return false;
+    save.trinketBag.push(id);
+    return true;
+}
+
+/** 某件是否已拥有（装备中或背包里） */
+export function ownsTrinket(save: MithrilSave, id: string): boolean {
+    return save.trinketBag.indexOf(id) >= 0 || save.trinkets.indexOf(id) >= 0;
+}
+
+/** 装备一件饰品到 0/1 号槽：必须已拥有，且同一件不能占两格 */
+export function equipTrinket(save: MithrilSave, id: string, slot: number): boolean {
+    if (slot !== 0 && slot !== 1) return false;
+    if (!TRINKET_BY_ID[id] || !ownsTrinket(save, id)) return false;
+    const other = 1 - slot;
+    if (save.trinkets[other] === id) return false;
+    const prev = save.trinkets[slot];
+    save.trinkets[slot] = id;
+    // 被换下来的回到背包，保持「拥有」不变
+    if (prev) addTrinket(save, prev);
+    // 装备中的件从背包列表里移除，面板上「拥有」= 背包 ∪ 装备栏
+    const at = save.trinketBag.indexOf(id);
+    if (at >= 0) save.trinketBag.splice(at, 1);
+    return true;
+}
+
+/** 卸下某槽的饰品，回到背包 */
+export function unequipTrinket(save: MithrilSave, slot: number): boolean {
+    if (slot !== 0 && slot !== 1) return false;
+    const prev = save.trinkets[slot];
+    if (!prev) return false;
+    save.trinkets[slot] = null;
+    addTrinket(save, prev);
+    return true;
+}
+
+/** 已装备的两格（顺序与装备槽一致，空槽为 null） */
+export function equippedTrinketDefs(save: MithrilSave): Array<{ id: string; name: string } | null> {
+    const out: Array<{ id: string; name: string } | null> = [];
+    for (let i = 0; i < 2; i++) {
+        const id = save.trinkets[i];
+        const def = id ? TRINKET_BY_ID[id] : null;
+        out.push(def ? { id: def.id, name: def.name } : null);
+    }
+    return out;
 }
 
 // ==================== 属性聚合 ====================

@@ -198,14 +198,23 @@ export class MithrilWildMap extends Component {
     }
 
     /** 打开宝箱前的确认：有陷阱的提示不要提前泄露，只写风险 */
-    showChest(node: WildNode, enterCost: number, onOpen: () => void, onLeave: () => void): void {
+    showChest(
+        node: WildNode, enterCost: number, onOpen: () => void, onLeave: () => void,
+        extra?: { label: string; onTap: () => void },
+    ): void {
         const lines = ['一个被遗弃的箱子，锁扣上还有干涸的血迹。'];
         if (enterCost > 0) lines.push(`补给耗尽：进来这一趟已失去 ${enterCost} 生命。`);
         lines.push('打开有风险（可能触发陷阱），但里面通常有装备。');
-        this.showModal('路边宝箱', lines, [
+        const buttons: ModalButtonSpec[] = [
             { label: '打开', fill: COLOR.PRIMARY, onTap: onOpen },
             { label: '离开', fill: '#334155', onTap: onLeave },
-        ]);
+        ];
+        // 拾荒者背包：多一个「额外搜刮」按钮，代价由调用方在结算里扣（这里只负责显示）
+        if (extra) {
+            lines.push('背包里的钩爪还能伸进去一次 —— 代价是生命。');
+            buttons.push({ label: extra.label, fill: COLOR.WARNING, onTap: extra.onTap });
+        }
+        this.showModal('路边宝箱', lines, buttons);
     }
 
     showEvent(

@@ -45,6 +45,9 @@ node tools/verify-<game>-core.js          # 退出码 0 = 通过
 | `verify-fridge-core.js` | 冰箱底下 | M1 移动/瞄准/眼泪/敌人/拾取；M2 地图生成/门锁/清房/宝箱/Boss/存档；M3 40 道具、14 协同、6 角色技能、免死复活、商店/祭坛/炸弹/秘密房 |
 | `verify-mithril-core.js` | 秘银远征 | M0：数值曲线、副属性预算、天赋规则、技能变体、存档净化、配置完整性、战斗骨架（确定性、实体上限、无 NaN、无敌帧） |
 | `verify-mithril-wild.js` | 秘银远征 | M4：地图生成（12 节点 / 6 层 / 连线对称 / 无孤岛）、走法规则（起点免费回退、相邻已清理节点路过、当前未结算节点重开、不相邻已清理节点拒绝）、补给扣减与耗尽 8% 扣血、宝箱 / 事件 / 篝火、死亡与放弃只吞本程材料、存档往返与坏档回落（2828 项） |
+| `verify-mithril-camp.js` | 秘银远征 | M5：营地设施（铁匠铺 / 训练场 / 厨房）等级与解锁、材料产出与消耗、料理场次、天赋方案存取、经济不变量（337 项） |
+| `verify-mithril-dungeons.js` | 秘银远征 | M6：24 敌人 / 6 副本 × 3 遭遇 / 6 份 BOSS 编排与阶段同序、6 件首通紫装、区域路由、美术登记、**4 职业 × 6 副本自动通关矩阵**（892 项） |
+| `verify-mithril-trinkets.js` | 秘银远征 | M7：20 饰品 / 10 tag / 12 协同配置与掉落池闭环、协同只靠配对点亮、**20 件逐件规则效果**、12 条协同效果、两格装备与存档往返、打桩差异 ≥25%、**4 职业 × 6 副本 × {不戴, 戴} 自动通关矩阵**（692 项；含 48 场自动战斗，跑一轮约 3–5 分钟） |
 | `verify-battle-fixes.js` | 小小先锋 | 战斗修复回归。**脚本内 ROOT 硬编码为作者的 Windows 路径，跨机运行前先改成本机绝对路径** |
 
 ## 脚手架与共享工具
@@ -53,6 +56,7 @@ node tools/verify-<game>-core.js          # 退出码 0 = 通过
 |---|---|---|
 | `new-game.js` | `--id <id> --name <中文名> [--class <X>] [--dry-run]`：从 `assets/games/game_template/` 生成骨架（Core/Game/Hud + `verify-<id>-core.js`），并打印必须手改的清单 | **新增游戏第一步** |
 | `lib/core-compile.js` | 共用模块（非独立脚本）：`findTsc` / `requireTsc` / `runTsc`，所有 `verify-*-core.js` 的 tsc 定位都走它 | 新写 verify 脚本时 `require` |
+| `lib/mithril-bot.js` | 共用模块（非独立脚本）：`createBot(F, C)` → `{ BANDS, runDungeon, botInput, pickMove }`。秘银远征的自动玩家（16 方向转向 + 躲预警圈 / 弹道 + 低血吃球），`runDungeon(classId, dungeonId, seconds, trinkets?)` 多接一个饰品数组 | 改战斗手感 / 加饰品矩阵自检时先用它跑一遍 |
 
 ## 图标 / 构建 / 场景清单
 

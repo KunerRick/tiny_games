@@ -15,7 +15,6 @@
 import {
     SKILLS,
     TALENT_BY_ID,
-    TRINKETS,
 } from './MithrilConfig';
 import type {
     ClassId,
@@ -384,19 +383,8 @@ export function skillModsFromSave(save: {
 // ==================== 饰品倍率 ====================
 
 /**
- * 饰品的「数值层」倍率（设计 §4.1：两格合计 1.20×）。
- * 饰品的规则改写效果排到 M7（见设计 §7），这里先把主属性倍率接进 profile，
- * 让五层倍率的乘积在实战里真能跑到 9.5×，而不是只在纸上成立。
+ * M7 起饰品的强度**全部**来自条件规则（`MithrilTrinkets.ts`）：
+ * 旧的「已装备件数 → 1.00–1.20× 攻击力」无条件乘区已删除，
+ * 因为那让 20 件饰品在数值上完全等价，违背「每件有可观测规则」的验收判据。
+ * 面板估算仍用 `MithrilProgress.TRINKET_MUL_MAX` 作为**条件上限**（≈1.20×）。
  */
-export const TRINKET_MUL_MAX = 1.2;
-
-export function trinketMultiplier(trinkets: Array<string | null> | null | undefined): number {
-    if (!Array.isArray(trinkets)) return 1;
-    const known: Record<string, true> = {};
-    for (const t of TRINKETS) known[t.id] = true;
-    let count = 0;
-    for (const id of trinkets) {
-        if (typeof id === 'string' && known[id]) count++;
-    }
-    return 1 + (TRINKET_MUL_MAX - 1) * Math.max(0, Math.min(2, count)) / 2;
-}

@@ -757,6 +757,30 @@ export function findSynergies(tags: string[]): SynergyDef[] {
     return out;
 }
 
+/** tag 的中文短名（面板色点旁的标签） */
+export const TRINKET_TAG_NAMES: Record<TrinketTag, string> = {
+    blood: '血', shadow: '影', echo: '回响', thorn: '荆棘', greed: '贪婪',
+    ember: '烬火', frost: '霜', storm: '雷', oath: '誓约', hunger: '饥饿',
+};
+
+/**
+ * 饰品掉落归属：20 件各归一处（同一件不会掉在两个副本里）。
+ * 分配按副本主题：矿坑（血/荆棘/贪婪）、教堂（誓约/饥饿/回响）、
+ * 哨塔（霜×2 + 影）、熔炉（烬火×2 + 血）、回廊（影/回响/贪婪/雷）、
+ * 王座（雷/荆棘/饥饿/誓约）。
+ * 注：计划 §M7.4 写「王座 4（雷/回响/饥饿/荆棘）」，但回响只有 2 件且已分给教堂与回廊，
+ * 故王座第 4 件取「誓约」；总数仍是 20 件、每件恰好一处。
+ */
+export const TRINKET_LOOT: Record<string, string[]> = {
+    mine: ['blood_ring', 'thorn_crown', 'greed_eye'],
+    chapel: ['oath_sigil', 'hungry_stomach', 'resonance_crystal'],
+    tower: ['frost_pendant', 'frost_heart', 'silent_bell'],
+    forge: ['ember_ring', 'ember_stone', 'blood_amulet'],
+    shadow: ['shadow_cloak', 'echo_stone', 'scavenger_pack', 'storm_totem'],
+    throne: ['charge_bracer', 'thorn_plate', 'scavenger_pendant', 'oath_chain'],
+};
+
+
 // ==================== 副本（6 个）与区域首领（3 只） ====================
 
 /** 三套机制解算器：打断 / 转火 / 走位 */

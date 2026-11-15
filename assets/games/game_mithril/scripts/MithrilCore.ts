@@ -60,9 +60,10 @@ import {
     emptyTalentEffects,
     skillModsFromSave,
     talentEffects,
-    trinketMultiplier,
 } from './MithrilTalents';
 import type { SkillMod, SkillMods, TalentEffects } from './MithrilTalents';
+import { trinketFxOf } from './MithrilTrinkets';
+import type { TrinketEnemy, TrinketFx, TrinketHost, TrinketSlotKey } from './MithrilTrinkets';
 
 export { FIELD_H, FIELD_W, FIXED_DT, MAX_BULLETS, MAX_ENEMIES };
 
@@ -165,12 +166,12 @@ export function profileFromSave(save: MithrilSave, minIlvl = 0): CombatProfile {
     // 注意不能用「基线 + 装备」相加：ilvl40 均衡配点本身已触顶，相加会让装备词条全部浪费。
     const floor = makeProfile(save.classId, save.level, Math.max(0, minIlvl));
     const tal = talentEffects(save.talents, save.classId);
-    // 设计 §4.1 的五层倍率：饰品这一层在 M7 之前没有获取途径，
-    // 先把「已装备件数」折算成 1.00–1.20× 的数值层，避免毕业 DPS 只到 8× 出头。
-    const trinketMul = trinketMultiplier(save.trinkets);
-    // 攻击强度由等级 × 装备 × 饰品 × 天赋（精准）四层相乘；
+    // 设计 §7.1：饰品**不提供任何无条件数值**，只改写规则（M7）。
+    // 旧的「按已装备件数折 1.00–1.20×」占位实现已删除：它让面板 DPS 好看，
+    // 却让 20 件饰品全部变成同一个乘数，构不成任何 build 差异。
+    // 攻击强度由等级 × 装备 × 天赋（精准）三层相乘；
     // 暴击率 / 暴伤 / 攻速 / 技能加成等天赋则落到各自的消费点，不在这里重复乘。
-    const ap = base.attackPower * gearApMultiplier(st.ilvl) * trinketMul * (1 + tal.apPct);
+    const ap = base.attackPower * gearApMultiplier(st.ilvl) * (1 + tal.apPct);
     // 营地料理（M5）：进本前吃下的 buff 按场次生效，面板与实战必须读同一份乘数
     const meal = mealMultipliers(save);
     const maxHp = (base.maxHp + st.bonusHp) * (1 + meal.hp);
@@ -279,6 +280,8 @@ export interface PlayerState {
     swingCount: number;
     /** 每 5 秒回怒气的计时器（战地指挥） */
     rageTimer: number;
+    /** 隐身（暗影披风）；渲染层压 alpha，伤害乘数在饰品引擎里 */
+    hidden: boolean;
 }
 
 export interface EnemyStatus {
@@ -312,6 +315,11 @@ export interface EnemyState {
     contactCd: number;
     /** BOSS 读条期间停止移动 */
     casting: boolean;
+    /**
+     * 朝向（弧度）。敌人每次实际位移时更新为移动方向；
+     * 站桩敌人保持出生朝向 —— 影刺协同的「背刺」判定读它。
+     */
+    facing: number;
 }
 
 export type BulletOwner = 'player' | 'enemy';
@@ -428,7 +436,11 @@ export type CoreEvent =
     | { type: 'phase'; phase: number; name: string }
     | { type: 'stage'; stage: DungeonStage; index: number }
     | { type: 'regen'; x: number; y: number; amount: number }
-    | { type: 'enrage'; duration: number };
+    | { type: 'enrage'; duration: number }
+    /** 饰品落雷（雷暴图腾）：一条竖线 + 顶点白闪 */
+    | { type: 'lightning'; x: number; y: number }
+    /** 饰品爆炸（烬火石 / 反伤溅射 / 雷音）：扩散圆环 */
+    | { type: 'blast'; x: number; y: number; radius: number };
 
 export interface MithrilSnapshot {
     time: number;
@@ -466,6 +478,8 @@ export interface MithrilSnapshot {
     bossPhaseCount: number;
     dungeonName: string;
     dungeonProgress: string;
+    /** 最近 1.5 秒触发的饰品 / 协同 id（HUD 提示行与探针读它） */
+    trinketProcs: string[];
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -504,10 +518,12 @@ function copyEnemy(e: EnemyState): EnemyState {
 }
 
 /** 固定步长世界 */
-export class MithrilWorld {
+export class MithrilWorld implements TrinketHost {
     /** 出战属性；升级时由 setProfile 整体替换（M3 起可变） */
     profile: CombatProfile;
     readonly rng: () => number;
+    /** 饰品效果引擎（M7）：空饰品时所有钩子直接短路 */
+    readonly trinkets: TrinketFx;
 
     time = 0;
     phase: WorldPhase = 'playing';
@@ -549,7 +565,7 @@ export class MithrilWorld {
         return CLASS_KITS[this.profile.classId] || CLASS_KITS.warrior;
     }
 
-    constructor(profile: CombatProfile, seed = 1) {
+    constructor(profile: CombatProfile, seed = 1, trinkets: Array<string | null> | null = null) {
         this.profile = profile;
         this.rng = mulberry32(seed);
         this.player = {
@@ -583,7 +599,10 @@ export class MithrilWorld {
             hasteBuffAmt: 0,
             swingCount: 0,
             rageTimer: 0,
+            hidden: false,
         };
+        // 玩家状态就绪后再建饰品引擎：它持有宿主引用（this）并读取 player.enemies
+        this.trinkets = trinketFxOf(trinkets, this);
     }
 
     /**
@@ -633,6 +652,8 @@ export class MithrilWorld {
             slamCd: def && def.slamCd ? def.slamCd : 0,
             contactCd: 0,
             casting: false,
+            // 出生朝向：面向玩家出发点（站桩敌人不会更新，背刺判定用它）
+            facing: Math.atan2(PLAYER_START_Y - y, PLAYER_START_X - x),
         };
         this.enemies.push(enemy);
         return enemy;
@@ -730,6 +751,9 @@ export class MithrilWorld {
         this.player.hasteBuffAmt = 0;
         this.player.swingCount = 0;
         this.player.rageTimer = 0;
+        this.player.hidden = false;
+        // 节点级饰品状态（守誓者每副本一次、隐身 / 时间窗）在开战时重置
+        this.trinkets.resetNode();
         this.player.burst = 0;
         this.player.burstTakenMod = PLAYER_TUNING.burst.takenBonus;
         this.player.burstDamage = PLAYER_TUNING.burst.dmgBonus;
@@ -760,6 +784,86 @@ export class MithrilWorld {
         return out;
     }
 
+    // ==================== 饰品宿主动作（M7） ====================
+    //
+    // 饰品效果**不直接改 world 字段**，只调这几个出口。好处：
+    //  1. 效果与战斗管线只有一处契约，自检可以用假宿主单独验一件饰品；
+    //  2. 伤害类效果统一走 `_pending` 队列（flush 时结算），不会在 `_damageEnemy`
+    //     的敌人循环里递归 splice 数组，把伤害打到错位目标上。
+
+    attackPower(): number {
+        return this.profile.attackPower;
+    }
+
+    healPlayer(amount: number): number {
+        const before = this.player.hp;
+        this._healPlayer(amount);
+        const healed = this.player.hp - before;
+        if (healed > 0) {
+            this._emit({ type: 'heal', x: this.player.x, y: this.player.y, amount: healed });
+        }
+        return healed;
+    }
+
+    addShield(amount: number, capPct: number): void {
+        if (!(amount > 0)) return;
+        const cap = Math.max(0, this.player.maxHp * Math.max(0, capPct));
+        this.player.shield = Math.min(cap, this.player.shield + amount);
+    }
+
+    addOrb(x: number, y: number, amount: number): void {
+        if (this.orbs.length >= MAX_ORBS) return;
+        this.orbs.push({
+            id: this._nextId++,
+            x,
+            y,
+            amount: Math.max(1, Math.round(Number.isFinite(amount) ? amount : 1)),
+            life: ORB_LIFE,
+        });
+    }
+
+    addGold(amount: number): void {
+        if (!(amount > 0)) return;
+        this.goldGained += Math.round(amount);
+    }
+
+    resetCooldown(slot: TrinketSlotKey): void {
+        this.player.cd[slot] = 0;
+    }
+
+    grantHaste(amount: number, duration: number): void {
+        if (!(amount > 0) || !(duration > 0)) return;
+        this.player.hasteBuff = Math.max(this.player.hasteBuff, duration);
+        this.player.hasteBuffAmt = Math.max(this.player.hasteBuffAmt, amount);
+    }
+
+    /** 结算本帧排队的饰品伤害（按敌人 id 重新定位，避免下标漂移） */
+    private _flushTrinketFx(): void {
+        this.trinkets.flush((fx) => {
+            if (fx.targetId !== undefined) {
+                const index = this.enemies.findIndex((e) => e.id === fx.targetId);
+                if (index >= 0) this._damageEnemy(index, fx.amount, false, 'dot');
+                return;
+            }
+            const list: number[] = [];
+            for (let i = 0; i < this.enemies.length; i++) {
+                const e = this.enemies[i];
+                if (!e) continue;
+                const reach = fx.radius + e.radius;
+                if (dist2(e.x, e.y, fx.x, fx.y) <= reach * reach) list.push(i);
+            }
+            for (let k = list.length - 1; k >= 0; k--) {
+                this._damageEnemy(list[k], fx.amount, false, 'dot');
+            }
+        });
+        // 特效与伤害分开取：特效只是表现，不参与结算（半径已由 TrinketFx 夹过）
+        const visuals = this.trinkets.drainVisuals();
+        for (const v of visuals) {
+            if (v.kind === 'lightning') this._emit({ type: 'lightning', x: v.x, y: v.y });
+            else this._emit({ type: 'blast', x: v.x, y: v.y, radius: v.radius });
+        }
+    }
+
     // ==================== 主循环 ====================
 
     /**
@@ -784,6 +888,9 @@ export class MithrilWorld {
         this._tickBoss(d);
         this._tickRun(d);
         this._tickTimersOnly(d);
+        // 饰品的位移 / 计时钩子必须在本帧玩家移动之后跑，否则隐身会晚一帧
+        this.trinkets.tick(d);
+        this._flushTrinketFx();
         return this.phase === 'playing';
     }
 
@@ -828,6 +935,15 @@ export class MithrilWorld {
             return true;
         }
 
+        // 守誓者徽记（M7）：每个节点首次致死免疫，回 30% 生命
+        if (dmg > 0 && p.hp - dmg <= 0 && this.trinkets.trySaveFromDeath()) {
+            p.hp = Math.max(1, Math.round(p.maxHp * 0.3));
+            p.invuln = 1.5;
+            this._emit({ type: 'heal', x: p.x, y: p.y, amount: p.hp });
+            this._emit({ type: 'damage', target: 'player', x: p.x, y: p.y, amount: dmg, crit: false });
+            return true;
+        }
+
         const landed = dmg;
         p.hp = Math.max(0, p.hp - dmg);
         p.invuln = HIT_INVULN;
@@ -847,6 +963,10 @@ export class MithrilWorld {
 
         // 荆棘堡垒：受的伤害按比例炸回去
         if (tal.thornAoe > 0 && taken > 0) this._thornAoe(p.x, p.y, taken * tal.thornAoe);
+
+        // 饰品（M7）：荆棘之冠 / 反伤甲片 / 守财。taken 是护盾吸收前的原始伤害，
+        // 否则「护盾挡住的伤害不反弹」会让荆棘类饰品在满盾时完全失效
+        if (taken > 0) this.trinkets.onDamaged(opts.attacker || null, taken, !!opts.melee);
 
         // 控制：BOSS 砸地的减速（钢铁意志按比例缩短）
         if (opts.slow) {
@@ -905,6 +1025,9 @@ export class MithrilWorld {
             bossPhaseCount: this.plan && this.plan.boss ? Math.max(1, this.plan.boss.phases.length) : 3,
             dungeonName: this.dungeonName,
             dungeonProgress: this._progressText(),
+            // HUD 直接显示这几个字符串：必须给玩家看得懂的文案，
+            // 给 id 会渲染成 `synergy:thunderclap` 这种内部标识（M7 浏览器验证发现）
+            trinketProcs: this.trinkets.procLabels(),
         };
     }
 
@@ -983,7 +1106,7 @@ export class MithrilWorld {
             mx /= len;
             my /= len;
         }
-        let speed = PLAYER_SPEED;
+        let speed = PLAYER_SPEED * this.trinkets.speedMul();
         if (p.whirlwind > 0) speed *= PLAYER_TUNING.whirlwind.moveScale;
         if (p.slow > 0) speed *= 0.6;
         p.x = clamp(p.x + mx * speed * d, p.radius, FIELD_W - p.radius);
@@ -1029,6 +1152,8 @@ export class MithrilWorld {
                     : this._skillCd(act.cd, mod);
                 if (mod.v4.nextCrit || act.nextCrit) p.nextCrit = true;
                 if (tal.counterReflect > 0) p.counterReady = 1.5;
+                // 饰品（M7）：静默之铃 / 影回 / 影刺的窗口都从「闪避成功」起算
+                this.trinkets.onDodge();
             }
         }
 
@@ -1039,20 +1164,30 @@ export class MithrilWorld {
         }
 
         // 技能槽 1 / 2 / 3（cd.charge / cd.whirlwind / cd.armorBreak 是槽位名，不是技能名）
-        if (input.skill1 && cd.charge <= 0 && this._spend(kit.a1.cost || 0)) {
-            if (this._castSlot(kit.a1, skills.a1)) cd.charge = this._skillCd(kit.a1.cd, skills.a1);
+        if (input.skill1) cd.charge = this._trySkillSlot('charge', cd.charge, kit.a1, skills.a1);
+        if (input.skill2 && p.whirlwind <= 0) {
+            cd.whirlwind = this._trySkillSlot('whirlwind', cd.whirlwind, kit.a2, skills.a2);
         }
-        if (input.skill2 && cd.whirlwind <= 0 && p.whirlwind <= 0 && this._spend(kit.a2.cost || 0)) {
-            if (this._castSlot(kit.a2, skills.a2)) cd.whirlwind = this._skillCd(kit.a2.cd, skills.a2);
-        }
-        if (input.skill3 && cd.armorBreak <= 0 && this._spend(kit.a3.cost || 0)) {
-            if (this._castSlot(kit.a3, skills.a3)) cd.armorBreak = this._skillCd(kit.a3.cd, skills.a3);
-        }
+        if (input.skill3) cd.armorBreak = this._trySkillSlot('armorBreak', cd.armorBreak, kit.a3, skills.a3);
 
         // 爆发（战士血怒 / 法师奥术强化 / 游侠鹰眼 / 牧师圣能爆发）
         if (input.burst && cd.burst <= 0 && this._tryBurst(skills.burst)) {
             cd.burst = this._skillCd(kit.burst.cd, skills.burst);
         }
+    }
+
+    /**
+     * 技能槽施放（M7 起统一入口）：回响石 / 影回可以免资源，静默之铃把下一发变成必暴，
+     * 成功后记账给回响计数与共鸣水晶用。返回该槽的新冷却（没放出去就原样返回）。
+     */
+    private _trySkillSlot(slot: TrinketSlotKey, cd: number, act: SkillActDef, mod: SkillMod): number {
+        if (cd > 0) return cd;
+        const free = this.trinkets.wantFreeCast(slot);
+        if (!free && !this._spend(act.cost || 0)) return cd;
+        if (this.trinkets.consumeForcedSkillCrit()) this.player.nextCrit = true;
+        if (!this._castSlot(act, mod)) return cd;
+        this.trinkets.onSkillCast(slot, free);
+        return this._skillCd(act.cd, mod);
     }
 
     /** 普攻按职业分派：战士近战扇形，法系发射投射物 */
@@ -1173,12 +1308,15 @@ export class MithrilWorld {
         return Math.max(0, Math.min(2, h));
     }
 
-    /** 技能冷却：急速 + 技能等级/变体 + 战术大师 */
+    /** 技能冷却：急速 + 技能等级/变体 + 战术大师 + 饰品（嗜血护符低血 ×0.6） */
     private _skillCd(base: number, mod: SkillMod): number {
         const tal = this.profile.talents;
         const cdMul = Number.isFinite(mod.cdMul) && mod.cdMul > 0 ? mod.cdMul : 1;
         const cd = base * cdMul / (1 + Math.max(0, this.profile.haste));
-        return Math.max(0.2, cd * (1 - Math.max(0, Math.min(0.6, tal.skillCd))));
+        return Math.max(
+            0.2,
+            cd * (1 - Math.max(0, Math.min(0.6, tal.skillCd))) * this.trinkets.skillCooldownMul(),
+        );
     }
 
     /** 怒气获取统一走这里（战术精通按比例放大；非战士职业直接忽略） */
@@ -1353,7 +1491,9 @@ export class MithrilWorld {
     }
 
     private _playerDamageMult(): number {
-        return this.player.burst > 0 ? 1 + this.player.burstDamage : 1;
+        const burst = this.player.burst > 0 ? 1 + this.player.burstDamage : 1;
+        // 饰品（M7）：血契 / 誓血 / 隐身伏击 / 影刺窗口
+        return burst * this.trinkets.currentDamageMul();
     }
 
     // ==================== 法系 / 远程技能（M6） ====================
@@ -1397,7 +1537,8 @@ export class MithrilWorld {
     /** 冰霜新星 / 神圣新星：周身范围伤害，可附带冻结或自愈 */
     private _nova(act: SkillActDef, mod: SkillMod, heal: boolean): void {
         const p = this.player;
-        const radius = act.radius || 120;
+        // 饰品（M7）：霜心（冻结类技能半径 +40%），只放大带冻结的新星
+        const radius = (act.radius || 120) * (act.freeze ? this.trinkets.frostRadiusMul() : 1);
         this._emit({ type: 'boom', x: p.x, y: p.y, radius });
         const mult = (act.mult || 0) * mod.dmgMul;
         const list: number[] = [];
@@ -1455,7 +1596,8 @@ export class MithrilWorld {
     private _trap(act: SkillActDef): void {
         if (this.traps.length >= 6) this.traps.shift();
         const p = this.player;
-        const radius = act.radius || 95;
+        // 饰品（M7）：霜心 —— 冰霜陷阱半径同样 +40%
+        const radius = (act.radius || 95) * this.trinkets.frostRadiusMul();
         const life = act.duration || 8;
         this.traps.push({
             id: this._nextId++,
@@ -1547,7 +1689,8 @@ export class MithrilWorld {
             // 持续伤害（后续职业会用；M1 战士不触发）
             if (e.status.burnRemaining > 0) {
                 e.status.burnRemaining = Math.max(0, e.status.burnRemaining - d);
-                e.hp -= e.status.burnDps * d;
+                // 饰品（M7）：血契（低血时燃烧翻倍）
+                e.hp -= e.status.burnDps * d * this.trinkets.burnTickMul();
                 if (e.hp <= 0) {
                     this._killEnemyAt(i);
                     continue;
@@ -1570,6 +1713,8 @@ export class MithrilWorld {
             const def = ENEMY_BY_ID[e.kind];
             if (def && def.kind === 'ranged') {
                 const keep = 260;
+                const bx = e.x;
+                const by = e.y;
                 if (dist < keep - 40) {
                     e.x = clamp(e.x - dirX * e.speed * d, e.radius, FIELD_W - e.radius);
                     e.y = clamp(e.y - dirY * e.speed * d, e.radius, FIELD_H - e.radius);
@@ -1577,6 +1722,8 @@ export class MithrilWorld {
                     e.x = clamp(e.x + dirX * e.speed * d, e.radius, FIELD_W - e.radius);
                     e.y = clamp(e.y + dirY * e.speed * d, e.radius, FIELD_H - e.radius);
                 }
+                // 饰品（M7）：只有真的移动过才更新朝向；静止目标保留出生朝向，影刺背刺可判定
+                if (e.x !== bx || e.y !== by) e.facing = Math.atan2(dirY, dirX);
                 if (e.shotCd > 0) e.shotCd -= d;
                 if (e.shotCd <= 0) {
                     e.shotCd = def.shotCd || 3;
@@ -1590,8 +1737,12 @@ export class MithrilWorld {
             // 近战 / 精英 / BOSS：追击
             if (e.status.stun <= 0) {
                 const speed = e.speed * (e.status.slow > 0 ? 0.5 : 1);
+                const bx = e.x;
+                const by = e.y;
                 e.x = clamp(e.x + dirX * speed * d, e.radius, FIELD_W - e.radius);
                 e.y = clamp(e.y + dirY * speed * d, e.radius, FIELD_H - e.radius);
+                // 饰品（M7）：朝向只在真的移动时更新（供影刺背刺判定）
+                if (e.x !== bx || e.y !== by) e.facing = Math.atan2(dirY, dirX);
             }
 
             // 精英砸地
@@ -1723,9 +1874,9 @@ export class MithrilWorld {
                     const reach = b.radius + e.radius;
                     if (dist2(b.x, b.y, e.x, e.y) > reach * reach) continue;
                     // 火球：先挂燃烧再结算直接伤害（直接伤害可能击杀并 splice 掉它）
+                    // 饰品（M7）：余烬指环把「刷新燃烧」变成「叠加燃烧」
                     if (b.burnDps && b.burnDur) {
-                        e.status.burnDps = Math.max(e.status.burnDps, b.burnDps);
-                        e.status.burnRemaining = Math.max(e.status.burnRemaining, b.burnDur);
+                        this.trinkets.applyBurn(e, b.burnDps, b.burnDur);
                     }
                     this._damageEnemy(j, b.damage, !!b.crit);
                     remove = true;
@@ -1739,7 +1890,8 @@ export class MithrilWorld {
 
     private _tickOrbs(d: number): void {
         const p = this.player;
-        const reach = p.radius + ORB_PICKUP_RADIUS;
+        // 饰品（M7）：拾荒者护符（血球吸附范围 +40% 上 30%）
+        const reach = p.radius + ORB_PICKUP_RADIUS * this.trinkets.orbPickupMul();
         for (let i = this.orbs.length - 1; i >= 0; i--) {
             const o = this.orbs[i];
             o.life -= d;
@@ -1749,8 +1901,10 @@ export class MithrilWorld {
             }
             if (p.hp >= p.maxHp) continue;
             if (dist2(o.x, o.y, p.x, p.y) > reach * reach) continue;
-            const heal = this._healPlayer(o.amount);
+            const raw = o.amount * this.trinkets.orbHealMul();
+            const heal = this._healPlayer(raw);
             if (heal > 0) this._emit({ type: 'heal', x: o.x, y: o.y, amount: heal });
+            this.trinkets.onOrbPicked(heal);
             this.orbs.splice(i, 1);
         }
     }
@@ -1906,9 +2060,17 @@ export class MithrilWorld {
             dmg *= 1 + e.status.armorBreakBonus;
         }
         dmg *= this._damageMulVs(e, source);
+        // 饰品（M7）：霜华坠饰（冻结目标 +25%）/ 影刺（背后 +40%），只作用于玩家自己的伤害
+        dmg *= this.trinkets.damageMulVs(e, source);
         e.hp -= dmg;
         if (source !== 'reflect' && source !== 'dot') this._onHitLanded();
         this._emit({ type: 'damage', target: 'enemy', x: e.x, y: e.y, amount: dmg, crit });
+
+        // 饰品触发（M7）：落雷 / 攻速 / 冷却重置。伤害类效果只入队，
+        // 由 `_flushTrinketFx()` 在本步末尾结算，避免在这里递归 splice 敌人数组
+        if (source === 'basic' || source === 'skill') {
+            this.trinkets.onHitLanded(e, crit, source);
+        }
 
         // BOSS 读条：累计伤害用于打断
         if (this.bossCast && this.boss === e) {
@@ -1956,9 +2118,12 @@ export class MithrilWorld {
     private _healPlayer(amount: number): number {
         const p = this.player;
         const mul = (1 + Math.max(0, this.profile.talents.healMul)) * Math.max(1, p.burstHealMul);
-        const heal = Math.min(p.maxHp - p.hp, Math.max(0, amount) * mul);
+        const want = Math.max(0, amount) * mul;
+        const heal = Math.min(p.maxHp - p.hp, want);
         if (heal <= 0) return 0;
         p.hp = Math.min(p.maxHp, p.hp + heal);
+        // 饰品（M7）：誓约项链把溢出治疗转成护盾
+        if (want > heal) this.trinkets.onHealOverflow(want - heal);
         return heal;
     }
 
@@ -2012,6 +2177,9 @@ export class MithrilWorld {
             this.boss = null;
             this.bossCast = null;
         }
+        // 饰品触发（M7）：余烬石（烧死的敌人爆炸）/ 拾荒者项链（精英击杀回血）/ 冰雷协同
+        // 只入队，不在这里直接结算伤害
+        this.trinkets.onEnemyKilled(e);
         // 嗜血：击杀回血（按最大生命比例，走统一治疗入口吃「战地医师」）；
         // 职业自带的击杀回复（游侠）与天赋叠加
         const killHealPct = this.profile.talents.killHealPct + Math.max(0, this.kit.killHealPct || 0);
@@ -2152,8 +2320,13 @@ export class MithrilWorld {
  * 所以自检能锁住「毕业装 vs 起点」的实测倍率。冲锋不在循环里：它是位移技，
  * 打桩时会把玩家冲过木桩导致大量空挥，反而测不准输出。
  */
-export function measureDummyDps(profile: CombatProfile, seconds = 60, seed = 991): number {
-    const world = new MithrilWorld(profile, seed);
+export function measureDummyDps(
+    profile: CombatProfile,
+    seconds = 60,
+    seed = 991,
+    trinkets: Array<string | null> | null = null,
+): number {
+    const world = new MithrilWorld(profile, seed, trinkets);
     world.spawnEnemy('dummy', PLAYER_START_X, PLAYER_START_Y + 70, 1e12, 0, 0);
     const input: MithrilInput = {
         moveX: 0, moveY: 0, aimX: 0, aimY: 0,

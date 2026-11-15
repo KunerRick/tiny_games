@@ -30,7 +30,7 @@ import { CLASS_PROJECTILE_COLOR } from './MithrilConfig';
 const { ccclass, property } = _decorator;
 
 interface Fx {
-    kind: 'ring' | 'swing' | 'streak' | 'plus' | 'mote';
+    kind: 'ring' | 'swing' | 'streak' | 'plus' | 'mote' | 'bolt';
     x: number;
     y: number;
     r: number;
@@ -196,6 +196,15 @@ export class MithrilRenderer extends Component {
                     break;
                 case 'regen':
                     if (ev.amount > 0.5) this._pushFx('mote', ev.x, ev.y, 30, 0, 0.6, this._cPurple);
+                    break;
+                case 'lightning':
+                    // 饰品落雷：竖线 + 顶点白闪，带一点点震屏（力度低于 boss 爆炸）
+                    this._pushFx('bolt', ev.x, ev.y, 0, 0, 0.3, this._cBolt);
+                    this._shake = Math.max(this._shake, 0.22);
+                    break;
+                case 'blast':
+                    // 饰品爆炸：复用扩散圆环，烬火色与 boss 的红圈区分
+                    this._pushFx('ring', ev.x, ev.y, ev.radius, 0, 0.38, this._cGold);
                     break;
                 case 'damage':
                     if (ev.target === 'player') {
@@ -391,7 +400,26 @@ export class MithrilRenderer extends Component {
 
     private _drawPlayer(g: Graphics, snap: MithrilSnapshot): void {
         const p = snap.player;
-        drawClassPlayer(g, p.x - FIELD_W / 2, p.y - FIELD_H / 2, p.facing, this._time, {
+        const px = p.x - FIELD_W / 2;
+        const py = p.y - FIELD_H / 2;
+        // 暗影披风隐身：整体压到约 35% 可见度 —— 不画实体，只留淡银轮廓 + 朝向短线，
+        // 一眼能分清「我隐身了」和「我人没了」。
+        if (p.hidden) {
+            this._tmp.set(this._cBlue);
+            this._tmp.a = 88;
+            g.fillColor = this._tmp;
+            g.ellipse(px, py - 15, 18, 8);
+            g.fill();
+            g.strokeColor = this._tmp;
+            g.lineWidth = 2;
+            g.ellipse(px, py + 2, 20, 26);
+            g.stroke();
+            g.moveTo(px, py);
+            g.lineTo(px + Math.cos(p.facing) * 34, py + Math.sin(p.facing) * 34);
+            g.stroke();
+            return;
+        }
+        drawClassPlayer(g, px, py, p.facing, this._time, {
             invuln: p.invuln > 0,
             burst: p.burst > 0,
             whirlwind: p.whirlwind > 0,
@@ -457,6 +485,23 @@ export class MithrilRenderer extends Component {
                     g.circle(x + Math.cos(a) * fx.r * (0.4 + k), y + Math.sin(a) * fx.r * (0.4 + k) + k * 20, 3);
                     g.fill();
                 }
+            } else if (fx.kind === 'bolt') {
+                // 落雷：从屏幕上方劈下来的折线 + 落点白闪，末段才变淡（雷要先「亮完」再消失）
+                this._tmp.a = Math.round(255 * (1 - k * k));
+                g.strokeColor = this._tmp;
+                g.lineWidth = 5 - 3 * k;
+                const top = FIELD_H / 2 - y;      // 折算到以落点为原点的竖直高度
+                const sway = 10 * Math.sin(this._time * 41);
+                g.moveTo(x + sway, y + top);
+                g.lineTo(x - 7 + sway * 0.5, y + top * 0.55);
+                g.lineTo(x + 6, y + top * 0.28);
+                g.lineTo(x, y);
+                g.stroke();
+                this._tmp.set(this._cWhite);
+                this._tmp.a = Math.round(210 * (1 - k));
+                g.fillColor = this._tmp;
+                g.circle(x, y, 24 * (1 - k * 0.6));
+                g.fill();
             }
         }
     }

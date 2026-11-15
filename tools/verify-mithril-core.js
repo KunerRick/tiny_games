@@ -1260,7 +1260,9 @@ function mkGraduate(variants = {}, skillLevel = 5) {
         'warrior_fury_t4_0', 'warrior_fury_t5_1', 'warrior_tactic_t1_0']) {
         for (let i = 0; i < 5; i++) P.spendTalent(save, id);
     }
-    save.trinkets = [F.TRINKETS[0].id, F.TRINKETS[1].id];
+    // M7：饰品不再提供无条件攻击力乘区（旧实现是 1.00–1.20×），
+    // 毕业装对比只测「装备 + 天赋」，饰品强度由 verify-mithril-trinkets.js 单独验证
+    save.trinkets = [null, null];
     for (const sk of F.SKILLS) {
         if (sk.classId !== 'warrior') continue;
         save.skills[sk.id] = skillLevel;
@@ -1385,8 +1387,9 @@ const BASE_DPS = C.measureDummyDps(BASE_PROFILE, 60);
     check('192. 金币不足时技能洗点失败、变体保留',
         !P.respecVariants(poorV) && poorV.gold === 499 && !deepEqual(poorV.variants, {}));
 
-    // ---- 实战倍率（M3 退出标准）----
-    const fiveDps = C.measureDummyDps(C.profileFromSave(mkGraduate({}, 1), 5), 60);
+    // ---- 实战倍率（M3 退出标准；M7 起饰品的强度是条件规则，必须真的装备才计入）----
+    const FIVE_TRINKETS = ['resonance_crystal', 'charge_bracer'];
+    const fiveDps = C.measureDummyDps(C.profileFromSave(mkGraduate({}, 1), 5), 60, 991, FIVE_TRINKETS);
     const fiveRatio = fiveDps / BASE_DPS;
     check('193. 五层倍率实测 ∈ [8,11]（30 级 / ilvl40 / 30 天赋 / 2 饰品，技能 1 级）',
         fiveRatio >= 8 && fiveRatio <= 11, fiveRatio.toFixed(2));
@@ -1401,8 +1404,11 @@ const BASE_DPS = C.measureDummyDps(BASE_PROFILE, 60);
         near(C.measureDummyDps(maxedProfile, 60), maxDps, 1e-6), maxDps.toFixed(2));
 
     const skillLvl5 = C.measureDummyDps(C.profileFromSave(mkGraduate({}, 5), 5), 60);
+    // 基准也走「不装饰品」的同一套 profile，技能层与饰品层不互相污染
+    const fiveBareDps = C.measureDummyDps(C.profileFromSave(mkGraduate({}, 1), 5), 60);
     check('196. 技能 1→5 级只增 0–20%（防止再调回 +8%/级 把终局顶出区间）',
-        skillLvl5 > fiveDps && skillLvl5 / fiveDps <= 1.20, (skillLvl5 / fiveDps).toFixed(3));
+        skillLvl5 > fiveBareDps && skillLvl5 / fiveBareDps <= 1.20,
+        (skillLvl5 / fiveBareDps).toFixed(3));
 
     // ---- 成长真的进战斗 ----
     function whirlDamage(variant) {

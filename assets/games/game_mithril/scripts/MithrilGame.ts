@@ -22,7 +22,14 @@ import {
     FIXED_DT, MithrilWorld, PLAYER_START_X, PLAYER_START_Y, mulberry32, profileFromSave,
 } from './MithrilCore';
 import type { CoreEvent, MithrilInput, MithrilSnapshot } from './MithrilCore';
-import { addToInventory, bossLoot, rollItem, sellPrice } from './MithrilLoot';
+import { addToInventory, addTrinket, bossLoot, bossTrinket, maybeLowerQuality, rollItem, sellPrice, trinketGoldValue, unownedTrinkets } from './MithrilLoot';
+import {
+    chestExtraOptionOf,
+    chestHpCostOf,
+    extraDropCountOf,
+    feastHealOnExtraLoot,
+    lowerQualityChanceOf,
+} from './MithrilTrinkets';
 import {
     SAVE_STORAGE_KEY, addExp, defaultSave, expToNext, parseSave, pendingVariantCount, serializeSave,
     talentPointsForLevel, talentPointsSpent,
@@ -31,6 +38,7 @@ import type { MithrilSave } from './MithrilProgress';
 import {
     COMBAT_ILVL_FLOOR, FIRST_CLEAR_EXP, GEAR_BASE_BY_ID, GEAR_SLOT_NAMES, QUALITY_BY_ID,
     REGION_BOSS_BY_ID, REGION_BY_ID, REGIONS, SKILL_BOOK_FIRST_CLEAR, SKILL_BOOK_PER_CLEAR,
+    TRINKET_BY_ID, TRINKET_TAG_NAMES,
     WILD_NODE_COUNT, WILD_REWARDS, materialName, regionMaterialId,
 } from './MithrilConfig';
 import type { ClassId, EquipItem, RunPlan } from './MithrilConfig';
@@ -520,14 +528,18 @@ export class MithrilGame extends Component {
     private _openChest(node: WildNode, hpCost: number): void {
         const wild = this._wildMapRef;
         if (!wild) return;
+        const extra = this._save ? chestExtraOptionOf(this._save.trinkets) : false;
         wild.showChest(
             node, hpCost,
-            () => this._resolveChest(node, true, hpCost),
-            () => this._resolveChest(node, false, hpCost),
+            () => this._resolveChest(node, true, hpCost, false),
+            () => this._resolveChest(node, false, hpCost, false),
+            extra
+                ? { label: '额外搜刮', onTap: () => this._resolveChest(node, true, hpCost, true) }
+                : undefined,
         );
     }
 
-    private _resolveChest(node: WildNode, opened: boolean, hpCost: number): void {
+    private _resolveChest(node: WildNode, opened: boolean, hpCost: number, extra = false): void {
         const save = this._save;
         const exp = save ? save.expedition : null;
         if (!save || !exp) {
@@ -550,11 +562,32 @@ export class MithrilGame extends Component {
         const gold = chestGold(node);
         save.gold = Math.max(0, Math.floor(save.gold || 0) + gold);
         lines.push(`金币 +${gold}`);
+        // 贪婪之眼的降档概率与额外件数只在这里读一次，保证同一节点内口径一致
+        const lowerChance = lowerQualityChanceOf(save.trinkets);
         const rng = wildRng((node.seed ^ 0x9e37) >>> 0);
         const item = rollItem(rng, { ilvl: node.ilvl, classId: save.classId, minQuality: 'uncommon' });
         if (item) {
+            maybeLowerQuality(rng, item, lowerChance);
             const label = this._grantItem(save, item, [], lines);
             if (label) lines.push(`获得装备：${label}`);
+        }
+        // 拾荒者背包：额外搜刮一件，代价是最大生命 5%（饕餮协同会把这口血补回来一部分）
+        if (extra) {
+            const cost = Math.max(1, Math.round(maxHp * chestHpCostOf(save.trinkets)));
+            exp.hp = Math.max(0, exp.hp - cost);
+            lines.push(`拾荒者背包：额外搜刮失去 ${cost} 生命（${exp.hp}/${maxHp}）`);
+            const bonus = rollItem(rng, { ilvl: node.ilvl, classId: save.classId, minQuality: 'uncommon' });
+            if (bonus) {
+                maybeLowerQuality(rng, bonus, lowerChance);
+                const label = this._grantItem(save, bonus, [], lines);
+                if (label) lines.push(`拾荒者背包 · 额外获得：${label}`);
+            }
+            const heal = feastHealOnExtraLoot(save.trinkets, maxHp);
+            if (heal > 0) {
+                const before = exp.hp;
+                exp.hp = Math.min(maxHp, exp.hp + Math.round(heal));
+                if (exp.hp > before) lines.push(`饕餮：额外掉落回复 ${exp.hp - before} 生命`);
+            }
         }
         markNodeDone(exp, node.id);
         this._persist();
@@ -665,7 +698,8 @@ export class MithrilGame extends Component {
         const seed = this.seed > 0
             ? ((this.seed ^ ((node.id + 1) * 7919)) >>> 0)
             : (Date.now() & 0x7fffffff);
-        const core = new MithrilWorld(profile, seed);
+        // 饰品（M7）：两个饰品槽 + 协同效果由战斗内核自行结算
+        const core = new MithrilWorld(profile, seed, save.trinkets);
         core.startWild(plan, Math.max(1, Math.round(exp.hp)));
         this._core = core;
         this._mode = 'combat';
@@ -807,6 +841,8 @@ export class MithrilGame extends Component {
             const snap = this._lastSnapshot;
             exp.hp = Math.max(1, Math.min(maxHp, Math.round(snap ? snap.player.hp : exp.hp)));
             const rng = mulberry32((this._runSeed ^ 0x5bd1e995) >>> 0);
+            // 贪婪之眼（M7）：所有节点掉落统一走同一个降档概率
+            const greedChance = lowerQualityChanceOf(save.trinkets);
 
             const mats = rollNodeMaterials(node);
             if (mats > 0) {
@@ -842,11 +878,25 @@ export class MithrilGame extends Component {
                 });
                 if (item) {
                     // 首通只在奖励真正入包时才消耗：满包折金币那一轮，首通紫装保留到下次
+                    maybeLowerQuality(rng, item, greedChance);
                     this._grantItem(save, item, granted, reward, () => {
                         if (firstClear && save.dungeonsCleared.indexOf(node.dungeonId!) < 0) {
                             save.dungeonsCleared.push(node.dungeonId!);
                         }
                     });
+                }
+                // 饰品（M7）：首通必给本副本未拥有的一件，重复通关 25%；
+                // 本副本饰品已集齐时退化为金币，结算行照实写，不假装出货
+                const poolEmpty = unownedTrinkets(save, node.dungeonId).length === 0;
+                const trinketId = bossTrinket(rng, save, node.dungeonId, firstClear);
+                if (trinketId) {
+                    addTrinket(save, trinketId);
+                    const tdef = TRINKET_BY_ID[trinketId];
+                    reward.push(`获得饰品：${tdef.name}（${TRINKET_TAG_NAMES[tdef.tag]}）`);
+                } else if (poolEmpty) {
+                    const gold = trinketGoldValue(node.dungeonId);
+                    save.gold = Math.max(0, Math.floor(save.gold || 0)) + gold;
+                    reward.push(`本副本饰品已集齐：金币 +${gold}`);
                 }
             } else if (node.kind === 'boss') {
                 // 区域首领：必掉（rare / epic）+ 橙装概率
@@ -855,7 +905,10 @@ export class MithrilGame extends Component {
                     ? 'legendary'
                     : (bdef ? bdef.guaranteed : 'epic');
                 const item = rollItem(rng, { ilvl: node.ilvl, classId: save.classId, quality });
-                if (item) this._grantItem(save, item, granted, reward);
+                if (item) {
+                    maybeLowerQuality(rng, item, greedChance);
+                    this._grantItem(save, item, granted, reward);
+                }
             } else {
                 const def = node.kind === 'battle' || node.kind === 'elite' ? WILD_REWARDS[node.kind] : null;
                 if (def && def.gearChance > 0 && rng() < def.gearChance) {
@@ -864,7 +917,33 @@ export class MithrilGame extends Component {
                         classId: save.classId,
                         minQuality: def.gearMinQuality,
                     });
-                    if (item) this._grantItem(save, item, granted, reward);
+                    if (item) {
+                        maybeLowerQuality(rng, item, greedChance);
+                        this._grantItem(save, item, granted, reward);
+                    }
+                }
+            }
+
+            // 贪婪之眼：每个节点额外掉一件（最低档起步，免得白送高品质）
+            const extraDrops = extraDropCountOf(save.trinkets);
+            if (extraDrops > 0) {
+                const before = exp.hp;
+                let gained = 0;
+                for (let i = 0; i < extraDrops; i++) {
+                    const bonus = rollItem(rng, { ilvl: node.ilvl, classId: save.classId });
+                    if (!bonus) continue;
+                    maybeLowerQuality(rng, bonus, greedChance);
+                    const label = this._grantItem(save, bonus, granted, reward);
+                    if (label) {
+                        reward.push(`贪婪之眼 · 额外掉落：${label}`);
+                        gained++;
+                    }
+                }
+                // 饕餮协同：有额外掉落就回 3% 生命（上限仍是 maxHp）
+                const heal = feastHealOnExtraLoot(save.trinkets, maxHp);
+                if (heal > 0 && gained > 0) {
+                    exp.hp = Math.min(maxHp, exp.hp + Math.round(heal));
+                    if (exp.hp > before) reward.push(`饕餮：额外掉落回复 ${exp.hp - before} 生命`);
                 }
             }
 

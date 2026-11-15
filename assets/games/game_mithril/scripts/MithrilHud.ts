@@ -94,6 +94,8 @@ export class MithrilHud extends Component {
     private _barGfx: Graphics | null = null;
     private _hpLabel: Label | null = null;
     private _rageLabel: Label | null = null;
+    /** 饰品 / 协同 proc 一行小字（M7） */
+    private _procLabel: Label | null = null;
     private _expLabel: Label | null = null;
     private _progressLabel: Label | null = null;
     private _timerLabel: Label | null = null;
@@ -175,6 +177,7 @@ export class MithrilHud extends Component {
         this._expLabel = null;
         this._progressLabel = null;
         this._timerLabel = null;
+        this._procLabel = null;
         this._bannerTitle = null;
         this._bannerSub = null;
         this._bossRoot = null;
@@ -308,6 +311,10 @@ export class MithrilHud extends Component {
         this._timerLabel = createLabel(this.node, '', 15, {
             width: 240, height: 20, color: COLOR.TEXT_SECONDARY, align: 'right', x: 232, y: 574,
         });
+        // 饰品 proc：资源条下方一行小字，不用图标字符（红线 10），也不改顶栏高度
+        this._procLabel = createLabel(this.node, '', 14, {
+            width: 400, height: 20, color: COLOR.WARNING, x: -20, y: 516,
+        });
     }
 
     private _drawTopBars(snap: MithrilSnapshot): void {
@@ -411,6 +418,11 @@ export class MithrilHud extends Component {
         const mm = Math.floor(t / 60);
         const ss = t % 60;
         this._timerLabel!.string = `${snap.dungeonName}  ${mm}:${ss < 10 ? '0' : ''}${ss}  击杀 ${snap.kills}`;
+        // 饰品 proc 行（M7）：只显示最近一条，内核在 1.5s 后自动清空 → 自然淡出
+        if (this._procLabel) {
+            const procs = snap.trinketProcs || [];
+            this._procLabel.string = procs.length > 0 ? procs[procs.length - 1] : '';
+        }
     }
 
     private _buildExit(): void {

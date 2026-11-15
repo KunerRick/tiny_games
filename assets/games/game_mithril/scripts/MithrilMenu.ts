@@ -1,11 +1,11 @@
 /**
- * 《秘银远征》装备面板（M2）：8 槽位 + 背包分页 + 属性总览 + 穿上/卸下/出售。
+ * 《秘银远征》角色面板（M2 / M7）：装备页（8 槽 + 背包 + 属性）+ 饰品页（两格 + 拥有列表 + 协同）。
  *
  * 设计纪律（docs/plans/2026-11-14-game-mithril-design.md §12）：
  *  面板只做「数据 → 显示」的一次性刷新，不在 update 里逐帧重建；
  *  所有 handler 都是命名方法或按钮自带闭包，组件事件能解绑（AGENTS 红线 5）。
  *
- * 生效时机：装备变更只改存档，**下一局开始**才重建 CombatProfile。
+ * 生效时机：装备 / 饰品变更只改存档，**下一局开始**才重建 CombatProfile。
  * 面板里会明确写出来，避免玩家以为当场 DPS 变了。
  */
 
@@ -18,28 +18,34 @@ import {
 import type { UiButton } from '../../../common/ui/GameUIKit';
 import {
     AFFIX_BY_ID, GEAR_BASE_BY_ID, GEAR_SLOT_NAMES, GEAR_SLOTS, MODIFIER_BY_ID, QUALITY_BY_ID,
-    STAMINA_HP_PER_POINT,
+    STAMINA_HP_PER_POINT, SYNERGIES, TRINKETS, TRINKET_BY_ID, TRINKET_TAG_NAMES,
 } from './MithrilConfig';
-import type { AffixId, EquipItem, GearSlot } from './MithrilConfig';
+import type { AffixId, EquipItem, GearSlot, TrinketDef } from './MithrilConfig';
 import {
-    affixValue, equipFromInventory, equipStats, findInventoryIndex, sellFromInventory,
-    sellPrice, sortedInventory, staminaOf, unequipToInventory,
+    affixValue, equipFromInventory, equipStats, equipTrinket, findInventoryIndex, ownsTrinket,
+    sellFromInventory, sellPrice, sortedInventory, staminaOf, unequipToInventory, unequipTrinket,
 } from './MithrilLoot';
 import type { EquipStats } from './MithrilLoot';
 import type { MithrilSave } from './MithrilProgress';
 import { profileFromSave } from './MithrilCore';
+import { equippedTags, litSynergies } from './MithrilTrinkets';
 
 const { ccclass } = _decorator;
 
 const ROWS_PER_PAGE = 6;
 const HINT_TEXT = '装备变更将在下一局生效';
+const TRINKET_HINT_TEXT = '饰品变更将在下一局生效';
 const PANEL_W = 680;
 const PANEL_H = 1180;
 
 type Selection =
     | { kind: 'inv'; uid: string }
     | { kind: 'slot'; slot: GearSlot }
+    | { kind: 'trinket'; id: string }
+    | { kind: 'trinketSlot'; slot: number }
     | null;
+
+type MenuTab = 'gear' | 'trinket';
 
 @ccclass('MithrilMenu')
 export class MithrilMenu extends Component {
@@ -70,14 +76,42 @@ export class MithrilMenu extends Component {
     private _sellBtn: UiButton | null = null;
     private _hintLabel: Label | null = null;
 
+    // ---- 页签与饰品页（M7） ----
+    private _tab: MenuTab = 'gear';
+    /** 装备页的全部节点：切到饰品页时整体隐藏，页签按钮与饰品页不在其中 */
+    private _gearNodes: Node[] = [];
+    private _trinketRoot: Node | null = null;
+    private _tSlotBtns: UiButton[] = [];
+    private _tRowRoot: Node | null = null;
+    private _tCountLabel: Label | null = null;
+    private _tPageLabel: Label | null = null;
+    /** 翻页按钮：只有一页时隐藏（试玩 N56） */
+    private _tPrevBtn: UiButton | null = null;
+    private _tNextBtn: UiButton | null = null;
+    private _gearTabBtn: UiButton | null = null;
+    private _trinketTabBtn: UiButton | null = null;
+    private _tDetailTitle: Label | null = null;
+    private _tDetailBody: Label | null = null;
+    private _tSynergyLabel: Label | null = null;
+    private _tHintLabel: Label | null = null;
+    private _tEquipBtn: UiButton | null = null;
+    private _tUnequipBtn: UiButton | null = null;
+    /** 装备到哪一格（0/1），点槽位切换 */
+    private _slotSel = 0;
+
     open(save: MithrilSave, floorIlvl = 0): void {
         this._save = save;
         this._floorIlvl = floorIlvl;
         this._sel = null;
         this._page = 0;
+        // 记住上次停留的页签（试玩 N57）：只在内存里保留，重载后回到装备页。
+        // 管理饰品是连续动作，每次重开都跳回装备页等于强迫玩家多点一次。
+        // 默认落到第一个空槽，装备饰品时少点一次
+        this._slotSel = save.trinkets[0] ? 1 : 0;
         this._ensureBuilt();
         if (!this._root) return;
         this._root.active = true;
+        this._applyTabVisibility();
         this.refresh();
     }
 
@@ -98,10 +132,48 @@ export class MithrilMenu extends Component {
             this._hintLabel.string = HINT_TEXT;
             this._hintLabel.color = hex(COLOR.WARNING);
         }
+        if (this._tHintLabel) {
+            this._tHintLabel.string = TRINKET_HINT_TEXT;
+            this._tHintLabel.color = hex(COLOR.WARNING);
+        }
+        if (this._tab === 'trinket') {
+            this._refreshTrinkets();
+            return;
+        }
         this._refreshStats();
         this._refreshSlots();
         this._refreshRows();
         this._refreshDetail();
+    }
+
+    // ==================== 页签 ====================
+
+    private _applyTabVisibility(): void {
+        const gear = this._tab === 'gear';
+        for (const n of this._gearNodes) {
+            if (n && n.isValid) n.active = gear;
+        }
+        if (this._trinketRoot && this._trinketRoot.isValid) this._trinketRoot.active = !gear;
+        if (this._gearTabBtn) this._gearTabBtn.setColor(gear ? '#1E3A5F' : '#334155', COLOR.TEXT_PRIMARY);
+        if (this._trinketTabBtn) {
+            this._trinketTabBtn.setColor(gear ? '#334155' : '#1E3A5F', COLOR.TEXT_PRIMARY);
+        }
+    }
+
+    private _setTab(tab: MenuTab): void {
+        if (this._tab === tab) return;
+        this._tab = tab;
+        this._sel = null;
+        this._applyTabVisibility();
+        this.refresh();
+    }
+
+    private _onGearTabTap(): void {
+        this._setTab('gear');
+    }
+
+    private _onTrinketTabTap(): void {
+        this._setTab('trinket');
     }
 
     // ==================== 构建 ====================
@@ -142,7 +214,7 @@ export class MithrilMenu extends Component {
         // 首次构建不显示：整棵树关掉（面板 + 遮罩一起），open() 再打开
         root.active = false;
 
-        createLabel(panel, '装备', 36, {
+        const titleLabel = createLabel(panel, '角色', 36, {
             width: 300, height: 48, color: COLOR.TEXT_PRIMARY, bold: true, x: 0, y: 540,
         });
         const closeBtn = createButton(panel, {
@@ -228,6 +300,103 @@ export class MithrilMenu extends Component {
             radius: 12, onTap: () => this._onSellTap(),
         });
         this._sellBtn.node.setPosition(180, -485, 0);
+
+        // ---- 页签（常驻）与饰品页（M7） ----
+        // 先给装备页拍快照：此刻面板的子节点全部是装备页控件，
+        // 页签按钮与饰品页在其后创建，不会被一起隐藏。
+        // 标题与「返回」例外：两个页签都要能看到、能按到（否则饰品页上没有退出路径，
+        // 遮罩还会把点击全吞掉）。
+        this._gearNodes = panel.children.filter((n) => n !== closeBtn.node && n !== titleLabel.node);
+
+        this._gearTabBtn = createButton(panel, {
+            w: 140, h: 44, text: '装备', fontSize: 22,
+            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            radius: 10, onTap: () => this._onGearTabTap(),
+        });
+        this._gearTabBtn.node.setPosition(-92, 478, 0);
+        this._trinketTabBtn = createButton(panel, {
+            w: 140, h: 44, text: '饰品', fontSize: 22,
+            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            radius: 10, onTap: () => this._onTrinketTabTap(),
+        });
+        this._trinketTabBtn.node.setPosition(64, 478, 0);
+
+        this._buildTrinketPage(panel);
+        this._applyTabVisibility();
+    }
+
+    /** 饰品页：两个装备槽 + 拥有列表（分页）+ 详情 + 协同栏 */
+    private _buildTrinketPage(panel: Node): void {
+        const root = new Node('TrinketTab');
+        root.layer = this.node.layer;
+        root.addComponent(UITransform).setContentSize(PANEL_W, PANEL_H);
+        panel.addChild(root);
+        this._trinketRoot = root;
+
+        for (let i = 0; i < 2; i++) {
+            const btn = createButton(root, {
+                w: 300, h: 96, text: '', fontSize: 19,
+                fill: '#1E293B', textColor: COLOR.TEXT_PRIMARY, activeFill: '#1E3A5F',
+                radius: 14, onTap: () => this._onTrinketSlotTap(i),
+            });
+            btn.node.setPosition(i === 0 ? -160 : 160, 400, 0);
+            btn.node.name = `TrinketSlot_${i}`;
+            this._tSlotBtns[i] = btn;
+        }
+
+        this._tCountLabel = createLabel(root, '', 20, {
+            width: 320, height: 34, color: COLOR.TEXT_PRIMARY, bold: true, x: -190, y: 320,
+        });
+        const prev = createButton(root, {
+            w: 84, h: 40, text: '上一页', fontSize: 16,
+            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            radius: 10, onTap: () => this._onTrinketPrevPage(),
+        });
+        prev.node.setPosition(104, 320, 0);
+        this._tPrevBtn = prev;
+        this._tPageLabel = createLabel(root, '', 17, {
+            width: 130, height: 28, color: COLOR.TEXT_SECONDARY, x: 204, y: 320,
+        });
+        const next = createButton(root, {
+            w: 84, h: 40, text: '下一页', fontSize: 16,
+            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            radius: 10, onTap: () => this._onTrinketNextPage(),
+        });
+        next.node.setPosition(298, 320, 0);
+        this._tNextBtn = next;
+        this._tHintLabel = createLabel(root, TRINKET_HINT_TEXT, 17, {
+            width: 600, height: 24, color: COLOR.WARNING, x: 0, y: 284,
+        });
+
+        const rows = new Node('TRows');
+        rows.layer = this.node.layer;
+        rows.addComponent(UITransform).setContentSize(620, 370);
+        rows.setPosition(0, 20, 0);
+        root.addChild(rows);
+        this._tRowRoot = rows;
+
+        this._tDetailTitle = createLabel(root, '', 21, {
+            width: 600, height: 30, color: COLOR.TEXT_PRIMARY, bold: true, x: 0, y: -212,
+        });
+        this._tDetailBody = createLabel(root, '', 17, {
+            width: 600, height: 190, color: COLOR.TEXT_SECONDARY, x: 0, y: -330, lineHeight: 28,
+        });
+        this._tSynergyLabel = createLabel(root, '', 18, {
+            width: 600, height: 52, color: COLOR.WARNING, x: 0, y: -470, lineHeight: 26,
+        });
+
+        this._tEquipBtn = createButton(root, {
+            w: 180, h: 56, text: '装备', fontSize: 24,
+            fill: COLOR.SUCCESS, textColor: '#FFFFFF', activeFill: '#15803D',
+            radius: 12, onTap: () => this._onTrinketEquipTap(),
+        });
+        this._tEquipBtn.node.setPosition(-105, -540, 0);
+        this._tUnequipBtn = createButton(root, {
+            w: 180, h: 56, text: '卸下', fontSize: 24,
+            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            radius: 12, onTap: () => this._onTrinketUnequipTap(),
+        });
+        this._tUnequipBtn.node.setPosition(105, -540, 0);
     }
 
     // ==================== 刷新 ====================
@@ -351,6 +520,202 @@ export class MithrilMenu extends Component {
         this._setActions(isInv, this._sel?.kind === 'slot', isInv);
     }
 
+    // ==================== 饰品页刷新（M7） ====================
+
+    private _ownedTrinkets(): TrinketDef[] {
+        const save = this._save;
+        if (!save) return [];
+        return TRINKETS.filter((t) => ownsTrinket(save, t.id));
+    }
+
+    private _trinketSlotOf(id: string): number {
+        const save = this._save;
+        return save ? save.trinkets.indexOf(id) : -1;
+    }
+
+    private _refreshTrinkets(): void {
+        const save = this._save;
+        const rows = this._tRowRoot;
+        if (!save || !rows) return;
+
+        // 两个装备槽：选中态高亮，空槽灰字
+        for (let i = 0; i < 2; i++) {
+            const btn = this._tSlotBtns[i];
+            if (!btn) continue;
+            const id = save.trinkets[i];
+            const def = id ? TRINKET_BY_ID[id] : null;
+            const picked = this._sel?.kind === 'trinketSlot' && this._sel.slot === i;
+            btn.setText(def
+                ? `槽 ${i + 1} · ${def.name}（${TRINKET_TAG_NAMES[def.tag]}）`
+                : `槽 ${i + 1} · 空`);
+            btn.setColor(picked ? '#1E3A5F' : '#1E293B', def ? COLOR.TEXT_PRIMARY : '#64748B');
+        }
+
+        const owned = this._ownedTrinkets();
+        const pages = Math.max(1, Math.ceil(owned.length / ROWS_PER_PAGE));
+        if (this._page >= pages) this._page = pages - 1;
+        if (this._page < 0) this._page = 0;
+        if (this._tCountLabel) {
+            this._tCountLabel.string = `已拥有饰品 ${owned.length}/${TRINKETS.length}`;
+        }
+        if (this._tPageLabel) this._tPageLabel.string = `${this._page + 1} / ${pages}`;
+        // 只有一页时翻页按钮点了也没反应，直接隐藏（试玩 N56）
+        if (this._tPrevBtn) this._tPrevBtn.node.active = pages > 1;
+        if (this._tNextBtn) this._tNextBtn.node.active = pages > 1;
+
+        const kids = rows.children.slice();
+        rows.removeAllChildren();
+        for (const k of kids) k.destroy();
+
+        const pageItems = owned.slice(this._page * ROWS_PER_PAGE, (this._page + 1) * ROWS_PER_PAGE);
+        if (pageItems.length === 0) {
+            createLabel(rows, '还没有饰品 —— 副本 BOSS 首通必掉一件本副本未拥有的', 18, {
+                width: 600, height: 40, color: COLOR.TEXT_SECONDARY, x: 0, y: 120,
+            });
+        }
+        for (let i = 0; i < pageItems.length; i++) {
+            const def = pageItems[i];
+            const equippedAt = this._trinketSlotOf(def.id);
+            const selected = this._sel?.kind === 'trinket' && this._sel.id === def.id;
+            const btn = createButton(rows, {
+                w: 620, h: 56, text: '',
+                fontSize: 19,
+                fill: selected ? '#1E3A5F' : '#1E293B',
+                textColor: COLOR.TEXT_PRIMARY,
+                activeFill: '#1E3A5F',
+                radius: 10,
+                onTap: () => this._onTrinketRowTap(def.id),
+            });
+            btn.node.setPosition(0, 150 - i * 60, 0);
+            btn.node.name = `TrinketRow_${def.id}`;
+            const mark = equippedAt >= 0 ? `[已装备 ${equippedAt + 1}]` : '';
+            btn.setText(`${def.name}（${TRINKET_TAG_NAMES[def.tag]}）${mark}`);
+        }
+
+        this._refreshTrinketDetail();
+    }
+
+    private _refreshTrinketDetail(): void {
+        const save = this._save;
+        if (!save || !this._tDetailTitle || !this._tDetailBody) return;
+        const sel = this._sel;
+        let def: TrinketDef | null = null;
+        if (sel?.kind === 'trinket') def = TRINKET_BY_ID[sel.id] || null;
+        else if (sel?.kind === 'trinketSlot') {
+            const id = save.trinkets[sel.slot];
+            def = id ? TRINKET_BY_ID[id] || null : null;
+        }
+
+        if (!def) {
+            this._tDetailTitle.string = '点上方两格看已装备，点下方列表看详情';
+            this._tDetailTitle.color = hex(COLOR.TEXT_SECONDARY);
+            this._tDetailBody.string = '饰品只改规则、不加固定数值：\n'
+                + `两件不同 tag 的饰品同时装备会点亮协同（共 ${SYNERGIES.length} 条）。`;
+            this._setTrinketActions(false, false);
+            this._refreshSynergyFooter();
+            return;
+        }
+
+        const at = this._trinketSlotOf(def.id);
+        this._tDetailTitle.string = `${def.name}（${TRINKET_TAG_NAMES[def.tag]}）`;
+        this._tDetailTitle.color = hex(COLOR.TEXT_PRIMARY);
+        const lines = [def.effect];
+        lines.push(at >= 0 ? `状态：已装备 · 槽 ${at + 1}` : '状态：在背包中（未装备）');
+        // 目标槽已有别的饰品时写明会被替换（试玩 N55：旧实现静默替换，玩家不知道丢了什么）
+        const targetId = this._slotSel === 0 || this._slotSel === 1 ? save.trinkets[this._slotSel] : null;
+        const targetDef = targetId && targetId !== def.id ? TRINKET_BY_ID[targetId] || null : null;
+        if (targetDef) {
+            lines.push(`目标槽：槽 ${this._slotSel + 1}（将替换「${targetDef.name}」，点上方槽位可切换）`);
+        } else {
+            lines.push(`目标槽：槽 ${this._slotSel + 1}（点上方槽位可切换）`);
+        }
+        this._tDetailBody.string = lines.join('\n');
+
+        const slotOccupied = sel?.kind === 'trinketSlot' && !!save.trinkets[sel.slot];
+        this._setTrinketActions(sel?.kind === 'trinket', !!slotOccupied);
+        this._refreshSynergyFooter();
+    }
+
+    private _refreshSynergyFooter(): void {
+        const save = this._save;
+        if (!save || !this._tSynergyLabel) return;
+        const lit = litSynergies(save.trinkets);
+        const tags = equippedTags(save.trinkets);
+        if (lit.length > 0) {
+            const text = lit
+                .map((s) => `${s.name}（${TRINKET_TAG_NAMES[s.a]} + ${TRINKET_TAG_NAMES[s.b]}）`)
+                .join(' / ');
+            this._tSynergyLabel.string = `协同已点亮：${text}`;
+            this._tSynergyLabel.color = hex(COLOR.WARNING);
+            return;
+        }
+        // 三态文案（试玩 N54）：空 / 真同 tag / tag 不同但没这条协同。
+        // 旧实现把「两格都有但没点亮」一律说成「两件同 tag」，
+        // 而 45 种 tag 配对里有 33 种是不同 tag 且无协同 —— 与两格显示的 tag 自相矛盾。
+        if (tags.length < 2) {
+            this._tSynergyLabel.string = `协同：两件不同 tag 的饰品同时装备可点亮（共 ${SYNERGIES.length} 条）`;
+        } else if (tags[0] === tags[1]) {
+            this._tSynergyLabel.string = `协同：两件都是「${TRINKET_TAG_NAMES[tags[0]]}」tag，同 tag 不产生协同 —— 换一件不同 tag 的试试`;
+        } else {
+            this._tSynergyLabel.string = `协同：${TRINKET_TAG_NAMES[tags[0]]} + ${TRINKET_TAG_NAMES[tags[1]]} 没有对应协同 —— 换一件试试`;
+        }
+        this._tSynergyLabel.color = hex(COLOR.TEXT_SECONDARY);
+    }
+
+    private _setTrinketActions(equip: boolean, unequip: boolean): void {
+        if (this._tEquipBtn) {
+            this._tEquipBtn.node.active = equip;
+            this._tEquipBtn.setText(`装备到槽 ${this._slotSel + 1}`);
+        }
+        if (this._tUnequipBtn) this._tUnequipBtn.node.active = unequip;
+    }
+
+    private _onTrinketSlotTap(slot: number): void {
+        this._slotSel = slot;
+        this._sel = { kind: 'trinketSlot', slot };
+        this.refresh();
+    }
+
+    private _onTrinketRowTap(id: string): void {
+        this._sel = { kind: 'trinket', id };
+        this.refresh();
+    }
+
+    private _onTrinketEquipTap(): void {
+        const save = this._save;
+        const sel = this._sel;
+        if (!save || !sel || sel.kind !== 'trinket') return;
+        if (!equipTrinket(save, sel.id, this._slotSel)) {
+            this._notice('装备失败：同一件不能占两格 —— 先卸下另一格');
+            return;
+        }
+        this._sel = { kind: 'trinketSlot', slot: this._slotSel };
+        this._changed();
+    }
+
+    private _onTrinketUnequipTap(): void {
+        const save = this._save;
+        const sel = this._sel;
+        if (!save || !sel || sel.kind !== 'trinketSlot') return;
+        if (!unequipTrinket(save, sel.slot)) {
+            this._notice('这一格没有饰品');
+            return;
+        }
+        this._sel = null;
+        this._changed();
+    }
+
+    private _onTrinketPrevPage(): void {
+        if (this._page > 0) this._page--;
+        this._refreshTrinkets();
+    }
+
+    private _onTrinketNextPage(): void {
+        const pages = Math.max(1, Math.ceil(this._ownedTrinkets().length / ROWS_PER_PAGE));
+        if (this._page < pages - 1) this._page++;
+        this._refreshTrinkets();
+    }
+
     private _setActions(equip: boolean, unequip: boolean, sell: boolean): void {
         if (this._equipBtn) this._equipBtn.node.active = equip;
         if (this._unequipBtn) this._unequipBtn.node.active = unequip;
@@ -376,6 +741,7 @@ export class MithrilMenu extends Component {
         const sel = this._sel;
         if (!save || !sel) return null;
         if (sel.kind === 'slot') return save.equips[sel.slot] || null;
+        if (sel.kind !== 'inv') return null;
         const idx = findInventoryIndex(save, sel.uid);
         return idx >= 0 ? save.inventory[idx] : null;
     }
@@ -426,11 +792,12 @@ export class MithrilMenu extends Component {
         this._changed();
     }
 
-    /** 失败提示：写进提示行，下一次任意交互（refresh）自动复位 */
+    /** 失败提示：写进当前页签的提示行，下一次任意交互（refresh）自动复位 */
     private _notice(text: string): void {
-        if (!this._hintLabel) return;
-        this._hintLabel.string = text;
-        this._hintLabel.color = hex(COLOR.DANGER);
+        const label = this._tab === 'trinket' ? this._tHintLabel : this._hintLabel;
+        if (!label) return;
+        label.string = text;
+        label.color = hex(COLOR.DANGER);
     }
 
     private _changed(): void {
@@ -472,6 +839,23 @@ export class MithrilMenu extends Component {
         this._unequipBtn = null;
         this._sellBtn = null;
         this._slotBtns = {};
+        // 饰品页（M7）：同样只清引用
+        this._gearNodes = [];
+        this._trinketRoot = null;
+        this._tSlotBtns = [];
+        this._tRowRoot = null;
+        this._tCountLabel = null;
+        this._tPageLabel = null;
+        this._tPrevBtn = null;
+        this._tNextBtn = null;
+        this._gearTabBtn = null;
+        this._trinketTabBtn = null;
+        this._tDetailTitle = null;
+        this._tDetailBody = null;
+        this._tSynergyLabel = null;
+        this._tHintLabel = null;
+        this._tEquipBtn = null;
+        this._tUnequipBtn = null;
     }
 }
 
