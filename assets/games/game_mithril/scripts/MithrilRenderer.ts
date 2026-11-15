@@ -19,6 +19,7 @@ import {
     drawImp,
     drawMiner,
     drawOrb,
+    drawRegionEnemy,
     drawTroll,
     drawWarrior,
     drawWraith,
@@ -305,7 +306,9 @@ export class MithrilRenderer extends Component {
             else if (e.kind === 'wraith') drawWraith(g, x, y, this._time);
             else if (e.kind === 'golem') drawGolem(g, x, y, this._time);
             else if (e.kind === 'troll') drawTroll(g, x, y, this._time, e.status.stun > 0 || e.casting || snap.bossEnraged > 0 || (snap.boss?.phase ?? 0) >= 1);
-            else {
+            else if (drawRegionEnemy(g, x, y, this._time, e.radius, e.kind)) {
+                // 区域怪物已画
+            } else {
                 g.fillColor = this._cRockLight;
                 g.circle(x, y, e.radius);
                 g.fill();

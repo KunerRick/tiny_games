@@ -17,6 +17,7 @@ import {
     INVENTORY_CAP,
     MODIFIER_BY_ID,
     QUALITY_BY_ID,
+    REGION_BY_ID,
     SKILL_BY_ID,
     SKILLS,
     SKILL_RESPEC_GOLD,
@@ -40,6 +41,8 @@ import type {
     SkillVariantDef,
     TalentDef,
 } from './MithrilConfig';
+import { sanitizeExpedition } from './MithrilWild';
+import type { ExpeditionState } from './MithrilWild';
 
 // ==================== 等级曲线 ====================
 
@@ -477,6 +480,10 @@ export interface MithrilSave {
     /** 技能书（通关掉落，成长面板里升级技能用） */
     skillBooks: number;
     dungeonsCleared: string[];
+    /** 已击败区域首领的区域 id（M4 野外） */
+    regionsCleared: string[];
+    /** 进行中的野外远征；没有则为 null */
+    expedition: ExpeditionState | null;
     bounties: string[];
     facilities: Record<FacilityId, number>;
 }
@@ -503,6 +510,8 @@ export function defaultSave(classId: ClassId = 'warrior'): MithrilSave {
         variants: {},
         skillBooks: 0,
         dungeonsCleared: [],
+        regionsCleared: [],
+        expedition: null,
         bounties: [],
         facilities,
     };
@@ -711,6 +720,17 @@ export function sanitizeSave(raw: unknown): MithrilSave {
         }
         out.bounties = ids;
     }
+
+    if (Array.isArray(src.regionsCleared)) {
+        const ids: string[] = [];
+        for (const id of src.regionsCleared) {
+            if (typeof id === 'string' && REGION_BY_ID[id] && ids.indexOf(id) < 0) ids.push(id);
+        }
+        out.regionsCleared = ids;
+    }
+
+    // 旧档没有这个字段 → null；坏档也回落成 null，不会把玩家卡在一张坏图上
+    out.expedition = sanitizeExpedition(src.expedition);
 
     if (src.facilities && typeof src.facilities === 'object') {
         const f = src.facilities as Record<string, unknown>;

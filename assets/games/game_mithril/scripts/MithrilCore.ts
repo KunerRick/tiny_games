@@ -25,15 +25,15 @@ import {
     MAX_ENEMIES,
     MAX_ORBS,
     MINE_BOSS_SCRIPT,
-    MINE_ENCOUNTERS,
     ORB_ADD_DROP_CHANCE,
     ORB_DROP_CHANCE,
     ORB_HEAL_PCT,
     ORB_LIFE,
     ORB_PICKUP_RADIUS,
     PLAYER_TUNING,
+    dungeonRunPlan,
 } from './MithrilConfig';
-import type { BossScriptDef, ClassId, EnemyDef, EquipItem, GearSlot } from './MithrilConfig';
+import type { BossScriptDef, ClassId, EnemyDef, EquipItem, GearSlot, RunPlan } from './MithrilConfig';
 import {
     BALANCED_ALLOC,
     CRIT_MULT,
@@ -404,6 +404,10 @@ export interface MithrilSnapshot {
     } | null;
     bossCast: BossCastState | null;
     bossEnraged: number;
+    /** BOSS 机制提示（区域首领与副本 BOSS 不同） */
+    bossHint: string;
+    /** BOSS 阶段总数（HUD 显示「阶段 n/N」） */
+    bossPhaseCount: number;
     dungeonName: string;
     dungeonProgress: string;
 }
@@ -461,6 +465,8 @@ export class MithrilWorld {
     telegraphs: TelegraphState[] = [];
     orbs: OrbState[] = [];
 
+    /** 本局战斗计划（副本或野外节点；M4 起 Core 不再写死矿坑） */
+    plan: RunPlan | null = null;
     /** 副本运行态 */
     dungeonId = '';
     dungeonName = '';
@@ -606,9 +612,26 @@ export class MithrilWorld {
 
     /** 开始「废弃矿坑」垂直切片：3 遭遇 + BOSS */
     startDungeon(dungeonId = 'mine'): void {
-        this.dungeonId = dungeonId;
-        this.dungeonName = dungeonId === 'mine' ? '废弃矿坑' : dungeonId;
-        this.stage = 'encounter';
+        const plan = dungeonRunPlan(dungeonId) || dungeonRunPlan('mine');
+        if (!plan) return;
+        this.startPlan(plan);
+    }
+
+    /** 野外节点：沿用远征当前生命（进节点时已扣过补给） */
+    startWild(plan: RunPlan, hp: number): void {
+        this.startPlan(plan, hp);
+    }
+
+    /**
+     * 一局战斗的公共重置。副本从满血开始，野外节点从远征当前生命开始；
+     * `encounters` 为空表示直接进 BOSS（野外 BOSS 节点），`boss` 为空表示打完遭遇即结束。
+     */
+    startPlan(plan: RunPlan, hp?: number): void {
+        this.plan = plan;
+        this._script = plan.boss || MINE_BOSS_SCRIPT;
+        this.dungeonId = plan.id;
+        this.dungeonName = plan.name;
+        this.stage = plan.encounters.length > 0 ? 'encounter' : 'boss';
         this.encounterIndex = -1;
         this.boss = null;
         this.bossPhase = 0;
@@ -620,7 +643,9 @@ export class MithrilWorld {
         this.orbs.length = 0;
         this.phase = 'playing';
         this.player.maxHp = this.profile.maxHp;
-        this.player.hp = this.player.maxHp;
+        this.player.hp = hp === undefined
+            ? this.player.maxHp
+            : Math.max(1, Math.min(this.player.maxHp, Math.round(hp)));
         this.player.rage = 0;
         this.player.shield = 0;
         this.player.slow = 0;
@@ -640,7 +665,12 @@ export class MithrilWorld {
         for (const key of Object.keys(this.player.cd) as Array<keyof PlayerCooldowns>) {
             this.player.cd[key] = 0;
         }
-        this._spawnNextEncounter();
+        if (plan.encounters.length === 0) {
+            if (plan.boss) this._enterBoss();
+            else this._finishRun();
+        } else {
+            this._spawnNextEncounter();
+        }
     }
 
     /** 当前遭遇结束到下一波之间的空档（秒） */
@@ -772,8 +802,10 @@ export class MithrilWorld {
             kills: this.kills,
             stage: this.stage,
             encounterIndex: this.encounterIndex,
-            encounterName: this.encounterIndex >= 0 && this.encounterIndex < MINE_ENCOUNTERS.length
-                ? MINE_ENCOUNTERS[this.encounterIndex].name
+            encounterName: this.plan
+                && this.encounterIndex >= 0
+                && this.encounterIndex < this.plan.encounters.length
+                ? this.plan.encounters[this.encounterIndex].name
                 : '',
             banner: this.banner ? { ...this.banner } : null,
             boss: this.boss
@@ -789,6 +821,8 @@ export class MithrilWorld {
                 : null,
             bossCast: this.bossCast ? { ...this.bossCast } : null,
             bossEnraged: this.bossEnraged,
+            bossHint: this.plan ? this.plan.bossHint : '',
+            bossPhaseCount: this.plan && this.plan.boss ? Math.max(1, this.plan.boss.phases.length) : 3,
             dungeonName: this.dungeonName,
             dungeonProgress: this._progressText(),
         };
@@ -1359,7 +1393,8 @@ export class MithrilWorld {
 
         // 阶段推进（按血线，不卡阶段）
         const script = this._script;
-        while (this.bossPhase < 2 && boss.hp / boss.maxHp <= script.thresholds[this.bossPhase]) {
+        while (this.bossPhase < script.thresholds.length
+            && boss.hp / boss.maxHp <= script.thresholds[this.bossPhase]) {
             this.bossPhase++;
             this._mechanicTimer = 0;
             const phase = script.phases[this.bossPhase];
@@ -1470,7 +1505,10 @@ export class MithrilWorld {
             const y = boss.y + Math.sin(angle) * 120;
             this.spawnDef(this._script.addsEnemyId, x, y);
         }
-        this._showBanner('BOSS 召唤矿工', '小怪存活时 BOSS 持续回血，先转火', 2.2);
+        const addName = ENEMY_BY_ID[this._script.addsEnemyId]
+            ? ENEMY_BY_ID[this._script.addsEnemyId].name
+            : '援军';
+        this._showBanner(`BOSS 召唤${addName}`, '小怪存活时 BOSS 持续回血，先转火', 2.2);
     }
 
     // ==================== 伤害与击杀 ====================
@@ -1602,28 +1640,36 @@ export class MithrilWorld {
 
     private _tickRun(d: number): void {
         if (this.stage === 'cleared') return;
+        const plan = this.plan;
+        const total = plan ? plan.encounters.length : 0;
 
         if (this.stage === 'encounter') {
             if (this._gap > 0) {
                 this._gap -= d;
                 if (this._gap <= 0) {
                     this._gap = 0;
-                    if (this.encounterIndex + 1 < MINE_ENCOUNTERS.length) this._spawnNextEncounter();
-                    else this._enterBoss();
+                    if (this.encounterIndex + 1 < total) this._spawnNextEncounter();
+                    else if (plan && plan.boss) this._enterBoss();
+                    else this._finishRun();
                 }
                 return;
             }
             if (this.enemies.length === 0) {
                 if (this.encounterIndex >= 0) {
-                    const heal = this._healPlayer(this.player.maxHp * ENCOUNTER_HEAL_PCT);
+                    const heal = this._healPlayer(this.player.maxHp * (plan ? plan.healPct : ENCOUNTER_HEAL_PCT));
                     // 满血清场时别弹一个实际没加上的绿色数字
                     if (heal > 0) {
                         this._emit({ type: 'heal', x: this.player.x, y: this.player.y, amount: heal });
                     }
                 }
-                this._gap = this.encounterIndex + 1 < MINE_ENCOUNTERS.length
-                    ? ENCOUNTER_GAP
-                    : BOSS_INTRO_GAP;
+                if (this.encounterIndex + 1 < total) {
+                    this._gap = ENCOUNTER_GAP;
+                } else if (plan && plan.boss) {
+                    this._gap = BOSS_INTRO_GAP;
+                } else {
+                    // 无 BOSS 的野外节点：最后一波清完立刻结算，不再空等黑场
+                    this._finishRun();
+                }
             }
             return;
         }
@@ -1635,21 +1681,31 @@ export class MithrilWorld {
         }
     }
 
+    private _finishRun(): void {
+        this.stage = 'cleared';
+        this.phase = 'won';
+        this._emit({ type: 'stage', stage: 'cleared', index: Math.max(0, this.encounterIndex) });
+    }
+
     private _spawnNextEncounter(): void {
+        const plan = this.plan;
+        if (!plan) return;
         this.encounterIndex++;
-        const enc = MINE_ENCOUNTERS[this.encounterIndex];
+        const total = plan.encounters.length;
+        const enc = plan.encounters[this.encounterIndex];
         if (!enc) {
-            this._enterBoss();
+            if (plan.boss) this._enterBoss();
+            else this._finishRun();
             return;
         }
         this.stage = 'encounter';
-        this._showBanner(`遭遇 ${this.encounterIndex + 1}/3 · ${enc.name}`, enc.subtitle, 2.2);
+        this._showBanner(`遭遇 ${this.encounterIndex + 1}/${total} · ${enc.name}`, enc.subtitle, 2.2);
         let i = 0;
         for (const group of enc.spawns) {
             for (let n = 0; n < group.count; n++) {
                 const x = 130 + ((i * 97 + this.encounterIndex * 53) % 460);
                 const y = 840 + ((i * 61 + this.encounterIndex * 47) % 260);
-                this.spawnDef(group.enemyId, x, y);
+                this.spawnDef(group.enemyId, x, y, plan.scale);
                 i++;
             }
         }
@@ -1657,8 +1713,13 @@ export class MithrilWorld {
     }
 
     private _enterBoss(): void {
+        const plan = this.plan;
+        if (!plan || !plan.boss) {
+            this._finishRun();
+            return;
+        }
         this.stage = 'boss';
-        this.encounterIndex = MINE_ENCOUNTERS.length - 1;
+        this.encounterIndex = Math.max(0, plan.encounters.length - 1);
         this.bossPhase = 0;
         this.bossCast = null;
         this.bossEnraged = 0;
@@ -1666,9 +1727,10 @@ export class MithrilWorld {
         this._regenTick = 0;
         this.telegraphs.length = 0;
         this.enemies.length = 0;
-        const boss = this.spawnDef(this._script.enemyId, FIELD_W / 2, 1000);
+        const boss = this.spawnDef(this._script.enemyId, FIELD_W / 2, 1000, plan.bossScale);
         this.boss = boss;
-        this._showBanner('矿坑巨魔', '走位躲砸地 · 转火矿工 · 打断狂暴读条', 3.2);
+        const hint = plan.bossHint || '观察机制提示，按阶段处理';
+        this._showBanner(plan.bossTitle || this._script.enemyId, hint, 3.2);
         this._emit({ type: 'stage', stage: 'boss', index: this.encounterIndex });
     }
 
@@ -1678,9 +1740,14 @@ export class MithrilWorld {
 
     private _progressText(): string {
         if (this.stage === 'idle') return '';
-        if (this.stage === 'encounter') return `遭遇 ${Math.max(1, this.encounterIndex + 1)}/3`;
-        if (this.stage === 'boss') return `BOSS 阶段 ${this.bossPhase + 1}/3`;
-        if (this.stage === 'cleared') return '副本通关';
+        const plan = this.plan;
+        const total = plan ? plan.encounters.length : 0;
+        if (this.stage === 'encounter') return `遭遇 ${Math.max(1, this.encounterIndex + 1)}/${Math.max(1, total)}`;
+        if (this.stage === 'boss') {
+            const phases = plan && plan.boss ? Math.max(1, plan.boss.phases.length) : 3;
+            return `BOSS 阶段 ${this.bossPhase + 1}/${phases}`;
+        }
+        if (this.stage === 'cleared') return plan && plan.kind === 'wild' ? '节点肃清' : '副本通关';
         return '';
     }
 

@@ -51,7 +51,7 @@ export class MithrilMenu extends Component {
     private _save: MithrilSave | null = null;
     private _sel: Selection = null;
     private _page = 0;
-    /** 下一局出战的副属性地板（与 MithrilGame.startNewRun 保持一致） */
+    /** 下一场战斗的副属性地板（与 MithrilGame 出战 profile 取法一致） */
     private _floorIlvl = 0;
 
     private _built = false;

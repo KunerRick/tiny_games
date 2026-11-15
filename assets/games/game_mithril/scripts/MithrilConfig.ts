@@ -856,7 +856,7 @@ export const NODE_KIND_NAMES: Record<NodeKind, string> = {
     elite: '精英',
     chest: '宝箱',
     event: '事件',
-    supply: '补给站',
+    supply: '篝火',
     dungeon: '副本入口',
     boss: '区域首领',
 };
@@ -982,6 +982,63 @@ export const ENEMIES: EnemyDef[] = [
         id: 'troll', name: '矿坑巨魔', kind: 'boss',
         hp: 3000, speed: 52, radius: 44, contactDamage: 6, exp: 400, gold: 120,
         shotCd: 4.2, shotDamage: 6, shotSpeed: 250,
+    },
+
+    // ---- 灰烬荒原区域首领（野外 BOSS 节点） ----
+    {
+        id: 'ash_lord', name: '灰烬领主', kind: 'boss',
+        hp: 2600, speed: 55, radius: 42, contactDamage: 8, exp: 450, gold: 140,
+        shotCd: 4.0, shotDamage: 9, shotSpeed: 260,
+    },
+
+    // ---- 霜牙峡谷（Lv10–20 / ilvl12–26）：更硬、更快、远程伤害更高 ----
+    {
+        id: 'frost_whelp', name: '霜狼幼崽', kind: 'melee',
+        hp: 210, speed: 115, radius: 16, contactDamage: 7, exp: 40, gold: 6,
+    },
+    {
+        id: 'ice_wisp', name: '冰晶之灵', kind: 'ranged',
+        hp: 190, speed: 82, radius: 17, contactDamage: 5, exp: 42, gold: 7,
+        shotCd: 2.6, shotDamage: 11, shotSpeed: 270,
+    },
+    {
+        id: 'snow_reaver', name: '雪原劫掠者', kind: 'melee',
+        hp: 260, speed: 95, radius: 19, contactDamage: 8, exp: 48, gold: 8,
+    },
+    {
+        id: 'ice_golem', name: '冰壳石魔', kind: 'elite',
+        hp: 1100, speed: 55, radius: 27, contactDamage: 14, exp: 130, gold: 24,
+        slamCd: 5, slamRadius: 125, slamDamage: 18, slamWarn: 1.0,
+    },
+    {
+        id: 'frost_wolf', name: '霜牙狼王', kind: 'boss',
+        hp: 7200, speed: 65, radius: 42, contactDamage: 10, exp: 900, gold: 260,
+        shotCd: 3.6, shotDamage: 12, shotSpeed: 280,
+    },
+
+    // ---- 秘银深渊（Lv20–30 / ilvl26–40） ----
+    {
+        id: 'abyss_spawn', name: '深渊爬虫', kind: 'melee',
+        hp: 520, speed: 110, radius: 17, contactDamage: 12, exp: 85, gold: 12,
+    },
+    {
+        id: 'void_acolyte', name: '虚空侍僧', kind: 'ranged',
+        hp: 460, speed: 75, radius: 18, contactDamage: 9, exp: 90, gold: 14,
+        shotCd: 2.4, shotDamage: 18, shotSpeed: 300,
+    },
+    {
+        id: 'shade_blade', name: '影刃游魂', kind: 'melee',
+        hp: 600, speed: 130, radius: 18, contactDamage: 14, exp: 100, gold: 15,
+    },
+    {
+        id: 'void_horror', name: '虚空恐魔', kind: 'elite',
+        hp: 2600, speed: 60, radius: 30, contactDamage: 20, exp: 280, gold: 50,
+        slamCd: 4.5, slamRadius: 140, slamDamage: 26, slamWarn: 0.9,
+    },
+    {
+        id: 'abyss_watcher', name: '深渊守望者', kind: 'boss',
+        hp: 16000, speed: 58, radius: 46, contactDamage: 18, exp: 1800, gold: 600,
+        shotCd: 3.2, shotDamage: 22, shotSpeed: 300,
     },
 ];
 
@@ -1116,3 +1173,201 @@ export const PLAYER_TUNING = {
     /** 同一敌人的接触伤害冷却（秒），避免贴脸时每 0.5s 连续掉血 */
     contactCooldown: 0.9,
 } as const;
+
+// ==================== 野外材料（每区域一种；悬赏 / 营地消耗入口） ====================
+
+export interface MaterialDef {
+    id: string;
+    name: string;
+    regionId: string;
+}
+
+export const MATERIALS: MaterialDef[] = [
+    { id: 'ash_dust', name: '灰烬', regionId: 'ash' },
+    { id: 'frost_crystal', name: '霜晶', regionId: 'frost' },
+    { id: 'mithril_ore', name: '秘银', regionId: 'abyss' },
+];
+
+export const MATERIAL_BY_ID: Record<string, MaterialDef> = (() => {
+    const out: Record<string, MaterialDef> = {};
+    for (const m of MATERIALS) out[m.id] = m;
+    return out;
+})();
+
+/** 区域 → 材料 id（未知区域回落到第一种，调用方不必判空） */
+export function regionMaterialId(regionId: string): string {
+    for (const m of MATERIALS) if (m.regionId === regionId) return m.id;
+    return MATERIALS[0].id;
+}
+
+export function materialName(id: string): string {
+    const m = MATERIAL_BY_ID[id];
+    return m ? m.name : id;
+}
+
+// ==================== 区域敌人池（野外节点按区域取怪） ====================
+
+export interface RegionEnemyPool {
+    /** 普通怪：第 1 个偏近战、第 2 个偏远程、第 3 个偏快速 */
+    mobs: string[];
+    elite: string;
+    /** 区域 BOSS，与 REGION_BOSSES 的 id 一致 */
+    boss: string;
+}
+
+export const REGION_ENEMY_POOLS: Record<string, RegionEnemyPool> = {
+    ash: { mobs: ['imp', 'miner', 'wraith'], elite: 'golem', boss: 'ash_lord' },
+    frost: { mobs: ['frost_whelp', 'ice_wisp', 'snow_reaver'], elite: 'ice_golem', boss: 'frost_wolf' },
+    abyss: { mobs: ['abyss_spawn', 'void_acolyte', 'shade_blade'], elite: 'void_horror', boss: 'abyss_watcher' },
+};
+
+// ==================== 野外节点奖励 / 补给风险 ====================
+
+export interface WildRewardDef {
+    matsMin: number;
+    matsMax: number;
+    /** 掉装备概率（BOSS 走 RegionBossDef 的必掉 + 橙装概率，这里为 0） */
+    gearChance: number;
+    gearMinQuality: QualityId;
+}
+
+export const WILD_REWARDS: Record<'battle' | 'elite' | 'boss', WildRewardDef> = {
+    battle: { matsMin: 1, matsMax: 2, gearChance: 0.25, gearMinQuality: 'uncommon' },
+    elite: { matsMin: 2, matsMax: 3, gearChance: 1, gearMinQuality: 'uncommon' },
+    boss: { matsMin: 3, matsMax: 5, gearChance: 0, gearMinQuality: 'rare' },
+};
+
+/** 每层节点数：起点 + 4 层（2/3/3/2）+ BOSS = 12 节点（设计 §4） */
+export const WILD_LAYERS: number[] = [1, 2, 3, 3, 2, 1];
+export const WILD_NODE_COUNT = 12;
+
+/** 篝火（首次访问）：恢复最大生命 40%，不补充补给 */
+export const WILD_SUPPLY_HEAL_PCT = 0.4;
+/** 宝箱陷阱：25% 概率，扣最大生命 15% */
+export const WILD_CHEST_TRAP_CHANCE = 0.25;
+export const WILD_CHEST_TRAP_HP_PCT = 0.15;
+/** 无陷阱宝箱额外给的金币（装备之外的小彩头） */
+export const WILD_CHEST_GOLD = 30;
+/** 事件三选一：包扎回血 / 搜刮材料 / 冒险深挖（材料更多但掉血） */
+export const WILD_EVENT_HEAL_PCT = 0.25;
+export const WILD_EVENT_MATERIALS = 2;
+export const WILD_EVENT_RISK_MATERIALS = 3;
+export const WILD_EVENT_RISK_HP_PCT = 0.1;
+
+// ==================== 一局战斗的计划（副本与野外共用） ====================
+
+export type RunKind = 'dungeon' | 'wild';
+
+/**
+ * 战斗流程图：Core 只认这个结构，副本与野外节点都编译成 RunPlan。
+ * `encounters` 为空表示直接进 BOSS（野外 BOSS 节点）；`boss` 为空表示打完遭遇即结束
+ * （野外普通 / 精英节点）。
+ */
+export interface RunPlan {
+    kind: RunKind;
+    /** 副本 id / 野外节点标识（日志与结算分支用） */
+    id: string;
+    name: string;
+    encounters: EncounterDef[];
+    /** 每次遭遇清空后恢复最大生命的比例 */
+    healPct: number;
+    boss: BossScriptDef | null;
+    bossTitle: string;
+    bossHint: string;
+    /** 遭遇敌人血量倍率（野外节点等级越高越硬） */
+    scale: number;
+    bossScale: number;
+    /** 结算掉落装等 */
+    ilvl: number;
+}
+
+/** 已实现战斗编排的副本；M4 只有废弃矿坑，M6 补齐其余 5 个 */
+export function dungeonRunPlan(dungeonId: string): RunPlan | null {
+    const def = DUNGEON_BY_ID[dungeonId];
+    if (!def) return null;
+    if (dungeonId === 'mine') {
+        return {
+            kind: 'dungeon',
+            id: 'mine',
+            name: def.name,
+            encounters: MINE_ENCOUNTERS,
+            healPct: ENCOUNTER_HEAL_PCT,
+            boss: MINE_BOSS_SCRIPT,
+            bossTitle: def.bossName,
+            bossHint: '走位躲砸地 · 转火矿工 · 打断狂暴读条',
+            scale: 1,
+            bossScale: 1,
+            ilvl: def.ilvlMax,
+        };
+    }
+    return null;
+}
+
+export function implementedDungeonIds(): string[] {
+    const out: string[] = [];
+    for (const d of DUNGEONS) if (dungeonRunPlan(d.id)) out.push(d.id);
+    return out;
+}
+
+// ==================== 区域 BOSS 脚本（按区域调参；机制取自 REGION_BOSSES） ====================
+
+export interface RegionBossTuning {
+    moveInterval: number;
+    moveRadius: number;
+    moveDamage: number;
+    moveWarn: number;
+    addsInterval: number;
+    addsCount: number;
+    addsEnemyId: string;
+    addsRegen: number;
+    interruptInterval: number;
+    interruptCast: number;
+    interruptNeed: number;
+    enrageBonus: number;
+    enrageDuration: number;
+}
+
+export const REGION_BOSS_TUNING: Record<string, RegionBossTuning> = {
+    ash_lord: {
+        moveInterval: 6, moveRadius: 130, moveDamage: 10, moveWarn: 1.1,
+        addsInterval: 16, addsCount: 2, addsEnemyId: 'imp', addsRegen: 15,
+        interruptInterval: 9, interruptCast: 3, interruptNeed: 100,
+        enrageBonus: 0.5, enrageDuration: 10,
+    },
+    frost_wolf: {
+        moveInterval: 5.2, moveRadius: 150, moveDamage: 18, moveWarn: 0.95,
+        addsInterval: 14, addsCount: 3, addsEnemyId: 'frost_whelp', addsRegen: 40,
+        interruptInterval: 8.5, interruptCast: 3, interruptNeed: 260,
+        enrageBonus: 0.6, enrageDuration: 10,
+    },
+    abyss_watcher: {
+        moveInterval: 4.6, moveRadius: 165, moveDamage: 24, moveWarn: 0.85,
+        addsInterval: 12, addsCount: 4, addsEnemyId: 'abyss_spawn', addsRegen: 90,
+        interruptInterval: 8, interruptCast: 2.8, interruptNeed: 600,
+        enrageBonus: 0.7, enrageDuration: 12,
+    },
+};
+
+export function regionBossScript(bossId: string): BossScriptDef | null {
+    const def = REGION_BOSS_BY_ID[bossId];
+    const tune = REGION_BOSS_TUNING[bossId];
+    if (!def || !tune) return null;
+    return {
+        enemyId: def.id,
+        thresholds: [2 / 3, 1 / 3],
+        phases: def.phases.map((p) => ({ mechanic: p.mechanic, name: p.name, desc: p.desc })),
+        moveInterval: tune.moveInterval,
+        moveRadius: tune.moveRadius,
+        moveDamage: tune.moveDamage,
+        moveWarn: tune.moveWarn,
+        addsInterval: tune.addsInterval,
+        addsCount: tune.addsCount,
+        addsEnemyId: tune.addsEnemyId,
+        addsRegen: tune.addsRegen,
+        interruptInterval: tune.interruptInterval,
+        interruptCast: tune.interruptCast,
+        interruptNeed: tune.interruptNeed,
+        enrageBonus: tune.enrageBonus,
+        enrageDuration: tune.enrageDuration,
+    };
+}

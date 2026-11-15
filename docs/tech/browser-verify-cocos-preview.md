@@ -230,6 +230,33 @@ const click = (wx, wy) => [ox + wx * k, oy + (1280 - wy) * k];
 **判据**：如果「界面中心的按钮能点、离中心越远越点不中」，先按上式重算，别改代码。
 本轮用 `touch-start/touch-end` 计数器（全 0）在一分钟内区分了「坐标偏」与「逻辑坏」，比逐条读代码快得多。
 
+### 4.5 canvas 绘制缓冲 ≠ 元素 CSS 尺寸时：**渲染位置 ≠ 命中位置**
+
+2026-11-15 秘银远征 M4 复验实测：预览页 `canvas.width/height = 393 × 679`，而
+`getBoundingClientRect()` 给出 `393 × 846.28`（预览页把画布纵向拉伸了 1.246 倍）。
+这时 §4.4 的 fit 公式算出来的是**渲染位置**，点击却走另一套映射：
+
+```
+引擎收到的 loc  = (clientX - rect.left, window.innerHeight - clientY)
+引擎认定的设计坐标 = loc * (设计高 / canvas.height)   // 即 (896 - clientY) * 1280 / 679
+```
+
+也就是**竖直方向既不翻转、也不乘 `rect.height / canvas.height`**。对应的点击入参：
+
+```js
+const sp  = cam.worldToScreen(node.worldPosition.clone(), new cc.Vec3()); // 缓冲像素、左下原点
+const cssX = rect.left + sp.x * (rect.width / canvasEl.width);
+const cssY = window.innerHeight - sp.y;      // ← 关键：不要用 (1 - sp.y/h) * rect.height
+```
+
+**取证顺序（比试坐标快）**：
+
+1. 给 `Mask` / `Panel` / 目标按钮同时挂 `touch-start`，点一次：渲染上被按钮盖住的位置若由 `Mask` 接到，就说明渲染与命中已经错位；
+2. 在 `touch-start` 里读 `e.getUILocation()`——它是引擎**认为**点到的设计坐标；让目标节点的 `worldPosition` 与它对齐才算对；
+3. 只读 `rect` / `dpr` / `innerWidth` 推不出来（同 §4 的 `k`），必须实测。
+
+> canvas 绘制缓冲与 CSS 尺寸一致（常见 1:1）时，本节公式与 §4.4 等价，按 §4.4 走即可。
+
 ---
 
 ## 5. 日志取证

@@ -401,8 +401,288 @@ export function drawTroll(g: Graphics, x: number, y: number, time: number, enrag
     g.stroke();
 }
 
-/** 血球：发光圆 + 十字 */
-export function drawOrb(g: Graphics, x: number, y: number, time: number): void {
+// ==================== 区域怪物（野外 / 区域首领） ====================
+
+export type RegionArtStyle = 'beast' | 'spirit' | 'brute' | 'blob' | 'eye';
+
+export interface RegionArtDef {
+    style: RegionArtStyle;
+    /** 主体色 */
+    main: string;
+    /** 暗面 / 轮廓色 */
+    dark: string;
+    /** 眼睛 / 发光点 */
+    glow: string;
+}
+
+/**
+ * 区域怪物画风表：新增区域敌人时**必须**在这里登记，否则渲染层只能画灰圆。
+ * 配色按区域走（灰烬 = 橙红，霜牙 = 冰蓝，深渊 = 紫），一眼能看出走到了哪。
+ */
+export const REGION_ART: Record<string, RegionArtDef> = {
+    // 灰烬荒原
+    ash_lord: { style: 'brute', main: '#8A4A37', dark: '#4E2418', glow: '#FF9A3D' },
+    // 霜牙峡谷
+    frost_whelp: { style: 'beast', main: '#CFE9FB', dark: '#7FA8C4', glow: '#EAF9FF' },
+    frost_wolf: { style: 'beast', main: '#E6F3FF', dark: '#7E9FBC', glow: '#8FE8FF' },
+    ice_wisp: { style: 'spirit', main: '#9BDCFF', dark: '#4E90BA', glow: '#DFF6FF' },
+    snow_reaver: { style: 'brute', main: '#AEC9DF', dark: '#647F98', glow: '#D6ECFF' },
+    ice_golem: { style: 'brute', main: '#9FC3D9', dark: '#4F6E85', glow: '#BFF0FF' },
+    // 秘银深渊
+    abyss_spawn: { style: 'blob', main: '#7C4FA8', dark: '#3E2159', glow: '#C99BFF' },
+    void_acolyte: { style: 'spirit', main: '#9A7BE8', dark: '#4B2E86', glow: '#D9C8FF' },
+    shade_blade: { style: 'brute', main: '#4B3B6B', dark: '#241A38', glow: '#B08CFF' },
+    void_horror: { style: 'blob', main: '#5E3A8C', dark: '#2E1A4C', glow: '#D07BFF' },
+    abyss_watcher: { style: 'eye', main: '#3E2B63', dark: '#1E1236', glow: '#E07BFF' },
+};
+
+const SHADOW = '#00000055';
+
+function drawBeast(g: Graphics, x: number, y: number, time: number, r: number, def: RegionArtDef): void {
+    const breathe = Math.sin(time * 2.6 + x * 0.1) * r * 0.04;
+    const cy = y + breathe;
+    g.fillColor = C(SHADOW);
+    g.ellipse(x, y - r * 0.9, r * 0.95, r * 0.22);
+    g.fill();
+    // 四条腿
+    g.fillColor = C(def.dark);
+    for (const dx of [-0.55, -0.2, 0.25, 0.6]) {
+        g.roundRect(x + dx * r - r * 0.14, cy - r * 0.95, r * 0.28, r * 0.5, r * 0.1);
+        g.fill();
+    }
+    // 身体
+    g.fillColor = C(def.main);
+    g.ellipse(x, cy - r * 0.12, r * 0.92, r * 0.55);
+    g.fill();
+    // 背脊
+    g.fillColor = C(def.dark);
+    g.moveTo(x - r * 0.72, cy + r * 0.12);
+    g.lineTo(x - r * 0.3, cy + r * 0.58);
+    g.lineTo(x + r * 0.08, cy + r * 0.3);
+    g.lineTo(x + r * 0.42, cy + r * 0.52);
+    g.lineTo(x + r * 0.76, cy + r * 0.06);
+    g.close();
+    g.fill();
+    // 尾巴
+    g.strokeColor = C(def.dark);
+    g.lineWidth = Math.max(2, r * 0.14);
+    g.moveTo(x - r * 0.8, cy + r * 0.06);
+    g.lineTo(x - r * 1.22, cy + r * 0.42);
+    g.stroke();
+    // 头 + 耳
+    g.fillColor = C(def.main);
+    g.circle(x + r * 0.78, cy + r * 0.46, r * 0.4);
+    g.fill();
+    g.fillColor = C(def.dark);
+    g.moveTo(x + r * 0.6, cy + r * 0.72);
+    g.lineTo(x + r * 0.52, cy + r * 1.08);
+    g.lineTo(x + r * 0.86, cy + r * 0.84);
+    g.close();
+    g.fill();
+    g.moveTo(x + r * 0.94, cy + r * 0.78);
+    g.lineTo(x + r * 1.02, cy + r * 1.12);
+    g.lineTo(x + r * 1.14, cy + r * 0.72);
+    g.close();
+    g.fill();
+    // 口鼻 + 眼
+    g.fillColor = C(def.dark);
+    g.ellipse(x + r * 1.04, cy + r * 0.34, r * 0.18, r * 0.13);
+    g.fill();
+    g.fillColor = C(def.glow);
+    g.circle(x + r * 0.86, cy + r * 0.54, Math.max(1.6, r * 0.09));
+    g.fill();
+}
+
+function drawSpirit(g: Graphics, x: number, y: number, time: number, r: number, def: RegionArtDef): void {
+    const cy = y + Math.sin(time * 2.2 + x * 0.1) * r * 0.2;
+    g.fillColor = C(def.glow + '2E');
+    g.circle(x, cy, r * 1.12);
+    g.fill();
+    // 下摆
+    g.fillColor = C(def.dark);
+    g.moveTo(x - r * 0.48, cy);
+    g.lineTo(x + r * 0.05, cy - r * 1.25);
+    g.lineTo(x + r * 0.48, cy);
+    g.close();
+    g.fill();
+    // 兜帽
+    g.fillColor = C(def.main);
+    g.moveTo(x, cy + r * 0.82);
+    g.lineTo(x + r * 0.58, cy + r * 0.08);
+    g.lineTo(x + r * 0.32, cy - r * 0.42);
+    g.lineTo(x - r * 0.32, cy - r * 0.42);
+    g.lineTo(x - r * 0.58, cy + r * 0.08);
+    g.close();
+    g.fill();
+    g.fillColor = C(def.dark);
+    g.moveTo(x, cy + r * 0.82);
+    g.lineTo(x - r * 0.58, cy + r * 0.08);
+    g.lineTo(x - r * 0.32, cy - r * 0.42);
+    g.lineTo(x, cy - r * 0.12);
+    g.close();
+    g.fill();
+    // 眼
+    g.fillColor = C(def.glow);
+    g.circle(x - r * 0.17, cy + r * 0.26, Math.max(1.5, r * 0.085));
+    g.fill();
+    g.circle(x + r * 0.17, cy + r * 0.26, Math.max(1.5, r * 0.085));
+    g.fill();
+    // 环绕光点
+    for (let i = 0; i < 3; i++) {
+        const a = time * 1.4 + i * 2.1;
+        g.fillColor = C(def.glow + 'AA');
+        g.circle(x + Math.cos(a) * r * 0.9, cy + Math.sin(a) * r * 0.45 + r * 0.15, Math.max(1.2, r * 0.07));
+        g.fill();
+    }
+}
+
+function drawBrute(g: Graphics, x: number, y: number, time: number, r: number, def: RegionArtDef): void {
+    const breathe = Math.sin(time * 2.1 + x * 0.1) * r * 0.05;
+    const cy = y + breathe;
+    g.fillColor = C(SHADOW);
+    g.ellipse(x, y - r * 0.98, r * 0.85, r * 0.22);
+    g.fill();
+    // 腿
+    g.fillColor = C(def.dark);
+    g.roundRect(x - r * 0.52, cy - r * 0.95, r * 0.38, r * 0.55, r * 0.12);
+    g.fill();
+    g.roundRect(x + r * 0.14, cy - r * 0.95, r * 0.38, r * 0.55, r * 0.12);
+    g.fill();
+    // 躯干
+    g.fillColor = C(def.main);
+    g.moveTo(x - r * 0.6, cy + r * 0.28);
+    g.lineTo(x - r * 0.42, cy - r * 0.44);
+    g.lineTo(x + r * 0.42, cy - r * 0.44);
+    g.lineTo(x + r * 0.6, cy + r * 0.28);
+    g.close();
+    g.fill();
+    g.fillColor = C(def.dark);
+    g.ellipse(x, cy - r * 0.12, r * 0.28, r * 0.24);
+    g.fill();
+    // 肩
+    g.fillColor = C(def.dark);
+    g.circle(x - r * 0.58, cy + r * 0.3, r * 0.25);
+    g.fill();
+    g.circle(x + r * 0.58, cy + r * 0.3, r * 0.25);
+    g.fill();
+    // 头 + 角
+    g.fillColor = C(def.main);
+    g.circle(x, cy + r * 0.7, r * 0.32);
+    g.fill();
+    g.strokeColor = C(def.glow);
+    g.lineWidth = Math.max(2, r * 0.08);
+    g.moveTo(x - r * 0.2, cy + r * 0.92);
+    g.lineTo(x - r * 0.46, cy + r * 1.2);
+    g.moveTo(x + r * 0.2, cy + r * 0.92);
+    g.lineTo(x + r * 0.46, cy + r * 1.2);
+    g.stroke();
+    // 眼
+    g.fillColor = C(def.glow);
+    g.circle(x - r * 0.11, cy + r * 0.72, Math.max(1.5, r * 0.075));
+    g.fill();
+    g.circle(x + r * 0.11, cy + r * 0.72, Math.max(1.5, r * 0.075));
+    g.fill();
+    // 武器：一把横在身侧的刃
+    g.strokeColor = C(def.dark);
+    g.lineWidth = Math.max(3, r * 0.14);
+    g.moveTo(x + r * 0.62, cy + r * 0.1);
+    g.lineTo(x + r * 1.05, cy + r * 0.72);
+    g.stroke();
+    g.strokeColor = C(def.glow + 'CC');
+    g.lineWidth = Math.max(1.5, r * 0.05);
+    g.moveTo(x + r * 0.72, cy + r * 0.22);
+    g.lineTo(x + r * 1.08, cy + r * 0.78);
+    g.stroke();
+}
+
+function drawBlob(g: Graphics, x: number, y: number, time: number, r: number, def: RegionArtDef): void {
+    const wob = Math.sin(time * 3 + x * 0.1) * r * 0.07;
+    const cy = y + wob * 0.5;
+    g.fillColor = C(SHADOW);
+    g.ellipse(x, y - r * 0.82, r * 0.85, r * 0.2);
+    g.fill();
+    // 触须
+    g.strokeColor = C(def.dark);
+    g.lineWidth = Math.max(2.5, r * 0.16);
+    for (const dx of [-0.5, 0, 0.5]) {
+        g.moveTo(x + dx * r, cy - r * 0.3);
+        g.lineTo(x + dx * r * 1.35, cy - r * 0.95 - Math.abs(dx) * r * 0.1);
+        g.stroke();
+    }
+    // 本体（外层暗、内层亮）
+    g.fillColor = C(def.dark);
+    g.ellipse(x, cy - r * 0.05, r * 0.92, r * 0.68 + wob);
+    g.fill();
+    g.fillColor = C(def.main);
+    g.ellipse(x, cy + r * 0.02, r * 0.74, r * 0.54 + wob * 0.6);
+    g.fill();
+    // 眼（三只，一大两小）
+    g.fillColor = C(def.glow);
+    g.circle(x - r * 0.26, cy + r * 0.2, Math.max(1.8, r * 0.11));
+    g.fill();
+    g.circle(x + r * 0.26, cy + r * 0.24, Math.max(1.5, r * 0.09));
+    g.fill();
+    g.circle(x + r * 0.02, cy - r * 0.08, Math.max(1.2, r * 0.06));
+    g.fill();
+}
+
+function drawEye(g: Graphics, x: number, y: number, time: number, r: number, def: RegionArtDef): void {
+    const cy = y + Math.sin(time * 1.7) * r * 0.1;
+    g.fillColor = C(def.glow + '26');
+    g.circle(x, cy, r * 1.2);
+    g.fill();
+    // 触须
+    g.strokeColor = C(def.dark);
+    g.lineWidth = Math.max(3, r * 0.12);
+    for (const a of [Math.PI * 0.85, Math.PI * 0.55, Math.PI * 0.15, -Math.PI * 0.15]) {
+        g.moveTo(x + Math.cos(a) * r * 0.5, cy + Math.sin(a) * r * 0.4);
+        g.lineTo(x + Math.cos(a + 0.2) * r * 1.15, cy + Math.sin(a + 0.2) * r * 1.05);
+        g.stroke();
+    }
+    // 眼体
+    g.fillColor = C(def.main);
+    g.ellipse(x, cy, r * 0.95, r * 0.78);
+    g.fill();
+    g.fillColor = C(def.dark);
+    g.ellipse(x, cy - r * 0.08, r * 0.78, r * 0.6);
+    g.fill();
+    // 虹膜 + 眨眼
+    const blink = 0.22 + 0.78 * Math.abs(Math.sin(time * 0.9));
+    g.fillColor = C(def.glow);
+    g.ellipse(x, cy + r * 0.04, r * 0.48, r * 0.48 * blink);
+    g.fill();
+    g.fillColor = C('#0B0A14');
+    g.ellipse(x, cy + r * 0.04, r * 0.17, r * 0.4 * blink);
+    g.fill();
+    g.fillColor = C('#FFFFFFCC');
+    g.circle(x - r * 0.15, cy + r * 0.26, Math.max(1.4, r * 0.08));
+    g.fill();
+}
+
+/**
+ * 画区域怪物（灰烬 / 霜牙 / 深渊）。返回 false 表示这个 kind 没登记，
+ * 由渲染层走自己的兜底。
+ */
+export function drawRegionEnemy(
+    g: Graphics,
+    x: number,
+    y: number,
+    time: number,
+    radius: number,
+    kind: string,
+): boolean {
+    const def = REGION_ART[kind];
+    if (!def) return false;
+    const r = Math.max(10, radius);
+    if (def.style === 'beast') drawBeast(g, x, y, time, r, def);
+    else if (def.style === 'spirit') drawSpirit(g, x, y, time, r, def);
+    else if (def.style === 'brute') drawBrute(g, x, y, time, r, def);
+    else if (def.style === 'blob') drawBlob(g, x, y, time, r, def);
+    else drawEye(g, x, y, time, r, def);
+    return true;
+}
+
+/** 血球：发光圆 + 十字 */export function drawOrb(g: Graphics, x: number, y: number, time: number): void {
     const pulse = 1 + Math.sin(time * 6 + x) * 0.12;
     g.fillColor = C(MITH_PAL.orb + '33');
     g.circle(x, y, 14 * pulse);

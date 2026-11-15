@@ -114,6 +114,13 @@ export class MithrilHud extends Component {
     private _lastDungeonName = '';
     private _lastProgress = '';
 
+    /** 结算文案可被主组件按模式覆盖（副本 / 野外节点） */
+    private _resultWinTitle = '副本通关';
+    private _resultWinLine = '矿坑巨魔已被击败';
+    private _resultLoseTitle = '你倒下了';
+    private _restartLabel = '再来一次';
+    private _againBtn: ReturnType<typeof createButton> | null = null;
+
     private _lastHp = -1;
     private _lastRage = -1;
 
@@ -182,6 +189,31 @@ export class MithrilHud extends Component {
     /** 等级 / 经验 / 技能书 / 待选变体（每次刷顶栏前调用，值没变也只是覆盖几个字段） */
     setGrowthInfo(info: GrowthInfo): void {
         this._growth = info;
+    }
+
+    /**
+     * 结算文案按模式覆盖：副本节点显示「副本通关」，野外节点显示「战斗胜利 / 首领已击败」，
+     * 主按钮也从「再来一次」变成「返回路线图」。不传的字段保持上一次的值。
+     */
+    setResultMode(cfg: {
+        winTitle?: string;
+        winLine?: string;
+        loseTitle?: string;
+        againLabel?: string;
+    }): void {
+        if (cfg.winTitle !== undefined) this._resultWinTitle = cfg.winTitle;
+        if (cfg.winLine !== undefined) this._resultWinLine = cfg.winLine;
+        if (cfg.loseTitle !== undefined) this._resultLoseTitle = cfg.loseTitle;
+        if (cfg.againLabel !== undefined) {
+            this._restartLabel = cfg.againLabel;
+            if (this._againBtn) {
+                this._againBtn.setText(cfg.againLabel);
+                // 「返回路线图」比「再来一次」长一个字，22 号字在 112 宽的按钮里会被折成两行，
+                // 长标签统一压到 17 号并关掉换行（SHRINK 会先换行再缩，救不回来）
+                this._againBtn.label.fontSize = cfg.againLabel.length >= 5 ? 17 : 22;
+            }
+        }
+        if (this._resultShown) this._refreshResultBody();
     }
 
     /**
@@ -306,7 +338,7 @@ export class MithrilHud extends Component {
             g.fill();
         }
 
-        this._hpLabel!.string = `Lv ${this._growth.level}　生命  ${Math.ceil(hp)} / ${hpMax}`;
+        this._hpLabel!.string = `Lv ${this._growth.level}　生命  ${Math.ceil(hp)} / ${Math.round(hpMax)}`;
         this._rageLabel!.string = `怒气  ${Math.floor(rage)} / 100`;
         if (this._expLabel) {
             const expText = capped
@@ -469,12 +501,13 @@ export class MithrilHud extends Component {
         }
         g.stroke();
 
-        this._bossName!.string = `${boss.name}  ·  阶段 ${boss.phase + 1}/3`;
-        this._bossHpText!.string = `${Math.ceil(boss.hp)} / ${boss.maxHp}`;
+        this._bossName!.string = `${boss.name}  ·  阶段 ${boss.phase + 1}/${snap.bossPhaseCount}`;
+        // BOSS 血量是浮点倍率连乘出来的，直接显示会出现 3535.9999999999995（试玩 N40）
+        this._bossHpText!.string = `${Math.ceil(boss.hp)} / ${Math.round(boss.maxHp)}`;
         this._bossHpText!.node.active = true;
         this._bossHint!.string = boss.enraged > 0
             ? `狂暴中：伤害 +50%（剩余 ${boss.enraged.toFixed(1)}s）`
-            : '走位躲砸地 · 转火矿工 · 打断狂暴读条';
+            : (snap.bossHint || '观察机制提示，按阶段处理');
         this._bossHint!.color = hex(boss.enraged > 0 ? '#EF4444' : COLOR.WARNING);
 
         // 读条
@@ -663,7 +696,7 @@ export class MithrilHud extends Component {
         this._lastKills = snap.kills;
         this._lastDungeonName = snap.dungeonName;
         this._lastProgress = snap.dungeonProgress;
-        this._resultTitle!.string = won ? '副本通关' : '你倒下了';
+        this._resultTitle!.string = won ? this._resultWinTitle : this._resultLoseTitle;
         this._resultTitle!.color = hex(won ? COLOR.SUCCESS : COLOR.DANGER);
         this._refreshResultBody();
     }
@@ -673,7 +706,7 @@ export class MithrilHud extends Component {
         const lines = [
             `${this._lastDungeonName}`,
             `用时 ${this._lastTimeText}    击杀 ${this._lastKills}`,
-            this._lastWin ? '矿坑巨魔已被击败' : `推进到 ${this._lastProgress}`,
+            this._lastWin ? this._resultWinLine : `推进到 ${this._lastProgress}`,
         ];
         if (this._rewardLines.length > 0) lines.push(...this._rewardLines);
         // 正文高度有限（8 行）：收益行优先，掉落最多两行
@@ -737,12 +770,13 @@ export class MithrilHud extends Component {
         });
 
         // 四个按钮均分：再来一次 / 成长 / 装备 / 返回大厅
-        const again = createButton(panel, {
-            w: 112, h: 58, text: '再来一次', fontSize: 22,
+        this._againBtn = createButton(panel, {
+            w: 112, h: 58, text: this._restartLabel, fontSize: 22,
             fill: COLOR.PRIMARY, textColor: '#FFFFFF', activeFill: COLOR.PRIMARY_DARK,
             radius: 14, onTap: () => this._onRestartTap(),
         });
-        again.node.setPosition(-177, -190, 0);
+        this._againBtn.node.setPosition(-177, -190, 0);
+        this._againBtn.label.enableWrapText = false;
 
         const grow = createButton(panel, {
             w: 112, h: 58, text: '成长', fontSize: 22,
