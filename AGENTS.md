@@ -57,10 +57,12 @@ tiny_games/
 │   │   └── resources/prefabs/GameIcon.prefab
 │   ├── games/             # 每游戏独立目录 game_<id>/（含 scenes/ + scripts/）
 │   │                      # 场景名与 GameConfig.sceneName 一致；id 清单见 GameConfig.ts
+│   │                      # game_template/ = 新游戏模板（见 docs/design/2026-11-15-new-game-contract.md）
 │   ├── common/            # 公共模块
 │   │   ├── managers/      # SceneManager, StorageManager, GameConfig
-│   │   └── components/    # BackButton, SafeAreaAdapter
-│   ├── game_placeholder/  # 新游戏模板（scenes/GamePlaceholder.scene）
+│   │   ├── components/    # BackButton, SafeAreaAdapter
+│   │   └── ui/            # UITheme（设计令牌）, GameUIKit（UI 工厂）, SceneSkin
+│   ├── game_placeholder/  # 旧占位场景，历史遗留，**不是**新游戏模板
 │   └── Cocos UI/          # 编辑器 UI 素材
 ├── docs/                  # 所有文档统一存放（见 docs/README.md）
 │   ├── specs/             # 游戏设计规格
@@ -82,7 +84,19 @@ tiny_games/
 本文件**不再抄写整张表**——手抄副本会漂移（已经发生过：脚本清单漏了 12 个，见 `docs/tech/verify-scripts.md`）。
 查 id：`grep -oE "id: '[^']+'" assets/common/managers/GameConfig.ts`。
 
-**添加新游戏四步骤**：① `GameConfig.ts` 注册 ② 创建 `assets/games/game_xxx/scenes/Xxx.scene` ③ 场景名与 `sceneName` 一致 ④ **在 `GameIconArt.ts` 补 `ACCENTS[id]` + `drawShape` 的 `case 'id':`**（漏了会落回兜底问号，大厅里和别的游戏长一样），改完跑 `node tools/check-game-icons.js`；规范见 [`design/2026-11-10-ui-art-style-guide.md`](./docs/design/2026-11-10-ui-art-style-guide.md)。
+**添加新游戏**：先跑骨架生成，再按[契约清单](./docs/design/2026-11-15-new-game-contract.md)补齐。
+**不要**从现有游戏里挑一个长文件当起点。
+
+```bash
+node tools/new-game.js --id <id> --name <中文名>   # 加 --dry-run 只打印
+```
+
+它复制 `assets/games/game_template/`（`<X>Core.ts` 纯逻辑 + `<X>Game.ts` 组件 + `<X>Hud.ts`）
+并生成 `tools/verify-<id>-core.js`，然后打印必须手改的清单。四条硬契约：① `GameConfig.GAME_LIST` 注册
+② `GameIconArt.ts` 补 `ACCENTS[id]` + `drawShape` 的 `case 'id':`，跑 `node tools/check-game-icons.js`
+③ 场景名与 `sceneName` 一致（**复制 `GamePlaceholder.scene`，场景只需 Canvas + 相机，模板不用绑任何属性**）
+④ 构建清单 `node tools/sync-build-scenes.js --check`。UI 规范见
+[`design/2026-11-10-ui-art-style-guide.md`](./docs/design/2026-11-10-ui-art-style-guide.md)。
 
 ## 架构与模式
 
@@ -165,7 +179,12 @@ node tools/verify-<game>-core.js      # 例：node tools/verify-tetris-core.js
 ```
 
 全部脚本的清单、覆盖范围与「何时跑」见 [`docs/tech/verify-scripts.md`](./docs/tech/verify-scripts.md)。
-每个游戏各有一份 `verify-*-core.js`，新增游戏时按惯例补一份。
+每个游戏各有一份 `verify-*-core.js`，新增游戏时 `tools/new-game.js` 会自动生成一份。
+tsc 定位与编译已抽到 [`tools/lib/core-compile.js`](./tools/lib/core-compile.js) —— 新脚本用它（`runTsc` / `requireTsc`），不要再手抄路径。
+
+```bash
+node tools/verify-template-core.js    # 模板自身的自检（改共享层 GameUIKit/UITheme 后跑）
+```
 
 大厅图标覆盖自检（**新增游戏后必跑**；退出码 0 = GAME_LIST 每款都有专属强调色与图形）：
 
@@ -279,6 +298,7 @@ node tools/sync-build-scenes.js --all     # 顺带修其它平台的构建任务
 ## 相关文档
 
 - [文档索引与定位指南](./docs/README.md) —— **按游戏找设计 / 计划 / 验脚本先看这里**
+- [新增游戏契约（一页）](./docs/design/2026-11-15-new-game-contract.md) —— 加新游戏先读这个：模板、三条职责、场景三步、交付门槛
 - [Cocos Creator 最佳实践（完整版）](./docs/cocos-best-practices.md)
 - [浏览器操作验证手册](./docs/tech/browser-verify-cocos-preview.md)
 - [全站 UI / 图标美术规范](./docs/design/2026-11-10-ui-art-style-guide.md)

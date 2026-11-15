@@ -315,6 +315,30 @@ for (const e of visible) (groups[e.parent || 'ROOT'] ||= []).push(e);
 **推论**：凡是用 Button 过渡色表达的"状态指示"，都要检查**每个过渡态**是否都写对了 ——
 只在 `normalColor` 上做标记，桌面预览里鼠标一碰就消失；微信触屏没有 hover 才不会暴露。
 
+### 7.3 运行时 `addComponent` 要传**构造函数**，2D 组件不在 legacy `cc` 全局上
+
+给临时冒烟节点挂组件时踩了两下，报错都是同一句 `TypeError: getComponent: Type must be non-nil`
+（抛自 `Node.addComponent`，见引擎源码 3804），很容易误判成"类没注册"：
+
+**① 字符串形式只认**完整注册名**。** `addComponent('TemplateGame')` 不走 `js.getClassByName` 的模糊匹配，
+名字对不上就是 null → 3804。稳妥写法是先取名再传构造函数：
+
+```js
+const Cls = cc.js.getClassByName('TemplateGame');   // 自己写的脚本：按 @ccclass 名取
+n.addComponent(Cls);
+```
+
+**② 内置组件要用 `'cc.'` 前缀取，且 legacy `cc` 全局上不一定有。**
+预览页里 `cc.UITransform` 是 `undefined`（实测 `cc.Label` / `cc.Graphics` / `cc.Sprite` / `cc.Widget` /
+`cc.Button` 都在，唯独 `UITransform` 不在），但 `cc.js.getClassByName('cc.UITransform')` 有值：
+
+```js
+n.addComponent(cc.js.getClassByName('cc.UITransform')).setContentSize(720, 1280);
+```
+
+**判据**：报 3804 时先打印 `typeof cc.X` 与 `!!cc.js.getClassByName('cc.X')`，别急着去查 @ccclass 注册。
+报错行号指向 `eval` 的内部行，**别按自己数的行号找** —— 多一行 `if (old) old.destroy()` 就会整体错位。
+
 ---
 
 ## 8. 面板显隐被 `_showCalled` 拦截（易踩的模式）

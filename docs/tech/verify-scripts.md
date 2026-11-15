@@ -10,14 +10,19 @@ node tools/<script>.js                    # 全部脚本都直接跑，无需 np
 node tools/verify-<game>-core.js          # 退出码 0 = 通过
 ```
 
-`verify-*-core.js` 会用 `tsc` 把对应 `*Core.ts` 编译到 `temp/` 再在 Node 里跑。脚本内的
-tsc 查找顺序：`$TSC` 环境变量 → `node_modules` → Cocos Creator 自带版本。
+`verify-*-core.js` 会用 `tsc` 把对应 `*Core.ts` 编译到 `temp/` 再在 Node 里跑。tsc 的查找顺序
+（`$TSC` → `node_modules` → Cocos Creator 自带版本）与调用**统一在** [`tools/lib/core-compile.js`](../../tools/lib/core-compile.js)，
+新脚本 `require('./lib/core-compile')` 后直接用 `runTsc` / `requireTsc`，不要再手抄路径。
 **改过 `*Core.ts` 之后必跑对应脚本**，纯 UI/场景改动不必跑。
+
+新游戏的骨架（含一份 `verify-<id>-core.js`）用 `node tools/new-game.js --id <id> --name <中文名>` 生成，
+规矩见 [`../design/2026-11-15-new-game-contract.md`](../design/2026-11-15-new-game-contract.md)。
 
 ## 纯逻辑自检（不启动编辑器）
 
 | 脚本 | 对应游戏 | 覆盖要点 |
 |---|---|---|
+| `verify-template-core.js` | **模板（game_template）** | Core 纯度（禁 cc / `Date.now` / `Math.random` / `localStorage`）、开局计时、点击计分与确定性奖励、可复现 RNG、best 只增、存档往返与坏档回落（15 项）。**改 `GameUIKit` / `UITheme` 后也跑它** |
 | `verify-tetris-core.js` | 方块坠落 | SRS 四态与踢墙、7-bag、出生位置、消行、Ghost、计分与重力表 |
 | `verify-brick-core.js` | 砖块远征 | RNG 确定性、关卡生成与难度曲线、弹板/发球/反弹、砖块耐久/穿透/爆炸球/炸弹连锁、计分连击、激光/粘性/分裂、生命结算、防穿模 |
 | `verify-merge-core.js` | 合合大作战 | 对应 `plans/2026-10-31-merge-physics-evaluation.md` §5 的 12 项：自由落体、叠放稳定、10 果堆塔、合并、禁链式合并、顶果消除、墙体钳制、高速不穿模、确定性、失败判定、投放冷却、长跑 |
@@ -40,6 +45,13 @@ tsc 查找顺序：`$TSC` 环境变量 → `node_modules` → Cocos Creator 自�
 | `verify-fridge-core.js` | 冰箱底下 | M1 移动/瞄准/眼泪/敌人/拾取；M2 地图生成/门锁/清房/宝箱/Boss/存档；M3 40 道具、14 协同、6 角色技能、免死复活、商店/祭坛/炸弹/秘密房 |
 | `verify-mithril-core.js` | 秘银远征 | M0：数值曲线、副属性预算、天赋规则、技能变体、存档净化、配置完整性、战斗骨架（确定性、实体上限、无 NaN、无敌帧） |
 | `verify-battle-fixes.js` | 小小先锋 | 战斗修复回归。**脚本内 ROOT 硬编码为作者的 Windows 路径，跨机运行前先改成本机绝对路径** |
+
+## 脚手架与共享工具
+
+| 脚本 | 用途 | 何时跑 |
+|---|---|---|
+| `new-game.js` | `--id <id> --name <中文名> [--class <X>] [--dry-run]`：从 `assets/games/game_template/` 生成骨架（Core/Game/Hud + `verify-<id>-core.js`），并打印必须手改的清单 | **新增游戏第一步** |
+| `lib/core-compile.js` | 共用模块（非独立脚本）：`findTsc` / `requireTsc` / `runTsc`，所有 `verify-*-core.js` 的 tsc 定位都走它 | 新写 verify 脚本时 `require` |
 
 ## 图标 / 构建 / 场景清单
 

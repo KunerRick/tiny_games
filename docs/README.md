@@ -20,8 +20,8 @@
 | 构建微信小游戏、或开发者工具报编译错误 / 一打开就崩 | [`tech/wechat-build-pitfalls.md`](./tech/wechat-build-pitfalls.md) + `node tools/check-wechat-build.js`（9 项预检）+ `node tools/replay-wechat-bundle.js`（包装器复现器） |
 | 新增游戏后同步构建场景清单（MCP / 脚本 / GUI 阶梯） | [`tech/wechat-build-pitfalls.md` §9.1](./tech/wechat-build-pitfalls.md) |
 | 新增游戏 / 改大厅图标 / 统一 UI 美术风格 | [`design/2026-11-10-ui-art-style-guide.md`](./design/2026-11-10-ui-art-style-guide.md) + `node tools/check-game-icons.js` |
-| 新增游戏或场景 | [`../AGENTS.md`](../AGENTS.md) 的 **项目结构 + 游戏注册** |
-| 改完 `*Core.ts`，该跑哪个自检 / `tools/` 有哪些脚本 | [`tech/verify-scripts.md`](./tech/verify-scripts.md)（27 个脚本的覆盖范围与「何时跑」） |
+| 新增游戏或场景 | [`design/2026-11-15-new-game-contract.md`](./design/2026-11-15-new-game-contract.md) + `node tools/new-game.js`（先读契约再动手） |
+| 改完 `*Core.ts`，该跑哪个自检 / `tools/` 有哪些脚本 | [`tech/verify-scripts.md`](./tech/verify-scripts.md)（全部脚本的覆盖范围与「何时跑」；数量不再手抄，避免漂移） |
 | 查某游戏的设计/计划/场景配置 | 下文的 **按游戏分类** |
 | 规划剩余 8 款的玩法/美术/复核开工顺序 | [`plans/2026-11-07-remaining-games-polish-plan.md`](./plans/2026-11-07-remaining-games-polish-plan.md) |
 | **想知道全部 24 款有哪些体验坑 / 该先修什么** | [`plans/2026-11-10-all-games-playtest-ux-report.md`](./plans/2026-11-10-all-games-playtest-ux-report.md)（玩家视角实机试玩：跨游戏共性问题 + 逐款清单 + P0/P1/P2 批次） |
@@ -34,6 +34,7 @@
 ## 核心规范（必读）
 
 - [`../AGENTS.md`](../AGENTS.md) — 项目总规范、红线清单、当前教训、Git 规范、MCP 守则
+- [`design/2026-11-15-new-game-contract.md`](./design/2026-11-15-new-game-contract.md) — **新增游戏契约（一页）**：模板三文件职责、可机检硬契约、场景三步、注册四步、交付门槛
 - [`cocos-best-practices.md`](./cocos-best-practices.md) — Cocos Creator 3.x 防崩溃详解与代码模式
 - [`tech/browser-verify-cocos-preview.md`](./tech/browser-verify-cocos-preview.md) — 浏览器操作验证预览：刷新资产库、设备像素坐标、页内探针与日志取证
 - [`tech/mcp-scene-authoring-pitfalls.md`](./tech/mcp-scene-authoring-pitfalls.md) — MCP 操作场景/预制体：按钮绑定类型、Button 组件、渲染组件冲突
