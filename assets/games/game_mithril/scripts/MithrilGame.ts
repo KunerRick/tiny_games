@@ -883,6 +883,9 @@ export class MithrilGame extends Component {
             const lostText = this._applyMaterialLoss(save, lost);
             save.expedition = null;
             reward.push('远征失败：本程材料已丢失（装备、经验与等级保留）');
+            // 试玩 N53：阵亡是「整次远征结束」而非退回副本门口，结算里要写明白，
+            // 否则玩家会以为还能原地重进，回路线图才发现要重新开始远征。
+            reward.push('本次远征结束：本程节点进度不保留，需回路线图重新「开始远征」');
             reward.push(lostText ? `丢失：${lostText}` : '本程还没有拾取材料');
         }
 
