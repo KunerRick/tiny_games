@@ -860,11 +860,12 @@ export function serializeSave(save: MithrilSave): string {
 }
 
 /**
- * 读档：任何异常（无档 / JSON 坏 / 旧 schema）都回落到默认档，绝不抛。
+ * 读档：无档返回 **null**（M6 起据此进入职业选择），
+ * 坏 JSON / 旧 schema 回落默认战士档（老玩家的档不能一升级就丢），绝不抛。
  * 坏字段交给 sanitizeSave 逐字段兜底。
  */
-export function parseSave(raw: string | null | undefined): MithrilSave {
-    if (!raw) return defaultSave('warrior');
+export function parseSave(raw: string | null | undefined): MithrilSave | null {
+    if (!raw) return null;
     let data: unknown = null;
     try {
         data = JSON.parse(raw);

@@ -21,6 +21,14 @@ function C(hexColor: string): Color {
     return c;
 }
 
+/** 带透明度的临时色（不能改缓存色的 a —— Color.a 在 3.8 类型里是只读的） */
+function CA(hexColor: string, alpha: number): Color {
+    const base = C(hexColor);
+    const c = new Color();
+    c.set(base.r, base.g, base.b, Math.max(0, Math.min(255, Math.round(alpha))));
+    return c;
+}
+
 export const MITH_PAL = {
     /** 矿坑地面 / 岩壁 */
     floor: '#141A22',
@@ -171,6 +179,145 @@ export function drawWarrior(
     g.moveTo(hx + nx * 6, hy + ny * 6);
     g.lineTo(hx - nx * 6, hy - ny * 6);
     g.stroke();
+}
+
+const CLASS_LOOK: Record<string, { robe: string; trim: string; glow: string }> = {
+    mage: { robe: '#334E8C', trim: '#60A5FA', glow: '#93C5FD' },
+    ranger: { robe: '#2C5C46', trim: '#34D399', glow: '#A7F3D0' },
+    priest: { robe: '#7A5B24', trim: '#FBBF24', glow: '#FDE68A' },
+};
+
+/** 法系 / 远程玩家：长袍 + 职业武器（法杖 / 弓 / 圣杖）。比例与战士一致（肩宽 22、身高 40）。 */
+function drawCaster(
+    g: Graphics,
+    x: number,
+    y: number,
+    facing: number,
+    time: number,
+    look: WarriorLook,
+    classId: string,
+): void {
+    const pal = CLASS_LOOK[classId] || CLASS_LOOK.mage;
+    const breath = Math.sin(time * 5) * 1.2;
+    const blink = look.invuln && Math.floor(time * 10) % 2 === 0;
+
+    g.fillColor = C(MITH_PAL.shadow + '66');
+    g.ellipse(x, y - 16, 16, 7);
+    g.fill();
+
+    if (look.burst) {
+        g.strokeColor = C(pal.glow);
+        g.lineWidth = 2;
+        g.circle(x, y, 34 + Math.sin(time * 9) * 3);
+        g.stroke();
+    }
+
+    // 长袍（下摆比肩宽）
+    g.fillColor = C(blink ? pal.glow : pal.robe);
+    g.moveTo(x - 10, y + 8 + breath * 0.2);
+    g.lineTo(x + 10, y + 8 + breath * 0.2);
+    g.lineTo(x + 16, y - 20);
+    g.lineTo(x - 16, y - 20);
+    g.close();
+    g.fill();
+    // 腰带与领口
+    g.fillColor = C(pal.trim);
+    g.rect(x - 11, y - 2, 22, 4);
+    g.fill();
+    g.moveTo(x - 8, y + 8);
+    g.lineTo(x, y + 2);
+    g.lineTo(x + 8, y + 8);
+    g.close();
+    g.fill();
+
+    // 兜帽 + 脸
+    g.fillColor = C(pal.trim);
+    g.circle(x, y + 15, 9 + breath * 0.15);
+    g.fill();
+    g.fillColor = C(blink ? '#FFFFFF' : MITH_PAL.skin);
+    g.circle(x + Math.cos(facing) * 1.5, y + 14, 5.5);
+    g.fill();
+    drawEyes(g, x + Math.cos(facing) * 1.5, y + 14, MITH_PAL.black, 2.4, 1.1);
+
+    // 武器沿朝向伸出
+    const hx = x + Math.cos(facing) * 11;
+    const hy = y + Math.sin(facing) * 5;
+    const tipX = hx + Math.cos(facing) * 22;
+    const tipY = hy + Math.sin(facing) * 22;
+    if (classId === 'ranger') {
+        // 弓：以朝向前方 10px 为圆心的一段弧 + 弦
+        const cx = x + Math.cos(facing) * 14;
+        const cy = y + Math.sin(facing) * 10;
+        g.strokeColor = C('#8B5A2B');
+        g.lineWidth = 3;
+        g.arc(cx, cy, 15, facing - 1.1, facing + 1.1, false);
+        g.stroke();
+        g.strokeColor = C(pal.glow);
+        g.lineWidth = 1;
+        g.moveTo(cx + Math.cos(facing - 1.1) * 15, cy + Math.sin(facing - 1.1) * 15);
+        g.lineTo(cx + Math.cos(facing + 1.1) * 15, cy + Math.sin(facing + 1.1) * 15);
+        g.stroke();
+    } else {
+        // 法杖 / 圣杖
+        g.strokeColor = C('#6B4A2A');
+        g.lineWidth = 3;
+        g.moveTo(hx, hy);
+        g.lineTo(tipX, tipY);
+        g.stroke();
+        if (classId === 'priest') {
+            g.fillColor = C(pal.glow);
+            const nx = Math.cos(facing + Math.PI / 2);
+            const ny = Math.sin(facing + Math.PI / 2);
+            g.rect(tipX - 1.5, tipY - 1.5, 3, 3);
+            g.fill();
+            g.strokeColor = C(pal.glow);
+            g.lineWidth = 2.5;
+            g.moveTo(tipX + nx * 5, tipY + ny * 5);
+            g.lineTo(tipX - nx * 5, tipY - ny * 5);
+            g.stroke();
+        } else {
+            g.fillColor = C(pal.glow);
+            g.circle(tipX, tipY, 5);
+            g.fill();
+            g.fillColor = C('#FFFFFF');
+            g.circle(tipX, tipY, 2);
+            g.fill();
+        }
+    }
+}
+
+/** 玩家按职业绘制（渲染层只认 classId，不关心具体画法） */
+export function drawClassPlayer(
+    g: Graphics,
+    x: number,
+    y: number,
+    facing: number,
+    time: number,
+    look: WarriorLook,
+    classId: string,
+): void {
+    if (!classId || classId === 'warrior') drawWarrior(g, x, y, facing, time, look);
+    else drawCaster(g, x, y, facing, time, look, classId);
+}
+
+/** 游侠冰霜陷阱：冰蓝圆环 + 放射冰刺，剩余时间越短越淡 */
+export function drawTrap(g: Graphics, x: number, y: number, radius: number, ratio: number, time: number): void {
+    const a = Math.round(90 + 150 * Math.max(0, Math.min(1, ratio)));
+    g.fillColor = CA('#0EA5E9', a * 0.25);
+    g.circle(x, y, radius);
+    g.fill();
+    g.strokeColor = CA('#7DD3FC', a);
+    g.lineWidth = 2;
+    g.circle(x, y, radius * (0.9 + Math.sin(time * 3) * 0.04));
+    g.stroke();
+    for (let i = 0; i < 6; i++) {
+        const ang = (Math.PI * 2 * i) / 6;
+        g.strokeColor = CA('#BAE6FD', a);
+        g.lineWidth = 1.5;
+        g.moveTo(x + Math.cos(ang) * radius * 0.35, y + Math.sin(ang) * radius * 0.35);
+        g.lineTo(x + Math.cos(ang) * radius * 0.85, y + Math.sin(ang) * radius * 0.85);
+        g.stroke();
+    }
 }
 
 function drawEyes(g: Graphics, x: number, y: number, color: string, spread = 4, r = 1.6): void {

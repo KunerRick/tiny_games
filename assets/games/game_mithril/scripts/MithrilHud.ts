@@ -13,8 +13,8 @@ import {
     COLOR, createBackButton, createButton, createLabel, hex,
 } from '../../../common/ui/GameUIKit';
 import type { CoreEvent, MithrilSnapshot } from './MithrilCore';
-import { PLAYER_TUNING, GEAR_BASE_BY_ID, GEAR_SLOT_NAMES, QUALITY_BY_ID } from './MithrilConfig';
-import type { EquipItem } from './MithrilConfig';
+import { CLASS_KITS, PLAYER_TUNING, GEAR_BASE_BY_ID, GEAR_SLOT_NAMES, QUALITY_BY_ID } from './MithrilConfig';
+import type { ClassId, EquipItem } from './MithrilConfig';
 
 const { ccclass } = _decorator;
 
@@ -40,6 +40,22 @@ const SKILL_NAME: Record<SkillKey, string> = {
     skill3: '破',
     burst: '怒',
     dodge: '闪',
+};
+
+/** 技能键单字文案（按职业；单字是为了在 84–112px 的圆键里不折行） */
+const CLASS_SKILL_NAME: Record<ClassId, Record<SkillKey, string>> = {
+    warrior: SKILL_NAME,
+    mage: { basic: '弹', skill1: '火', skill2: '冰', skill3: '闪', burst: '奥', dodge: '屏' },
+    ranger: { basic: '射', skill1: '多', skill2: '陷', skill3: '跃', burst: '鹰', dodge: '滚' },
+    priest: { basic: '光', skill1: '愈', skill2: '新', skill3: '盾', burst: '圣', dodge: '步' },
+};
+
+/** 资源条配色：怒气 / 法力 / 能量 / 圣能 */
+const RESOURCE_COLOR: Record<string, string> = {
+    rage: '#B45309',
+    mana: '#2563EB',
+    energy: '#059669',
+    holy: '#B45309',
 };
 
 /** 成长信息（MithrilGame 每次刷新顶栏前喂进来） */
@@ -123,6 +139,25 @@ export class MithrilHud extends Component {
 
     private _lastHp = -1;
     private _lastRage = -1;
+    /** 当前职业（技能键文案与资源条按它切换；首次快照时同步） */
+    private _classId: ClassId = 'warrior';
+
+    /** 职业切换时改技能键文案与冷却总时长（只改文案与数值，不动布局） */
+    private _syncClass(snap: MithrilSnapshot): void {
+        if (!snap.classId || snap.classId === this._classId) return;
+        this._classId = snap.classId;
+        const kit = CLASS_KITS[snap.classId] || CLASS_KITS.warrior;
+        const names = CLASS_SKILL_NAME[snap.classId] || CLASS_SKILL_NAME.warrior;
+        for (const b of this._skills) {
+            b.label.string = names[b.key];
+            if (b.key === 'basic') b.total = kit.basic.cd;
+            else if (b.key === 'skill1') b.total = kit.a1.cd;
+            else if (b.key === 'skill2') b.total = kit.a2.cd;
+            else if (b.key === 'skill3') b.total = kit.a3.cd;
+            else if (b.key === 'dodge') b.total = kit.dodge.cd;
+            else if (b.key === 'burst') b.total = kit.burst.cd;
+        }
+    }
 
     onLoad(): void {
         this._buildBars();
@@ -158,6 +193,7 @@ export class MithrilHud extends Component {
     // ==================== 对外 ====================
 
     updateHud(snap: MithrilSnapshot): void {
+        this._syncClass(snap);
         this._drawTopBars(snap);
         this._updateBanner(snap);
         this._updateBoss(snap);
@@ -280,6 +316,12 @@ export class MithrilHud extends Component {
         const hp = snap.player.hp;
         const hpMax = Math.max(1, snap.player.maxHp);
         const rage = snap.player.rage;
+        const kit = CLASS_KITS[snap.classId] || CLASS_KITS.warrior;
+        const resMax = snap.resourceMax || 100;
+        const kind = snap.resourceName === '怒气' ? 'rage' : (snap.resourceName === '能量' ? 'energy' : 'mana');
+        const bright = kind === 'rage' ? '#F59E0B' : (kind === 'energy' ? '#34D399' : '#60A5FA');
+        // 只有主资源驱动爆发的职业才需要「资源够了 → 高亮」
+        const burstNeed = kit.burst.holyCost ? 0 : (kit.burst.cost || 0);
 
         if (hp !== this._lastHp || rage !== this._lastRage) {
             this._lastHp = hp;
@@ -306,7 +348,7 @@ export class MithrilHud extends Component {
         g.roundRect(bx, by, bw, bh, 7);
         g.stroke();
 
-        // 怒气条
+        // 资源条（怒气 / 法力 / 能量）
         const ry = 560;
         const rw = 320;
         const rh = 18;
@@ -314,14 +356,28 @@ export class MithrilHud extends Component {
         g.roundRect(bx, ry, rw, rh, 6);
         g.fill();
         if (rage > 0) {
-            g.fillColor = hex(rage >= PLAYER_TUNING.burst.rageCost ? '#F59E0B' : '#B45309', 255);
-            g.roundRect(bx + 1, ry + 1, Math.max(3, (rw - 2) * (rage / 100)), rh - 2, 5);
+            g.fillColor = hex(burstNeed > 0 && rage >= burstNeed ? bright : RESOURCE_COLOR[kind], 255);
+            g.roundRect(bx + 1, ry + 1, Math.max(3, (rw - 2) * Math.min(1, rage / resMax)), rh - 2, 5);
             g.fill();
         }
         g.strokeColor = hex(COLOR.PANEL_BORDER, 160);
         g.lineWidth = 1;
         g.roundRect(bx, ry, rw, rh, 6);
         g.stroke();
+
+        // 圣能（牧师）：贴在主资源条下方的一条细金条
+        if (snap.holyMax > 0) {
+            const hy = ry - 10;
+            const holy = snap.player.holy;
+            g.fillColor = hex(COLOR.SLOT_EMPTY_BG, 210);
+            g.roundRect(bx, hy, rw, 6, 3);
+            g.fill();
+            if (holy > 0) {
+                g.fillColor = hex('#FBBF24', 255);
+                g.roundRect(bx + 1, hy + 1, Math.max(2, (rw - 2) * Math.min(1, holy / snap.holyMax)), 4, 2);
+                g.fill();
+            }
+        }
 
         // 经验条：满级（expNeed 非有限）时按满槽画，避免出现「满级却空条」
         const need = this._growth.expNeed;
@@ -339,7 +395,9 @@ export class MithrilHud extends Component {
         }
 
         this._hpLabel!.string = `Lv ${this._growth.level}　生命  ${Math.ceil(hp)} / ${Math.round(hpMax)}`;
-        this._rageLabel!.string = `怒气  ${Math.floor(rage)} / 100`;
+        this._rageLabel!.string = snap.holyMax > 0
+            ? `${snap.resourceName}  ${Math.floor(rage)} / ${resMax}　圣能 ${Math.floor(snap.player.holy)} / ${snap.holyMax}`
+            : `${snap.resourceName}  ${Math.floor(rage)} / ${resMax}`;
         if (this._expLabel) {
             const expText = capped
                 ? '经验 满级'
@@ -622,8 +680,12 @@ export class MithrilHud extends Component {
             else if (b.key === 'dodge') cd = p.cd.dodge;
             else if (b.key === 'burst') cd = p.cd.burst;
 
-            const needRage = b.key === 'burst' ? PLAYER_TUNING.burst.rageCost : 0;
-            const rageOk = p.rage >= needRage;
+            const kit = CLASS_KITS[snap.classId] || CLASS_KITS.warrior;
+            const burstSolo = kit.burst.holyCost ? 0 : (kit.burst.cost || 0);
+            const needRage = b.key === 'burst' ? (kit.burst.holyCost || burstSolo) : 0;
+            const poolNow = b.key === 'burst' && kit.burst.holyCost ? p.holy : p.rage;
+            const poolMax = b.key === 'burst' && kit.burst.holyCost ? (kit.holyMax || 100) : (snap.resourceMax || 100);
+            const rageOk = poolNow >= needRage;
             const ready = cd <= 0.001 && rageOk;
             const r = b.size / 2;
 
@@ -654,21 +716,21 @@ export class MithrilHud extends Component {
                 b.label.color = hex('#FFFFFF', 255);
             }
 
-            // 怒气不足：灰色 + 需求
+            // 资源不足：灰色 + 需求
             if (b.key === 'burst' && !rageOk) {
                 b.g.fillColor = hex('#000000', 120);
                 b.g.circle(0, 0, r - 4);
                 b.g.fill();
                 b.cdLabel.node.active = true;
-                b.cdLabel.string = `${Math.floor(p.rage)}/100`;
+                b.cdLabel.string = `${Math.floor(poolNow)}/${needRage}`;
                 b.cdLabel.color = hex('#FCA5A5', 255);
             }
 
-            // 怒气环 / 持续时间提示
+            // 资源环 / 持续时间提示
             if (b.key === 'burst' && rageOk && cd <= 0.001) {
                 b.g.strokeColor = hex('#F59E0B', 255);
                 b.g.lineWidth = 4;
-                b.g.arc(0, 0, r - 1, Math.PI / 2, Math.PI / 2 - Math.PI * 2 * Math.max(0, Math.min(1, p.rage / 100)), true);
+                b.g.arc(0, 0, r - 1, Math.PI / 2, Math.PI / 2 - Math.PI * 2 * Math.max(0, Math.min(1, poolNow / Math.max(1, poolMax))), true);
                 b.g.stroke();
             }
             if (b.key === 'basic' && p.whirlwind > 0) {

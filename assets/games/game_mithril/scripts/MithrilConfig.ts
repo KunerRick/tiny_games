@@ -1174,6 +1174,211 @@ export const PLAYER_TUNING = {
     contactCooldown: 0.9,
 } as const;
 
+// ==================== 职业战斗套件（M6） ====================
+
+export type ResourceKind = 'rage' | 'mana' | 'energy' | 'holy';
+
+/**
+ * 一个技能槽的数值与行为。`act` 决定 Core 里的分派，
+ * 其余字段按行为取用；没填的字段表示该行为不关心它。
+ */
+export interface SkillActDef {
+    act: string;
+    /** 冷却（秒） */
+    cd: number;
+    /** 伤害倍率（相对攻击强度） */
+    mult?: number;
+    /** 资源消耗（主资源） */
+    cost?: number;
+    /** 圣能消耗（牧师爆发） */
+    holyCost?: number;
+    /** 命中 / 施放积攒的主资源 */
+    gain?: number;
+    /** 命中积攒的圣能 */
+    holyGain?: number;
+    /** 作用半径 */
+    radius?: number;
+    /** 近战扇形半角 */
+    halfAngle?: number;
+    /** 位移距离 */
+    distance?: number;
+    /** 持续时间（旋风斩 / 护盾 / 陷阱） */
+    duration?: number;
+    /** 旋风的跳伤间隔 */
+    tick?: number;
+    /** 旋风期间的移速倍率 */
+    moveScale?: number;
+    /** 投射物速度 */
+    speed?: number;
+    /** 投射物判定半径 */
+    projRadius?: number;
+    /** 目标搜索距离（单体技能 / 远程普攻） */
+    range?: number;
+    /** 治疗比例（最大生命） */
+    healPct?: number;
+    /** 护盾比例（最大生命） */
+    shieldPct?: number;
+    /** 冻结 / 眩晕时长 */
+    freeze?: number;
+    /** 燃烧：每秒伤害占攻击强度的比例 / 持续 */
+    burnMult?: number;
+    burnDur?: number;
+    /** 多重射击的箭数 */
+    arrows?: number;
+    /** 减速比例 / 时长（陷阱） */
+    slowPct?: number;
+    slowDur?: number;
+    /** 爆发：持续时间 / 增伤 / 受伤惩罚 / 暴击加成 / 射程加成 / 治疗倍率 / 消耗倍率 */
+    dmgBonus?: number;
+    takenBonus?: number;
+    critBonus?: number;
+    rangeBonus?: number;
+    healMul?: number;
+    costMul?: number;
+    /** 后跃 / 闪现的方向：'back' 反向、'forward' 面向 */
+    dir?: 'back' | 'forward';
+    /** 施放后下一击必暴 */
+    nextCrit?: boolean;
+}
+
+export interface ClassKitDef {
+    classId: ClassId;
+    resource: ResourceKind;
+    resourceName: string;
+    /** 主资源上限（统一 100） */
+    resourceMax: number;
+    /** 每秒回复（法力 / 能量） */
+    regen: number;
+    /** 移动时的每秒回复（能量站桩更快） */
+    moveRegen?: number;
+    /** 受击积攒主资源（战士） */
+    rageOnHurt?: number;
+    /** 圣能上限与来源（牧师） */
+    holyMax?: number;
+    holyPerHeal?: number;
+    basic: SkillActDef;
+    a1: SkillActDef;
+    a2: SkillActDef;
+    a3: SkillActDef;
+    dodge: SkillActDef;
+    burst: SkillActDef;
+}
+
+const WARRIOR_KIT: ClassKitDef = {
+    classId: 'warrior',
+    resource: 'rage',
+    resourceName: '怒气',
+    resourceMax: 100,
+    regen: 0,
+    rageOnHurt: PLAYER_TUNING.rageOnHurt,
+    basic: {
+        act: 'swing', cd: PLAYER_TUNING.basic.cd, mult: PLAYER_TUNING.basic.mult,
+        radius: PLAYER_TUNING.basic.radius, halfAngle: PLAYER_TUNING.basic.halfAngle,
+        gain: PLAYER_TUNING.basic.rage,
+    },
+    a1: {
+        act: 'charge', cd: PLAYER_TUNING.charge.cd, mult: PLAYER_TUNING.charge.mult,
+        distance: PLAYER_TUNING.charge.distance, radius: PLAYER_TUNING.charge.radius,
+        freeze: PLAYER_TUNING.charge.stun, gain: PLAYER_TUNING.charge.rage,
+    },
+    a2: {
+        act: 'whirl', cd: PLAYER_TUNING.whirlwind.cd, mult: PLAYER_TUNING.whirlwind.mult,
+        radius: PLAYER_TUNING.whirlwind.radius, duration: PLAYER_TUNING.whirlwind.duration,
+        tick: PLAYER_TUNING.whirlwind.tick, moveScale: PLAYER_TUNING.whirlwind.moveScale,
+    },
+    a3: {
+        act: 'break', cd: PLAYER_TUNING.armorBreak.cd, mult: PLAYER_TUNING.armorBreak.mult,
+        range: PLAYER_TUNING.armorBreak.range, duration: PLAYER_TUNING.armorBreak.duration,
+        gain: PLAYER_TUNING.armorBreak.rage,
+    },
+    dodge: {
+        act: 'dash', cd: PLAYER_TUNING.dodge.cd, distance: PLAYER_TUNING.dodge.distance,
+    },
+    burst: {
+        act: 'rage', cd: PLAYER_TUNING.burst.cd, cost: PLAYER_TUNING.burst.rageCost,
+        duration: PLAYER_TUNING.burst.duration, dmgBonus: PLAYER_TUNING.burst.dmgBonus,
+        takenBonus: PLAYER_TUNING.burst.takenBonus,
+    },
+};
+
+const MAGE_KIT: ClassKitDef = {
+    classId: 'mage',
+    resource: 'mana',
+    resourceName: '法力',
+    resourceMax: 100,
+    regen: 7,
+    basic: { act: 'bolt', cd: 1.2, mult: 1.0, speed: 520, projRadius: 7, range: 560 },
+    a1: {
+        act: 'fireball', cd: 6, mult: 1.2, cost: 25, speed: 430, projRadius: 9, range: 560,
+        burnMult: 0.3, burnDur: 3,
+    },
+    a2: {
+        act: 'novaFreeze', cd: 12, mult: 0.5, cost: 35, radius: 120, freeze: 1.5,
+    },
+    a3: { act: 'blink', cd: 8, cost: 20, distance: 250, dir: 'forward' },
+    dodge: {
+        act: 'barrier', cd: 10, cost: 15, shieldPct: 0.15, duration: 2, freeze: 0.3,
+    },
+    burst: {
+        act: 'arcane', cd: 45, cost: 40, duration: 8, dmgBonus: 0.4, costMul: 2,
+    },
+};
+
+const RANGER_KIT: ClassKitDef = {
+    classId: 'ranger',
+    resource: 'energy',
+    resourceName: '能量',
+    resourceMax: 100,
+    regen: 14,
+    moveRegen: 6,
+    basic: { act: 'bolt', cd: 0.9, mult: 0.95, speed: 620, projRadius: 6, range: 620 },
+    a1: {
+        act: 'volley', cd: 5, mult: 0.6, cost: 30, arrows: 5, halfAngle: 0.34,
+        speed: 560, projRadius: 6, range: 620,
+    },
+    a2: {
+        act: 'trap', cd: 10, cost: 25, radius: 95, duration: 8, slowPct: 0.5, slowDur: 3,
+    },
+    a3: { act: 'backjump', cd: 7, cost: 20, distance: 200, dir: 'back', nextCrit: true },
+    dodge: { act: 'dash', cd: 5, cost: 15, distance: 300, freeze: 0.4 },
+    burst: {
+        act: 'hawk', cd: 40, cost: 40, duration: 6, critBonus: 0.3, rangeBonus: 0.4,
+    },
+};
+
+const PRIEST_KIT: ClassKitDef = {
+    classId: 'priest',
+    resource: 'holy',
+    resourceName: '法力',
+    resourceMax: 100,
+    regen: 6,
+    holyMax: 100,
+    holyPerHeal: 20,
+    basic: { act: 'bolt', cd: 1.0, mult: 0.85, speed: 520, projRadius: 7, range: 520, holyGain: 5 },
+    a1: { act: 'heal', cd: 8, cost: 30, healPct: 0.25 },
+    a2: { act: 'novaHeal', cd: 10, mult: 0.8, cost: 35, radius: 150, healPct: 0.05 },
+    a3: { act: 'shield', cd: 14, cost: 30, shieldPct: 0.2, duration: 6 },
+    dodge: { act: 'blink', cd: 6, cost: 15, distance: 200, freeze: 0.5, dir: 'back' },
+    burst: {
+        act: 'holy', cd: 50, holyCost: 100, duration: 8, dmgBonus: 0.35, healMul: 2,
+    },
+};
+
+export const CLASS_KITS: Record<ClassId, ClassKitDef> = {
+    warrior: WARRIOR_KIT,
+    mage: MAGE_KIT,
+    ranger: RANGER_KIT,
+    priest: PRIEST_KIT,
+};
+
+/** 玩家投射物颜色（渲染层按职业上色，避免和敌方弹幕混淆） */
+export const CLASS_PROJECTILE_COLOR: Record<ClassId, string> = {
+    warrior: '#F59E0B',
+    mage: '#60A5FA',
+    ranger: '#34D399',
+    priest: '#FBBF24',
+};
+
 // ==================== 野外材料（每区域一种；悬赏 / 营地消耗入口） ====================
 
 export interface MaterialDef {

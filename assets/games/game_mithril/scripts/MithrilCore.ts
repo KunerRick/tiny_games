@@ -15,6 +15,7 @@
 import {
     BOSS_INTRO_GAP,
     BOSS_PHASE_HEAL_PCT,
+    CLASS_KITS,
     ENCOUNTER_GAP,
     ENCOUNTER_HEAL_PCT,
     ENEMY_BY_ID,
@@ -33,7 +34,16 @@ import {
     PLAYER_TUNING,
     dungeonRunPlan,
 } from './MithrilConfig';
-import type { BossScriptDef, ClassId, EnemyDef, EquipItem, GearSlot, RunPlan } from './MithrilConfig';
+import type {
+    BossScriptDef,
+    ClassId,
+    ClassKitDef,
+    EnemyDef,
+    EquipItem,
+    GearSlot,
+    RunPlan,
+    SkillActDef,
+} from './MithrilConfig';
 import {
     BALANCED_ALLOC,
     CRIT_MULT,
@@ -192,12 +202,14 @@ export function computeDamage(
     rng: () => number,
     skillMultiplier = 1,
     guaranteedCrit = false,
+    critBonus = 0,
 ): DamageResult {
     const ap = Number.isFinite(profile.attackPower) ? Math.max(0, profile.attackPower) : 0;
     const vers = Number.isFinite(profile.vers) ? Math.max(0, profile.vers) : 0;
     const mastery = Number.isFinite(profile.mastery) ? Math.max(0, profile.mastery) : 0;
     const mul = Number.isFinite(skillMultiplier) && skillMultiplier > 0 ? skillMultiplier : 0;
-    const critChance = Number.isFinite(profile.critChance) ? Math.max(0, Math.min(1, profile.critChance)) : 0;
+    const critChance = Math.max(0, Math.min(1, (Number.isFinite(profile.critChance) ? profile.critChance : 0)
+        + (Number.isFinite(critBonus) ? critBonus : 0)));
     const crit = guaranteedCrit || rng() < critChance;
     const critMult = Number.isFinite(profile.critMult) ? Math.max(1, profile.critMult) : 1;
     const damage = ap * (1 + vers) * (1 + mastery) * mul * (crit ? critMult : 1);
@@ -223,9 +235,15 @@ export interface PlayerState {
     radius: number;
     invuln: number;
     facing: number;
-    /** 怒气 0–100 */
+    /** 主资源池 0–100（战士怒气 / 法师与牧师法力 / 游侠能量；字段名沿用 rage 以保持老测试） */
     rage: number;
+    /** 圣能 0–100（牧师专用：普攻与治疗积攒，爆发消耗） */
+    holy: number;
     cd: PlayerCooldowns;
+    /** 爆发期间的技能资源消耗倍率（法师奥术强化 ×2） */
+    costMul: number;
+    /** 爆发期间的治疗倍率（牧师圣能爆发 ×2） */
+    burstHealMul: number;
     /** 旋风斩剩余持续时间 */
     whirlwind: number;
     /** 旋风斩下一跳倒计时 */
@@ -309,6 +327,25 @@ export interface BulletState {
     damage: number;
     life: number;
     kind: string;
+    /** 命中后的燃烧（火球）：每秒伤害与剩余时长 */
+    burnDps?: number;
+    burnDur?: number;
+    /** 掷骰时已判定的暴击（投射物命中沿用，不二次掷骰） */
+    crit?: boolean;
+}
+
+/** 游侠冰霜陷阱：落地后触发一次范围减速 */
+export interface TrapState {
+    id: number;
+    x: number;
+    y: number;
+    radius: number;
+    /** 剩余存在时间（秒） */
+    life: number;
+    /** 初始存在时间（秒），渲染层算剩余比例用 */
+    maxLife: number;
+    slowPct: number;
+    slowDur: number;
 }
 
 export interface TelegraphState {
@@ -392,6 +429,12 @@ export interface MithrilSnapshot {
     bullets: BulletState[];
     telegraphs: TelegraphState[];
     orbs: OrbState[];
+    traps: TrapState[];
+    /** 职业与资源模型（HUD 按它换技能键文案与资源条） */
+    classId: ClassId;
+    resourceName: string;
+    resourceMax: number;
+    holyMax: number;
     kills: number;
     stage: DungeonStage;
     encounterIndex: number;
@@ -468,6 +511,8 @@ export class MithrilWorld {
     bullets: BulletState[] = [];
     telegraphs: TelegraphState[] = [];
     orbs: OrbState[] = [];
+    /** 游侠陷阱（M6） */
+    traps: TrapState[] = [];
 
     /** 本局战斗计划（副本或野外节点；M4 起 Core 不再写死矿坑） */
     plan: RunPlan | null = null;
@@ -490,6 +535,11 @@ export class MithrilWorld {
     private _regenTick = 0;
     private _events: CoreEvent[] = [];
 
+    /** 当前职业的战斗套件（老存档 / 未知职业一律回落到战士） */
+    get kit(): ClassKitDef {
+        return CLASS_KITS[this.profile.classId] || CLASS_KITS.warrior;
+    }
+
     constructor(profile: CombatProfile, seed = 1) {
         this.profile = profile;
         this.rng = mulberry32(seed);
@@ -502,7 +552,10 @@ export class MithrilWorld {
             invuln: 0,
             facing: Math.PI / 2,
             rage: 0,
+            holy: 0,
             cd: makeCooldowns(),
+            costMul: 1,
+            burstHealMul: 1,
             whirlwind: 0,
             whirlTick: 0,
             burst: 0,
@@ -645,12 +698,17 @@ export class MithrilWorld {
         this._regenTick = 0;
         this._gap = 0;
         this.orbs.length = 0;
+        this.traps.length = 0;
         this.phase = 'playing';
         this.player.maxHp = this.profile.maxHp;
         this.player.hp = hp === undefined
             ? this.player.maxHp
             : Math.max(1, Math.min(this.player.maxHp, Math.round(hp)));
-        this.player.rage = 0;
+        // 战士从 0 怒起手；法系职业进本时资源是满的（否则第一个技能都放不出）
+        this.player.rage = this.kit.resource === 'rage' ? 0 : this.kit.resourceMax;
+        this.player.holy = 0;
+        this.player.costMul = 1;
+        this.player.burstHealMul = 1;
         this.player.shield = 0;
         this.player.slow = 0;
         this.player.guard = 0;
@@ -710,6 +768,7 @@ export class MithrilWorld {
             return false;
         }
         this._tickEnemies(d);
+        this._tickTraps(d);
         this._tickTelegraphs(d);
         this._tickBullets(d);
         this._tickOrbs(d);
@@ -803,6 +862,11 @@ export class MithrilWorld {
             bullets: this.bullets.map((b) => ({ ...b })),
             telegraphs: this.telegraphs.map((t) => ({ ...t })),
             orbs: this.orbs.map((o) => ({ ...o })),
+            traps: this.traps.map((t) => ({ ...t })),
+            classId: this.profile.classId,
+            resourceName: this.kit.resourceName,
+            resourceMax: this.kit.resourceMax,
+            holyMax: this.kit.holyMax || 0,
             kills: this.kills,
             stage: this.stage,
             encounterIndex: this.encounterIndex,
@@ -854,6 +918,10 @@ export class MithrilWorld {
         cd.dodge = Math.max(0, cd.dodge - d);
         cd.burst = Math.max(0, cd.burst - d);
         p.burst = Math.max(0, p.burst - d);
+        if (p.burst <= 0) {
+            p.costMul = 1;
+            p.burstHealMul = 1;
+        }
         p.slow = Math.max(0, p.slow - d);
         p.guard = Math.max(0, p.guard - d);
         p.counterReady = Math.max(0, p.counterReady - d);
@@ -861,13 +929,27 @@ export class MithrilWorld {
         p.comboTimer += d;
         if (p.comboTimer > COMBO_TIMEOUT) p.combo = 0;
 
-        // 战地指挥：每 5 秒回固定怒气（不吃「战术精通」的百分比，否则会双倍放大）
-        if (tal.rageRegen > 0) {
-            p.rageTimer += d;
-            while (p.rageTimer >= 5) {
-                p.rageTimer -= 5;
-                p.rage = Math.min(100, p.rage + tal.rageRegen);
+        const kit = this.kit;
+        if (kit.resource === 'rage') {
+            // 战地指挥：每 5 秒回固定怒气（不吃「战术精通」的百分比，否则会双倍放大）
+            if (tal.rageRegen > 0) {
+                p.rageTimer += d;
+                while (p.rageTimer >= 5) {
+                    p.rageTimer -= 5;
+                    p.rage = Math.min(100, p.rage + tal.rageRegen);
+                }
             }
+        } else if (kit.resource === 'energy') {
+            // 能量：站桩回得快、边跑边回得慢，鼓励在走位间隙攒资源
+            const moving = Math.hypot(
+                Number.isFinite(input.moveX) ? input.moveX : 0,
+                Number.isFinite(input.moveY) ? input.moveY : 0,
+            ) > 0.2;
+            const regen = moving ? (kit.moveRegen ?? kit.regen) : kit.regen;
+            p.rage = Math.min(kit.resourceMax, p.rage + regen * d);
+        } else {
+            // 法力（法师 / 牧师）：稳定的每秒回复
+            p.rage = Math.min(kit.resourceMax, p.rage + kit.regen * d);
         }
 
         // 旋风斩持续时间与跳伤
@@ -875,7 +957,7 @@ export class MithrilWorld {
             p.whirlwind = Math.max(0, p.whirlwind - d);
             p.whirlTick -= d;
             if (p.whirlTick <= 0) {
-                p.whirlTick += PLAYER_TUNING.whirlwind.tick * (skills.a2.v2.tickMul || 1);
+                p.whirlTick += (kit.a2.tick || PLAYER_TUNING.whirlwind.tick) * (skills.a2.v2.tickMul || 1);
                 this._whirlTick(skills.a2);
                 if (this.phase !== 'playing') return;
             }
@@ -903,76 +985,170 @@ export class MithrilWorld {
             // 自动索敌朝向：手机端只有摇杆、没有瞄准输入。若朝向只跟移动方向走，
             // 玩家绕圈走位时剑永远指向切向，普攻 45° 扇形扫不到身前的目标
             // （BOSS 半径 44、站位 120+，实测整场只有约 5 DPS，BOSS 打不死）。
-            const focus = this._nearestEnemy(PLAYER_TUNING.basic.radius + 90, true);
+            const focus = this._nearestEnemy(this._focusRange(), true);
             if (focus) p.facing = Math.atan2(focus.y - p.y, focus.x - p.x);
             else if (len > 0.01) p.facing = Math.atan2(my, mx);
         }
 
-        // 闪避
+        // 闪避 / 保命（按职业分派：战士翻滚、法师屏障、游侠翻滚、牧师圣光步）
         if (input.dodge && cd.dodge <= 0) {
             const mod = skills.dodge;
-            // 站着不动时朝向已被自动索敌吸住，直接沿用 facing 会冲进敌人身体里，
-            // 所以无移动输入时朝目标反方向后撤。
-            const dir = Math.hypot(mx, my) > 0.2
-                ? Math.atan2(my, mx)
-                : (this._nearestEnemy(PLAYER_TUNING.basic.radius + 90, true) ? p.facing + Math.PI : p.facing);
-            const dist = PLAYER_TUNING.dodge.distance + (mod.v2.distAdd || 0) + (mod.v4.distAdd || 0);
-            this._dash(dir, dist);
-            p.invuln = Math.max(p.invuln, PLAYER_TUNING.dodge.invuln + (mod.v2.invulnAdd || 0) + (mod.v4.invulnAdd || 0));
-            cd.dodge = Math.max(
-                1,
-                PLAYER_TUNING.dodge.cd * mod.cdMul / (1 + this.profile.haste) - tal.dodgeCdCut,
-            );
-            if (mod.v4.nextCrit) p.nextCrit = true;
-            if (tal.counterReflect > 0) p.counterReady = 1.5;
-            this._emit({ type: 'dodge', x: p.x, y: p.y, facing: dir });
+            const act = kit.dodge;
+            if (this._spend(act.cost || 0)) {
+                if (act.act === 'barrier') {
+                    p.shield = Math.max(p.shield, p.maxHp * (act.shieldPct || 0));
+                    p.invuln = Math.max(p.invuln, act.freeze || 0.3);
+                    this._emit({ type: 'boom', x: p.x, y: p.y, radius: 46 });
+                } else {
+                    // 站着不动时朝向已被自动索敌吸住，直接沿用 facing 会冲进敌人身体里，
+                    // 所以无移动输入时朝目标反方向后撤。
+                    const dir = Math.hypot(mx, my) > 0.2
+                        ? Math.atan2(my, mx)
+                        : (this._nearestEnemy(this._focusRange(), true) ? p.facing + Math.PI : p.facing);
+                    const dist = (act.distance || 0) + (mod.v2.distAdd || 0) + (mod.v4.distAdd || 0);
+                    this._dash(dir, dist);
+                    const baseInvuln = act.freeze !== undefined ? act.freeze : PLAYER_TUNING.dodge.invuln;
+                    p.invuln = Math.max(p.invuln, baseInvuln + (mod.v2.invulnAdd || 0) + (mod.v4.invulnAdd || 0));
+                    this._emit({ type: 'dodge', x: p.x, y: p.y, facing: dir });
+                }
+                // 战士沿用老公式（有 1s 下限与天赋减免），其它职业走统一冷却
+                cd.dodge = kit.resource === 'rage'
+                    ? Math.max(1, act.cd * mod.cdMul / (1 + this.profile.haste) - tal.dodgeCdCut)
+                    : this._skillCd(act.cd, mod);
+                if (mod.v4.nextCrit || act.nextCrit) p.nextCrit = true;
+                if (tal.counterReflect > 0) p.counterReady = 1.5;
+            }
         }
 
         // 普攻
         if (input.basic && cd.basic <= 0) {
-            this._swing(skills.basic);
-            cd.basic = PLAYER_TUNING.basic.cd * skills.basic.cdMul / (1 + this._effHaste());
+            this._basicAttack(skills.basic);
+            cd.basic = kit.basic.cd * skills.basic.cdMul / (1 + this._effHaste());
         }
 
-        // 冲锋
-        if (input.skill1 && cd.charge <= 0) {
-            this._charge(skills.a1);
-            cd.charge = this._skillCd(PLAYER_TUNING.charge.cd, skills.a1);
+        // 技能槽 1 / 2 / 3（cd.charge / cd.whirlwind / cd.armorBreak 是槽位名，不是技能名）
+        if (input.skill1 && cd.charge <= 0 && this._spend(kit.a1.cost || 0)) {
+            if (this._castSlot(kit.a1, skills.a1)) cd.charge = this._skillCd(kit.a1.cd, skills.a1);
+        }
+        if (input.skill2 && cd.whirlwind <= 0 && p.whirlwind <= 0 && this._spend(kit.a2.cost || 0)) {
+            if (this._castSlot(kit.a2, skills.a2)) cd.whirlwind = this._skillCd(kit.a2.cd, skills.a2);
+        }
+        if (input.skill3 && cd.armorBreak <= 0 && this._spend(kit.a3.cost || 0)) {
+            if (this._castSlot(kit.a3, skills.a3)) cd.armorBreak = this._skillCd(kit.a3.cd, skills.a3);
         }
 
-        // 旋风斩
-        if (input.skill2 && cd.whirlwind <= 0 && p.whirlwind <= 0) {
-            p.whirlwind = PLAYER_TUNING.whirlwind.duration + (skills.a2.v4.durationAdd || 0);
-            p.whirlTick = 0;
-            cd.whirlwind = this._skillCd(PLAYER_TUNING.whirlwind.cd, skills.a2);
+        // 爆发（战士血怒 / 法师奥术强化 / 游侠鹰眼 / 牧师圣能爆发）
+        if (input.burst && cd.burst <= 0 && this._tryBurst(skills.burst)) {
+            cd.burst = this._skillCd(kit.burst.cd, skills.burst);
         }
+    }
 
-        // 破甲
-        if (input.skill3 && cd.armorBreak <= 0) {
-            if (this._armorBreak(skills.a3)) {
-                cd.armorBreak = this._skillCd(PLAYER_TUNING.armorBreak.cd, skills.a3);
-            }
-        }
+    /** 普攻按职业分派：战士近战扇形，法系发射投射物 */
+    private _basicAttack(mod: SkillMod): void {
+        const act = this.kit.basic;
+        if (act.act === 'swing') this._swing(mod);
+        else this._fireBolt(act, mod, this._basicRange(act));
+    }
 
-        // 血怒
-        if (input.burst && cd.burst <= 0 && p.rage >= PLAYER_TUNING.burst.rageCost) {
-            const mod = skills.burst;
-            p.rage = 0;
-            p.burst = PLAYER_TUNING.burst.duration + (mod.v2.durationAdd || 0);
-            p.burstDamage = PLAYER_TUNING.burst.dmgBonus + tal.burstDamage + (mod.v4.burstDmgAdd || 0);
-            // 变体的「受伤惩罚」是往基础 +15% 上做加减，最后夹在 [-100%, +100%]
-            p.burstTakenMod = Math.max(-1, Math.min(
-                1,
-                PLAYER_TUNING.burst.takenBonus
-                + (mod.v2.burstTakenAdd || 0)
-                + (mod.v4.burstTakenAdd || 0)
-                - tal.burstTaken,
-            ));
-            if (tal.burstShield > 0) {
-                p.shield = Math.max(p.shield, p.maxHp * tal.burstShield);
-            }
-            cd.burst = this._skillCd(PLAYER_TUNING.burst.cd, mod);
+    /** 自动索敌距离：近战用剑刃半径，远程用技能射程（鹰眼爆发会拉长普攻射程） */
+    private _focusRange(): number {
+        const act = this.kit.basic;
+        if (act.act === 'swing') return PLAYER_TUNING.basic.radius + 90;
+        return this._basicRange(act);
+    }
+
+    private _basicRange(act: SkillActDef): number {
+        const base = act.range || 500;
+        if (act.act !== 'bolt') return base;
+        return base * (this.player.burst > 0 ? 1 + (this.kit.burst.rangeBonus || 0) : 1);
+    }
+
+    /** 技能槽分派；返回 false 表示这招没打出去（不进冷却、不扣资源已被前置 `_spend` 挡住） */
+    private _castSlot(act: SkillActDef, mod: SkillMod): boolean {
+        switch (act.act) {
+            case 'charge':
+                this._charge(mod);
+                return true;
+            case 'whirl':
+                this.player.whirlwind = (act.duration || 0) + (mod.v4.durationAdd || 0);
+                this.player.whirlTick = 0;
+                return true;
+            case 'break':
+                return this._armorBreak(mod);
+            case 'fireball':
+                this._fireBolt(act, mod, this._basicRange(act));
+                return true;
+            case 'novaFreeze':
+                this._nova(act, mod, false);
+                return true;
+            case 'volley':
+                this._volley(act, mod);
+                return true;
+            case 'trap':
+                this._trap(act);
+                return true;
+            case 'blink':
+            case 'backjump':
+                this._blink(act, mod);
+                return true;
+            case 'heal':
+                this._healSelf(act);
+                return true;
+            case 'novaHeal':
+                this._nova(act, mod, true);
+                return true;
+            case 'shield':
+                this._shieldSelf(act);
+                return true;
+            default:
+                return false;
         }
+    }
+
+    /** 每点资源消耗都过这里；爆发期间按 `costMul` 放大（法师奥术强化耗蓝翻倍） */
+    private _spend(cost: number): boolean {
+        const p = this.player;
+        const need = Math.max(0, Number.isFinite(cost) ? cost : 0) * Math.max(1, p.costMul);
+        if (need <= 0) return true;
+        if (p.rage + 1e-6 < need) return false;
+        p.rage = Math.max(0, p.rage - need);
+        return true;
+    }
+
+    private _gainHoly(amount: number): void {
+        const max = this.kit.holyMax || 0;
+        if (max <= 0 || !(amount > 0)) return;
+        this.player.holy = Math.min(max, this.player.holy + amount);
+    }
+
+    /** 爆发前置检查与结算；返回是否成功释放 */
+    private _tryBurst(mod: SkillMod): boolean {
+        const p = this.player;
+        const tal = this.profile.talents;
+        const kit = this.kit;
+        const act = kit.burst;
+        if (act.holyCost) {
+            if (p.holy + 1e-6 < act.holyCost) return false;
+            p.holy = Math.max(0, p.holy - act.holyCost);
+        } else if (!this._spend(act.cost || 0)) {
+            return false;
+        }
+        p.burst = (act.duration || 0) + (mod.v2.durationAdd || 0);
+        p.burstDamage = (act.dmgBonus || 0) + tal.burstDamage + (mod.v4.burstDmgAdd || 0);
+        // 变体的「受伤惩罚」是往职业基础上做加减，最后夹在 [-100%, +100%]
+        p.burstTakenMod = Math.max(-1, Math.min(
+            1,
+            (act.takenBonus || 0)
+            + (mod.v2.burstTakenAdd || 0)
+            + (mod.v4.burstTakenAdd || 0)
+            - tal.burstTaken,
+        ));
+        p.costMul = act.costMul || 1;
+        p.burstHealMul = act.healMul || 1;
+        if (tal.burstShield > 0) {
+            p.shield = Math.max(p.shield, p.maxHp * tal.burstShield);
+        }
+        return true;
     }
 
     /** 攻速换算后的急速（普攻冷却用）：基础急速 + 双持 + 无尽怒焰 + 破阵 */
@@ -993,19 +1169,21 @@ export class MithrilWorld {
         return Math.max(0.2, cd * (1 - Math.max(0, Math.min(0.6, tal.skillCd))));
     }
 
-    /** 怒气获取统一走这里（战术精通按比例放大） */
+    /** 怒气获取统一走这里（战术精通按比例放大；非战士职业直接忽略） */
     private _gainRage(amount: number): void {
+        if (this.kit.resource !== 'rage') return;
         if (!(amount > 0)) return;
         const tal = this.profile.talents;
         this.player.rage = Math.min(100, this.player.rage + amount * (1 + Math.max(0, tal.rageGain)));
     }
 
-    /** 掷伤害：消费「下一击必暴」 */
+    /** 掷伤害：消费「下一击必暴」；爆发期间额外吃职业暴击加成（游侠鹰眼） */
     private _rollDamage(mult: number): DamageResult {
         const p = this.player;
         const forced = p.nextCrit;
         if (forced) p.nextCrit = false;
-        return computeDamage(this.profile, this.rng, mult, forced);
+        const burstCrit = p.burst > 0 ? (this.kit.burst.critBonus || 0) : 0;
+        return computeDamage(this.profile, this.rng, mult, forced, burstCrit);
     }
 
     private _dash(dir: number, distance: number): void {
@@ -1164,6 +1342,163 @@ export class MithrilWorld {
 
     private _playerDamageMult(): number {
         return this.player.burst > 0 ? 1 + this.player.burstDamage : 1;
+    }
+
+    // ==================== 法系 / 远程技能（M6） ====================
+
+    /** 远程普攻与火球：朝最近敌人发射投射物；没有目标时朝面向方向射出（保留操作反馈） */
+    private _fireBolt(act: SkillActDef, mod: SkillMod, range: number): void {
+        const p = this.player;
+        const target = this._nearestEnemy(range, true);
+        if (target) p.facing = Math.atan2(target.y - p.y, target.x - p.x);
+        const speed = act.speed || 500;
+        const res = this._rollDamage((act.mult || 1) * mod.dmgMul);
+        const cos = Math.cos(p.facing);
+        const sin = Math.sin(p.facing);
+        const bullet = this.fireBullet(
+            'player',
+            p.x + cos * (p.radius + 6),
+            p.y + sin * (p.radius + 6),
+            cos * speed,
+            sin * speed,
+            res.damage * this._playerDamageMult(),
+            (range + 80) / speed,
+            act.burnMult ? 'player_fire' : 'player_bolt',
+        );
+        if (bullet) {
+            bullet.radius = act.projRadius || 7;
+            bullet.crit = res.crit;
+            if (act.burnMult && act.burnMult > 0) {
+                bullet.burnDps = this.profile.attackPower * act.burnMult * this._playerDamageMult();
+                bullet.burnDur = act.burnDur || 0;
+            }
+        }
+        // 牧师普攻积攒圣能（打空也积，避免开局必须贴脸才能放大招）
+        if (act === this.kit.basic) this._gainHoly(this.kit.basic.holyGain || 0);
+    }
+
+    /** 冰霜新星 / 神圣新星：周身范围伤害，可附带冻结或自愈 */
+    private _nova(act: SkillActDef, mod: SkillMod, heal: boolean): void {
+        const p = this.player;
+        const radius = act.radius || 120;
+        this._emit({ type: 'boom', x: p.x, y: p.y, radius });
+        const mult = (act.mult || 0) * mod.dmgMul;
+        const list: number[] = [];
+        for (let i = 0; i < this.enemies.length; i++) {
+            const e = this.enemies[i];
+            if (!e) continue;
+            if (dist2(e.x, e.y, p.x, p.y) <= (radius + e.radius) * (radius + e.radius)) list.push(i);
+        }
+        for (let k = list.length - 1; k >= 0; k--) {
+            const e = this.enemies[list[k]];
+            if (!e) continue;
+            if (act.freeze) e.status.stun = Math.max(e.status.stun, act.freeze);
+            const res = this._rollDamage(mult);
+            this._damageEnemy(list[k], res.damage * this._playerDamageMult(), res.crit, 'skill');
+        }
+        if (heal) this._healSelf(act);
+    }
+
+    /** 多重射击：以朝向为中心均分扇形，每支箭独立掷骰 */
+    private _volley(act: SkillActDef, mod: SkillMod): void {
+        const p = this.player;
+        const target = this._nearestEnemy(act.range || 620, true);
+        if (target) p.facing = Math.atan2(target.y - p.y, target.x - p.x);
+        const arrows = Math.max(1, Math.round(act.arrows || 1));
+        const total = (act.halfAngle || 0.3) * 2;
+        const speed = act.speed || 560;
+        for (let i = 0; i < arrows; i++) {
+            const offset = arrows <= 1 ? 0 : -total / 2 + (total * i) / (arrows - 1);
+            const dir = p.facing + offset;
+            const res = this._rollDamage((act.mult || 1) * mod.dmgMul);
+            const cos = Math.cos(dir);
+            const sin = Math.sin(dir);
+            const bullet = this.fireBullet(
+                'player',
+                p.x + cos * (p.radius + 6),
+                p.y + sin * (p.radius + 6),
+                cos * speed,
+                sin * speed,
+                res.damage * this._playerDamageMult(),
+                ((act.range || 620) + 60) / speed,
+                'player_bolt',
+            );
+            if (bullet) {
+                bullet.radius = act.projRadius || 6;
+                bullet.crit = res.crit;
+            }
+        }
+    }
+
+    /** 冰霜陷阱：落在脚下，敌人踩中触发一次范围减速 */
+    private _trap(act: SkillActDef): void {
+        if (this.traps.length >= 6) this.traps.shift();
+        const p = this.player;
+        const radius = act.radius || 95;
+        const life = act.duration || 8;
+        this.traps.push({
+            id: this._nextId++,
+            x: p.x,
+            y: p.y,
+            radius,
+            life,
+            maxLife: life,
+            slowPct: act.slowPct || 0.5,
+            slowDur: act.slowDur || 3,
+        });
+        this._emit({ type: 'boom', x: p.x, y: p.y, radius });
+    }
+
+    /** 闪现 / 后跃：沿面向位移，附带短暂无敌与「下一击必暴」 */
+    private _blink(act: SkillActDef, mod: SkillMod): void {
+        const p = this.player;
+        const dir = act.dir === 'back' ? p.facing + Math.PI : p.facing;
+        const dist = (act.distance || 0) + (mod.v2.distAdd || 0) + (mod.v4.distAdd || 0);
+        this._dash(dir, dist);
+        p.invuln = Math.max(p.invuln, act.freeze !== undefined ? act.freeze : 0.2);
+        if (act.nextCrit) p.nextCrit = true;
+        this._emit({ type: 'dodge', x: p.x, y: p.y, facing: dir });
+    }
+
+    /** 治疗术 / 神圣新星的自我治疗；牧师爆发期间治疗量翻倍 */
+    private _healSelf(act: SkillActDef): void {
+        const p = this.player;
+        const pct = act.healPct || 0;
+        if (pct <= 0) return;
+        const healed = this._healPlayer(p.maxHp * pct);
+        if (healed > 0) this._emit({ type: 'heal', x: p.x, y: p.y, amount: healed });
+        this._gainHoly(this.kit.holyPerHeal || 0);
+    }
+
+    private _shieldSelf(act: SkillActDef): void {
+        const p = this.player;
+        if (!(act.shieldPct > 0)) return;
+        p.shield = Math.max(p.shield, p.maxHp * act.shieldPct);
+        this._emit({ type: 'boom', x: p.x, y: p.y, radius: 46 });
+    }
+
+    private _tickTraps(d: number): void {
+        for (let i = this.traps.length - 1; i >= 0; i--) {
+            const t = this.traps[i];
+            t.life -= d;
+            if (t.life <= 0) {
+                this.traps.splice(i, 1);
+                continue;
+            }
+            let triggered = false;
+            for (const e of this.enemies) {
+                if (!e) continue;
+                const reach = t.radius + e.radius;
+                if (dist2(e.x, e.y, t.x, t.y) > reach * reach) continue;
+                e.status.slow = Math.max(e.status.slow, t.slowDur);
+                triggered = true;
+                break;
+            }
+            if (triggered) {
+                this._emit({ type: 'boom', x: t.x, y: t.y, radius: t.radius });
+                this.traps.splice(i, 1);
+            }
+        }
     }
 
     private _nearestEnemy(range: number, includeBoss = true): EnemyState | null {
@@ -1351,7 +1686,12 @@ export class MithrilWorld {
                     if (!e) continue;
                     const reach = b.radius + e.radius;
                     if (dist2(b.x, b.y, e.x, e.y) > reach * reach) continue;
-                    this._damageEnemy(j, b.damage, false);
+                    // 火球：先挂燃烧再结算直接伤害（直接伤害可能击杀并 splice 掉它）
+                    if (b.burnDps && b.burnDur) {
+                        e.status.burnDps = Math.max(e.status.burnDps, b.burnDps);
+                        e.status.burnRemaining = Math.max(e.status.burnRemaining, b.burnDur);
+                    }
+                    this._damageEnemy(j, b.damage, !!b.crit);
                     remove = true;
                     break;
                 }
@@ -1571,10 +1911,10 @@ export class MithrilWorld {
         p.comboTimer = 0;
     }
 
-    /** 治疗统一入口（战地医师按比例加成，且不会溢出上限） */
+    /** 治疗统一入口（战地医师按比例加成 + 牧师爆发的治疗倍率，且不会溢出上限） */
     private _healPlayer(amount: number): number {
         const p = this.player;
-        const mul = 1 + Math.max(0, this.profile.talents.healMul);
+        const mul = (1 + Math.max(0, this.profile.talents.healMul)) * Math.max(1, p.burstHealMul);
         const heal = Math.min(p.maxHp - p.hp, Math.max(0, amount) * mul);
         if (heal <= 0) return 0;
         p.hp = Math.min(p.maxHp, p.hp + heal);

@@ -14,16 +14,18 @@ import type { CoreEvent, MithrilSnapshot } from './MithrilCore';
 import { FIELD_H, FIELD_W } from './MithrilCore';
 import {
     MITH_PAL,
+    drawClassPlayer,
     drawEnemyBar,
     drawGolem,
     drawImp,
     drawMiner,
     drawOrb,
     drawRegionEnemy,
+    drawTrap,
     drawTroll,
-    drawWarrior,
     drawWraith,
 } from './MithrilArt';
+import { CLASS_PROJECTILE_COLOR } from './MithrilConfig';
 
 const { ccclass, property } = _decorator;
 
@@ -101,6 +103,8 @@ export class MithrilRenderer extends Component {
     private _cPurple = cacheColor('#B44BE0');
     private _cBlue = cacheColor('#93C5FD');
     private _cHurt = cacheColor('#EF444455');
+    /** 各职业玩家弹道色（懒建，避免每帧 new Color） */
+    private _cPlayerBullet: Record<string, Color> = {};
 
     onLoad(): void {
         if (!this.entityGfx) {
@@ -152,6 +156,7 @@ export class MithrilRenderer extends Component {
         this._drawFloor(g);
         this._drawTelegraphs(g, snap);
         this._drawOrbs(g, snap);
+        this._drawTraps(g, snap);
         this._drawEnemies(g, snap);
         this._drawBullets(g, snap);
         this._drawPlayer(g, snap);
@@ -361,21 +366,45 @@ export class MithrilRenderer extends Component {
                 g.circle(x, y, b.radius - 2);
                 g.stroke();
             } else {
-                g.fillColor = b.owner === 'player' ? this._cGold : this._cBolt;
+                const isPlayer = b.owner === 'player';
+                if (isPlayer) {
+                    let c = this._cPlayerBullet[snap.classId];
+                    if (!c) {
+                        c = cacheColor(CLASS_PROJECTILE_COLOR[snap.classId] || CLASS_PROJECTILE_COLOR.warrior);
+                        this._cPlayerBullet[snap.classId] = c;
+                    }
+                    g.fillColor = c;
+                } else {
+                    g.fillColor = this._cBolt;
+                }
                 g.circle(x, y, b.radius);
                 g.fill();
+                if (isPlayer) {
+                    // 白热心，区分「我的弹道」和敌方弹幕
+                    g.fillColor = this._cWhite;
+                    g.circle(x, y, Math.max(1.5, b.radius * 0.42));
+                    g.fill();
+                }
             }
         }
     }
 
     private _drawPlayer(g: Graphics, snap: MithrilSnapshot): void {
         const p = snap.player;
-        drawWarrior(g, p.x - FIELD_W / 2, p.y - FIELD_H / 2, p.facing, this._time, {
+        drawClassPlayer(g, p.x - FIELD_W / 2, p.y - FIELD_H / 2, p.facing, this._time, {
             invuln: p.invuln > 0,
             burst: p.burst > 0,
             whirlwind: p.whirlwind > 0,
             hitFlash: this._hurtFlash,
-        });
+        }, snap.classId);
+    }
+
+    /** 游侠陷阱：画在敌人下面，不挡视野 */
+    private _drawTraps(g: Graphics, snap: MithrilSnapshot): void {
+        for (const t of snap.traps) {
+            const ratio = t.life > 0 && t.maxLife > 0 ? t.life / t.maxLife : 0;
+            drawTrap(g, t.x - FIELD_W / 2, t.y - FIELD_H / 2, t.radius, ratio, this._time);
+        }
     }
 
     private _drawFx(g: Graphics, dt: number): void {

@@ -24,7 +24,7 @@ import {
 import type { CoreEvent, MithrilInput, MithrilSnapshot } from './MithrilCore';
 import { addToInventory, bossLoot, rollItem, sellPrice } from './MithrilLoot';
 import {
-    SAVE_STORAGE_KEY, addExp, expToNext, parseSave, pendingVariantCount, serializeSave,
+    SAVE_STORAGE_KEY, addExp, defaultSave, expToNext, parseSave, pendingVariantCount, serializeSave,
     talentPointsForLevel, talentPointsSpent,
 } from './MithrilProgress';
 import type { MithrilSave } from './MithrilProgress';
@@ -33,7 +33,7 @@ import {
     REGION_BOSS_BY_ID, REGION_BY_ID, REGIONS, SKILL_BOOK_FIRST_CLEAR, SKILL_BOOK_PER_CLEAR,
     WILD_NODE_COUNT, WILD_REWARDS, materialName, regionMaterialId,
 } from './MithrilConfig';
-import type { EquipItem, RunPlan } from './MithrilConfig';
+import type { ClassId, EquipItem, RunPlan } from './MithrilConfig';
 import {
     WILD_EVENT_OPTIONS, applyWildEvent, buildWildPlan, chestGold, chestHasTrap, chestTrapDamage,
     createExpedition, enterNode, failExpedition, generateWildMap, grantRunMaterials, markNodeDone,
@@ -43,6 +43,7 @@ import type { ExpeditionState, WildEventChoice, WildMap, WildNode } from './Mith
 import { MithrilWildMap } from './MithrilWildMap';
 import { MithrilGrowthMenu } from './MithrilGrowthMenu';
 import { MithrilCampPanel } from './MithrilCampPanel';
+import { MithrilClassSelect } from './MithrilClassSelect';
 import { consumeMealBattle } from './MithrilCamp';
 import { MithrilHud } from './MithrilHud';
 import { MithrilJoystick } from './MithrilJoystick';
@@ -74,6 +75,7 @@ export class MithrilGame extends Component {
     _menuRef: MithrilMenu | null = null;
     _growthRef: MithrilGrowthMenu | null = null;
     _campRef: MithrilCampPanel | null = null;
+    _classRef: MithrilClassSelect | null = null;
     _wildMapRef: MithrilWildMap | null = null;
     _save: MithrilSave | null = null;
     _lastSnapshot: MithrilSnapshot | null = null;
@@ -112,6 +114,7 @@ export class MithrilGame extends Component {
         this._ensureGrowth();
         this._ensureCamp();
         this._ensureWildMap();
+        this._ensureClassSelect();
 
         const hud = this._hudRef;
         if (hud) {
@@ -145,14 +148,26 @@ export class MithrilGame extends Component {
             wild.onOpenBag = () => this.openMenu();
             wild.onExit = () => this.exitToLobby();
         }
+        const cls = this._classRef;
+        if (cls) {
+            cls.onPick = (classId) => this.onClassPicked(classId);
+            cls.onCancel = () => this.exitToLobby();
+        }
 
         input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
         input.on(Input.EventType.KEY_UP, this.onKeyUp, this);
         game.on(Game.EVENT_HIDE, this.onGameHide, this);
 
         this._mapSeed = this.seed > 0 ? (this.seed & 0x7fffffff) : (Date.now() & 0x7fffffff);
-        showTutorialOnce(this.node, 'mithril', '路线图选节点启程 · 左侧拖动移动 · 右下技能键', 3.4);
-        this._enterMapMode();
+        if (this._save) {
+            showTutorialOnce(this.node, 'mithril', '路线图选节点启程 · 左侧拖动移动 · 右下技能键', 3.4);
+            this._enterMapMode();
+        } else {
+            // 首次进入：先选职业。战斗层与路线图都先收起来，避免玩家透过面板点到摇杆
+            this._setWorldVisible(false);
+            this._wildMapRef?.hide();
+            this._classRef?.open();
+        }
     }
 
     onDestroy(): void {
@@ -1106,6 +1121,33 @@ export class MithrilGame extends Component {
     }
 
     // ==================== 节点创建 ====================
+
+    private _ensureClassSelect(): void {
+        let root = this.node.getChildByName('ClassSelect');
+        if (!root) {
+            root = new Node('ClassSelect');
+            root.layer = this.node.layer;
+            root.addComponent(UITransform).setContentSize(720, 1280);
+            this.node.addChild(root);
+        }
+        // 开档面板压在最上层：首次进入没有任何其它 UI 应该盖住它
+        root.setSiblingIndex(this.node.children.length - 1);
+        this._classRef = root.getComponent(MithrilClassSelect) || root.addComponent(MithrilClassSelect);
+    }
+
+    /** 新档：建存档 → 落盘 → 收面板 → 进路线图 */
+    private onClassPicked(classId: ClassId): void {
+        if (this._save) {
+            this._classRef?.close();
+            this._enterMapMode();
+            return;
+        }
+        this._save = defaultSave(classId);
+        this._persist();
+        this._classRef?.close();
+        showTutorialOnce(this.node, 'mithril', '路线图选节点启程 · 左侧拖动移动 · 右下技能键', 3.4);
+        this._enterMapMode();
+    }
 
     private _ensureField(): void {
         if (this.renderer) {

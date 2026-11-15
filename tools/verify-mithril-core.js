@@ -1189,9 +1189,10 @@ function mkEquip(patch) {
 
     const badSave = P.parseSave('{not json');
     const nullSave = P.parseSave(null);
-    check('169. 坏档 / 无档回落默认档（不抛异常）',
-        badSave.level === 1 && badSave.inventory.length === 0 && badSave.equips.head === null
-        && nullSave.level === 1);
+    check('169. 坏档回落默认战士档；无档返回 null（M6 起据此进职业选择）',
+        badSave !== null && badSave.classId === 'warrior'
+        && badSave.level === 1 && badSave.inventory.length === 0 && badSave.equips.head === null
+        && nullSave === null);
 
     const dupSave = mkBagSave();
     const wornRt = L.rollItem(C.mulberry32(89), { ilvl: 12, classId: 'warrior', slot: 'head' });
