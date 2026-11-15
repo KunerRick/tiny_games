@@ -19,14 +19,16 @@ import {
 } from '../../../common/ui/GameUIKit';
 import type { UiButton } from '../../../common/ui/GameUIKit';
 import {
-    COMBAT_ILVL_FLOOR, SKILL_BY_ID, SKILL_RESPEC_GOLD, SKILLS, TALENT_BY_ID, TALENT_LINE_CAP,
-    TALENT_RESPEC_GOLD, TALENT_TREE_NAMES, TALENT_TREE_ORDER, talentTierGate,
+    COMBAT_ILVL_FLOOR, SKILL_BY_ID, SKILLS, TALENT_BY_ID, TALENT_LINE_CAP,
+    TALENT_TREE_NAMES, TALENT_TREE_ORDER, talentTierGate,
 } from './MithrilConfig';
 import type { SkillDef, TalentDef } from './MithrilConfig';
 import {
-    canChooseVariant, canSpendTalent, canUpgradeSkill, chooseVariant, pendingVariantCount,
+    canChooseVariant, canSpendTalent, canUpgradeSkill, chooseVariant, facilityLevel,
+    pendingVariantCount,
     respecTalents, respecVariants, skillLevel, SKILL_LEVEL_MAX, spendTalent,
-    talentPointsForLevel, talentPointsInTree, talentPointsSpent, upgradeSkill, variantState,
+    talentPointsForLevel, talentPointsInTree, talentPointsSpent, talentRespecCost,
+    upgradeSkill, variantRespecCost, variantState,
 } from './MithrilProgress';
 import type { MithrilSave, TalentSpendReason } from './MithrilProgress';
 import { SKILL_CD_PER_LEVEL, SKILL_DMG_PER_LEVEL } from './MithrilTalents';
@@ -234,9 +236,16 @@ export class MithrilGrowthMenu extends Component {
             width: 620, height: 108, color: COLOR.TEXT_SECONDARY, x: 0, y: -224, lineHeight: 30,
         });
 
+        const respecCost = talentRespecCost(save);
+        const campReady = facilityLevel(save, 'training') > 0;
         const respec = createButton(content, {
-            w: 260, h: 48, text: `洗点 ${TALENT_RESPEC_GOLD} 金`, fontSize: 18,
-            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            w: 260, h: 48,
+            text: !campReady ? '洗点（营地训练场 Lv1 解锁）'
+                : (respecCost > 0 ? `洗点 ${respecCost} 金` : '洗点（免费）'),
+            fontSize: 18,
+            fill: campReady ? '#334155' : '#1A2332',
+            textColor: campReady ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED,
+            activeFill: '#475569',
             radius: 12, onTap: () => this._onRespecTalents(),
         });
         respec.node.setPosition(0, -338, 0);
@@ -311,9 +320,16 @@ export class MithrilGrowthMenu extends Component {
             });
         }
 
+        const variantCost = variantRespecCost(save);
+        const campReady = facilityLevel(save, 'training') > 0;
         const respec = createButton(content, {
-            w: 200, h: 46, text: `重置变体 ${SKILL_RESPEC_GOLD} 金`, fontSize: 18,
-            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            w: 200, h: 46,
+            text: !campReady ? '变体重置（需训练场 Lv1）'
+                : (variantCost > 0 ? `重置变体 ${variantCost} 金` : '重置变体（免费）'),
+            fontSize: 18,
+            fill: campReady ? '#334155' : '#1A2332',
+            textColor: campReady ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED,
+            activeFill: '#475569',
             radius: 12, onTap: () => this._onRespecVariants(),
         });
         respec.node.setPosition(224, 316, 0);
@@ -537,12 +553,19 @@ export class MithrilGrowthMenu extends Component {
     private _onRespecTalents(): void {
         const save = this._save;
         if (!save) return;
+        if (facilityLevel(save, 'training') <= 0) {
+            this._notice('训练场还没建造：去营地把它升到 Lv1 才能洗点');
+            return;
+        }
         if (talentPointsSpent(save.talents) <= 0) {
             this._notice('还没有投入天赋点');
             return;
         }
         if (!respecTalents(save)) {
-            this._notice(`金币不足：洗点需要 ${TALENT_RESPEC_GOLD} 金`);
+            const cost = talentRespecCost(save);
+            this._notice(cost > 0
+                ? `金币不足：洗点需要 ${cost} 金（营地将训练场升级可打折 / 免费）`
+                : '洗点失败');
             return;
         }
         this._changed();
@@ -551,6 +574,10 @@ export class MithrilGrowthMenu extends Component {
     private _onRespecVariants(): void {
         const save = this._save;
         if (!save) return;
+        if (facilityLevel(save, 'training') <= 0) {
+            this._notice('训练场还没建造：去营地把它升到 Lv1 才能重置变体');
+            return;
+        }
         let chosen = 0;
         for (const def of SKILLS) {
             if (def.classId !== save.classId || !def.variants) continue;
@@ -563,7 +590,10 @@ export class MithrilGrowthMenu extends Component {
             return;
         }
         if (!respecVariants(save)) {
-            this._notice(`金币不足：重置变体需要 ${SKILL_RESPEC_GOLD} 金`);
+            const cost = variantRespecCost(save);
+            this._notice(cost > 0
+                ? `金币不足：重置变体需要 ${cost} 金（营地将训练场升级可打折 / 免费）`
+                : '重置变体失败');
             return;
         }
         this._changed();
@@ -588,9 +618,14 @@ export class MithrilGrowthMenu extends Component {
     }
 
     private _defaultHint(): string {
-        return this._tab === 'talent'
-            ? '点击格子加点：每线最多 25 点，第 N 层需本线已有 5×(N−1) 点'
-            : '点技能名看详情 · 等级与变体选定后立刻生效 · 变体二选一（重置需 500 金）';
+        if (this._tab === 'talent') {
+            return '点击格子加点：每线最多 25 点，第 N 层需本线已有 5×(N−1) 点';
+        }
+        const head = '点技能名看详情 · 等级与变体选定后立刻生效 · 变体二选一';
+        const save = this._save;
+        if (!save) return head;
+        const cost = variantRespecCost(save);
+        return cost > 0 ? `${head}（重置需 ${cost} 金）` : `${head}（重置免费）`;
     }
 
     /** 失败提示：写进底部提示行，下次刷新自动复位 */

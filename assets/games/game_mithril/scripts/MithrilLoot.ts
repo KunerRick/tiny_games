@@ -20,7 +20,6 @@ import {
     GEAR_BASE_BY_ID,
     GEAR_SLOTS,
     ILVL_MAX,
-    INVENTORY_CAP,
     MODIFIERS,
     QUALITIES,
     QUALITY_BY_ID,
@@ -36,6 +35,7 @@ import type {
     QualityId,
 } from './MithrilConfig';
 import type { MithrilSave } from './MithrilProgress';
+import { inventoryCapFor } from './MithrilProgress';
 
 export const QUALITY_ORDER: QualityId[] = QUALITIES.map((q) => q.id);
 
@@ -269,7 +269,7 @@ export function equipStats(equips: Partial<Record<GearSlot, EquipItem | null>>):
 export function addToInventory(save: MithrilSave, item: EquipItem): boolean {
     if (!item || !item.uid) return false;
     if (!Array.isArray(save.inventory)) save.inventory = [];
-    if (save.inventory.length >= INVENTORY_CAP) return false;
+    if (save.inventory.length >= inventoryCapFor(save)) return false;
     let uid = item.uid;
     let n = 1;
     while (uidTaken(save, uid)) uid = `${item.uid}-${n++}`;

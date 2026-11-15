@@ -42,6 +42,8 @@ import {
 import type { ExpeditionState, WildEventChoice, WildMap, WildNode } from './MithrilWild';
 import { MithrilWildMap } from './MithrilWildMap';
 import { MithrilGrowthMenu } from './MithrilGrowthMenu';
+import { MithrilCampPanel } from './MithrilCampPanel';
+import { consumeMealBattle } from './MithrilCamp';
 import { MithrilHud } from './MithrilHud';
 import { MithrilJoystick } from './MithrilJoystick';
 import { MithrilMenu } from './MithrilMenu';
@@ -71,6 +73,7 @@ export class MithrilGame extends Component {
     _hudRef: MithrilHud | null = null;
     _menuRef: MithrilMenu | null = null;
     _growthRef: MithrilGrowthMenu | null = null;
+    _campRef: MithrilCampPanel | null = null;
     _wildMapRef: MithrilWildMap | null = null;
     _save: MithrilSave | null = null;
     _lastSnapshot: MithrilSnapshot | null = null;
@@ -107,6 +110,7 @@ export class MithrilGame extends Component {
         this._ensureHud();
         this._ensureMenu();
         this._ensureGrowth();
+        this._ensureCamp();
         this._ensureWildMap();
 
         const hud = this._hudRef;
@@ -126,12 +130,18 @@ export class MithrilGame extends Component {
             growth.onClose = () => this.closeGrowth();
             growth.onChanged = () => this.onGrowthChanged();
         }
+        const camp = this._campRef;
+        if (camp) {
+            camp.onClose = () => this.closeCamp();
+            camp.onChanged = () => this.onCampChanged();
+        }
         const wild = this._wildMapRef;
         if (wild) {
             wild.onEnterNode = (nodeId: number) => this.onWildNodeTap(nodeId);
             wild.onPrimary = () => this.onWildPrimary();
             wild.onSelectRegion = (regionId: string) => this.onWildRegionTap(regionId);
             wild.onOpenGrowth = () => this.openGrowth();
+            wild.onOpenCamp = () => this.openCamp();
             wild.onOpenBag = () => this.openMenu();
             wild.onExit = () => this.exitToLobby();
         }
@@ -154,6 +164,7 @@ export class MithrilGame extends Component {
         this._hudRef = null;
         this._menuRef = null;
         this._growthRef = null;
+        this._campRef = null;
         this._wildMapRef = null;
         this._save = null;
         this._lastSnapshot = null;
@@ -170,7 +181,8 @@ export class MithrilGame extends Component {
         // 面板打开时整局冻结：不推进核心、不刷 HUD（面板自己管显示）
         const menuOpen = this._menuRef && this._menuRef.isOpen();
         const growthOpen = this._growthRef && this._growthRef.isOpen();
-        if (menuOpen || growthOpen) return;
+        const campOpen = this._campRef && this._campRef.isOpen();
+        if (menuOpen || growthOpen || campOpen) return;
 
         // 切后台回来 / 长卡顿时 dt 可能是 NaN 或巨大值：
         // NaN 会永久污染 _acc（`_acc >= FIXED_DT` 恒假且再也不会回正），巨大值会让蓄积步数无限涨。
@@ -237,6 +249,7 @@ export class MithrilGame extends Component {
         if (!save) return;
         this._menuRef?.close();
         this._growthRef?.close();
+        this._campRef?.close();
         this._mode = 'map';
         this._core = null;
         this._lastSnapshot = null;
@@ -753,9 +766,15 @@ export class MithrilGame extends Component {
             return;
         }
         const hud = this._hudRef;
+        // 料理按「打完一场」扣场次：本场仍吃到效果，结算时才递减。
+        // 必须在 maxHp 之前——扣完之后上限可能下降，后面写回 exp.hp 才不会被夹错。
+        const finishedMeals = consumeMealBattle(save);
         const maxHp = profileFromSave(save, COMBAT_ILVL_FLOOR).maxHp;
         const matId = regionMaterialId(exp.regionId);
         const reward: string[] = [`本局收益：金币 +${this._runGold}　经验 +${this._runExp}`];
+        if (finishedMeals.length > 0) {
+            reward.push(`料理结束：${finishedMeals.join('、')}（下一场不再生效）`);
+        }
         if (this._nodeHpCost > 0) {
             reward.push(`补给耗尽：进入本节点失去 ${this._nodeHpCost} 生命`);
         }
@@ -967,6 +986,43 @@ export class MithrilGame extends Component {
         core.setProfile(profileFromSave(save, COMBAT_ILVL_FLOOR));
     }
 
+    // ==================== 营地面板（5 设施） ====================
+
+    private openCamp(): void {
+        const camp = this._campRef;
+        const save = this._save;
+        if (!camp || !save) return;
+        this._menuRef?.close();
+        this._growthRef?.close();
+        // 面板是运行时建的独立节点：每次打开都抬到最上层（AGENTS 教训 H）
+        camp.node.setSiblingIndex(this.node.children.length - 1);
+        camp.open(save);
+        this._joystick?.release();
+        this._keys.clear();
+        this._hudRef?.releaseAllHeld();
+    }
+
+    private closeCamp(): void {
+        this._campRef?.close();
+        this._acc = 0;
+        // 洗点 / 载入方案可能改了天赋：立刻同步给当前这一局（若正在战斗）
+        this._applyGrowthProfile();
+        this._refreshGrowthHud();
+        if (this._mode === 'map') this._refreshMap();
+    }
+
+    /**
+     * 营地改动：落盘 + 刷新路线图。
+     * 设施升级只影响上限 / 后续规则，料理在**下一场开打时**才进 profile，
+     * 所以这里不把料理硬塞进进行中的战斗（会凭空回血）。
+     */
+    private onCampChanged(): void {
+        this._persist();
+        this._applyGrowthProfile();
+        this._refreshGrowthHud();
+        if (this._mode === 'map') this._refreshMap();
+    }
+
     private exitToLobby(): void {
         this._persist();
         SceneManager.gotoLobby();
@@ -1018,7 +1074,7 @@ export class MithrilGame extends Component {
     }
 
     private onKeyDown(ev: EventKeyboard): void {
-        // B = 装备面板、T = 成长面板（桌面调试入口；手机走结算面板按钮）
+        // B = 装备面板、T = 成长面板、C = 营地（桌面调试入口；手机走路线图按钮）
         if (ev.keyCode === KeyCode.KEY_B) {
             if (this._growthRef && this._growthRef.isOpen()) {
                 this.closeGrowth();
@@ -1031,6 +1087,11 @@ export class MithrilGame extends Component {
         if (ev.keyCode === KeyCode.KEY_T) {
             if (this._growthRef && this._growthRef.isOpen()) this.closeGrowth();
             else this.openGrowth();
+            return;
+        }
+        if (ev.keyCode === KeyCode.KEY_C) {
+            if (this._campRef && this._campRef.isOpen()) this.closeCamp();
+            else this.openCamp();
             return;
         }
         this._keys.add(ev.keyCode);
@@ -1125,6 +1186,19 @@ export class MithrilGame extends Component {
         // 与装备面板同一个理由：必须压在结算遮罩之上
         root.setSiblingIndex(this.node.children.length - 1);
         this._growthRef = root.getComponent(MithrilGrowthMenu) || root.addComponent(MithrilGrowthMenu);
+    }
+
+    private _ensureCamp(): void {
+        let root = this.node.getChildByName('CampMenu');
+        if (!root) {
+            root = new Node('CampMenu');
+            root.layer = this.node.layer;
+            root.addComponent(UITransform).setContentSize(720, 1280);
+            this.node.addChild(root);
+        }
+        // 营地也从路线图打开，同样必须压在 HUD / 结算遮罩之上
+        root.setSiblingIndex(this.node.children.length - 1);
+        this._campRef = root.getComponent(MithrilCampPanel) || root.addComponent(MithrilCampPanel);
     }
 
     private _ensureWildMap(): void {

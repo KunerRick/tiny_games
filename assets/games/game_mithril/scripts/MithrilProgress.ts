@@ -11,12 +11,18 @@
 import {
     AFFIXES,
     AFFIX_BUDGET,
+    FACILITY_IDS,
     GEAR_SLOTS,
     GEAR_BASE_BY_ID,
     ILVL_MAX,
     INVENTORY_CAP,
+    KITCHEN_DURATION_LEVEL,
+    KITCHEN_DURATION_RUNS,
+    KITCHEN_SECOND_SLOT_LEVEL,
+    MEAL_BY_ID,
     MODIFIER_BY_ID,
     QUALITY_BY_ID,
+    QUARTERMASTER_SLOTS_PER_LEVEL,
     REGION_BY_ID,
     SKILL_BY_ID,
     SKILLS,
@@ -25,8 +31,12 @@ import {
     TALENT_BY_ID,
     TALENT_LINE_CAP,
     TALENT_MAX_RANK,
+    TALENT_PRESET_LEVEL,
+    TALENT_PRESET_SECOND_LEVEL,
     TALENT_RESPEC_GOLD,
     TALENT_TOTAL,
+    TRAINING_FREE_LEVEL,
+    TRAINING_HALF_PRICE_LEVEL,
     TRINKET_BY_ID,
     talentTierGate,
 } from './MithrilConfig';
@@ -35,6 +45,7 @@ import type {
     AffixRoll,
     ClassId,
     EquipItem,
+    FacilityId,
     GearSlot,
     QualityId,
     SkillDef,
@@ -43,6 +54,10 @@ import type {
 } from './MithrilConfig';
 import { sanitizeExpedition } from './MithrilWild';
 import type { ExpeditionState } from './MithrilWild';
+
+/** 设施 id 定义在 MithrilConfig（营地数据与存档 schema 共用一份） */
+export { FACILITY_IDS };
+export type { FacilityId };
 
 // ==================== 等级曲线 ====================
 
@@ -307,14 +322,38 @@ export function resetTalents(save: MithrilSave): number {
     return refunded;
 }
 
+/** 某设施的当前等级（0 = 未建造，5 = 满级） */
+export function facilityLevel(save: MithrilSave, id: FacilityId): number {
+    const raw = save.facilities ? save.facilities[id] : 0;
+    return Math.max(0, Math.min(5, Math.floor(Number(raw) || 0)));
+}
+
+/** 训练场折扣：0/1 级原价、2 级半价、3 级起免费（设计 §4.6） */
+export function trainingPriceMul(save: MithrilSave): number {
+    const lv = facilityLevel(save, 'training');
+    if (lv >= TRAINING_FREE_LEVEL) return 0;
+    if (lv >= TRAINING_HALF_PRICE_LEVEL) return 0.5;
+    return 1;
+}
+
+export function talentRespecCost(save: MithrilSave): number {
+    return Math.round(TALENT_RESPEC_GOLD * trainingPriceMul(save));
+}
+
+export function variantRespecCost(save: MithrilSave): number {
+    return Math.round(SKILL_RESPEC_GOLD * trainingPriceMul(save));
+}
+
 /**
- * 付费洗点（设计 §4.4：营地训练场 200 金，单机不惩罚实验）。
- * 金币不足返回 false；成功时清空天赋并落盘由调用方负责。
+ * 付费洗点（设计 §4.4：营地训练场 200 金，单机不惩罚实验；训练场升级后打折 / 免费）。
+ * 训练场 Lv0（还没建造）不能洗点；金币不足返回 false；成功时清空天赋并落盘由调用方负责。
  */
 export function respecTalents(save: MithrilSave): boolean {
+    if (facilityLevel(save, 'training') <= 0) return false;
+    const cost = talentRespecCost(save);
     const gold = Math.max(0, Math.floor(save.gold || 0));
-    if (gold < TALENT_RESPEC_GOLD) return false;
-    save.gold = gold - TALENT_RESPEC_GOLD;
+    if (gold < cost) return false;
+    save.gold = gold - cost;
     save.talents = {};
     return true;
 }
@@ -413,11 +452,40 @@ export function upgradeSkill(save: MithrilSave, skillId: string): boolean {
  * 技能等级与技能书不退 —— 与天赋洗点同口径，只重选「形态」。
  */
 export function respecVariants(save: MithrilSave): boolean {
+    if (facilityLevel(save, 'training') <= 0) return false;
+    const cost = variantRespecCost(save);
     const gold = Math.max(0, Math.floor(save.gold || 0));
-    if (gold < SKILL_RESPEC_GOLD) return false;
-    save.gold = gold - SKILL_RESPEC_GOLD;
+    if (gold < cost) return false;
+    save.gold = gold - cost;
     save.variants = {};
     return true;
+}
+
+// ==================== 营地相关存档规则（M5） ====================
+
+/** 装备仓库上限：基础 60 + 军需官每级 6 格（满级 90） */
+export function inventoryCapFor(save: MithrilSave): number {
+    return INVENTORY_CAP + facilityLevel(save, 'quartermaster') * QUARTERMASTER_SLOTS_PER_LEVEL;
+}
+
+/** 天赋方案槽位数：训练场 Lv4 起 1 个、Lv5 起 2 个 */
+export function talentPresetSlots(save: MithrilSave): number {
+    const lv = facilityLevel(save, 'training');
+    if (lv >= TALENT_PRESET_SECOND_LEVEL) return 2;
+    if (lv >= TALENT_PRESET_LEVEL) return 1;
+    return 0;
+}
+
+/** 料理同时生效槽位：厨房 Lv3 起 2 个，否则 1 个（未建造时 0） */
+export function mealSlotsFor(save: MithrilSave): number {
+    const lv = facilityLevel(save, 'kitchen');
+    if (lv <= 0) return 0;
+    return lv >= KITCHEN_SECOND_SLOT_LEVEL ? 2 : 1;
+}
+
+/** 吃一份料理能持续几场战斗：厨房 Lv5 起 3 场，否则 1 场 */
+export function mealDurationFor(save: MithrilSave): number {
+    return facilityLevel(save, 'kitchen') >= KITCHEN_DURATION_LEVEL ? KITCHEN_DURATION_RUNS : 1;
 }
 
 /** 某职业是否还有「够级但没选」的变体（面板红点 / 提示用） */
@@ -460,9 +528,6 @@ export function addExp(save: MithrilSave, amount: number): number {
 
 // ==================== 存档 ====================
 
-export const FACILITY_IDS = ['smith', 'enchant', 'training', 'kitchen', 'quartermaster'] as const;
-export type FacilityId = (typeof FACILITY_IDS)[number];
-
 export interface MithrilSave {
     v: number;
     classId: ClassId;
@@ -486,6 +551,16 @@ export interface MithrilSave {
     expedition: ExpeditionState | null;
     bounties: string[];
     facilities: Record<FacilityId, number>;
+    /** 厨房料理（M5）：按场次生效，战斗结算时扣 1 场 */
+    meals: MealState[];
+    /** 训练场天赋方案（M5）：下标 0/1，null = 空槽；槽位数由训练场等级决定 */
+    talentPresets: Array<TalentState | null>;
+}
+
+/** 一份生效中的料理 */
+export interface MealState {
+    id: string;
+    runsLeft: number;
 }
 
 export function defaultSave(classId: ClassId = 'warrior'): MithrilSave {
@@ -514,6 +589,8 @@ export function defaultSave(classId: ClassId = 'warrior'): MithrilSave {
         expedition: null,
         bounties: [],
         facilities,
+        meals: [],
+        talentPresets: [],
     };
 }
 
@@ -630,6 +707,12 @@ export function sanitizeSave(raw: unknown): MithrilSave {
         }
     }
 
+    // 设施等级先解析：仓库上限（军需官）与洗点折扣都依赖它
+    if (src.facilities && typeof src.facilities === 'object') {
+        const f = src.facilities as Record<string, unknown>;
+        for (const id of FACILITY_IDS) out.facilities[id] = toInt(f[id], 0, 5, 0);
+    }
+
     // 装备栏：逐槽校验 + uid 去重（坏档里两槽同 uid 会让「按 uid 操作」认错件）
     if (src.equips && typeof src.equips === 'object') {
         const e = src.equips as Record<string, unknown>;
@@ -654,7 +737,8 @@ export function sanitizeSave(raw: unknown): MithrilSave {
             if (item) usedUid[item.uid] = true;
         }
         for (const entry of src.inventory) {
-            if (out.inventory.length >= INVENTORY_CAP) break;
+            // 军需官扩容后的上限才作数，否则升级的仓库读档就被砍回 60 格
+            if (out.inventory.length >= inventoryCapFor(out)) break;
             const item = sanitizeEquip(entry);
             if (!item) continue;
             let uid = item.uid;
@@ -732,9 +816,29 @@ export function sanitizeSave(raw: unknown): MithrilSave {
     // 旧档没有这个字段 → null；坏档也回落成 null，不会把玩家卡在一张坏图上
     out.expedition = sanitizeExpedition(src.expedition);
 
-    if (src.facilities && typeof src.facilities === 'object') {
-        const f = src.facilities as Record<string, unknown>;
-        for (const id of FACILITY_IDS) out.facilities[id] = toInt(f[id], 0, 5, 0);
+    // 料理：只认已定义的 id、去重、按槽位截断；场次夹在 1–9
+    if (Array.isArray(src.meals)) {
+        const seen: Record<string, true> = {};
+        for (const entry of src.meals) {
+            if (out.meals.length >= 2) break;
+            if (!entry || typeof entry !== 'object') continue;
+            const m = entry as Record<string, unknown>;
+            const id = typeof m.id === 'string' ? m.id : '';
+            if (!MEAL_BY_ID[id] || seen[id]) continue;
+            seen[id] = true;
+            out.meals.push({ id, runsLeft: toInt(m.runsLeft, 1, 9, 1) });
+        }
+    }
+
+    // 天赋方案：逐槽位按当前等级重新归一（层门槛 / 每线 25 点 / 总点数三条不变量）
+    if (Array.isArray(src.talentPresets)) {
+        for (let i = 0; i < 2; i++) {
+            const raw = src.talentPresets[i];
+            const normalized = raw && typeof raw === 'object'
+                ? normalizeTalents(raw, classId, talentPointsForLevel(out.level))
+                : {};
+            out.talentPresets[i] = Object.keys(normalized).length > 0 ? normalized : null;
+        }
     }
 
     return out;

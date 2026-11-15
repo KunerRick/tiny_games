@@ -85,6 +85,7 @@ export class MithrilWildMap extends Component {
     onPrimary: (() => void) | null = null;
     onSelectRegion: ((regionId: string) => void) | null = null;
     onOpenGrowth: (() => void) | null = null;
+    onOpenCamp: (() => void) | null = null;
     onOpenBag: (() => void) | null = null;
     onExit: (() => void) | null = null;
 
@@ -351,32 +352,40 @@ export class MithrilWildMap extends Component {
 
     private _buildBottom(): void {
         this._primaryBtn = createButton(this.node, {
-            w: 180, h: 64, text: '开始远征', fontSize: 22,
+            w: 176, h: 64, text: '开始远征', fontSize: 21,
             fill: COLOR.PRIMARY, textColor: '#FFFFFF', activeFill: COLOR.PRIMARY_DARK,
             radius: 16, onTap: () => this._onPrimaryTap(),
         });
-        this._primaryBtn.node.setPosition(-190, -556, 0);
+        this._primaryBtn.node.setPosition(-238, -556, 0);
+
+        // M5 起这一行放 5 个按钮：开始远征 + 营地 / 成长 / 装备 / 返回大厅
+        const camp = createButton(this.node, {
+            w: 104, h: 64, text: '营地', fontSize: 20,
+            fill: '#0E7490', textColor: '#FFFFFF', activeFill: '#155E75',
+            radius: 16, onTap: () => { if (this.onOpenCamp) this.onOpenCamp(); },
+        });
+        camp.node.setPosition(-88, -556, 0);
 
         const grow = createButton(this.node, {
-            w: 130, h: 64, text: '成长', fontSize: 21,
+            w: 104, h: 64, text: '成长', fontSize: 20,
             fill: '#B45309', textColor: '#FFFFFF', activeFill: '#92400E',
             radius: 16, onTap: () => { if (this.onOpenGrowth) this.onOpenGrowth(); },
         });
-        grow.node.setPosition(-32, -556, 0);
+        grow.node.setPosition(22, -556, 0);
 
         const bag = createButton(this.node, {
-            w: 130, h: 64, text: '装备', fontSize: 21,
+            w: 104, h: 64, text: '装备', fontSize: 20,
             fill: '#A855F7', textColor: '#FFFFFF', activeFill: '#7E3AF2',
             radius: 16, onTap: () => { if (this.onOpenBag) this.onOpenBag(); },
         });
-        bag.node.setPosition(110, -556, 0);
+        bag.node.setPosition(132, -556, 0);
 
         const exit = createButton(this.node, {
-            w: 130, h: 64, text: '返回大厅', fontSize: 21,
+            w: 112, h: 64, text: '返回大厅', fontSize: 19,
             fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
             radius: 16, onTap: () => { if (this.onExit) this.onExit(); },
         });
-        exit.node.setPosition(252, -556, 0);
+        exit.node.setPosition(244, -556, 0);
 
         // 这行是全游戏唯一解释 8% 规则的地方，字号 / 对比度不能再往低调（试玩 N45）
         createLabel(this.node, '补给耗尽后每新节点 −8% 生命 · 已清理节点可路过 · 死亡失去本程材料', 16, {

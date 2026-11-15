@@ -1254,6 +1254,239 @@ export const WILD_EVENT_MATERIALS = 2;
 export const WILD_EVENT_RISK_MATERIALS = 3;
 export const WILD_EVENT_RISK_HP_PCT = 0.1;
 
+// ==================== 营地（M5）：5 设施 / 料理 / 重铸与附魔 ====================
+
+/** 设施 id（存档 `facilities` 的键；顺序即页签顺序） */
+export const FACILITY_IDS = ['smith', 'enchant', 'training', 'kitchen', 'quartermaster'] as const;
+export type FacilityId = (typeof FACILITY_IDS)[number];
+
+export const FACILITY_MAX_LEVEL = 5;
+
+export interface FacilityCostDef {
+    materialId: string;
+    count: number;
+}
+
+export interface FacilityDef {
+    id: FacilityId;
+    name: string;
+    /** 页签下方的一句话功能说明 */
+    summary: string;
+    /** effects[i] = 升到 (i+1) 级的效果；升到 1 级即「解锁」 */
+    effects: string[];
+    /** costs[i] = 从 i 级升到 i+1 级的材料（设施升级只用材料，设计 §4.6） */
+    costs: FacilityCostDef[];
+}
+
+/**
+ * 升级材料按区域递进：1–2 级吃灰烬、3–4 级吃霜晶、5 级吃秘银。
+ * 这样营地的成长节奏自动绑在「野外推进到哪个区域」上，不需要额外的前置条件。
+ */
+export const FACILITIES: FacilityDef[] = [
+    {
+        id: 'smith',
+        name: '铁匠铺',
+        summary: '重铸词条 / 分解装备',
+        effects: [
+            '解锁重铸：花金币重掷未锁定的词条',
+            '重铸可锁定 1 条词条',
+            '重铸可锁定 2 条词条',
+            '重铸费用 −25%',
+            '重铸费用 −50%',
+        ],
+        costs: [
+            { materialId: 'ash_dust', count: 4 },
+            { materialId: 'ash_dust', count: 10 },
+            { materialId: 'frost_crystal', count: 8 },
+            { materialId: 'frost_crystal', count: 16 },
+            { materialId: 'mithril_ore', count: 12 },
+        ],
+    },
+    {
+        id: 'enchant',
+        name: '附魔台',
+        summary: '把一条词条转移到另一件装备',
+        effects: [
+            '解锁附魔：转移 1 条词条（源装备被消耗）',
+            '一次可转移 2 条词条',
+            '保留源装备：只移除被转移的词条',
+            '附魔材料减半',
+            '目标词条不再受品质条数限制（最多 4 条）',
+        ],
+        costs: [
+            { materialId: 'ash_dust', count: 4 },
+            { materialId: 'ash_dust', count: 10 },
+            { materialId: 'frost_crystal', count: 8 },
+            { materialId: 'frost_crystal', count: 16 },
+            { materialId: 'mithril_ore', count: 12 },
+        ],
+    },
+    {
+        id: 'training',
+        name: '训练场',
+        summary: '重置天赋 / 重置技能变体 / 保存天赋方案',
+        effects: [
+            '解锁洗点：天赋 200 金、变体 500 金',
+            '洗点半价（100 / 250 金）',
+            '洗点免费',
+            '解锁天赋方案 A（保存 / 载入）',
+            '解锁天赋方案 B',
+        ],
+        costs: [
+            { materialId: 'ash_dust', count: 4 },
+            { materialId: 'ash_dust', count: 10 },
+            { materialId: 'frost_crystal', count: 8 },
+            { materialId: 'frost_crystal', count: 16 },
+            { materialId: 'mithril_ore', count: 12 },
+        ],
+    },
+    {
+        id: 'kitchen',
+        name: '厨房',
+        summary: '开战前吃料理，按场次生效',
+        effects: [
+            '解锁 3 种料理',
+            '解锁全部 5 种料理',
+            '可同时生效 2 种料理',
+            '料理效果 +50%',
+            '料理持续 3 场战斗（默认 1 场）',
+        ],
+        costs: [
+            { materialId: 'ash_dust', count: 4 },
+            { materialId: 'ash_dust', count: 10 },
+            { materialId: 'frost_crystal', count: 8 },
+            { materialId: 'frost_crystal', count: 16 },
+            { materialId: 'mithril_ore', count: 12 },
+        ],
+    },
+    {
+        id: 'quartermaster',
+        name: '军需官',
+        summary: '装备仓库扩容 / 悬赏位',
+        effects: [
+            '装备仓库 +6 格',
+            '仓库共 +12 格，悬赏位 3→6',
+            '仓库共 +18 格',
+            '仓库共 +24 格',
+            '仓库共 +30 格',
+        ],
+        costs: [
+            { materialId: 'ash_dust', count: 4 },
+            { materialId: 'ash_dust', count: 10 },
+            { materialId: 'frost_crystal', count: 8 },
+            { materialId: 'frost_crystal', count: 16 },
+            { materialId: 'mithril_ore', count: 12 },
+        ],
+    },
+];
+
+export const FACILITY_BY_ID: Record<FacilityId, FacilityDef> = (() => {
+    const out = {} as Record<FacilityId, FacilityDef>;
+    for (const def of FACILITIES) out[def.id] = def;
+    return out;
+})();
+
+// ---- 铁匠铺：重铸 ----
+
+export const REFORGE_GOLD_BASE = 40;
+export const REFORGE_GOLD_PER_ILVL = 6;
+/** 每锁一条词条，费用 +40% */
+export const REFORGE_LOCK_MUL = 0.4;
+/** 可锁条数按设施等级：Lv2 → 1、Lv3 → 2 */
+export const REFORGE_LOCK_LEVELS: readonly number[] = [2, 3];
+export const REFORGE_DISCOUNT: Record<number, number> = { 4: 0.75, 5: 0.5 };
+
+// ---- 附魔台：词条转移 ----
+
+export const ENCHANT_GOLD = 80;
+/** 目标词条数上限（Lv5 之前受品质条数限制；硬上限 4 条） */
+export const ENCHANT_HARD_AFFIX_CAP = 4;
+/** Lv2 起一次可转移 2 条 */
+export const ENCHANT_MAX_TRANSFER_LEVEL: readonly number[] = [2];
+export const ENCHANT_MATERIAL_COUNT = 2;
+
+// ---- 分解 ----
+
+export const DISMANTLE_BASE = 1;
+/** 每高一档品质多给 1 份材料 */
+export const DISMANTLE_PER_QUALITY = 1;
+/** 每 15 装等多给 1 份材料 */
+export const DISMANTLE_ILVL_STEP = 15;
+
+// ---- 训练场 ----
+
+/** 洗点价格档位：Lv2 半价、Lv3 免费（与 FACILITIES.training.effects 一致） */
+export const TRAINING_HALF_PRICE_LEVEL = 2;
+export const TRAINING_FREE_LEVEL = 3;
+/** 天赋方案槽：Lv4 解锁第 1 个、Lv5 解锁第 2 个 */
+export const TALENT_PRESET_LEVEL = 4;
+export const TALENT_PRESET_SECOND_LEVEL = 5;
+
+// ---- 厨房 ----
+
+export type MealStat = 'ap' | 'hp' | 'haste' | 'crit' | 'vers';
+
+export interface MealDef {
+    id: string;
+    name: string;
+    desc: string;
+    gold: number;
+    materialId: string;
+    materialCount: number;
+    /** 1 = 厨房 1 级可做；2 = 厨房 2 级起 */
+    tier: 1 | 2;
+    stat: MealStat;
+    /** 效果百分比（0.10 = +10%） */
+    pct: number;
+}
+
+export const MEALS: MealDef[] = [
+    {
+        id: 'pot_roast', name: '力量炖锅', desc: '攻击强度 +10%',
+        gold: 40, materialId: 'ash_dust', materialCount: 1, tier: 1, stat: 'ap', pct: 0.10,
+    },
+    {
+        id: 'swift_soup', name: '迅捷浓汤', desc: '急速 +8%',
+        gold: 40, materialId: 'ash_dust', materialCount: 1, tier: 1, stat: 'haste', pct: 0.08,
+    },
+    {
+        id: 'iron_bread', name: '铁皮面包', desc: '生命上限 +12%',
+        gold: 50, materialId: 'ash_dust', materialCount: 2, tier: 1, stat: 'hp', pct: 0.12,
+    },
+    {
+        id: 'honey_wings', name: '蜜酒烤翅', desc: '暴击 +5%',
+        gold: 80, materialId: 'frost_crystal', materialCount: 1, tier: 2, stat: 'crit', pct: 0.05,
+    },
+    {
+        id: 'mithril_broth', name: '秘银浓汤', desc: '全能 +5%',
+        gold: 80, materialId: 'frost_crystal', materialCount: 1, tier: 2, stat: 'vers', pct: 0.05,
+    },
+];
+
+export const MEAL_BY_ID: Record<string, MealDef> = (() => {
+    const out: Record<string, MealDef> = {};
+    for (const m of MEALS) out[m.id] = m;
+    return out;
+})();
+
+/** 厨房 Lv3 起可同时生效 2 种料理 */
+export const KITCHEN_SECOND_SLOT_LEVEL = 3;
+/** 厨房 Lv4 起料理效果 ×1.5（原设计的「团队 buff」在单机改为自身强化） */
+export const KITCHEN_BONUS_LEVEL = 4;
+export const KITCHEN_BONUS_MUL = 1.5;
+/** 厨房 Lv5 起料理持续 3 场战斗 */
+export const KITCHEN_DURATION_LEVEL = 5;
+export const KITCHEN_DURATION_RUNS = 3;
+
+// ---- 军需官 ----
+
+/** 每级仓库扩容格数 */
+export const QUARTERMASTER_SLOTS_PER_LEVEL = 6;
+/** 悬赏位：默认 3，军需官 Lv2 起 6（悬赏本体在 M8） */
+export const BOUNTY_SLOTS_BASE = 3;
+export const BOUNTY_SLOTS_UPGRADED = 6;
+export const BOUNTY_SLOTS_LEVEL = 2;
+
 // ==================== 一局战斗的计划（副本与野外共用） ====================
 
 export type RunKind = 'dungeon' | 'wild';

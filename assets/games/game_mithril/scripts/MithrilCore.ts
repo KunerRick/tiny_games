@@ -44,6 +44,7 @@ import {
 } from './MithrilProgress';
 import type { AffixAlloc, MithrilSave } from './MithrilProgress';
 import { equipStats } from './MithrilLoot';
+import { mealMultipliers } from './MithrilCamp';
 import {
     emptySkillMods,
     emptyTalentEffects,
@@ -160,15 +161,18 @@ export function profileFromSave(save: MithrilSave, minIlvl = 0): CombatProfile {
     // 攻击强度由等级 × 装备 × 饰品 × 天赋（精准）四层相乘；
     // 暴击率 / 暴伤 / 攻速 / 技能加成等天赋则落到各自的消费点，不在这里重复乘。
     const ap = base.attackPower * gearApMultiplier(st.ilvl) * trinketMul * (1 + tal.apPct);
+    // 营地料理（M5）：进本前吃下的 buff 按场次生效，面板与实战必须读同一份乘数
+    const meal = mealMultipliers(save);
+    const maxHp = (base.maxHp + st.bonusHp) * (1 + meal.hp);
     return {
         ...base,
-        attackPower: ap,
-        maxHp: base.maxHp + st.bonusHp,
-        critChance: Math.min(1, Math.max(st.crit, floor.critChance) + tal.critChance),
+        attackPower: ap * (1 + meal.ap),
+        maxHp,
+        critChance: Math.min(1, Math.max(st.crit, floor.critChance) + tal.critChance + meal.crit),
         critMult: base.critMult + tal.critMult,
-        haste: Math.max(st.haste, floor.haste),
+        haste: Math.max(st.haste, floor.haste) + meal.haste,
         mastery: Math.max(st.mastery, floor.mastery),
-        vers: Math.max(st.vers, floor.vers),
+        vers: Math.max(st.vers, floor.vers) + meal.vers,
         talents: tal,
         skills: skillModsFromSave(save),
     };

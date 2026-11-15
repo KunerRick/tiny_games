@@ -1357,17 +1357,20 @@ const BASE_DPS = C.measureDummyDps(BASE_PROFILE, 60);
     const rich = P.defaultSave('warrior');
     rich.level = 10;
     rich.gold = 250;
+    rich.facilities.training = 1;   // M5 起洗点在营地训练场 Lv1 解锁
     P.spendTalent(rich, 'warrior_fury_t1_0');
     check('189. 天赋洗点花 200 金并清空', P.respecTalents(rich) && rich.gold === 50 && P.talentPointsSpent(rich.talents) === 0);
     const poor = P.defaultSave('warrior');
     poor.level = 10;
     poor.gold = 100;
+    poor.facilities.training = 1;
     P.spendTalent(poor, 'warrior_fury_t1_0');
     check('190. 金币不足时洗点失败且点数保留',
         !P.respecTalents(poor) && poor.gold === 100 && P.talentPointsSpent(poor.talents) === 1);
 
     const richV = P.defaultSave('warrior');
     richV.gold = 600;
+    richV.facilities.training = 1;
     richV.skills.warrior_basic = 5;
     P.chooseVariant(richV, 'warrior_basic', 2, 1);
     check('191. 技能洗点花 500 金、清空所有变体、等级不退',
@@ -1375,6 +1378,7 @@ const BASE_DPS = C.measureDummyDps(BASE_PROFILE, 60);
         && deepEqual(richV.variants, {}) && richV.skills.warrior_basic === 5);
     const poorV = P.defaultSave('warrior');
     poorV.gold = 499;
+    poorV.facilities.training = 1;
     poorV.skills.warrior_basic = 5;
     P.chooseVariant(poorV, 'warrior_basic', 2, 0);
     check('192. 金币不足时技能洗点失败、变体保留',
