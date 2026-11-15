@@ -332,6 +332,15 @@ export interface BulletState {
     burnDur?: number;
     /** 掷骰时已判定的暴击（投射物命中沿用，不二次掷骰） */
     crit?: boolean;
+    /**
+     * 追踪转向速率（弧度/秒）：手机端没有瞄准输入，普攻会自动锁最近的敌人，
+     * 但「锁定发射点」不等于「能打中」—— 小怪以 105–125 速度追人时，
+     * 0.3s 的飞行时间就足以让它走出判定圈，远程实战 DPS 只剩木桩的一半。
+     * 给玩家弹道一点自导，锁定目标后逐步修正朝向。
+     */
+    homing?: number;
+    /** 追踪目标 id（敌人 id，不是数组下标：数组会被 splice） */
+    targetId?: number;
 }
 
 /** 游侠冰霜陷阱：落地后触发一次范围减速 */
@@ -803,6 +812,9 @@ export class MithrilWorld {
         if (opts.physical) dr += tal.armor * ARMOR_DR_PER_POINT;
         if (p.hp / Math.max(1, p.maxHp) < 0.3) dr += tal.lowHpDr;
         if (p.guard > 0) dr += p.guardCut;
+        // 职业护甲（M6）：板甲战士靠减伤站住近战位
+        dr += Math.max(0, this.kit.dr || 0);
+        if (opts.melee) dr += Math.max(0, this.kit.contactDr || 0);
         dr = Math.max(0, Math.min(0.75, dr));
         dmg *= 1 - dr;
 
@@ -1368,6 +1380,11 @@ export class MithrilWorld {
         if (bullet) {
             bullet.radius = act.projRadius || 7;
             bullet.crit = res.crit;
+            // 普攻追踪强一些（输出循环靠它），火球弱一些（保留一点走位惩罚）
+            if (target) {
+                bullet.targetId = target.id;
+                bullet.homing = act === this.kit.basic ? 3.4 : 2.2;
+            }
             if (act.burnMult && act.burnMult > 0) {
                 bullet.burnDps = this.profile.attackPower * act.burnMult * this._playerDamageMult();
                 bullet.burnDur = act.burnDur || 0;
@@ -1426,6 +1443,10 @@ export class MithrilWorld {
             if (bullet) {
                 bullet.radius = act.projRadius || 6;
                 bullet.crit = res.crit;
+                if (target) {
+                    bullet.targetId = target.id;
+                    bullet.homing = 1.2;
+                }
             }
         }
     }
@@ -1668,6 +1689,21 @@ export class MithrilWorld {
         const p = this.player;
         for (let i = this.bullets.length - 1; i >= 0; i--) {
             const b = this.bullets[i];
+            // 自导：贴着飞行方向小角度修正，别做成瞬移式转向
+            if (b.homing && b.targetId !== undefined) {
+                const tgt = this.enemies.find((e) => e.id === b.targetId);
+                if (tgt) {
+                    const sp = Math.hypot(b.vx, b.vy);
+                    const cur = Math.atan2(b.vy, b.vx);
+                    let diff = Math.atan2(tgt.y - b.y, tgt.x - b.x) - cur;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+                    const maxTurn = b.homing * d;
+                    const turn = Math.max(-maxTurn, Math.min(maxTurn, diff));
+                    b.vx = Math.cos(cur + turn) * sp;
+                    b.vy = Math.sin(cur + turn) * sp;
+                }
+            }
             b.x += b.vx * d;
             b.y += b.vy * d;
             b.life -= d;
@@ -1798,6 +1834,9 @@ export class MithrilWorld {
         } else if (phase.mechanic === 'adds') {
             const addsAlive = this._countAdds() > 0;
             if (addsAlive) {
+                // 召唤物在场时不计时：`_mechanicTimer` 若继续累加，清掉最后一只的下一帧
+                // 就已经超过 `addsInterval`，会立刻重刷下一波 —— 玩家永远等不到打 BOSS 的窗口
+                this._mechanicTimer = 0;
                 const before = boss.hp;
                 boss.hp = Math.min(boss.maxHp, boss.hp + script.addsRegen * d);
                 this._regenTick += d;
@@ -1847,7 +1886,9 @@ export class MithrilWorld {
             const angle = (i / count) * Math.PI * 2;
             const x = boss.x + Math.cos(angle) * 120;
             const y = boss.y + Math.sin(angle) * 120;
-            this.spawnDef(this._script.addsEnemyId, x, y);
+            // 召唤物也吃副本的整体缩放：否则深渊层的小怪按野外数值进场，
+            // 遭遇战里是 0.7 档，BOSS 召唤出来却突然满血
+            this.spawnDef(this._script.addsEnemyId, x, y, this.plan ? this.plan.scale : 1);
         }
         const addName = ENEMY_BY_ID[this._script.addsEnemyId]
             ? ENEMY_BY_ID[this._script.addsEnemyId].name
@@ -1971,8 +2012,9 @@ export class MithrilWorld {
             this.boss = null;
             this.bossCast = null;
         }
-        // 嗜血：击杀回血（按最大生命比例，走统一治疗入口吃「战地医师」）
-        const killHealPct = this.profile.talents.killHealPct;
+        // 嗜血：击杀回血（按最大生命比例，走统一治疗入口吃「战地医师」）；
+        // 职业自带的击杀回复（游侠）与天赋叠加
+        const killHealPct = this.profile.talents.killHealPct + Math.max(0, this.kit.killHealPct || 0);
         if (killHealPct > 0) {
             const heal = this._healPlayer(this.player.maxHp * killHealPct);
             if (heal > 0) this._emit({ type: 'heal', x: e.x, y: e.y, amount: heal });

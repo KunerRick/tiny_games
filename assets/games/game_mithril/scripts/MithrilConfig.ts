@@ -558,6 +558,10 @@ export interface DungeonLootDef {
     firstClearBase: Record<ClassId, string>;
 }
 
+/**
+ * 6 个副本的首通紫装：一槽一件、逐副本换部位，装等跟着副本走。
+ * 基型 id 规则见 `GEAR_BASE_TABLE`：6 件套槽位里 0=战士 1=法师 2=游侠 3=牧师。
+ */
 export const DUNGEON_LOOT: Record<string, DungeonLootDef> = {
     mine: {
         ilvl: 8,
@@ -567,6 +571,56 @@ export const DUNGEON_LOOT: Record<string, DungeonLootDef> = {
             mage: 'mainHand_2',      // 橡木法杖
             ranger: 'mainHand_4',    // 长弓
             priest: 'mainHand_6',    // 圣光槌
+        },
+    },
+    chapel: {
+        ilvl: 16,
+        firstClearSlot: 'head',
+        firstClearBase: {
+            warrior: 'head_0',       // 铁盔
+            mage: 'head_1',          // 法师兜帽
+            ranger: 'head_2',        // 游侠皮帽
+            priest: 'head_3',        // 牧师头环
+        },
+    },
+    tower: {
+        ilvl: 22,
+        firstClearSlot: 'chest',
+        firstClearBase: {
+            warrior: 'chest_0',      // 板甲胸
+            mage: 'chest_1',         // 法袍
+            ranger: 'chest_2',       // 皮甲胸
+            priest: 'chest_3',       // 牧师祭袍
+        },
+    },
+    forge: {
+        ilvl: 28,
+        firstClearSlot: 'hands',
+        firstClearBase: {
+            warrior: 'hands_0',      // 铁手套
+            mage: 'hands_1',         // 法系手套
+            ranger: 'hands_2',       // 皮手套
+            priest: 'hands_3',       // 牧师手套
+        },
+    },
+    shadow: {
+        ilvl: 34,
+        firstClearSlot: 'legs',
+        firstClearBase: {
+            warrior: 'legs_0',       // 板甲腿
+            mage: 'legs_1',          // 法袍腿
+            ranger: 'legs_2',        // 皮甲腿
+            priest: 'legs_3',        // 祭袍腿
+        },
+    },
+    throne: {
+        ilvl: 40,
+        firstClearSlot: 'feet',
+        firstClearBase: {
+            warrior: 'feet_0',       // 战靴
+            mage: 'feet_1',          // 法靴
+            ranger: 'feet_2',        // 皮靴
+            priest: 'feet_3',        // 圣靴
         },
     },
 };
@@ -1040,6 +1094,53 @@ export const ENEMIES: EnemyDef[] = [
         hp: 16000, speed: 58, radius: 46, contactDamage: 18, exp: 1800, gold: 600,
         shotCd: 3.2, shotDamage: 22, shotSpeed: 300,
     },
+
+    // ---- M6：5 个副本的专属 BOSS + 3 个副本专属小怪（补齐 24 种） ----
+    // 腐化教堂（ilvl10–16）
+    {
+        id: 'chapel_acolyte', name: '忏悔修女', kind: 'ranged',
+        hp: 130, speed: 88, radius: 18, contactDamage: 10, exp: 60, gold: 9,
+        shotCd: 2.7, shotDamage: 12, shotSpeed: 265,
+    },
+    {
+        id: 'chapel_bishop', name: '堕落主教', kind: 'boss',
+        hp: 5000, speed: 54, radius: 44, contactDamage: 12, exp: 1000, gold: 300,
+        shotCd: 3.8, shotDamage: 14, shotSpeed: 270,
+    },
+    // 冰封哨塔（ilvl16–22）
+    {
+        id: 'frost_giant', name: '霜巨人', kind: 'boss',
+        hp: 5800, speed: 56, radius: 50, contactDamage: 14, exp: 1200, gold: 380,
+        shotCd: 3.6, shotDamage: 17, shotSpeed: 275,
+    },
+    // 熔火熔炉（ilvl22–28）
+    {
+        id: 'forge_smith', name: '熔炉锻工', kind: 'elite',
+        hp: 1200, speed: 60, radius: 28, contactDamage: 18, exp: 190, gold: 32,
+        slamCd: 4.8, slamRadius: 130, slamDamage: 24, slamWarn: 0.95,
+    },
+    {
+        id: 'forge_warden', name: '熔炉守卫', kind: 'boss',
+        hp: 7000, speed: 52, radius: 48, contactDamage: 18, exp: 1500, gold: 480,
+        shotCd: 3.4, shotDamage: 21, shotSpeed: 285,
+    },
+    // 暗影回廊（ilvl28–34）
+    {
+        id: 'shadow_double', name: '影刃分身', kind: 'elite',
+        hp: 900, speed: 125, radius: 24, contactDamage: 22, exp: 250, gold: 44,
+        slamCd: 5, slamRadius: 115, slamDamage: 28, slamWarn: 0.85,
+    },
+    {
+        id: 'shadow_blade', name: '影刃刺客', kind: 'boss',
+        hp: 8500, speed: 68, radius: 42, contactDamage: 22, exp: 1750, gold: 560,
+        shotCd: 3.0, shotDamage: 25, shotSpeed: 300,
+    },
+    // 秘银王座（ilvl34–40）
+    {
+        id: 'mithril_king', name: '秘银君王', kind: 'boss',
+        hp: 10000, speed: 58, radius: 52, contactDamage: 25, exp: 2100, gold: 700,
+        shotCd: 3.0, shotDamage: 28, shotSpeed: 305,
+    },
 ];
 
 export const ENEMY_BY_ID: Record<string, EnemyDef> = (() => {
@@ -1080,6 +1181,104 @@ export const MINE_ENCOUNTERS: EncounterDef[] = [
         ],
     },
 ];
+
+/**
+ * 6 个副本的遭遇编排（M6）。第三个遭遇统一加 1 只精英压轴，
+ * 让「打完两波就见到 BOSS」的门槛和矿坑一致。
+ */
+export const DUNGEON_ENCOUNTERS: Record<string, EncounterDef[]> = {
+    mine: MINE_ENCOUNTERS,
+    chapel: [
+        {
+            name: '教堂前庭', subtitle: '跪着的修女抬起头，眼睛是黑色的',
+            spawns: [{ enemyId: 'chapel_acolyte', count: 4 }],
+        },
+        {
+            name: '彩窗回廊', subtitle: '碎玻璃后面飘着不肯安息的影子',
+            spawns: [{ enemyId: 'chapel_acolyte', count: 2 }, { enemyId: 'wraith', count: 3 }],
+        },
+        {
+            name: '圣坛之下', subtitle: '石像鬼从雕像里剥离出来',
+            spawns: [
+                { enemyId: 'chapel_acolyte', count: 3 },
+                { enemyId: 'golem', count: 1 },
+                { enemyId: 'wraith', count: 2 },
+            ],
+        },
+    ],
+    tower: [
+        {
+            name: '塔基风口', subtitle: '风雪里有东西贴着地面跑',
+            spawns: [{ enemyId: 'frost_whelp', count: 5 }],
+        },
+        {
+            name: '冰封阶梯', subtitle: '每一步都踩在冰晶的裂响上',
+            spawns: [{ enemyId: 'ice_wisp', count: 3 }, { enemyId: 'frost_whelp', count: 2 }],
+        },
+        {
+            name: '哨塔中庭', subtitle: '冰壳石魔挡在通往塔顶的门口',
+            spawns: [
+                { enemyId: 'ice_golem', count: 1 },
+                { enemyId: 'snow_reaver', count: 2 },
+                { enemyId: 'ice_wisp', count: 2 },
+            ],
+        },
+    ],
+    forge: [
+        {
+            name: '炉口平台', subtitle: '熔渣里爬出被烧红的小鬼',
+            spawns: [{ enemyId: 'imp', count: 4 }, { enemyId: 'forge_smith', count: 1 }],
+        },
+        {
+            name: '锻锤车间', subtitle: '被奴役的矿工还在无意识地挥锤',
+            spawns: [{ enemyId: 'miner', count: 4 }, { enemyId: 'forge_smith', count: 1 }],
+        },
+        {
+            name: '熔炉核心', subtitle: '石魔与锻工一起守着最后一道闸门',
+            spawns: [
+                { enemyId: 'golem', count: 1 },
+                { enemyId: 'imp', count: 4 },
+                { enemyId: 'forge_smith', count: 1 },
+            ],
+        },
+    ],
+    shadow: [
+        {
+            name: '回廊入口', subtitle: '影子里多出一个不该有的轮廓',
+            spawns: [{ enemyId: 'shade_blade', count: 4 }],
+        },
+        {
+            name: '无声夹层', subtitle: '侍僧的祷词从四面八方传来',
+            spawns: [{ enemyId: 'shade_blade', count: 3 }, { enemyId: 'void_acolyte', count: 2 }],
+        },
+        {
+            name: '影厅', subtitle: '分身比本体先一步动刀',
+            spawns: [
+                { enemyId: 'shadow_double', count: 1 },
+                { enemyId: 'shade_blade', count: 3 },
+                { enemyId: 'void_acolyte', count: 2 },
+            ],
+        },
+    ],
+    throne: [
+        {
+            name: '王座阶梯', subtitle: '秘银台阶上爬满深渊爬虫',
+            spawns: [{ enemyId: 'abyss_spawn', count: 4 }],
+        },
+        {
+            name: '誓约大厅', subtitle: '侍僧还在对空王座宣誓',
+            spawns: [{ enemyId: 'void_acolyte', count: 3 }, { enemyId: 'abyss_spawn', count: 2 }],
+        },
+        {
+            name: '王座前厅', subtitle: '虚空恐魔被铁链拴在王座脚下',
+            spawns: [
+                { enemyId: 'void_horror', count: 1 },
+                { enemyId: 'shade_blade', count: 2 },
+                { enemyId: 'void_acolyte', count: 2 },
+            ],
+        },
+    ],
+};
 
 export type BossMechanic = 'interrupt' | 'adds' | 'move';
 
@@ -1135,9 +1334,92 @@ export const MINE_BOSS_SCRIPT: BossScriptDef = {
     enrageDuration: 10,
 };
 
+/**
+ * 5 个新副本的 BOSS 编排（M6）。阶段顺序严格取自 `DUNGEONS[*].phases`，
+ * 数值按副本装等带递增：预警更短、召唤更勤、打断要求更高。
+ */
+export const CHAPEL_BOSS_SCRIPT: BossScriptDef = {
+    enemyId: 'chapel_bishop',
+    thresholds: [2 / 3, 1 / 3],
+    phases: [
+        { mechanic: 'adds', name: '治疗图腾', desc: '转火图腾，否则 BOSS 持续回血' },
+        { mechanic: 'move', name: '追踪圣光', desc: '追踪光柱，持续走位躲避' },
+        { mechanic: 'interrupt', name: '群体忏悔', desc: '读条控制，必须打断' },
+    ],
+    moveInterval: 5.8, moveRadius: 138, moveDamage: 12, moveWarn: 1.05,
+    addsInterval: 15, addsCount: 2, addsEnemyId: 'chapel_acolyte', addsRegen: 10,
+    interruptInterval: 8.8, interruptCast: 3, interruptNeed: 50,
+    enrageBonus: 0.55, enrageDuration: 10,
+};
+
+export const TOWER_BOSS_SCRIPT: BossScriptDef = {
+    enemyId: 'frost_giant',
+    thresholds: [2 / 3, 1 / 3],
+    phases: [
+        { mechanic: 'move', name: '冰面减速', desc: '地面结冰，限制移动路线' },
+        { mechanic: 'move', name: '冰柱落点', desc: '落点预警，连续躲避' },
+        { mechanic: 'adds', name: '全屏冰冻', desc: '击碎冰柱解除冻结' },
+    ],
+    moveInterval: 5.2, moveRadius: 152, moveDamage: 18, moveWarn: 0.95,
+    addsInterval: 16, addsCount: 2, addsEnemyId: 'frost_whelp', addsRegen: 12,
+    interruptInterval: 8.4, interruptCast: 2.9, interruptNeed: 60,
+    enrageBonus: 0.6, enrageDuration: 11,
+};
+
+export const FORGE_BOSS_SCRIPT: BossScriptDef = {
+    enemyId: 'forge_warden',
+    thresholds: [2 / 3, 1 / 3],
+    phases: [
+        { mechanic: 'move', name: '火墙推进', desc: '火墙向前推进，找缺口穿过' },
+        { mechanic: 'move', name: '熔岩涌泉', desc: '地面喷发点，持续走位' },
+        { mechanic: 'interrupt', name: '过载读条', desc: '读条自爆，必须打断' },
+    ],
+    moveInterval: 4.9, moveRadius: 160, moveDamage: 22, moveWarn: 0.9,
+    addsInterval: 13, addsCount: 3, addsEnemyId: 'imp', addsRegen: 14,
+    interruptInterval: 8, interruptCast: 2.8, interruptNeed: 70,
+    enrageBonus: 0.65, enrageDuration: 12,
+};
+
+export const SHADOW_BOSS_SCRIPT: BossScriptDef = {
+    enemyId: 'shadow_blade',
+    thresholds: [2 / 3, 1 / 3],
+    phases: [
+        { mechanic: 'adds', name: '分身', desc: '识别真身，转火错误目标会爆炸' },
+        { mechanic: 'move', name: '背刺', desc: '绕背攻击，需要转向应对' },
+        { mechanic: 'move', name: '影分身连击', desc: '闪避节奏，连续躲开' },
+    ],
+    moveInterval: 4.6, moveRadius: 165, moveDamage: 26, moveWarn: 0.85,
+    addsInterval: 18, addsCount: 2, addsEnemyId: 'shade_blade', addsRegen: 14,
+    interruptInterval: 7.6, interruptCast: 2.7, interruptNeed: 80,
+    enrageBonus: 0.7, enrageDuration: 12,
+};
+
+export const THRONE_BOSS_SCRIPT: BossScriptDef = {
+    enemyId: 'mithril_king',
+    thresholds: [2 / 3, 1 / 3],
+    phases: [
+        { mechanic: 'interrupt', name: '三系法术轮换', desc: '按顺序打断三系读条' },
+        { mechanic: 'move', name: '王座震击', desc: '全场震击，走位躲进安全区' },
+        { mechanic: 'move', name: '最终狂暴', desc: 'DPS 检验，狂暴前击杀' },
+    ],
+    moveInterval: 4.3, moveRadius: 172, moveDamage: 30, moveWarn: 0.8,
+    addsInterval: 17, addsCount: 3, addsEnemyId: 'void_acolyte', addsRegen: 16,
+    interruptInterval: 7.2, interruptCast: 2.6, interruptNeed: 90,
+    enrageBonus: 0.75, enrageDuration: 13,
+};
+
+/** 副本 id → BOSS 编排（M6 起 6 个副本全覆盖） */
+export const DUNGEON_BOSS_SCRIPTS: Record<string, BossScriptDef> = {
+    mine: MINE_BOSS_SCRIPT,
+    chapel: CHAPEL_BOSS_SCRIPT,
+    tower: TOWER_BOSS_SCRIPT,
+    forge: FORGE_BOSS_SCRIPT,
+    shadow: SHADOW_BOSS_SCRIPT,
+    throne: THRONE_BOSS_SCRIPT,
+};
+
 /** 遭遇之间 / BOSS 入场前的黑场时间（秒） */
-export const ENCOUNTER_GAP = 2.2;
-export const BOSS_INTRO_GAP = 2.4;
+export const ENCOUNTER_GAP = 2.2;export const BOSS_INTRO_GAP = 2.4;
 /** 每次遭遇结束恢复最大生命的比例 */
 export const ENCOUNTER_HEAL_PCT = 0.25;
 /** 每次 BOSS 阶段转换的回血（给三阶段战斗留呼吸窗口） */
@@ -1253,6 +1535,19 @@ export interface ClassKitDef {
     moveRegen?: number;
     /** 受击积攒主资源（战士） */
     rageOnHurt?: number;
+    /**
+     * 护甲减伤（0–1）：板甲职业靠减伤站住近战位，而不是把血条做厚。
+     * 战士 15% 常驻 + 近战接触额外 35%，等效把「贴着 BOSS 打」的代价压回来。
+     */
+    dr?: number;
+    /** 近战接触伤害的额外减伤（与 dr 相加，最终仍受 75% 上限约束） */
+    contactDr?: number;
+    /**
+     * 击杀回复（最大生命比例）：游侠没有任何自我治疗手段，
+     * 清完一波召唤物却回不了血，长 BOSS 战只能一路掉到 0。
+     * 给一点「猎杀回复」，让「先清小怪」除了停 BOSS 回血还有额外收益。
+     */
+    killHealPct?: number;
     /** 圣能上限与来源（牧师） */
     holyMax?: number;
     holyPerHeal?: number;
@@ -1271,6 +1566,8 @@ const WARRIOR_KIT: ClassKitDef = {
     resourceMax: 100,
     regen: 0,
     rageOnHurt: PLAYER_TUNING.rageOnHurt,
+    dr: 0.15,
+    contactDr: 0.35,
     basic: {
         act: 'swing', cd: PLAYER_TUNING.basic.cd, mult: PLAYER_TUNING.basic.mult,
         radius: PLAYER_TUNING.basic.radius, halfAngle: PLAYER_TUNING.basic.halfAngle,
@@ -1307,9 +1604,11 @@ const MAGE_KIT: ClassKitDef = {
     resourceName: '法力',
     resourceMax: 100,
     regen: 7,
-    basic: { act: 'bolt', cd: 1.2, mult: 1.0, speed: 520, projRadius: 7, range: 560 },
+    // 布甲：没有减伤，靠闪现拉开
+    dr: 0,
+    basic: { act: 'bolt', cd: 0.8, mult: 1.5, speed: 520, projRadius: 7, range: 560 },
     a1: {
-        act: 'fireball', cd: 6, mult: 1.2, cost: 25, speed: 430, projRadius: 9, range: 560,
+        act: 'fireball', cd: 5, mult: 1.6, cost: 25, speed: 430, projRadius: 9, range: 560,
         burnMult: 0.3, burnDur: 3,
     },
     a2: {
@@ -1331,9 +1630,12 @@ const RANGER_KIT: ClassKitDef = {
     resourceMax: 100,
     regen: 14,
     moveRegen: 6,
-    basic: { act: 'bolt', cd: 0.9, mult: 0.95, speed: 620, projRadius: 6, range: 620 },
+    // 皮甲：少量减伤 + 后跳 + 击杀回血
+    dr: 0.1,
+    killHealPct: 0.035,
+    basic: { act: 'bolt', cd: 0.7, mult: 1.15, speed: 620, projRadius: 6, range: 620 },
     a1: {
-        act: 'volley', cd: 5, mult: 0.6, cost: 30, arrows: 5, halfAngle: 0.34,
+        act: 'volley', cd: 5, mult: 0.8, cost: 30, arrows: 5, halfAngle: 0.34,
         speed: 560, projRadius: 6, range: 620,
     },
     a2: {
@@ -1352,11 +1654,13 @@ const PRIEST_KIT: ClassKitDef = {
     resourceName: '法力',
     resourceMax: 100,
     regen: 6,
+    // 锁甲：少量减伤，主要靠治疗术
+    dr: 0.08,
     holyMax: 100,
     holyPerHeal: 20,
-    basic: { act: 'bolt', cd: 1.0, mult: 0.85, speed: 520, projRadius: 7, range: 520, holyGain: 5 },
+    basic: { act: 'bolt', cd: 0.75, mult: 1.35, speed: 520, projRadius: 7, range: 520, holyGain: 5 },
     a1: { act: 'heal', cd: 8, cost: 30, healPct: 0.25 },
-    a2: { act: 'novaHeal', cd: 10, mult: 0.8, cost: 35, radius: 150, healPct: 0.05 },
+    a2: { act: 'novaHeal', cd: 10, mult: 1.0, cost: 35, radius: 150, healPct: 0.05 },
     a3: { act: 'shield', cd: 14, cost: 30, shieldPct: 0.2, duration: 6 },
     dodge: { act: 'blink', cd: 6, cost: 15, distance: 200, freeze: 0.5, dir: 'back' },
     burst: {
@@ -1719,26 +2023,41 @@ export interface RunPlan {
     ilvl: number;
 }
 
-/** 已实现战斗编排的副本；M4 只有废弃矿坑，M6 补齐其余 5 个 */
+/**
+ * 遭遇敌人的血量倍率。副本里大量复用低阶区域小怪，靠这一档把强度拉到对应装等带；
+ * 注意它**只乘生命、不乘伤害**，扛打靠 BOSS 阶段机制而不是小怪数值。
+ */
+const DUNGEON_SCALE: Record<string, number> = {
+    mine: 1,
+    chapel: 1,
+    tower: 1,
+    forge: 1,
+    // 深渊两层的遭遇怪直接复用野外深渊怪（520/460/2600 血是给 20–30 级野外调的），
+    // 进副本时压一档，让「三波杂兵 ≈ 60–90 秒」而不是半分钟一波都打不完。
+    shadow: 0.7,
+    throne: 0.72,
+};
+
+/** 已实现战斗编排的副本；M6 起 6 个副本全部可用 */
 export function dungeonRunPlan(dungeonId: string): RunPlan | null {
     const def = DUNGEON_BY_ID[dungeonId];
-    if (!def) return null;
-    if (dungeonId === 'mine') {
-        return {
-            kind: 'dungeon',
-            id: 'mine',
-            name: def.name,
-            encounters: MINE_ENCOUNTERS,
-            healPct: ENCOUNTER_HEAL_PCT,
-            boss: MINE_BOSS_SCRIPT,
-            bossTitle: def.bossName,
-            bossHint: '走位躲砸地 · 转火矿工 · 打断狂暴读条',
-            scale: 1,
-            bossScale: 1,
-            ilvl: def.ilvlMax,
-        };
-    }
-    return null;
+    const encounters = DUNGEON_ENCOUNTERS[dungeonId];
+    const boss = DUNGEON_BOSS_SCRIPTS[dungeonId];
+    if (!def || !encounters || !boss) return null;
+    return {
+        kind: 'dungeon',
+        id: dungeonId,
+        name: def.name,
+        encounters,
+        healPct: ENCOUNTER_HEAL_PCT,
+        boss,
+        bossTitle: def.bossName,
+        // 阶段名直接当机制提示：文案只维护 `DUNGEONS[*].phases` 一处
+        bossHint: def.phases.map((p) => p.name).join(' · '),
+        scale: DUNGEON_SCALE[dungeonId] ?? 1,
+        bossScale: 1,
+        ilvl: def.ilvlMax,
+    };
 }
 
 export function implementedDungeonIds(): string[] {
@@ -1769,7 +2088,7 @@ export const REGION_BOSS_TUNING: Record<string, RegionBossTuning> = {
     ash_lord: {
         moveInterval: 6, moveRadius: 130, moveDamage: 10, moveWarn: 1.1,
         addsInterval: 16, addsCount: 2, addsEnemyId: 'imp', addsRegen: 15,
-        interruptInterval: 9, interruptCast: 3, interruptNeed: 100,
+        interruptInterval: 9, interruptCast: 3, interruptNeed: 40,
         enrageBonus: 0.5, enrageDuration: 10,
     },
     frost_wolf: {

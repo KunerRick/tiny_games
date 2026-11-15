@@ -187,10 +187,17 @@ export function generateWildMap(regionId: string, seed: number): WildMap {
     const rng = wildRng(mixSeed(s, 0xa11ce));
     const regionPool = REGION_ENEMY_POOLS[region.id];
 
+    let dungeonCursor = 0;
     for (let layer = 0; layer < WILD_LAYERS.length; layer++) {
         const count = WILD_LAYERS[layer];
         let kinds = LAYER_KINDS[layer].slice();
-        if (layer === 4 && dungeonPool.length === 0) kinds = ['elite', 'elite'];
+        // 层 4 是副本入口层：区域内已实装几个副本就开几个门（两个副本 = 两个门，玩家自己选），
+        // 一个都没有时退回双精英。选哪个副本不由种子决定，否则同一区域总有一层进不去。
+        if (layer === 4) {
+            kinds = dungeonPool.length === 0
+                ? ['elite', 'elite']
+                : new Array(count).fill('dungeon');
+        }
         if (kinds.length < count) kinds = kinds.concat(new Array(count - kinds.length).fill('battle'));
         shuffle(kinds, rng);
 
@@ -202,7 +209,7 @@ export function generateWildMap(regionId: string, seed: number): WildMap {
             const level = Math.round(region.levelMin + (region.levelMax - region.levelMin) * t);
             const ilvl = Math.round(region.ilvlMin + (region.ilvlMax - region.ilvlMin) * t);
             const dungeonId = kind === 'dungeon' && dungeonPool.length > 0
-                ? dungeonPool[(id + s) % dungeonPool.length]
+                ? dungeonPool[dungeonCursor++ % dungeonPool.length]
                 : null;
             nodes.push({
                 id,
