@@ -21,11 +21,13 @@
 | 新增游戏后同步构建场景清单（MCP / 脚本 / GUI 阶梯） | [`tech/wechat-build-pitfalls.md` §9.1](./tech/wechat-build-pitfalls.md) |
 | 新增游戏 / 改大厅图标 / 统一 UI 美术风格 | [`design/2026-11-10-ui-art-style-guide.md`](./design/2026-11-10-ui-art-style-guide.md) + `node tools/check-game-icons.js` |
 | 新增游戏或场景 | [`../AGENTS.md`](../AGENTS.md) 的 **项目结构 + 游戏注册** |
+| 改完 `*Core.ts`，该跑哪个自检 / `tools/` 有哪些脚本 | [`tech/verify-scripts.md`](./tech/verify-scripts.md)（27 个脚本的覆盖范围与「何时跑」） |
 | 查某游戏的设计/计划/场景配置 | 下文的 **按游戏分类** |
 | 规划剩余 8 款的玩法/美术/复核开工顺序 | [`plans/2026-11-07-remaining-games-polish-plan.md`](./plans/2026-11-07-remaining-games-polish-plan.md) |
 | **想知道全部 24 款有哪些体验坑 / 该先修什么** | [`plans/2026-11-10-all-games-playtest-ux-report.md`](./plans/2026-11-10-all-games-playtest-ux-report.md)（玩家视角实机试玩：跨游戏共性问题 + 逐款清单 + P0/P1/P2 批次） |
 | **想知道上一轮修复哪些真生效、哪些没落地** | [`plans/2026-11-11-playtest-fix-review.md`](./plans/2026-11-11-playtest-fix-review.md)（第二轮复核：A 批 10 条全过、B/C 5 处未生效、18 条新问题 + 4 条原报告更正） |
-| **想追最新的试玩轮次与闭环状态** | 见下方 **试玩巡检归档**（第六轮为当前最新） |
+| **想追最新的试玩轮次与闭环状态** | 见下方 **试玩巡检归档**（第九轮为当前最新） |
+| **要跑「试玩 → 修复 → 复核」闭环（不想再人工转发报告）** | [`tech/playtest-cycle.md`](./tech/playtest-cycle.md)（fresh 子代理当试玩者/复核者，文件交接，串行，P0/P1 清零即止） |
 
 ---
 
@@ -42,6 +44,8 @@
 - [`tech/wechat-text-rendering.md`](./tech/wechat-text-rendering.md) — 微信文本渲染：变体选择符 VS16 导致图标方框、图标单一来源规约
 - [`tech/wechat-build-pitfalls.md`](./tech/wechat-build-pitfalls.md) — 微信小游戏构建产物：开发者工具「编译报错」的时序根因、**「能编译但一打开就崩」的包装器/项目类型根因**、日志与缓存取证、预检脚本与声明纪律
 - [`tech/dev-toolchain-notes.md`](./tech/dev-toolchain-notes.md) — 文本编码（PowerShell 陷阱）、`tsc` 版本注意事项、提交前检查
+- [`tech/playtest-cycle.md`](./tech/playtest-cycle.md) — 试玩-修复闭环：fresh 子代理分工、报告机读格式与编号规则、退出判据、三条硬约束（预览单例 / 不在 worktree 验 / 不改状态作弊）
+- [`tech/verify-scripts.md`](./tech/verify-scripts.md) — `tools/` 全部脚本的唯一清单：纯逻辑自检覆盖范围、图标/构建/场景同步脚本的「何时跑」
 - [`design/2026-11-10-ui-art-style-guide.md`](./design/2026-11-10-ui-art-style-guide.md) — 全站 UI / 图标美术规范：设计令牌（`UITheme` / `GameUIKit` / `SceneSkin`）、大厅图标四色法与登记表、新增游戏第四步与 `tools/check-game-icons.js`
 
 ---
@@ -53,7 +57,9 @@
 
 | 轮次 | 报告 | 闭环 / 结论 |
 |------|------|-------------|
-| 第六轮（2026-11-13） | [`plans/2026-11-13-playtest-round6-player.md`](./plans/2026-11-13-playtest-round6-player.md) | [`plans/2026-11-13-playtest-round6-reverify.md`](./plans/2026-11-13-playtest-round6-reverify.md) — N19–N24 全修（雷霆退出刷金币 / 锁定关卡反馈 / 遮罩收敛 / 接龙出口） |
+| 第九轮（2026-11-14） | [`plans/2026-11-14-playtest-round9-fridge.md`](./plans/2026-11-14-playtest-round9-fridge.md) | 第八轮 P1/P2/P3 全修（自检 276/276、双角色真通关）；新增 N34/N35（P3，待处理） |
+| 第八轮（2026-11-13） | [`plans/2026-11-13-playtest-round8-fridge.md`](./plans/2026-11-13-playtest-round8-fridge.md) | 首次不作弊真通关 + 全房型覆盖；新增 P1 N31（Boss 房炸弹开墙死局）/ N32（开局道具从未发放） |
+| 第七轮（2026-11-13） | [`plans/2026-11-13-playtest-round7-player.md`](./plans/2026-11-13-playtest-round7-player.md) | 第六轮 N19–N24 全成立；新增 N25–N29（冰箱 P2/P3） |
 | 第五轮（2026-11-13） | [`plans/2026-11-13-playtest-round5-endstates.md`](./plans/2026-11-13-playtest-round5-endstates.md) | [`plans/2026-11-13-playtest-round5-reverify.md`](./plans/2026-11-13-playtest-round5-reverify.md) — P1-1 / P2-1 / P2-2 / P2-3 全修（结算锁死 / 接龙计数 / 冰箱死亡面板 / 遮罩） |
 | 第四轮（2026-11-12） | [`plans/2026-11-12-playtest-round4-novice.md`](./plans/2026-11-12-playtest-round4-novice.md) | 新手视角全量；视觉统一类项延后（装饰圆、弹幕遮罩、战争进化返回键皮肤） |
 | 第三轮（2026-11-12） | [`plans/2026-11-11-playtest-ux-fix-plan.md`](./plans/2026-11-11-playtest-ux-fix-plan.md)（修复计划） | [`plans/2026-11-12-playtest-round3-reverify.md`](./plans/2026-11-12-playtest-round3-reverify.md) — 8 项闭环 + 塔防翻转分支实测 |
@@ -211,6 +217,21 @@
 | 游戏设计（M1–M4 已实现，M5 音效震动已实现） | [`specs/2026-11-09-game-fridge-design.md`](./specs/2026-11-09-game-fridge-design.md) | 房间制地牢 Roguelike：四层世界（冷藏/玩具箱/游戏机/压缩机）× 7 房、40 道具靠 14 标签涌现 14 条协同、6 角色条件式解锁与充能制主动槽、冰箱贴「只解锁内容不卖数值」、**房间级断点续玩 + 存档跨版本迁移**、Boss 核心三选一、解锁树 / 图鉴 / 每日挑战 / 热度模式、**程序化合成音效 + 震动开关**、确定性地图与 56 项自检目标 |
 | 回归自检 | [`../tools/verify-fridge-core.js`](../tools/verify-fridge-core.js) | 纯逻辑单测（**M1+M2+M3+M4 共 261 项**：随机数、40 道具 / 6 角色 / 16 敌人表、属性公式与夹取、移动 / 开火 / 命中、拾取、无敌帧与死亡、敌人生成上限、地图生成与门锁、宝箱、Boss、40 道具触发 / 14 协同 / 6 角色主动槽、免死与复活、商店 / 祭坛 / 炸弹 / 秘密房、**四层 Boss 与核心三选一 / 冰箱贴各来源 / 解锁条件 / 每日挑战 / 热度诅咒 / 电梯 / v3 存档迁移**、确定性与 60 秒长跑） |
 
+### 未单列小节的新游戏（规格与自检都在）
+
+| 游戏 | 设计规格 | 回归自检 |
+|---|---|---|
+| 台球 Pool / `pool` | [`specs/2026-11-06-game-pool-design.md`](./specs/2026-11-06-game-pool-design.md) | `tools/verify-pool-core.js` |
+| 泡泡龙 Bubble / `bubble` | [`specs/2026-11-08-game-bubble-design.md`](./specs/2026-11-08-game-bubble-design.md) | `tools/verify-bubble-core.js` |
+| 推箱子 Sokoban / `sokoban` | [`specs/2026-11-08-game-sokoban-design.md`](./specs/2026-11-08-game-sokoban-design.md) | `tools/verify-sokoban-core.js` |
+| 成语猜猜 Wordle / `wordle` | [`specs/2026-11-08-game-wordle-design.md`](./specs/2026-11-08-game-wordle-design.md) | `tools/verify-wordle-core.js` |
+| 星际弹幕 Shmup / `shmup` | [`specs/2026-11-08-game-shmup-design.md`](./specs/2026-11-08-game-shmup-design.md) | `tools/verify-shmup-core.js` |
+
+补充规格（不属于单款游戏的定稿）：[`war-evo-p0-core-experience`](./specs/2026-05-19-war-evo-p0-core-experience.md)、
+[`mammoth-stomp-redesign`](./specs/2026-05-26-mammoth-stomp-redesign.md)、
+[`tiny-vanguard-fixes`](./specs/2026-06-06-tiny-vanguard-fixes.md)、
+[`tiny-vanguard-ux-improvements`](./specs/2026-06-06-tiny-vanguard-ux-improvements.md)。
+
 ### 大厅与整体
 
 | 类型 | 文件 | 说明 |
@@ -239,4 +260,6 @@
 
 - 新增文档请按 `<YYYY-MM-DD>-<scope>-<topic>.md` 命名
 - 临时 artifact 文件不要直接放 `docs/` 根目录，应归类到对应 `specs/` / `plans/` / `design/`
-- 修改 AGENTS.md 的“当前教训”时，保留最近 3-5 条高价值教训，过旧的迁移到 `tech/` 或 `cocos-best-practices.md`
+- **单一源**：AGENTS.md 只放规则 / 判据 / 指针；清单类信息（游戏注册、脚本清单、逐款文档链接）
+  各自只维护一处——`GameConfig.ts`、`tech/verify-scripts.md`、本文件。不要在入口文档里复写副本。
+- 修改 AGENTS.md 的“当前教训”时，保留最近 3–6 条高价值教训，过旧的迁移到 `tech/` 或 `cocos-best-practices.md`
