@@ -110,14 +110,53 @@ const FIREBALL_VARIANTS: [[SkillVariantDef, SkillVariantDef], [SkillVariantDef, 
     ],
 ];
 
+const WARRIOR_VARIANTS: Record<SkillIdSuffix, [[SkillVariantDef, SkillVariantDef], [SkillVariantDef, SkillVariantDef]]> = {
+    basic: [
+        [{ name: '横扫', desc: '扇形扩大到 120°，伤害 −10%' }, { name: '迅斩', desc: '冷却 −10%，伤害 −10%' }],
+        [{ name: '连斩', desc: '普攻伤害 −10%，每第 4 击 ×1.5' }, { name: '重斩', desc: '伤害 +15%，冷却 +15%' }],
+    ],
+    a1: [
+        [{ name: '长驱', desc: '冲锋距离 +100px' }, { name: '铁肩', desc: '眩晕 +0.4s' }],
+        [{ name: '破阵', desc: '冲锋后 3s 攻速 +25%' }, { name: '回身', desc: '冲锋后 1.5s 受伤 −40%' }],
+    ],
+    a2: [
+        [{ name: '风暴', desc: '旋风半径 +30px' }, { name: '疾旋', desc: '旋转每 0.34s 一跳' }],
+        [{ name: '血旋', desc: '旋风伤害 +10%' }, { name: '持久', desc: '旋转持续 +0.5s' }],
+    ],
+    a3: [
+        [{ name: '粉碎', desc: '额外减甲 4%' }, { name: '裂甲', desc: '命中溅射 90px（60% 伤害）' }],
+        [{ name: '久战', desc: '减甲持续 +1s' }, { name: '致命', desc: '破甲伤害 +10%' }],
+    ],
+    dodge: [
+        [{ name: '疾影', desc: '位移距离 +80px' }, { name: '坚守', desc: '无敌 +0.2s' }],
+        [{ name: '反击步', desc: '侧步后下一击必暴' }, { name: '轻身', desc: '冷却 −25%' }],
+    ],
+    burst: [
+        [{ name: '狂血', desc: '血怒持续 +2s' }, { name: '苦战', desc: '爆发期受伤惩罚减半' }],
+        [{ name: '血偿', desc: '爆发期伤害再 +8%' }, { name: '铁血', desc: '爆发期不再有受伤惩罚' }],
+    ],
+};
+
 export const SKILLS: SkillDef[] = [
     // 战士（怒气）
-    s('warrior', 'basic', 'basic', '劈砍', 0.6, '90° 扇形，110% 攻击，积 8 怒气'),
-    s('warrior', 'a1', 'active', '冲锋', 8, '突进 220px，命中眩晕 0.8s'),
-    s('warrior', 'a2', 'active', '旋风斩', 10, '旋转 2s，每 0.4s 40% 攻击'),
-    s('warrior', 'a3', 'active', '破甲', 12, '单体 150%，减甲 20% 持续 5s'),
-    s('warrior', 'dodge', 'dodge', '侧步', 6, '位移 280px，0.4s 无敌'),
-    s('warrior', 'burst', 'burst', '血怒', 40, '10s 伤害 +30%、受伤 +15%，清空怒气'),
+    s('warrior', 'basic', 'basic', '劈砍', 0.6, '90° 扇形，110% 攻击，积 8 怒气', [
+        WARRIOR_VARIANTS.basic[0], WARRIOR_VARIANTS.basic[1],
+    ]),
+    s('warrior', 'a1', 'active', '冲锋', 8, '突进 220px，命中眩晕 0.8s', [
+        WARRIOR_VARIANTS.a1[0], WARRIOR_VARIANTS.a1[1],
+    ]),
+    s('warrior', 'a2', 'active', '旋风斩', 10, '旋转 2s，每 0.4s 40% 攻击', [
+        WARRIOR_VARIANTS.a2[0], WARRIOR_VARIANTS.a2[1],
+    ]),
+    s('warrior', 'a3', 'active', '破甲', 12, '单体 150%，减甲 20% 持续 5s，并减速 25% 2s', [
+        WARRIOR_VARIANTS.a3[0], WARRIOR_VARIANTS.a3[1],
+    ]),
+    s('warrior', 'dodge', 'dodge', '侧步', 6, '位移 280px，0.4s 无敌', [
+        WARRIOR_VARIANTS.dodge[0], WARRIOR_VARIANTS.dodge[1],
+    ]),
+    s('warrior', 'burst', 'burst', '血怒', 40, '10s 伤害 +30%、受伤 +15%，清空怒气', [
+        WARRIOR_VARIANTS.burst[0], WARRIOR_VARIANTS.burst[1],
+    ]),
     // 法师（法力）
     s('mage', 'basic', 'basic', '奥术弹', 1.2, '远程单体 100%'),
     s('mage', 'a1', 'active', '火球术', 6, '120% + 燃烧 3s（每秒 30%）', FIREBALL_VARIANTS),
@@ -150,6 +189,24 @@ export const SKILL_BY_ID: Record<string, SkillDef> = (() => {
 export function skillsOf(classId: ClassId): SkillDef[] {
     return SKILLS.filter((sk) => sk.classId === classId);
 }
+
+/** ==================== 成长（M3） ==================== */
+
+/**
+ * 出战时的**装等地板**：空档平均装等是 1、副属性全 0，直接按 1 算对 BOSS 只有约 4 DPS
+ * （M1 起的平衡基准就按 5 级 / 装等 5 量过）。注意它只夹「装等」，**不再夹角色等级** ——
+ * M3 起新档从 1 级开始自己练上去。
+ */
+export const COMBAT_ILVL_FLOOR = 5;
+
+/** 技能书：每次通关保底 1 本，首通再 +1（在成长面板里换技能升级） */
+export const SKILL_BOOK_PER_CLEAR = 1;
+export const SKILL_BOOK_FIRST_CLEAR = 1;
+/** 副本首通额外经验（一次性的追赶奖励，与掉落同轮发放） */
+export const FIRST_CLEAR_EXP = 800;
+/** 洗点金币价（设计 §4.4 / §4.5；M5 营地训练场再打折） */
+export const TALENT_RESPEC_GOLD = 200;
+export const SKILL_RESPEC_GOLD = 500;
 
 // ==================== 天赋（4 职业 × 3 线 × 5 层 × 2 选 1 = 120） ====================
 
@@ -220,7 +277,7 @@ const WARRIOR_SEEDS: TalentSeedGrid = [
     [
         [seed('盾墙', '闪避 CD -0.4s'), seed('战地医师', '治疗 +6%')],
         [seed('暴怒', '暴击伤害 +3%'), seed('持续压制', '对残血目标 +2%')],
-        [seed('精准', '命中 +2%'), seed('压制', '减甲 +3%')],
+        [seed('精准', '攻击强度 +1%'), seed('压制', '减甲 +3%')],
     ],
     [
         [seed('钢铁意志', '控制时长 -8%'), seed('反弹', '反弹近战 8%')],

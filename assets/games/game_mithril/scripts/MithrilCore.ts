@@ -44,6 +44,14 @@ import {
 } from './MithrilProgress';
 import type { AffixAlloc, MithrilSave } from './MithrilProgress';
 import { equipStats } from './MithrilLoot';
+import {
+    emptySkillMods,
+    emptyTalentEffects,
+    skillModsFromSave,
+    talentEffects,
+    trinketMultiplier,
+} from './MithrilTalents';
+import type { SkillMod, SkillMods, TalentEffects } from './MithrilTalents';
 
 export { FIELD_H, FIELD_W, FIXED_DT, MAX_BULLETS, MAX_ENEMIES };
 
@@ -53,6 +61,29 @@ export const HIT_INVULN = 0.5;
 export const PLAYER_RADIUS = 18;
 /** 玩家基础移速（设计像素 / 秒） */
 export const PLAYER_SPEED = 240;
+/** 天赋「铁壁」的 1 点护甲 = 0.5% 物理减伤 */
+export const ARMOR_DR_PER_POINT = 0.005;
+/** 荆棘堡垒的反击半径（设计只写「受伤 10% 转 AoE」，半径按近战威胁范围取） */
+export const THORN_RADIUS = 140;
+/** 连续命中层数上限（血之狂潮） */
+export const COMBO_MAX = 10;
+/** 连续命中的判定间隔：超过这么久没打中就从 0 重新叠 */
+export const COMBO_TIMEOUT = 9;
+
+/** 受击来源信息（M3 的反弹 / 护甲 / 减速都靠这几个标记区分） */
+export interface HitOptions {
+    /** 物理伤害（吃护甲） */
+    physical?: boolean;
+    /** 近战接触（吃反弹） */
+    melee?: boolean;
+    /** 来源敌人（反弹 / 荆棘用） */
+    attacker?: EnemyState | null;
+    /** 附带减速（BOSS 砸地） */
+    slow?: boolean;
+}
+
+/** 玩家攻击的类型：只有技能吃「重击」，反弹不吃任何条件加成 */
+export type DamageSource = 'basic' | 'skill' | 'dot' | 'reflect';
 
 /** 玩家出生点（下方，给上方敌人留出走位空间） */
 export const PLAYER_START_X = FIELD_W / 2;
@@ -84,6 +115,10 @@ export interface CombatProfile {
     haste: number;
     mastery: number;
     vers: number;
+    /** 天赋聚合效果（M3；未点是全 0） */
+    talents: TalentEffects;
+    /** 技能等级 / 变体修正（M3；默认 1 级无变体） */
+    skills: SkillMods;
 }
 
 /** 由等级 + 装备装等 + 词条配点推导出实战属性 */
@@ -104,6 +139,8 @@ export function makeProfile(
         haste: sec.haste,
         mastery: sec.mastery,
         vers: sec.vers,
+        talents: emptyTalentEffects(),
+        skills: emptySkillMods(),
     };
 }
 
@@ -116,16 +153,24 @@ export function profileFromSave(save: MithrilSave, minIlvl = 0): CombatProfile {
     // 调的平衡基线，所以给一条按 ilvl 均衡配点算出的副属性下限，装备超过下限就自然接管。
     // 注意不能用「基线 + 装备」相加：ilvl40 均衡配点本身已触顶，相加会让装备词条全部浪费。
     const floor = makeProfile(save.classId, save.level, Math.max(0, minIlvl));
+    const tal = talentEffects(save.talents, save.classId);
+    // 设计 §4.1 的五层倍率：饰品这一层在 M7 之前没有获取途径，
+    // 先把「已装备件数」折算成 1.00–1.20× 的数值层，避免毕业 DPS 只到 8× 出头。
+    const trinketMul = trinketMultiplier(save.trinkets);
+    // 攻击强度由等级 × 装备 × 饰品 × 天赋（精准）四层相乘；
+    // 暴击率 / 暴伤 / 攻速 / 技能加成等天赋则落到各自的消费点，不在这里重复乘。
+    const ap = base.attackPower * gearApMultiplier(st.ilvl) * trinketMul * (1 + tal.apPct);
     return {
         ...base,
-        // 装备·主属性（设计 §4.1，ilvl 1–40 = 1.00×→1.60×）：空装 ilvl=1 ⇒ 1.00×，
-        // 所以切片基线不受影响；穿上第一件紫装攻击强度立刻可见地涨。
-        attackPower: base.attackPower * gearApMultiplier(st.ilvl),
+        attackPower: ap,
         maxHp: base.maxHp + st.bonusHp,
-        critChance: Math.max(st.crit, floor.critChance),
+        critChance: Math.min(1, Math.max(st.crit, floor.critChance) + tal.critChance),
+        critMult: base.critMult + tal.critMult,
         haste: Math.max(st.haste, floor.haste),
         mastery: Math.max(st.mastery, floor.mastery),
         vers: Math.max(st.vers, floor.vers),
+        talents: tal,
+        skills: skillModsFromSave(save),
     };
 }
 
@@ -183,12 +228,43 @@ export interface PlayerState {
     whirlTick: number;
     /** 血怒剩余持续时间 */
     burst: number;
+    /** 血怒期间的受伤倍率修正（基础 +0.15，天赋 / 变体往下扣） */
+    burstTakenMod: number;
+    /** 血怒期间的伤害加成（基础 +0.30，变体 / 天赋往上加） */
+    burstDamage: number;
+    /** 护盾池（吸收伤害，先于生命结算） */
+    shield: number;
+    /** 减速剩余（BOSS 砸地） */
+    slow: number;
+    /** 减伤窗口剩余（冲锋「回身」） */
+    guard: number;
+    /** 减伤窗口比例 */
+    guardCut: number;
+    /** 连续命中层数（血之狂潮） */
+    combo: number;
+    /** 距离上次命中的时间（超过 COMBO_TIMEOUT 清层） */
+    comboTimer: number;
+    /** 下一击必暴（侧步「反击步」） */
+    nextCrit: boolean;
+    /** 侧步后的反击窗口剩余 */
+    counterReady: number;
+    /** 本副本剩余免死次数（不朽） */
+    cheatDeaths: number;
+    /** 破阵攻速 buff 剩余 / 加成 */
+    hasteBuff: number;
+    hasteBuffAmt: number;
+    /** 普攻计数（连斩） */
+    swingCount: number;
+    /** 每 5 秒回怒气的计时器（战地指挥） */
+    rageTimer: number;
 }
 
 export interface EnemyStatus {
     stun: number;
     slow: number;
     armorBreak: number;
+    /** 减甲幅度（破甲 20% + 天赋「压制」），与剩余时间分开存，不同破甲强度可以并存 */
+    armorBreakBonus: number;
     burnDps: number;
     burnRemaining: number;
 }
@@ -356,7 +432,7 @@ function makeCooldowns(): PlayerCooldowns {
 }
 
 function makeStatus(): EnemyStatus {
-    return { stun: 0, slow: 0, armorBreak: 0, burnDps: 0, burnRemaining: 0 };
+    return { stun: 0, slow: 0, armorBreak: 0, armorBreakBonus: 0, burnDps: 0, burnRemaining: 0 };
 }
 
 function copyPlayer(p: PlayerState): PlayerState {
@@ -369,7 +445,8 @@ function copyEnemy(e: EnemyState): EnemyState {
 
 /** 固定步长世界 */
 export class MithrilWorld {
-    readonly profile: CombatProfile;
+    /** 出战属性；升级时由 setProfile 整体替换（M3 起可变） */
+    profile: CombatProfile;
     readonly rng: () => number;
 
     time = 0;
@@ -419,7 +496,37 @@ export class MithrilWorld {
             whirlwind: 0,
             whirlTick: 0,
             burst: 0,
+            burstTakenMod: PLAYER_TUNING.burst.takenBonus,
+            burstDamage: PLAYER_TUNING.burst.dmgBonus,
+            shield: 0,
+            slow: 0,
+            guard: 0,
+            guardCut: 0,
+            combo: 0,
+            comboTimer: 0,
+            nextCrit: false,
+            counterReady: 0,
+            cheatDeaths: profile.talents.cheatDeath,
+            hasteBuff: 0,
+            hasteBuffAmt: 0,
+            swingCount: 0,
+            rageTimer: 0,
         };
+    }
+
+    /**
+     * 战斗中升级 / 换 build：整体替换 profile，并按生命上限的变化同步当前生命。
+     * 升级回满血会掩盖「升级续航」的设计，所以只补差额（掉上限时不扣当前生命之外的部分）。
+     */
+    setProfile(next: CombatProfile): void {
+        const before = this.profile.maxHp;
+        this.profile = next;
+        const delta = next.maxHp - before;
+        this.player.maxHp = next.maxHp;
+        if (delta > 0) this.player.hp = Math.min(next.maxHp, this.player.hp + delta);
+        else this.player.hp = Math.min(this.player.hp, next.maxHp);
+        // 免死次数按新流派的天赋补足（只在还没用掉时增加，不重置已消耗的）
+        this.player.cheatDeaths = Math.max(this.player.cheatDeaths, next.talents.cheatDeath);
     }
 
     // ==================== 生成 ====================
@@ -512,8 +619,27 @@ export class MithrilWorld {
         this._gap = 0;
         this.orbs.length = 0;
         this.phase = 'playing';
+        this.player.maxHp = this.profile.maxHp;
         this.player.hp = this.player.maxHp;
         this.player.rage = 0;
+        this.player.shield = 0;
+        this.player.slow = 0;
+        this.player.guard = 0;
+        this.player.guardCut = 0;
+        this.player.combo = 0;
+        this.player.nextCrit = false;
+        this.player.counterReady = 0;
+        this.player.cheatDeaths = this.profile.talents.cheatDeath;
+        this.player.hasteBuff = 0;
+        this.player.hasteBuffAmt = 0;
+        this.player.swingCount = 0;
+        this.player.rageTimer = 0;
+        this.player.burst = 0;
+        this.player.burstTakenMod = PLAYER_TUNING.burst.takenBonus;
+        this.player.burstDamage = PLAYER_TUNING.burst.dmgBonus;
+        for (const key of Object.keys(this.player.cd) as Array<keyof PlayerCooldowns>) {
+            this.player.cd[key] = 0;
+        }
         this._spawnNextEncounter();
     }
 
@@ -559,17 +685,71 @@ export class MithrilWorld {
         return this.phase === 'playing';
     }
 
-    /** 对玩家造成伤害；无敌帧内忽略。返回是否真的扣血 */
-    hitPlayer(damage: number): boolean {
+    /**
+     * 对玩家造成伤害；无敌帧内忽略。返回是否真的扣血（护盾全吃也算）。
+     *
+     * 结算顺序（M3 起有天赋后每一步都必须有确定位置，否则「护甲 / 减伤 / 护盾」会互相覆盖）：
+     *  血怒受伤惩罚 → 护盾吸收 → 各项减伤 → 免死 → 扣血 → 反弹 / 荆棘 → 减速
+     */
+    hitPlayer(damage: number, opts: HitOptions = {}): boolean {
         if (this.phase !== 'playing' || this.player.invuln > 0) return false;
+        const p = this.player;
+        const tal = this.profile.talents;
         let dmg = Number.isFinite(damage) ? Math.max(0, damage) : 0;
-        if (this.player.burst > 0) dmg *= 1 + PLAYER_TUNING.burst.takenBonus;
-        this.player.hp = Math.max(0, this.player.hp - dmg);
-        this.player.invuln = HIT_INVULN;
-        this.player.rage = Math.min(100, this.player.rage + PLAYER_TUNING.rageOnHurt);
-        this._emit({ type: 'damage', target: 'player', x: this.player.x, y: this.player.y, amount: dmg, crit: false });
-        if (this.player.hp <= 0) {
-            this.player.hp = 0;
+        if (p.burst > 0) dmg *= Math.max(0, 1 + p.burstTakenMod);
+
+        // 护盾先吃伤害（钢铁阵型 / 后续职业的护盾技能共用这一池）
+        let absorbed = 0;
+        if (p.shield > 0 && dmg > 0) {
+            absorbed = Math.min(p.shield, dmg);
+            p.shield -= absorbed;
+            dmg -= absorbed;
+        }
+
+        let dr = Math.max(0, -tal.takenMul);
+        if (opts.physical) dr += tal.armor * ARMOR_DR_PER_POINT;
+        if (p.hp / Math.max(1, p.maxHp) < 0.3) dr += tal.lowHpDr;
+        if (p.guard > 0) dr += p.guardCut;
+        dr = Math.max(0, Math.min(0.75, dr));
+        dmg *= 1 - dr;
+
+        // 免死（不朽）：致命伤触发一次，回 35% 生命并给 1.5s 无敌
+        if (dmg > 0 && p.hp - dmg <= 0 && p.cheatDeaths > 0) {
+            p.cheatDeaths--;
+            p.hp = Math.max(1, Math.round(p.maxHp * 0.35));
+            p.invuln = 1.5;
+            this._emit({ type: 'heal', x: p.x, y: p.y, amount: p.hp });
+            this._emit({ type: 'damage', target: 'player', x: p.x, y: p.y, amount: dmg, crit: false });
+            return true;
+        }
+
+        const landed = dmg;
+        p.hp = Math.max(0, p.hp - dmg);
+        p.invuln = HIT_INVULN;
+        this._gainRage(PLAYER_TUNING.rageOnHurt);
+        if (dmg > 0) {
+            this._emit({ type: 'damage', target: 'player', x: p.x, y: p.y, amount: dmg, crit: false });
+        }
+
+        // 反弹（近战接触）+ 格挡反击（侧步后的反击窗口）
+        const taken = landed + absorbed;
+        if (taken > 0 && opts.attacker) {
+            let reflect = opts.melee ? tal.meleeReflect : 0;
+            if (p.counterReady > 0) reflect += tal.counterReflect;
+            if (reflect > 0) this._reflect(opts.attacker, taken * reflect);
+        }
+        if (p.counterReady > 0) p.counterReady = 0;
+
+        // 荆棘堡垒：受的伤害按比例炸回去
+        if (tal.thornAoe > 0 && taken > 0) this._thornAoe(p.x, p.y, taken * tal.thornAoe);
+
+        // 控制：BOSS 砸地的减速（钢铁意志按比例缩短）
+        if (opts.slow) {
+            p.slow = Math.max(p.slow, 1.5 * (1 - Math.max(0, Math.min(0.9, tal.ccResist))));
+        }
+
+        if (p.hp <= 0) {
+            p.hp = 0;
             this.phase = 'dead';
         }
         return true;
@@ -627,6 +807,8 @@ export class MithrilWorld {
     private _tickPlayer(d: number, input: MithrilInput): void {
         const p = this.player;
         const cd = p.cd;
+        const tal = this.profile.talents;
+        const skills = this.profile.skills;
         cd.basic = Math.max(0, cd.basic - d);
         cd.charge = Math.max(0, cd.charge - d);
         cd.whirlwind = Math.max(0, cd.whirlwind - d);
@@ -634,14 +816,29 @@ export class MithrilWorld {
         cd.dodge = Math.max(0, cd.dodge - d);
         cd.burst = Math.max(0, cd.burst - d);
         p.burst = Math.max(0, p.burst - d);
+        p.slow = Math.max(0, p.slow - d);
+        p.guard = Math.max(0, p.guard - d);
+        p.counterReady = Math.max(0, p.counterReady - d);
+        p.hasteBuff = Math.max(0, p.hasteBuff - d);
+        p.comboTimer += d;
+        if (p.comboTimer > COMBO_TIMEOUT) p.combo = 0;
+
+        // 战地指挥：每 5 秒回固定怒气（不吃「战术精通」的百分比，否则会双倍放大）
+        if (tal.rageRegen > 0) {
+            p.rageTimer += d;
+            while (p.rageTimer >= 5) {
+                p.rageTimer -= 5;
+                p.rage = Math.min(100, p.rage + tal.rageRegen);
+            }
+        }
 
         // 旋风斩持续时间与跳伤
         if (p.whirlwind > 0) {
             p.whirlwind = Math.max(0, p.whirlwind - d);
             p.whirlTick -= d;
             if (p.whirlTick <= 0) {
-                p.whirlTick += PLAYER_TUNING.whirlwind.tick;
-                this._whirlTick();
+                p.whirlTick += PLAYER_TUNING.whirlwind.tick * (skills.a2.v2.tickMul || 1);
+                this._whirlTick(skills.a2);
                 if (this.phase !== 'playing') return;
             }
         }
@@ -656,6 +853,7 @@ export class MithrilWorld {
         }
         let speed = PLAYER_SPEED;
         if (p.whirlwind > 0) speed *= PLAYER_TUNING.whirlwind.moveScale;
+        if (p.slow > 0) speed *= 0.6;
         p.x = clamp(p.x + mx * speed * d, p.radius, FIELD_W - p.radius);
         p.y = clamp(p.y + my * speed * d, p.radius, FIELD_H - p.radius);
 
@@ -674,49 +872,102 @@ export class MithrilWorld {
 
         // 闪避
         if (input.dodge && cd.dodge <= 0) {
+            const mod = skills.dodge;
             // 站着不动时朝向已被自动索敌吸住，直接沿用 facing 会冲进敌人身体里，
             // 所以无移动输入时朝目标反方向后撤。
             const dir = Math.hypot(mx, my) > 0.2
                 ? Math.atan2(my, mx)
                 : (this._nearestEnemy(PLAYER_TUNING.basic.radius + 90, true) ? p.facing + Math.PI : p.facing);
-            this._dash(dir, PLAYER_TUNING.dodge.distance);
-            p.invuln = Math.max(p.invuln, PLAYER_TUNING.dodge.invuln);
-            cd.dodge = PLAYER_TUNING.dodge.cd / (1 + this.profile.haste);
+            const dist = PLAYER_TUNING.dodge.distance + (mod.v2.distAdd || 0) + (mod.v4.distAdd || 0);
+            this._dash(dir, dist);
+            p.invuln = Math.max(p.invuln, PLAYER_TUNING.dodge.invuln + (mod.v2.invulnAdd || 0) + (mod.v4.invulnAdd || 0));
+            cd.dodge = Math.max(
+                1,
+                PLAYER_TUNING.dodge.cd * mod.cdMul / (1 + this.profile.haste) - tal.dodgeCdCut,
+            );
+            if (mod.v4.nextCrit) p.nextCrit = true;
+            if (tal.counterReflect > 0) p.counterReady = 1.5;
             this._emit({ type: 'dodge', x: p.x, y: p.y, facing: dir });
         }
 
         // 普攻
         if (input.basic && cd.basic <= 0) {
-            this._swing();
-            cd.basic = PLAYER_TUNING.basic.cd / (1 + this.profile.haste);
+            this._swing(skills.basic);
+            cd.basic = PLAYER_TUNING.basic.cd * skills.basic.cdMul / (1 + this._effHaste());
         }
 
         // 冲锋
         if (input.skill1 && cd.charge <= 0) {
-            this._charge();
-            cd.charge = PLAYER_TUNING.charge.cd / (1 + this.profile.haste);
+            this._charge(skills.a1);
+            cd.charge = this._skillCd(PLAYER_TUNING.charge.cd, skills.a1);
         }
 
         // 旋风斩
         if (input.skill2 && cd.whirlwind <= 0 && p.whirlwind <= 0) {
-            p.whirlwind = PLAYER_TUNING.whirlwind.duration;
+            p.whirlwind = PLAYER_TUNING.whirlwind.duration + (skills.a2.v4.durationAdd || 0);
             p.whirlTick = 0;
-            cd.whirlwind = PLAYER_TUNING.whirlwind.cd / (1 + this.profile.haste);
+            cd.whirlwind = this._skillCd(PLAYER_TUNING.whirlwind.cd, skills.a2);
         }
 
         // 破甲
         if (input.skill3 && cd.armorBreak <= 0) {
-            if (this._armorBreak()) {
-                cd.armorBreak = PLAYER_TUNING.armorBreak.cd / (1 + this.profile.haste);
+            if (this._armorBreak(skills.a3)) {
+                cd.armorBreak = this._skillCd(PLAYER_TUNING.armorBreak.cd, skills.a3);
             }
         }
 
         // 血怒
         if (input.burst && cd.burst <= 0 && p.rage >= PLAYER_TUNING.burst.rageCost) {
+            const mod = skills.burst;
             p.rage = 0;
-            p.burst = PLAYER_TUNING.burst.duration;
-            cd.burst = PLAYER_TUNING.burst.cd;
+            p.burst = PLAYER_TUNING.burst.duration + (mod.v2.durationAdd || 0);
+            p.burstDamage = PLAYER_TUNING.burst.dmgBonus + tal.burstDamage + (mod.v4.burstDmgAdd || 0);
+            // 变体的「受伤惩罚」是往基础 +15% 上做加减，最后夹在 [-100%, +100%]
+            p.burstTakenMod = Math.max(-1, Math.min(
+                1,
+                PLAYER_TUNING.burst.takenBonus
+                + (mod.v2.burstTakenAdd || 0)
+                + (mod.v4.burstTakenAdd || 0)
+                - tal.burstTaken,
+            ));
+            if (tal.burstShield > 0) {
+                p.shield = Math.max(p.shield, p.maxHp * tal.burstShield);
+            }
+            cd.burst = this._skillCd(PLAYER_TUNING.burst.cd, mod);
         }
+    }
+
+    /** 攻速换算后的急速（普攻冷却用）：基础急速 + 双持 + 无尽怒焰 + 破阵 */
+    private _effHaste(): number {
+        const p = this.player;
+        const tal = this.profile.talents;
+        let h = this.profile.haste + Math.max(0, tal.attackSpeed);
+        if (p.burst > 0) h += Math.max(0, tal.burstAttackSpeed);
+        if (p.hasteBuff > 0) h += p.hasteBuffAmt;
+        return Math.max(0, Math.min(2, h));
+    }
+
+    /** 技能冷却：急速 + 技能等级/变体 + 战术大师 */
+    private _skillCd(base: number, mod: SkillMod): number {
+        const tal = this.profile.talents;
+        const cdMul = Number.isFinite(mod.cdMul) && mod.cdMul > 0 ? mod.cdMul : 1;
+        const cd = base * cdMul / (1 + Math.max(0, this.profile.haste));
+        return Math.max(0.2, cd * (1 - Math.max(0, Math.min(0.6, tal.skillCd))));
+    }
+
+    /** 怒气获取统一走这里（战术精通按比例放大） */
+    private _gainRage(amount: number): void {
+        if (!(amount > 0)) return;
+        const tal = this.profile.talents;
+        this.player.rage = Math.min(100, this.player.rage + amount * (1 + Math.max(0, tal.rageGain)));
+    }
+
+    /** 掷伤害：消费「下一击必暴」 */
+    private _rollDamage(mult: number): DamageResult {
+        const p = this.player;
+        const forced = p.nextCrit;
+        if (forced) p.nextCrit = false;
+        return computeDamage(this.profile, this.rng, mult, forced);
     }
 
     private _dash(dir: number, distance: number): void {
@@ -726,11 +977,12 @@ export class MithrilWorld {
         p.facing = dir;
     }
 
-    private _swing(): void {
+    private _swing(mod: SkillMod): void {
         const p = this.player;
         const t = PLAYER_TUNING.basic;
-        // 自动索敌：命中判定用「距离 − 敌人半径」，转身也必须同口径，
+        // 横扫变体把扇形扩到 120°（半角 ×1.333）；命中判定用「距离 − 敌人半径」，转身也必须同口径，
         // 否则大体积的 BOSS 站在 120 距离上会被判成「不在扇形内」而永远空挥。
+        const halfAngle = t.halfAngle * (mod.v2.arcMul || 1);
         let target: EnemyState | null = null;
         let bestReach = Infinity;
         for (const e of this.enemies) {
@@ -741,6 +993,11 @@ export class MithrilWorld {
             }
         }
         if (target) p.facing = Math.atan2(target.y - p.y, target.x - p.x);
+        // 连斩：每第 N 次普攻整段加倍
+        p.swingCount++;
+        const per = mod.v4.comboEvery || 0;
+        const comboHit = per > 0 && p.swingCount % per === 0;
+        const mult = t.mult * mod.dmgMul * (comboHit ? (mod.v4.comboMul || 1) : 1);
         const hitsList: Array<[number, DamageResult]> = [];
         for (let i = 0; i < this.enemies.length; i++) {
             const e = this.enemies[i];
@@ -749,8 +1006,8 @@ export class MithrilWorld {
             const dist = Math.hypot(dx, dy);
             if (dist > t.radius + e.radius) continue;
             const angle = Math.abs(wrapAngle(Math.atan2(dy, dx) - p.facing));
-            if (angle > t.halfAngle && e !== target) continue;
-            hitsList.push([i, computeDamage(this.profile, this.rng, t.mult)]);
+            if (angle > halfAngle && e !== target) continue;
+            hitsList.push([i, this._rollDamage(mult)]);
         }
         this._emit({ type: 'swing', x: p.x, y: p.y, facing: p.facing, radius: t.radius });
         // 结算必须**倒序**：_damageEnemy 打死人会 splice 掉该敌人，升序结算会让后面所有下标
@@ -760,32 +1017,37 @@ export class MithrilWorld {
         for (let i = hitsList.length - 1; i >= 0; i--) {
             const [index, res] = hitsList[i];
             const dmg = res.damage * this._playerDamageMult();
-            this._damageEnemy(index, dmg, res.crit);
+            this._damageEnemy(index, dmg, res.crit, 'basic');
         }
         if (hitCount > 0) {
-            p.rage = Math.min(100, p.rage + t.rage + Math.min(4, (hitCount - 1) * 2));
+            this._gainRage(t.rage + Math.min(4, (hitCount - 1) * 2));
         }
     }
 
-    private _whirlTick(): void {
+    private _whirlTick(mod: SkillMod): void {
         const p = this.player;
         const t = PLAYER_TUNING.whirlwind;
-        this._emit({ type: 'whirl', x: p.x, y: p.y, radius: t.radius });
+        const radius = t.radius + (mod.v2.radiusAdd || 0);
+        this._emit({ type: 'whirl', x: p.x, y: p.y, radius });
         let hit = false;
+        const mult = t.mult * mod.dmgMul;
         for (let i = this.enemies.length - 1; i >= 0; i--) {
             const e = this.enemies[i];
             if (!e) continue;
-            if (dist2(e.x, e.y, p.x, p.y) > (t.radius + e.radius) * (t.radius + e.radius)) continue;
-            const res = computeDamage(this.profile, this.rng, t.mult);
+            if (dist2(e.x, e.y, p.x, p.y) > (radius + e.radius) * (radius + e.radius)) continue;
+            const res = this._rollDamage(mult);
             hit = true;
-            this._damageEnemy(i, res.damage * this._playerDamageMult(), res.crit);
+            this._damageEnemy(i, res.damage * this._playerDamageMult(), res.crit, 'skill');
         }
-        if (hit) p.rage = Math.min(100, p.rage + 3);
+        if (hit) this._gainRage(3);
     }
 
-    private _charge(): void {
+    private _charge(mod: SkillMod): void {
         const p = this.player;
         const t = PLAYER_TUNING.charge;
+        const tal = this.profile.talents;
+        const dist = t.distance + (mod.v2.distAdd || 0) + (mod.v4.distAdd || 0);
+        const stun = t.stun + (mod.v2.stunAdd || 0) + (mod.v4.stunAdd || 0) + Math.max(0, tal.stunBonus);
         let dir = p.facing;
         if (this.enemies.length > 0) {
             const near = this._nearestEnemy(360, true);
@@ -793,10 +1055,11 @@ export class MithrilWorld {
         }
         const sx = p.x;
         const sy = p.y;
-        this._dash(dir, t.distance);
+        this._dash(dir, dist);
         this._emit({ type: 'charge', x: p.x, y: p.y });
         const seen: Record<number, true> = {};
         let hitAny = false;
+        const mult = t.mult * mod.dmgMul;
         for (let s = 0; s <= 8; s++) {
             const k = s / 8;
             const px = sx + (p.x - sx) * k;
@@ -808,33 +1071,61 @@ export class MithrilWorld {
                 if (dist2(e.x, e.y, px, py) > reach * reach) continue;
                 seen[e.id] = true;
                 hitAny = true;
-                const res = computeDamage(this.profile, this.rng, t.mult);
-                e.status.stun = Math.max(e.status.stun, t.stun);
-                this._damageEnemy(i, res.damage * this._playerDamageMult(), res.crit);
+                const res = this._rollDamage(mult);
+                e.status.stun = Math.max(e.status.stun, stun);
+                this._damageEnemy(i, res.damage * this._playerDamageMult(), res.crit, 'skill');
             }
         }
-        if (hitAny) p.rage = Math.min(100, p.rage + t.rage);
+        if (hitAny) this._gainRage(t.rage);
+        // 破阵 / 回身：冲锋后的姿态 buff（不要求命中，否则空冲等于白点天赋）
+        if (mod.v4.hasteBuff) {
+            p.hasteBuffAmt = mod.v4.hasteBuff;
+            p.hasteBuff = mod.v4.hasteBuffDur || 3;
+        }
+        if (mod.v4.guardDur) {
+            p.guard = mod.v4.guardDur;
+            p.guardCut = 0.4;
+        }
     }
 
-    private _armorBreak(): boolean {
+    private _armorBreak(mod: SkillMod): boolean {
         const t = PLAYER_TUNING.armorBreak;
+        const tal = this.profile.talents;
         // 破甲要能作用于 BOSS —— 渲染层会给 BOSS 画破甲标记，
         // 之前传 includeBoss=false 导致这招对 BOSS 静默无效。
         const target = this._nearestEnemy(t.range, true);
         if (!target) return false;
         const p = this.player;
         p.facing = Math.atan2(target.y - p.y, target.x - p.x);
+        const res = this._rollDamage(t.mult * mod.dmgMul);
+        const bonus = t.bonus + Math.max(0, tal.armorBreakBonus) + (mod.v2.armorBreakAdd || 0);
+        const duration = t.duration + (mod.v4.durationAdd || 0);
+        target.status.armorBreak = Math.max(target.status.armorBreak, duration);
+        target.status.armorBreakBonus = Math.max(target.status.armorBreakBonus, bonus);
+        // 威慑：破甲附带减速，天赋按比例延长
+        target.status.slow = Math.max(target.status.slow, 2 * (1 + Math.max(0, tal.slowBonus)));
+
+        // 裂甲：先结算溅射（会 splice 数组），再按 target 重新定位主目标
+        const splash = mod.v2.splashRadius || 0;
+        if (splash > 0) {
+            const amount = res.damage * this._playerDamageMult() * (mod.v2.splashMul || 0.5);
+            const list: number[] = [];
+            for (let i = 0; i < this.enemies.length; i++) {
+                const e = this.enemies[i];
+                if (!e || e === target) continue;
+                if (dist2(e.x, e.y, target.x, target.y) <= (splash + e.radius) * (splash + e.radius)) list.push(i);
+            }
+            for (let k = list.length - 1; k >= 0; k--) this._damageEnemy(list[k], amount, false, 'skill');
+        }
         const index = this.enemies.indexOf(target);
-        if (index < 0) return false;
-        const res = computeDamage(this.profile, this.rng, t.mult);
-        target.status.armorBreak = Math.max(target.status.armorBreak, t.duration);
-        this._damageEnemy(index, res.damage * this._playerDamageMult(), res.crit);
-        p.rage = Math.min(100, p.rage + t.rage);
+        if (index < 0) return true;
+        this._damageEnemy(index, res.damage * this._playerDamageMult(), res.crit, 'skill');
+        this._gainRage(t.rage);
         return true;
     }
 
     private _playerDamageMult(): number {
-        return this.player.burst > 0 ? 1 + PLAYER_TUNING.burst.dmgBonus : 1;
+        return this.player.burst > 0 ? 1 + this.player.burstDamage : 1;
     }
 
     private _nearestEnemy(range: number, includeBoss = true): EnemyState | null {
@@ -931,7 +1222,8 @@ export class MithrilWorld {
         const reach = e.radius + p.radius;
         if (dist2(e.x, e.y, p.x, p.y) <= reach * reach) {
             const mult = e.isBoss ? this._bossDamageMult() : 1;
-            if (this.hitPlayer(e.contactDamage * mult)) {
+            // 接触伤害算物理近战：吃护甲，也触发「反弹」与格挡反击
+            if (this.hitPlayer(e.contactDamage * mult, { physical: true, melee: true, attacker: e })) {
                 e.contactCd = PLAYER_TUNING.contactCooldown;
             }
         }
@@ -991,7 +1283,7 @@ export class MithrilWorld {
                 t.done = true;
                 const reach = t.radius + this.player.radius;
                 if (dist2(t.x, t.y, this.player.x, this.player.y) <= reach * reach) {
-                    this.hitPlayer(t.damage);
+                    this.hitPlayer(t.damage, { physical: true, slow: t.kind === 'boss_slam' });
                 }
                 this._emit({ type: 'boom', x: t.x, y: t.y, radius: t.radius });
             }
@@ -1012,7 +1304,7 @@ export class MithrilWorld {
                 const reach = b.radius + p.radius;
                 if (dist2(b.x, b.y, p.x, p.y) <= reach * reach) {
                     // 狂暴倍率在发射时就烘进伤害，避免「BOSS 狂暴了，小怪的子弹也跟着变疼」
-                    this.hitPlayer(b.damage);
+                    this.hitPlayer(b.damage, { physical: true });
                     remove = true;
                 }
             } else if (!remove && b.owner === 'player') {
@@ -1043,9 +1335,8 @@ export class MithrilWorld {
             }
             if (p.hp >= p.maxHp) continue;
             if (dist2(o.x, o.y, p.x, p.y) > reach * reach) continue;
-            const heal = Math.min(o.amount, p.maxHp - p.hp);
-            p.hp = Math.min(p.maxHp, p.hp + heal);
-            this._emit({ type: 'heal', x: o.x, y: o.y, amount: heal });
+            const heal = this._healPlayer(o.amount);
+            if (heal > 0) this._emit({ type: 'heal', x: o.x, y: o.y, amount: heal });
             this.orbs.splice(i, 1);
         }
     }
@@ -1073,11 +1364,9 @@ export class MithrilWorld {
             this._mechanicTimer = 0;
             const phase = script.phases[this.bossPhase];
             // 阶段转换回血：让玩家有机会整理节奏，而不是被血线直接压死
-            const heal = Math.round(this.player.maxHp * BOSS_PHASE_HEAL_PCT);
-            const before = this.player.hp;
-            this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
-            if (this.player.hp > before) {
-                this._emit({ type: 'heal', x: this.player.x, y: this.player.y, amount: this.player.hp - before });
+            const heal = this._healPlayer(this.player.maxHp * BOSS_PHASE_HEAL_PCT);
+            if (heal > 0) {
+                this._emit({ type: 'heal', x: this.player.x, y: this.player.y, amount: heal });
             }
             this._emit({ type: 'phase', phase: this.bossPhase + 1, name: phase.name });
             this._showBanner(`阶段 ${this.bossPhase + 1} · ${phase.name}`, phase.desc, 2.6);
@@ -1186,12 +1475,16 @@ export class MithrilWorld {
 
     // ==================== 伤害与击杀 ====================
 
-    private _damageEnemy(index: number, damage: number, crit: boolean): boolean {
+    private _damageEnemy(index: number, damage: number, crit: boolean, source: DamageSource = 'basic'): boolean {
         const e = this.enemies[index];
         if (!e) return false;
         let dmg = Number.isFinite(damage) ? Math.max(0, damage) : 0;
-        if (e.status.armorBreak > 0) dmg *= 1 + PLAYER_TUNING.armorBreak.bonus;
+        if (e.status.armorBreak > 0 && e.status.armorBreakBonus > 0) {
+            dmg *= 1 + e.status.armorBreakBonus;
+        }
+        dmg *= this._damageMulVs(e, source);
         e.hp -= dmg;
+        if (source !== 'reflect' && source !== 'dot') this._onHitLanded();
         this._emit({ type: 'damage', target: 'enemy', x: e.x, y: e.y, amount: dmg, crit });
 
         // BOSS 读条：累计伤害用于打断
@@ -1209,6 +1502,60 @@ export class MithrilWorld {
         if (e.hp > 0) return false;
         this._killEnemyAt(index);
         return true;
+    }
+
+    /**
+     * 天赋里的条件增伤：目标残血 / 濒死、自身低血、连续命中、技能伤害。
+     * 全部在「伤害落地前」读取目标血量，避免同一击把目标打进 20% 后立刻吃到斩杀加成。
+     */
+    private _damageMulVs(e: EnemyState, source: DamageSource): number {
+        if (source === 'reflect' || source === 'dot') return 1;
+        const p = this.player;
+        const tal = this.profile.talents;
+        let mul = 1;
+        const ratio = e.maxHp > 0 ? e.hp / e.maxHp : 1;
+        if (tal.woundedDamage > 0 && ratio < 0.35) mul *= 1 + tal.woundedDamage;
+        if (tal.executeDamage > 0 && ratio < 0.2) mul *= 1 + tal.executeDamage;
+        if (tal.lowHpDamage > 0 && p.hp / Math.max(1, p.maxHp) < 0.35) mul *= 1 + tal.lowHpDamage;
+        if (tal.stackDamage > 0 && p.combo > 0) mul *= 1 + tal.stackDamage * Math.min(COMBO_MAX, p.combo);
+        if (source === 'skill' && tal.skillDamage > 0) mul *= 1 + tal.skillDamage;
+        return mul;
+    }
+
+    /** 记录一次命中：叠「血之狂潮」，并刷新连击计时 */
+    private _onHitLanded(): void {
+        const p = this.player;
+        p.combo = Math.min(COMBO_MAX, p.combo + 1);
+        p.comboTimer = 0;
+    }
+
+    /** 治疗统一入口（战地医师按比例加成，且不会溢出上限） */
+    private _healPlayer(amount: number): number {
+        const p = this.player;
+        const mul = 1 + Math.max(0, this.profile.talents.healMul);
+        const heal = Math.min(p.maxHp - p.hp, Math.max(0, amount) * mul);
+        if (heal <= 0) return 0;
+        p.hp = Math.min(p.maxHp, p.hp + heal);
+        return heal;
+    }
+
+    /** 反弹：把伤害按比例打回来源敌人（不吃条件增伤、不叠连击） */
+    private _reflect(attacker: EnemyState, amount: number): void {
+        const index = this.enemies.indexOf(attacker);
+        if (index < 0 || !(amount > 0)) return;
+        this._damageEnemy(index, amount, false, 'reflect');
+    }
+
+    /** 荆棘堡垒：受伤后对周围敌人造成比例伤害 */
+    private _thornAoe(x: number, y: number, amount: number): void {
+        if (!(amount > 0)) return;
+        const list: number[] = [];
+        for (let i = 0; i < this.enemies.length; i++) {
+            const e = this.enemies[i];
+            if (!e) continue;
+            if (dist2(e.x, e.y, x, y) <= (THORN_RADIUS + e.radius) * (THORN_RADIUS + e.radius)) list.push(i);
+        }
+        for (let k = list.length - 1; k >= 0; k--) this._damageEnemy(list[k], amount, false, 'reflect');
     }
 
     private _killEnemyAt(index: number): void {
@@ -1242,6 +1589,12 @@ export class MithrilWorld {
             this.boss = null;
             this.bossCast = null;
         }
+        // 嗜血：击杀回血（按最大生命比例，走统一治疗入口吃「战地医师」）
+        const killHealPct = this.profile.talents.killHealPct;
+        if (killHealPct > 0) {
+            const heal = this._healPlayer(this.player.maxHp * killHealPct);
+            if (heal > 0) this._emit({ type: 'heal', x: e.x, y: e.y, amount: heal });
+        }
         this._emit({ type: 'kill', x: e.x, y: e.y, kind: e.kind, exp, gold });
     }
 
@@ -1262,12 +1615,10 @@ export class MithrilWorld {
             }
             if (this.enemies.length === 0) {
                 if (this.encounterIndex >= 0) {
-                    const heal = Math.round(this.player.maxHp * ENCOUNTER_HEAL_PCT);
-                    const before = this.player.hp;
-                    this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
+                    const heal = this._healPlayer(this.player.maxHp * ENCOUNTER_HEAL_PCT);
                     // 满血清场时别弹一个实际没加上的绿色数字
-                    if (this.player.hp > before) {
-                        this._emit({ type: 'heal', x: this.player.x, y: this.player.y, amount: this.player.hp - before });
+                    if (heal > 0) {
+                        this._emit({ type: 'heal', x: this.player.x, y: this.player.y, amount: heal });
                     }
                 }
                 this._gap = this.encounterIndex + 1 < MINE_ENCOUNTERS.length
@@ -1337,4 +1688,31 @@ export class MithrilWorld {
         if (this._events.length >= 240) this._events.shift();
         this._events.push(ev);
     }
+}
+
+// ==================== 平衡打桩（自检专用） ====================
+
+/**
+ * 对一只「不会死、不会还手」的木桩按标准循环输出的实战 DPS。
+ *
+ * 用真实战斗结算（含暴击 / 连击 / 条件增伤 / 技能等级与变体），而不是纸面公式，
+ * 所以自检能锁住「毕业装 vs 起点」的实测倍率。冲锋不在循环里：它是位移技，
+ * 打桩时会把玩家冲过木桩导致大量空挥，反而测不准输出。
+ */
+export function measureDummyDps(profile: CombatProfile, seconds = 60, seed = 991): number {
+    const world = new MithrilWorld(profile, seed);
+    world.spawnEnemy('dummy', PLAYER_START_X, PLAYER_START_Y + 70, 1e12, 0, 0);
+    const input: MithrilInput = {
+        moveX: 0, moveY: 0, aimX: 0, aimY: 0,
+        basic: true, skill1: false, skill2: true, skill3: true, burst: true, dodge: false,
+    };
+    const steps = Math.max(1, Math.round(seconds / FIXED_DT));
+    let total = 0;
+    for (let i = 0; i < steps; i++) {
+        world.step(FIXED_DT, input);
+        for (const ev of world.drainEvents()) {
+            if (ev.type === 'damage' && ev.target === 'enemy') total += ev.amount;
+        }
+    }
+    return total / seconds;
 }

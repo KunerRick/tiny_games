@@ -42,6 +42,23 @@ const SKILL_NAME: Record<SkillKey, string> = {
     dodge: '闪',
 };
 
+/** 成长信息（MithrilGame 每次刷新顶栏前喂进来） */
+export interface GrowthInfo {
+    level: number;
+    exp: number;
+    /** 升到下一级所需经验；满级传 Infinity */
+    expNeed: number;
+    books: number;
+    /** 够级但还没选的变体数量 */
+    pending: number;
+    /** 可分配天赋点 */
+    points: number;
+}
+
+const DEFAULT_GROWTH: GrowthInfo = {
+    level: 1, exp: 0, expNeed: Infinity, books: 0, pending: 0, points: 0,
+};
+
 @ccclass('MithrilHud')
 export class MithrilHud extends Component {
     /** 左上角返回（由 MithrilGame 接到 SceneManager.gotoLobby） */
@@ -50,6 +67,8 @@ export class MithrilHud extends Component {
     onRestart: (() => void) | null = null;
     /** 结算面板「装备」 */
     onOpenBag: (() => void) | null = null;
+    /** 结算面板「成长」 */
+    onOpenGrowth: (() => void) | null = null;
 
     /** 各技能键当前是否按住（主组件每帧读取） */
     readonly held: Record<SkillKey, boolean> = {
@@ -59,8 +78,15 @@ export class MithrilHud extends Component {
     private _barGfx: Graphics | null = null;
     private _hpLabel: Label | null = null;
     private _rageLabel: Label | null = null;
+    private _expLabel: Label | null = null;
     private _progressLabel: Label | null = null;
     private _timerLabel: Label | null = null;
+
+    private _growth: GrowthInfo = { ...DEFAULT_GROWTH };
+    /** 升级横幅：优先于副本阶段横幅显示，按 HUD 刷新节拍倒数 */
+    private _growthTitle = '';
+    private _growthSub = '';
+    private _growthTimer = 0;
 
     private _bannerTitle: Label | null = null;
     private _bannerSub: Label | null = null;
@@ -81,6 +107,7 @@ export class MithrilHud extends Component {
     private _resultBody: Label | null = null;
     private _resultShown = false;
     private _lootLines: string[] = [];
+    private _rewardLines: string[] = [];
     private _lastWin = false;
     private _lastTimeText = '0:00';
     private _lastKills = 0;
@@ -103,6 +130,7 @@ export class MithrilHud extends Component {
         this._barGfx = null;
         this._hpLabel = null;
         this._rageLabel = null;
+        this._expLabel = null;
         this._progressLabel = null;
         this._timerLabel = null;
         this._bannerTitle = null;
@@ -142,11 +170,38 @@ export class MithrilHud extends Component {
     resetForNewRun(): void {
         this._resultShown = false;
         this._lootLines = [];
+        this._rewardLines = [];
+        this._growthTimer = 0;
         if (this._resultRoot) this._resultRoot.active = false;
         for (const key of Object.keys(this.held) as SkillKey[]) this.held[key] = false;
         for (const b of this._skills) b.pressed = false;
         this._lastHp = -1;
         this._lastRage = -1;
+    }
+
+    /** 等级 / 经验 / 技能书 / 待选变体（每次刷顶栏前调用，值没变也只是覆盖几个字段） */
+    setGrowthInfo(info: GrowthInfo): void {
+        this._growth = info;
+    }
+
+    /**
+     * 升级横幅。走 HUD 自己的计时器而不是 `toast`：
+     * 升级发生在战斗中，底部 toast 会被技能键压住，而这里是屏幕中上方的固定视线区。
+     */
+    showGrowthBanner(title: string, sub: string, seconds = 2.2): void {
+        this._growthTitle = title;
+        this._growthSub = sub;
+        this._growthTimer = seconds;
+        this._bannerKey = '';
+    }
+
+    /**
+     * 结算面板的收益行（金币 / 经验 / 技能书 / 首通奖励）。
+     * 由 MithrilGame 在判定通关后、updateHud 之前调用。
+     */
+    setRewardLines(lines: string[]): void {
+        this._rewardLines = lines.slice(0, 4);
+        if (this._resultShown) this._refreshResultBody();
     }
 
     /**
@@ -174,6 +229,10 @@ export class MithrilHud extends Component {
         });
         this._rageLabel = createLabel(this.node, '', 13, {
             width: 300, height: 16, color: COLOR.TEXT_PRIMARY, x: -80, y: 569,
+        });
+        // 经验条贴在怒气条下方（540 行），文字放右侧，避免和 BOSS 条打架
+        this._expLabel = createLabel(this.node, '', 13, {
+            width: 240, height: 16, color: COLOR.TEXT_SECONDARY, align: 'right', x: 232, y: 541,
         });
         this._progressLabel = createLabel(this.node, '', 18, {
             width: 240, height: 24, color: COLOR.TEXT_PRIMARY, bold: true, align: 'right', x: 232, y: 608,
@@ -232,8 +291,31 @@ export class MithrilHud extends Component {
         g.roundRect(bx, ry, rw, rh, 6);
         g.stroke();
 
-        this._hpLabel!.string = `生命  ${Math.ceil(hp)} / ${hpMax}`;
+        // 经验条：满级（expNeed 非有限）时按满槽画，避免出现「满级却空条」
+        const need = this._growth.expNeed;
+        const capped = !Number.isFinite(need) || need <= 0;
+        const expRatio = capped ? 1 : Math.max(0, Math.min(1, this._growth.exp / need));
+        const ey = 536;
+        const eh = 6;
+        g.fillColor = hex(COLOR.SLOT_EMPTY_BG, 210);
+        g.roundRect(bx, ey, rw, eh, 3);
+        g.fill();
+        if (expRatio > 0) {
+            g.fillColor = hex('#38BDF8', 235);
+            g.roundRect(bx + 1, ey + 1, Math.max(2, (rw - 2) * expRatio), eh - 2, 2);
+            g.fill();
+        }
+
+        this._hpLabel!.string = `Lv ${this._growth.level}　生命  ${Math.ceil(hp)} / ${hpMax}`;
         this._rageLabel!.string = `怒气  ${Math.floor(rage)} / 100`;
+        if (this._expLabel) {
+            const expText = capped
+                ? '经验 满级'
+                : `经验 ${Math.floor(this._growth.exp)} / ${need}`;
+            this._expLabel.string = this._growth.points > 0
+                ? `${expText}　天赋点 ${this._growth.points}`
+                : expText;
+        }
         this._progressLabel!.string = snap.dungeonProgress || snap.dungeonName;
         const t = Math.max(0, Math.floor(snap.time));
         const mm = Math.floor(t / 60);
@@ -267,6 +349,24 @@ export class MithrilHud extends Component {
         const title = this._bannerTitle;
         const sub = this._bannerSub;
         if (!title || !sub) return;
+        // 升级横幅优先：它出现在战斗中，被副本阶段横幅盖掉就等于没提示
+        if (this._growthTimer > 0) {
+            // updateHud 的调用节拍是 HUD_REFRESH(0.1s)，按同一节拍倒数
+            this._growthTimer -= 0.1;
+            const growKey = `grow|${this._growthTitle}|${this._growthSub}`;
+            if (growKey !== this._bannerKey) {
+                this._bannerKey = growKey;
+                title.string = this._growthTitle;
+                sub.string = this._growthSub;
+                title.color = hex(COLOR.WARNING);
+                sub.color = hex(COLOR.TEXT_PRIMARY);
+            }
+            title.node.active = true;
+            sub.node.active = true;
+            title.node.setScale(1, 1, 1);
+            return;
+        }
+        if (this._bannerKey.indexOf('grow|') === 0) this._bannerKey = '';
         const b = snap.banner;
         if (!b) {
             title.node.active = false;
@@ -279,6 +379,9 @@ export class MithrilHud extends Component {
             this._bannerKey = key;
             title.string = b.title;
             sub.string = b.subtitle;
+            // 升级横幅把标题染成金色了，回到副本横幅时要把基色复位（下面按 alpha 复制）
+            title.color = hex(COLOR.TEXT_PRIMARY);
+            sub.color = hex(COLOR.TEXT_SECONDARY);
         }
         title.node.active = true;
         sub.node.active = true;
@@ -572,8 +675,21 @@ export class MithrilHud extends Component {
             `用时 ${this._lastTimeText}    击杀 ${this._lastKills}`,
             this._lastWin ? '矿坑巨魔已被击败' : `推进到 ${this._lastProgress}`,
         ];
-        if (this._lootLines.length > 0) lines.push(...this._lootLines);
+        if (this._rewardLines.length > 0) lines.push(...this._rewardLines);
+        // 正文高度有限（8 行）：收益行优先，掉落最多两行
+        if (this._lootLines.length > 0) lines.push(...this._lootLines.slice(0, 2));
+        const hint = this._growthHintText();
+        if (hint) lines.push(hint);
         this._resultBody.string = lines.join('\n');
+    }
+
+    /** 结算面板最后一行：还有多少东西可以花 */
+    private _growthHintText(): string {
+        const bits: string[] = [];
+        if (this._growth.points > 0) bits.push(`天赋点 ${this._growth.points}`);
+        if (this._growth.books > 0) bits.push(`技能书 ${this._growth.books}`);
+        if (this._growth.pending > 0) bits.push(`待选变体 ${this._growth.pending}`);
+        return bits.length > 0 ? `可成长：${bits.join(' · ')}` : '';
     }
 
     private _ensureResult(): void {
@@ -613,39 +729,51 @@ export class MithrilHud extends Component {
         root.addChild(panel);
 
         this._resultTitle = createLabel(panel, '', 44, {
-            width: 460, height: 60, color: COLOR.TEXT_PRIMARY, bold: true, y: 190,
+            width: 460, height: 60, color: COLOR.TEXT_PRIMARY, bold: true, y: 198,
         });
-        this._resultBody = createLabel(panel, '', 18, {
-            width: 470, height: 180, color: COLOR.TEXT_SECONDARY, y: 60,
-            lineHeight: 28,
+        this._resultBody = createLabel(panel, '', 17, {
+            width: 470, height: 224, color: COLOR.TEXT_SECONDARY, y: 58,
+            lineHeight: 26,
         });
 
+        // 四个按钮均分：再来一次 / 成长 / 装备 / 返回大厅
         const again = createButton(panel, {
-            w: 150, h: 58, text: '再来一次', fontSize: 24,
+            w: 112, h: 58, text: '再来一次', fontSize: 22,
             fill: COLOR.PRIMARY, textColor: '#FFFFFF', activeFill: COLOR.PRIMARY_DARK,
             radius: 14, onTap: () => this._onRestartTap(),
         });
-        again.node.setPosition(-172, -190, 0);
+        again.node.setPosition(-177, -190, 0);
+
+        const grow = createButton(panel, {
+            w: 112, h: 58, text: '成长', fontSize: 22,
+            fill: '#B45309', textColor: '#FFFFFF', activeFill: '#92400E',
+            radius: 14, onTap: () => this._onGrowthTap(),
+        });
+        grow.node.setPosition(-59, -190, 0);
 
         const bag = createButton(panel, {
-            w: 150, h: 58, text: '装备', fontSize: 24,
+            w: 112, h: 58, text: '装备', fontSize: 22,
             fill: '#A855F7', textColor: '#FFFFFF', activeFill: '#7E3AF2',
             radius: 14, onTap: () => this._onBagTap(),
         });
-        bag.node.setPosition(0, -190, 0);
+        bag.node.setPosition(59, -190, 0);
 
         const exit = createButton(panel, {
-            w: 150, h: 58, text: '返回大厅', fontSize: 24,
+            w: 112, h: 58, text: '返回大厅', fontSize: 22,
             fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
             radius: 14, onTap: () => this._onExitTap(),
         });
-        exit.node.setPosition(172, -190, 0);
+        exit.node.setPosition(177, -190, 0);
 
         root.active = false;
     }
 
     private _onRestartTap = (): void => {
         if (this.onRestart) this.onRestart();
+    };
+
+    private _onGrowthTap = (): void => {
+        if (this.onOpenGrowth) this.onOpenGrowth();
     };
 
     private _onBagTap = (): void => {

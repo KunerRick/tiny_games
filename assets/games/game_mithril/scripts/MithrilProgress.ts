@@ -19,10 +19,12 @@ import {
     QUALITY_BY_ID,
     SKILL_BY_ID,
     SKILLS,
+    SKILL_RESPEC_GOLD,
     TALENTS,
     TALENT_BY_ID,
     TALENT_LINE_CAP,
     TALENT_MAX_RANK,
+    TALENT_RESPEC_GOLD,
     TALENT_TOTAL,
     TRINKET_BY_ID,
     talentTierGate,
@@ -302,6 +304,18 @@ export function resetTalents(save: MithrilSave): number {
     return refunded;
 }
 
+/**
+ * 付费洗点（设计 §4.4：营地训练场 200 金，单机不惩罚实验）。
+ * 金币不足返回 false；成功时清空天赋并落盘由调用方负责。
+ */
+export function respecTalents(save: MithrilSave): boolean {
+    const gold = Math.max(0, Math.floor(save.gold || 0));
+    if (gold < TALENT_RESPEC_GOLD) return false;
+    save.gold = gold - TALENT_RESPEC_GOLD;
+    save.talents = {};
+    return true;
+}
+
 // ==================== 技能与变体 ====================
 
 export type VariantState = [number | null, number | null];
@@ -356,6 +370,66 @@ export function variantDef(save: MithrilSave, skillId: string, tier: number): Sk
     return def.variants[slot][choice];
 }
 
+// ---- 技能升级（M3）：技能书 → 等级 1..5 ----
+
+export const SKILL_LEVEL_MAX = 5;
+/** 每级消耗 1 本技能书（通关保底 1 本，首通 2 本） */
+export const SKILL_BOOK_COST = 1;
+
+export type SkillUpgradeReason = '' | 'unknown' | 'class' | 'max-level' | 'no-books';
+
+export interface SkillUpgradeCheck {
+    ok: boolean;
+    reason: SkillUpgradeReason;
+    level: number;
+}
+
+export function canUpgradeSkill(save: MithrilSave, skillId: string): SkillUpgradeCheck {
+    const def = SKILL_BY_ID[skillId];
+    const level = skillLevel(save, skillId);
+    if (!def) return { ok: false, reason: 'unknown', level };
+    if (def.classId !== save.classId) return { ok: false, reason: 'class', level };
+    if (level >= SKILL_LEVEL_MAX) return { ok: false, reason: 'max-level', level };
+    if (Math.max(0, Math.floor(save.skillBooks || 0)) < SKILL_BOOK_COST) {
+        return { ok: false, reason: 'no-books', level };
+    }
+    return { ok: true, reason: '', level };
+}
+
+/** 消耗技能书升一级；2 级 / 4 级升上去后由 UI 弹变体二选一 */
+export function upgradeSkill(save: MithrilSave, skillId: string): boolean {
+    const check = canUpgradeSkill(save, skillId);
+    if (!check.ok) return false;
+    save.skillBooks = Math.max(0, Math.floor(save.skillBooks || 0) - SKILL_BOOK_COST);
+    save.skills[skillId] = check.level + 1;
+    return true;
+}
+
+/**
+ * 技能洗点（设计 §4.5：500 金清空所有变体选择，重新二选一）。
+ * 技能等级与技能书不退 —— 与天赋洗点同口径，只重选「形态」。
+ */
+export function respecVariants(save: MithrilSave): boolean {
+    const gold = Math.max(0, Math.floor(save.gold || 0));
+    if (gold < SKILL_RESPEC_GOLD) return false;
+    save.gold = gold - SKILL_RESPEC_GOLD;
+    save.variants = {};
+    return true;
+}
+
+/** 某职业是否还有「够级但没选」的变体（面板红点 / 提示用） */
+export function pendingVariantCount(save: MithrilSave): number {
+    let n = 0;
+    for (const def of SKILLS) {
+        if (def.classId !== save.classId || !def.variants) continue;
+        const level = skillLevel(save, def.id);
+        const state = variantState(save, def.id);
+        if (level >= 2 && state[0] === null) n++;
+        if (level >= 4 && state[1] === null) n++;
+    }
+    return n;
+}
+
 // ==================== 经验与升级 ====================
 
 /** 增加经验，返回升了几级；满级后经验停在 0 */
@@ -400,6 +474,8 @@ export interface MithrilSave {
     talents: TalentState;
     skills: Record<string, number>;
     variants: Record<string, VariantState>;
+    /** 技能书（通关掉落，成长面板里升级技能用） */
+    skillBooks: number;
     dungeonsCleared: string[];
     bounties: string[];
     facilities: Record<FacilityId, number>;
@@ -425,6 +501,7 @@ export function defaultSave(classId: ClassId = 'warrior'): MithrilSave {
         talents: {},
         skills,
         variants: {},
+        skillBooks: 0,
         dungeonsCleared: [],
         bounties: [],
         facilities,
@@ -602,6 +679,8 @@ export function sanitizeSave(raw: unknown): MithrilSave {
             out.skills[def.id] = toInt(sk[def.id], 1, 5, 1);
         }
     }
+
+    out.skillBooks = toInt(src.skillBooks, 0, 999, 0);
 
     if (src.variants && typeof src.variants === 'object') {
         const v = src.variants as Record<string, unknown>;

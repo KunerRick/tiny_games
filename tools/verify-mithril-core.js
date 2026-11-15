@@ -4,6 +4,8 @@
  *
  * M0 覆盖：数值曲线 / 副属性预算 / 天赋规则 / 技能变体 / 存档净化 /
  *          配置表完整性 / 战斗骨架（确定性、实体上限、伤害无 NaN、无敌帧）。
+ * M3 覆盖：天赋效果聚合与夹取 / 30 条天赋无空挂 / 技能等级与变体门控 /
+ *          技能书与洗点 / **实战打桩 DPS 倍率 ∈ [8,11]** / 升级换 profile。
  *
  * 用法：node tools/verify-mithril-core.js
  * 通过时打印 MITHRIL_CORE_OK；失败时逐条打印并以退出码 1 结束。
@@ -20,6 +22,7 @@ const CONFIG = path.join(SCRIPTS, 'MithrilConfig.ts');
 const PROGRESS = path.join(SCRIPTS, 'MithrilProgress.ts');
 const CORE = path.join(SCRIPTS, 'MithrilCore.ts');
 const LOOT = path.join(SCRIPTS, 'MithrilLoot.ts');
+const TALENTS = path.join(SCRIPTS, 'MithrilTalents.ts');
 
 function findTsc() {
     const candidates = [
@@ -39,7 +42,7 @@ function loadModules() {
         console.error('找不到 tsc：设置 $TSC 或安装 typescript');
         process.exit(2);
     }
-    for (const f of [CONFIG, PROGRESS, CORE, LOOT]) {
+    for (const f of [CONFIG, PROGRESS, CORE, LOOT, TALENTS]) {
         if (!fs.existsSync(f)) {
             console.error(`缺少源文件：${f}`);
             process.exit(2);
@@ -52,6 +55,7 @@ function loadModules() {
         PROGRESS,
         CORE,
         LOOT,
+        TALENTS,
         '--outDir', outDir,
         '--target', 'ES2019',
         '--module', 'commonjs',
@@ -63,10 +67,11 @@ function loadModules() {
         prog: require(path.join(outDir, 'MithrilProgress.js')),
         core: require(path.join(outDir, 'MithrilCore.js')),
         loot: require(path.join(outDir, 'MithrilLoot.js')),
+        tal: require(path.join(outDir, 'MithrilTalents.js')),
     };
 }
 
-const { cfg: F, prog: P, core: C, loot: L } = loadModules();
+const { cfg: F, prog: P, core: C, loot: L, tal: T } = loadModules();
 
 let passed = 0;
 let failed = 0;
@@ -1240,6 +1245,238 @@ function mkEquip(patch) {
         `crit ${noFloorProf.critChance} → ${floorProf.critChance.toFixed(4)}`);
 }
 
+// ==================== 12. M3：天赋聚合 / 技能等级 / 变体 / 实战倍率 ====================
+
+/** 毕业档：30 级 + 8×ilvl40 史诗 + 30 天赋点 + 2 饰品 + 指定技能等级 / 变体 */
+function mkGraduate(variants = {}, skillLevel = 5) {
+    const save = P.defaultSave('warrior');
+    save.level = 30;
+    let uid = 0;
+    for (const slot of F.GEAR_SLOTS) {
+        const base = F.GEAR_BASES.find((g) => g.slot === slot);
+        save.equips[slot] = {
+            uid: `grad-${uid++}`,
+            baseId: base.id,
+            slot,
+            ilvl: 40,
+            quality: 'epic',
+            affixes: [
+                { id: 'crit', points: 1 }, { id: 'haste', points: 1 },
+                { id: 'mastery', points: 1 }, { id: 'vers', points: 1 },
+            ],
+        };
+    }
+    for (const id of ['warrior_fury_t1_0', 'warrior_fury_t2_0', 'warrior_fury_t3_0',
+        'warrior_fury_t4_0', 'warrior_fury_t5_1', 'warrior_tactic_t1_0']) {
+        for (let i = 0; i < 5; i++) P.spendTalent(save, id);
+    }
+    save.trinkets = [F.TRINKETS[0].id, F.TRINKETS[1].id];
+    for (const sk of F.SKILLS) {
+        if (sk.classId !== 'warrior') continue;
+        save.skills[sk.id] = skillLevel;
+        save.variants[sk.id] = variants[sk.suffix] || null;
+    }
+    return save;
+}
+
+const BASE_PROFILE = C.profileFromSave(P.defaultSave('warrior'), 5);
+const BASE_DPS = C.measureDummyDps(BASE_PROFILE, 60);
+
+{
+    // ---- 天赋聚合 ----
+    const empty = T.talentEffects({}, 'warrior');
+    check('173. 空天赋表聚合为全 0', Object.keys(empty).every((k) => empty[k] === 0));
+
+    const one = T.talentEffects({ warrior_fury_t1_0: 3 }, 'warrior');
+    check('174. 天赋按点数线性放大（狂暴 3 点 = 暴击 +3%）', near(one.critChance, 0.03), one.critChance);
+
+    const over = T.talentEffects({ warrior_tactic_t1_0: 40 }, 'warrior');
+    check('175. 越界点数被上限夹取（战术精通 40 点 → 0.50 封顶）', near(over.rageGain, 0.50), over.rageGain);
+
+    const cheat = T.talentEffects({ warrior_steel_t5_0: 5 }, 'warrior');
+    check('176. 不朽每 2 点换 1 次免死（5 点 → 2 次）', cheat.cheatDeath === 2, cheat.cheatDeath);
+
+    const warriorTalents = F.TALENTS.filter((t) => t.classId === 'warrior');
+    const deadTalents = warriorTalents.filter((t) => {
+        // 用满 5 点判断：不朽这类「每 2 点 1 次」的天赋 1 点本来就是 0
+        const eff = T.talentEffects({ [t.id]: 5 }, 'warrior');
+        return !Object.keys(eff).some((k) => eff[k] !== 0);
+    }).map((t) => t.id);
+    check('177. 战士 30 条天赋全部有实战消费点（无空挂天赋）',
+        warriorTalents.length === 30 && deadTalents.length === 0, deadTalents.join(','));
+
+    const alien = T.talentEffects({ warrior_fury_t1_0: 5, not_a_talent: 5 }, 'mage');
+    check('178. 非本职业 / 未知天赋 id 不生效也不崩', Object.keys(alien).every((k) => alien[k] === 0));
+
+    // ---- 技能等级 / 变体聚合 ----
+    const lvl1 = T.skillModsFromSave({ classId: 'warrior', skills: {}, variants: {} });
+    const lvl5 = T.skillModsFromSave({ classId: 'warrior', skills: { warrior_basic: 5 }, variants: {} });
+    check('179. 技能 1 级无加成、5 级 +2% 伤害 / −4% 冷却',
+        near(lvl1.basic.dmgMul, 1) && near(lvl1.basic.cdMul, 1)
+        && near(lvl5.basic.dmgMul, 1.02) && near(lvl5.basic.cdMul, 0.96),
+        `lvl5 dmg ${lvl5.basic.dmgMul} cd ${lvl5.basic.cdMul}`);
+
+    const vAt1 = T.skillModsFromSave({ classId: 'warrior', skills: { warrior_basic: 1 }, variants: { warrior_basic: [0, 0] } });
+    const vAt2 = T.skillModsFromSave({ classId: 'warrior', skills: { warrior_basic: 2 }, variants: { warrior_basic: [0, 0] } });
+    check('180. 变体门控：1 级时存档里的选择被忽略，2 级生效（横扫扇形 ×4/3）',
+        Object.keys(vAt1.basic.v2).length === 0 && near(vAt2.basic.v2.arcMul, 1.3333),
+        JSON.stringify(vAt2.basic.v2));
+
+    const v3 = T.skillModsFromSave({ classId: 'warrior', skills: { warrior_basic: 3 }, variants: { warrior_basic: [0, 1] } });
+    const v4 = T.skillModsFromSave({ classId: 'warrior', skills: { warrior_basic: 4 }, variants: { warrior_basic: [0, 1] } });
+    check('181. 4 级槽：3 级不生效，4 级生效（重斩 +15% 伤害进 dmgMul）',
+        Object.keys(v3.basic.v4).length === 0 && near(v4.basic.v4.dmgMul, 1.15)
+        && v4.basic.dmgMul > v3.basic.dmgMul,
+        `v4 ${v4.basic.dmgMul.toFixed(3)} vs v3 ${v3.basic.dmgMul.toFixed(3)}`);
+
+    const warriorSkills = F.SKILLS.filter((s) => s.classId === 'warrior');
+    const witchSkills = {};
+    for (const s of warriorSkills) witchSkills[s.id] = 5;
+    const allVariants = {};
+    for (const s of warriorSkills) allVariants[s.id] = [0, 0];
+    const allV = T.skillModsFromSave({ classId: 'warrior', skills: witchSkills, variants: allVariants });
+    const uncovered = warriorSkills.filter((s) => Object.keys(allV[s.suffix].v2).length === 0
+        || Object.keys(allV[s.suffix].v4).length === 0).map((s) => s.id);
+    check('182. 六个战士技能的 2 级 / 4 级变体都有引擎侧生效（文本与实现成对）',
+        warriorSkills.length === 6 && uncovered.length === 0, uncovered.join(','));
+
+    // ---- 技能书 / 洗点 ----
+    const bookSave = P.defaultSave('warrior');
+    check('183. 默认没有技能书', bookSave.skillBooks === 0);
+    bookSave.skillBooks = 3;
+    const rtBooks = P.parseSave(P.serializeSave(bookSave));
+    check('184. 技能书存档往返 + 越界夹取', rtBooks.skillBooks === 3
+        && P.sanitizeSave({ skillBooks: -5 }).skillBooks === 0
+        && P.sanitizeSave({ skillBooks: 9999 }).skillBooks === 999);
+
+    const up = P.defaultSave('warrior');
+    check('185. 没技能书时不能升级（给出原因）',
+        !P.canUpgradeSkill(up, 'warrior_basic').ok && P.canUpgradeSkill(up, 'warrior_basic').reason === 'no-books');
+    up.skillBooks = 2;
+    const okUp = P.upgradeSkill(up, 'warrior_basic');
+    check('186. 升级消耗 1 本书、技能 +1 级', okUp && up.skills.warrior_basic === 2 && up.skillBooks === 1);
+    up.skills.warrior_basic = P.SKILL_LEVEL_MAX;
+    check('187. 满级技能不能再升', P.canUpgradeSkill(up, 'warrior_basic').reason === 'max-level');
+
+    const pend = P.defaultSave('warrior');
+    pend.skills.warrior_basic = 2;
+    const pendBefore = P.pendingVariantCount(pend);
+    P.chooseVariant(pend, 'warrior_basic', 2, 0);
+    check('188. 变体红点：够级未选自增，选完归零',
+        pendBefore === 1 && P.pendingVariantCount(pend) === 0, `${pendBefore}→${P.pendingVariantCount(pend)}`);
+
+    const rich = P.defaultSave('warrior');
+    rich.level = 10;
+    rich.gold = 250;
+    P.spendTalent(rich, 'warrior_fury_t1_0');
+    check('189. 天赋洗点花 200 金并清空', P.respecTalents(rich) && rich.gold === 50 && P.talentPointsSpent(rich.talents) === 0);
+    const poor = P.defaultSave('warrior');
+    poor.level = 10;
+    poor.gold = 100;
+    P.spendTalent(poor, 'warrior_fury_t1_0');
+    check('190. 金币不足时洗点失败且点数保留',
+        !P.respecTalents(poor) && poor.gold === 100 && P.talentPointsSpent(poor.talents) === 1);
+
+    const richV = P.defaultSave('warrior');
+    richV.gold = 600;
+    richV.skills.warrior_basic = 5;
+    P.chooseVariant(richV, 'warrior_basic', 2, 1);
+    check('191. 技能洗点花 500 金、清空所有变体、等级不退',
+        P.respecVariants(richV) && richV.gold === 100
+        && deepEqual(richV.variants, {}) && richV.skills.warrior_basic === 5);
+    const poorV = P.defaultSave('warrior');
+    poorV.gold = 499;
+    poorV.skills.warrior_basic = 5;
+    P.chooseVariant(poorV, 'warrior_basic', 2, 0);
+    check('192. 金币不足时技能洗点失败、变体保留',
+        !P.respecVariants(poorV) && poorV.gold === 499 && !deepEqual(poorV.variants, {}));
+
+    // ---- 实战倍率（M3 退出标准）----
+    const fiveDps = C.measureDummyDps(C.profileFromSave(mkGraduate({}, 1), 5), 60);
+    const fiveRatio = fiveDps / BASE_DPS;
+    check('193. 五层倍率实测 ∈ [8,11]（30 级 / ilvl40 / 30 天赋 / 2 饰品，技能 1 级）',
+        fiveRatio >= 8 && fiveRatio <= 11, fiveRatio.toFixed(2));
+
+    const maxedProfile = C.profileFromSave(mkGraduate({ basic: [1, 0], a2: [0, 1], a3: [0, 0], burst: [0, 0] }, 5), 5);
+    const maxDps = C.measureDummyDps(maxedProfile, 60);
+    const maxRatio = maxDps / BASE_DPS;
+    check('194. 满技能 + 最坏变体构筑仍 ∈ [8,11]（技能层是形态，不是数值）',
+        maxRatio >= 8 && maxRatio <= 11, maxRatio.toFixed(2));
+
+    check('195. 打桩测量确定性（同 profile 同种子两次一致）',
+        near(C.measureDummyDps(maxedProfile, 60), maxDps, 1e-6), maxDps.toFixed(2));
+
+    const skillLvl5 = C.measureDummyDps(C.profileFromSave(mkGraduate({}, 5), 5), 60);
+    check('196. 技能 1→5 级只增 0–20%（防止再调回 +8%/级 把终局顶出区间）',
+        skillLvl5 > fiveDps && skillLvl5 / fiveDps <= 1.20, (skillLvl5 / fiveDps).toFixed(3));
+
+    // ---- 成长真的进战斗 ----
+    function whirlDamage(variant) {
+        const save = P.defaultSave('warrior');
+        save.skills.warrior_a2 = 4;
+        save.variants.warrior_a2 = variant;
+        const w = new C.MithrilWorld(C.profileFromSave(save, 5), 4242);
+        w.spawnEnemy('dummy', w.player.x, w.player.y + 40, 1e12, 0, 0);
+        w.player.rage = 100;
+        w.drainEvents();
+        let total = 0;
+        const input = { ...IDLE, skill2: true };
+        for (let i = 0; i < Math.round(2.2 / F.FIXED_DT); i++) {
+            w.step(F.FIXED_DT, input);
+            for (const ev of w.drainEvents()) {
+                if (ev.type === 'damage' && ev.target === 'enemy') total += ev.amount;
+            }
+        }
+        return total;
+    }
+    const plainWhirl = whirlDamage(null);
+    const bloodWhirl = whirlDamage([null, 0]);
+    check('197. 变体真的进战斗（血旋：旋风伤害 +10%）',
+        near(bloodWhirl / plainWhirl, 1.1, 0.02), (bloodWhirl / plainWhirl).toFixed(3));
+
+    function hpLossAfterHit(talents) {
+        const save = P.defaultSave('warrior');
+        save.level = 10;
+        save.talents = talents;
+        const w = new C.MithrilWorld(C.profileFromSave(save, 5), 31);
+        const hp0 = w.player.hp;
+        w.hitPlayer(100, { physical: true });
+        return hp0 - w.player.hp;
+    }
+    const plainLoss = hpLossAfterHit({});
+    const armoredLoss = hpLossAfterHit({ warrior_steel_t1_1: 5 });
+    check('198. 天赋真的进战斗（铁壁 5 点 → 物理减伤 5%）',
+        near(armoredLoss, plainLoss * 0.95, 0.6), `${plainLoss} → ${armoredLoss}`);
+
+    const cdSave = P.defaultSave('warrior');
+    cdSave.level = 30;
+    for (const id of ['warrior_steel_t1_0', 'warrior_steel_t2_0', 'warrior_steel_t3_0', 'warrior_steel_t4_0']) {
+        for (let i = 0; i < 5; i++) P.spendTalent(cdSave, id);
+    }
+    for (let i = 0; i < 4; i++) P.spendTalent(cdSave, 'warrior_steel_t5_0');
+    const cw = new C.MithrilWorld(C.profileFromSave(cdSave, 5), 32);
+    cw.player.hp = 10;
+    const survived = cw.hitPlayer(1e6, { physical: true });
+    check('199. 不朽：致命伤免死一次（回 35% 生命 + 1.5s 无敌）',
+        survived && cw.player.hp === Math.round(cw.player.maxHp * 0.35)
+        && cw.player.cheatDeaths === 1 && cw.player.invuln >= 1.4,
+        `hp ${cw.player.hp} / ${cw.player.maxHp}，剩 ${cw.player.cheatDeaths} 次`);
+
+    const sw = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 33);
+    sw.player.hp = 30;
+    const beforeMax = sw.player.maxHp;
+    const grown = C.makeProfile('warrior', 10, 10);
+    sw.setProfile(grown);
+    check('200. 战斗内升级换 profile：上限同步、当前生命只补差额',
+        near(sw.player.maxHp, grown.maxHp)
+        && near(sw.player.hp, Math.min(grown.maxHp, 30 + grown.maxHp - beforeMax)),
+        `${beforeMax} → ${sw.player.maxHp}，hp ${sw.player.hp}`);
+
+    check('201. 通关奖励常量：首通经验 800 / 技能书首通额外 1 本',
+        F.FIRST_CLEAR_EXP === 800 && F.SKILL_BOOK_PER_CLEAR === 1 && F.SKILL_BOOK_FIRST_CLEAR === 1);
+    check('202. 30 级共 30 天赋点', P.talentPointsForLevel(30) === 30, P.talentPointsForLevel(30));
+}
+
 // ==================== 汇总 ====================
 
 const total = passed + failed;
@@ -1248,4 +1485,4 @@ if (failed > 0) {
     for (const f of failures) console.error(`  ✗ ${f}`);
     process.exit(1);
 }
-console.log(`MITHRIL_CORE_OK  ${passed}/${total} 项通过（M1 + M2）`);
+console.log(`MITHRIL_CORE_OK  ${passed}/${total} 项通过（M1 + M2 + M3）`);
