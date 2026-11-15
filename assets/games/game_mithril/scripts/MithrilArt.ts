@@ -581,6 +581,18 @@ export const REGION_ART: Record<string, RegionArtDef> = {
     shade_blade: { style: 'brute', main: '#4B3B6B', dark: '#241A38', glow: '#B08CFF' },
     void_horror: { style: 'blob', main: '#5E3A8C', dark: '#2E1A4C', glow: '#D07BFF' },
     abyss_watcher: { style: 'eye', main: '#3E2B63', dark: '#1E1236', glow: '#E07BFF' },
+    // 腐化教堂（M6）：圣白 / 旧金 + 黑边，越神圣越渗人
+    chapel_acolyte: { style: 'spirit', main: '#E4D8BE', dark: '#5C4C33', glow: '#FFE9A8' },
+    chapel_bishop: { style: 'spirit', main: '#F2E6C4', dark: '#463A22', glow: '#FFD966' },
+    // 冰封哨塔（M6）
+    frost_giant: { style: 'brute', main: '#BFE4F7', dark: '#5A87A3', glow: '#E9FBFF' },
+    // 熔火熔炉（M6）：橙红铁锈
+    forge_smith: { style: 'brute', main: '#B4643C', dark: '#5E2A16', glow: '#FFB05C' },
+    forge_warden: { style: 'brute', main: '#C2572B', dark: '#541C0A', glow: '#FFD24A' },
+    // 暗影回廊 / 秘银王座（M6）
+    shadow_double: { style: 'spirit', main: '#3A2E55', dark: '#1B1329', glow: '#C77BFF' },
+    shadow_blade: { style: 'brute', main: '#33244C', dark: '#150E24', glow: '#FF8CF0' },
+    mithril_king: { style: 'brute', main: '#A8BDD0', dark: '#3C4A5C', glow: '#A9E8FF' },
 };
 
 const SHADOW = '#00000055';

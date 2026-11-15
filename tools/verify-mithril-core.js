@@ -1439,8 +1439,10 @@ const BASE_DPS = C.measureDummyDps(BASE_PROFILE, 60);
     }
     const plainLoss = hpLossAfterHit({});
     const armoredLoss = hpLossAfterHit({ warrior_steel_t1_1: 5 });
+    // 减伤是「加法叠加」到职业护甲上的（战士板甲 15% + 铁壁 5% = 20%），
+    // 所以基准是原始 100 点，而不是减免后的 85 点再乘 0.95
     check('198. 天赋真的进战斗（铁壁 5 点 → 物理减伤 5%）',
-        near(armoredLoss, plainLoss * 0.95, 0.6), `${plainLoss} → ${armoredLoss}`);
+        near(armoredLoss, plainLoss - 100 * 0.05, 0.6), `${plainLoss} → ${armoredLoss}`);
 
     const cdSave = P.defaultSave('warrior');
     cdSave.level = 30;
