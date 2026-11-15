@@ -314,6 +314,8 @@ export class MithrilCampPanel extends Component {
     private _renderSmith(save: MithrilSave): void {
         const content = this._content!;
         const lv = facilityLevel(save, 'smith');
+        // 未建造时两个按钮都直接标出门槛（试玩 N52：别让玩家先选装备才发现用不了）
+        const gate = lv <= 0;
         const list = ownedItems(save);
         const pages = Math.max(1, Math.ceil(list.length / SMITH_ROWS));
         if (this._smPage >= pages) this._smPage = pages - 1;
@@ -393,10 +395,11 @@ export class MithrilCampPanel extends Component {
 
         const canForge = sel ? canReforge(save, sel.item, this._locks) : null;
         const forge = createButton(content, {
-            w: 200, h: 50, text: sel ? `重铸 ${reforgeGold(save, sel.item, this._locks.length)} 金` : '重铸',
-            fontSize: 18,
-            fill: canForge && canForge.ok ? '#B45309' : '#334155',
-            textColor: canForge && canForge.ok ? '#FFFFFF' : COLOR.TEXT_SECONDARY,
+            w: 200, h: 50,
+            text: gate ? '重铸（需铁匠铺 Lv1）' : (sel ? `重铸 ${reforgeGold(save, sel.item, this._locks.length)} 金` : '重铸'),
+            fontSize: gate ? 15 : 18,
+            fill: gate ? '#1A2332' : (canForge && canForge.ok ? '#B45309' : '#334155'),
+            textColor: gate ? COLOR.TEXT_DISABLED : (canForge && canForge.ok ? '#FFFFFF' : COLOR.TEXT_SECONDARY),
             activeFill: '#92400E',
             radius: 12, onTap: () => this._onReforgeTap(),
         });
@@ -405,22 +408,25 @@ export class MithrilCampPanel extends Component {
         const yieldInfo = sel && !sel.equipped ? dismantleYield(sel.item) : null;
         const dismantleBtn = createButton(content, {
             w: 200, h: 50,
-            text: yieldInfo
-                ? `分解 +${yieldInfo.count} ${materialName(yieldInfo.materialId)}`
-                : (sel && sel.equipped ? '已装备·不能拆' : '分解'),
-            fontSize: 17,
-            fill: yieldInfo ? '#334155' : '#1A2332',
-            textColor: yieldInfo ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED,
+            text: gate
+                ? '分解（需铁匠铺 Lv1）'
+                : (yieldInfo
+                    ? `分解 +${yieldInfo.count} ${materialName(yieldInfo.materialId)}`
+                    : (sel && sel.equipped ? '已装备·不能拆' : '分解')),
+            fontSize: gate ? 15 : 17,
+            fill: gate ? '#1A2332' : (yieldInfo ? '#334155' : '#1A2332'),
+            textColor: gate ? COLOR.TEXT_DISABLED : (yieldInfo ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED),
             activeFill: '#475569',
             radius: 12, onTap: () => this._onDismantleTap(),
         });
         dismantleBtn.node.setPosition(150, -140, 0);
 
         createLabel(content, [
+            gate ? '铁匠铺还没建造：升到 Lv1 就能重铸与分解背包里的装备。' : '',
             '重铸：金币重掷**未锁定**的词条，点数与装等不变；每锁一条费用 +40%。',
             '分解：背包里的装备按装等换成材料；身上穿着的不能拆（先脱下）。',
-        ].join('\n'), 15, {
-            width: 620, height: 52, color: COLOR.TEXT_SECONDARY, x: 0, y: -230, lineHeight: 22,
+        ].filter((line) => !!line).join('\n'), 15, {
+            width: 620, height: 72, color: COLOR.TEXT_SECONDARY, x: 0, y: -230, lineHeight: 22,
         });
     }
 
@@ -723,7 +729,7 @@ export class MithrilCampPanel extends Component {
             `下一级：${lv < FACILITY_MAX_LEVEL ? FACILITY_BY_ID.quartermaster.effects[lv] : '已满级'}`,
             '',
             '仓库满时：战斗掉落的装备会折算成金币（不会白打）。',
-            '悬赏系统在 M8 上线，届时悬赏位数量直接生效。',
+            '悬赏任务还没开放；开放后这里的悬赏位数量会直接生效。',
         ].join('\n'), 17, {
             width: 620, height: 380, color: COLOR.TEXT_SECONDARY, x: 0, y: 150, lineHeight: 34,
         });
@@ -769,8 +775,13 @@ export class MithrilCampPanel extends Component {
 
     private _onReforgeTap(): void {
         const save = this._save;
-        const sel = save ? this._selectedOwned(save) : null;
-        if (!save || !sel) {
+        if (!save) return;
+        if (facilityLevel(save, 'smith') <= 0) {
+            this._notice('铁匠铺还没建造：把它升到 Lv1 才能重铸');
+            return;
+        }
+        const sel = this._selectedOwned(save);
+        if (!sel) {
             this._notice('先选一件装备');
             return;
         }
@@ -794,8 +805,13 @@ export class MithrilCampPanel extends Component {
 
     private _onDismantleTap(): void {
         const save = this._save;
-        const sel = save ? this._selectedOwned(save) : null;
-        if (!save || !sel) {
+        if (!save) return;
+        if (facilityLevel(save, 'smith') <= 0) {
+            this._notice('铁匠铺还没建造：把它升到 Lv1 才能分解装备');
+            return;
+        }
+        const sel = this._selectedOwned(save);
+        if (!sel) {
             this._notice('先选一件装备');
             return;
         }

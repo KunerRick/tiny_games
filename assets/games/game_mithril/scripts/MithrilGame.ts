@@ -547,6 +547,8 @@ export class MithrilGame extends Component {
             this._expeditionDown('宝箱的陷阱太狠了', lines);
             return;
         }
+        // 扣血已生效：弹窗开着时顶栏也要显示扣完的生命（试玩 N49）
+        this._refreshMap();
         this._wildMapRef?.showMessage('宝箱', lines, () => {
             this._refreshMap(`宝箱已开 · 生命 ${exp.hp}/${maxHp}`);
         });
@@ -586,6 +588,8 @@ export class MithrilGame extends Component {
             this._expeditionDown('伤势太重，倒在了路上', lines);
             return;
         }
+        // 扣血已生效：弹窗开着时顶栏也要显示扣完的生命（试玩 N49）
+        this._refreshMap();
         this._wildMapRef?.showMessage('事件结果', lines, () => {
             this._refreshMap(`事件已处理 · 生命 ${exp.hp}/${maxHp}`);
         });
