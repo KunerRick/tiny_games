@@ -59,6 +59,7 @@ import {
     emptyBountyStats,
 } from './MithrilBounty';
 import type { BountyRunReport } from './MithrilBounty';
+import { MithrilAudioUi, playCoreEvents, sfx } from './MithrilAudio';
 import { MithrilHud } from './MithrilHud';
 import { MithrilJoystick } from './MithrilJoystick';
 import { MithrilMenu } from './MithrilMenu';
@@ -91,6 +92,8 @@ export class MithrilGame extends Component {
     _campRef: MithrilCampPanel | null = null;
     _classRef: MithrilClassSelect | null = null;
     _wildMapRef: MithrilWildMap | null = null;
+    /** 路线图顶栏的音效开关（战斗中不显示，见 `MithrilAudio.ts` 位置注释） */
+    _audioRef: MithrilAudioUi | null = null;
     _save: MithrilSave | null = null;
     _lastSnapshot: MithrilSnapshot | null = null;
     /** 当前界面态：路线图 / 节点战斗 */
@@ -136,6 +139,7 @@ export class MithrilGame extends Component {
         this._ensureCamp();
         this._ensureWildMap();
         this._ensureClassSelect();
+        this._ensureAudio();
 
         const hud = this._hudRef;
         if (hud) {
@@ -202,11 +206,14 @@ export class MithrilGame extends Component {
         this._growthRef = null;
         this._campRef = null;
         this._wildMapRef = null;
+        this._audioRef = null;
         this._save = null;
         this._lastSnapshot = null;
         this._wildMap = null;
         this._wildNode = null;
         this._keys.clear();
+        const g = globalThis as unknown as { __mithrilAudio?: unknown };
+        if (g.__mithrilAudio === sfx) g.__mithrilAudio = undefined;
     }
 
     update(dt: number): void {
@@ -239,6 +246,8 @@ export class MithrilGame extends Component {
         }
 
         const events = core.drainEvents();
+        // 音效（M10）：只读事件，节流在 GameAudio 的配方表里
+        playCoreEvents(events);
         // 击杀的金币 / 经验在事件里，先进存档再结算（结算面板要显示本局收益）
         this._onCoreEvents(events);
         const snap = core.snapshot();
@@ -380,6 +389,7 @@ export class MithrilGame extends Component {
     }
 
     private onWildRegionTap(regionId: string): void {
+        sfx.play('click');
         const save = this._save;
         if (!save) return;
         const region = REGION_BY_ID[regionId];
@@ -407,6 +417,7 @@ export class MithrilGame extends Component {
     }
 
     private onWildPrimary(): void {
+        sfx.play('click');
         const save = this._save;
         const wild = this._wildMapRef;
         if (!save || !wild) return;
@@ -472,6 +483,8 @@ export class MithrilGame extends Component {
     // ==================== 节点交互 ====================
 
     private onWildNodeTap(nodeId: number): void {
+        // 点节点先给一声：不管这次能不能走（提示文字同时在底部说明原因）
+        sfx.play('click');
         const save = this._save;
         const map = this._wildMap;
         if (!save || !map) return;
@@ -560,6 +573,7 @@ export class MithrilGame extends Component {
             return;
         }
         if (!opened) {
+            sfx.play('click');
             markNodeDone(exp, node.id);
             this._persist();
             this._refreshMap('你绕开了那个箱子');
@@ -570,10 +584,12 @@ export class MithrilGame extends Component {
         if (chestHasTrap(node)) {
             const dmg = chestTrapDamage(maxHp);
             exp.hp = Math.max(0, exp.hp - dmg);
+            sfx.play('playerHit');
             lines.push(`锁扣弹开：失去 ${dmg} 生命（${exp.hp}/${maxHp}）`);
         }
         const gold = chestGold(node);
         save.gold = Math.max(0, Math.floor(save.gold || 0) + gold);
+        sfx.play('coin');
         lines.push(`金币 +${gold}`);
         // 贪婪之眼的降档概率与额外件数只在这里读一次，保证同一节点内口径一致
         const lowerChance = lowerQualityChanceOf(save.trinkets);
@@ -633,6 +649,8 @@ export class MithrilGame extends Component {
         }
         const maxHp = profileFromSave(save, COMBAT_ILVL_FLOOR).maxHp;
         const res = applyWildEvent(exp, choice, maxHp);
+        // 事件结果：掉血用挨打音（带震动），其余算拾取
+        sfx.play(res.hpDelta < 0 ? 'playerHit' : 'pickup');
         const matId = regionMaterialId(exp.regionId);
         const lines: string[] = [];
         if (hpCost > 0) lines.push(`补给耗尽：进入节点失去 ${hpCost} 生命（现 ${exp.hp}/${maxHp}）`);
@@ -665,6 +683,7 @@ export class MithrilGame extends Component {
         }
         const heal = supplyHeal(maxHp, exp.hp);
         exp.hp = Math.max(0, Math.min(maxHp, exp.hp + heal));
+        sfx.play('pickup');
         markNodeDone(exp, node.id);
         this._persist();
         // 治疗已生效：弹窗开着时顶栏也要显示治完的生命（试玩 N49）
@@ -817,6 +836,8 @@ export class MithrilGame extends Component {
                 const profile = profileFromSave(save, COMBAT_ILVL_FLOOR);
                 if (this._core) this._core.setProfile(profile);
                 this._persist();
+                // 升级用 BOSS 换阶段同一条上扬音（'core' 带 medium 震动）：战斗中这是最该被听到的一次
+                sfx.play('core');
                 this._hudRef?.showGrowthBanner(
                     `升级！Lv ${save.level}`,
                     `生命上限 ${Math.round(profile.maxHp)} · 天赋点 +${levels}`,
@@ -835,6 +856,8 @@ export class MithrilGame extends Component {
      */
     private _settle(won: boolean): void {
         this._settled = true;
+        // 胜负各一声（通关 heavy 短震、阵亡长震），与结算面板同时出现
+        sfx.play(won ? 'won' : 'dead');
         const save = this._save;
         const node = this._wildNode;
         if (!save || !node) return;
@@ -1411,6 +1434,23 @@ export class MithrilGame extends Component {
         this._wildMapRef = root.getComponent(MithrilWildMap) || root.addComponent(MithrilWildMap);
         // 先收起来：真正的 UI 在首次 show() 的 onLoad 里构建
         root.active = false;
+    }
+
+    /**
+     * 音效开关（M10）：挂到路线图节点上，跟着地图一起显隐。
+     * 战斗 HUD 全屏无空位（顶栏右侧是进度/计时、下方 BOSS 条横跨中线），
+     * 所以开关只在 hub 出现；`MithrilAudioUi` 自己负责位置与重绘。
+     */
+    private _ensureAudio(): void {
+        const host = this._wildMapRef ? this._wildMapRef.node : this.node;
+        if (!host.getChildByName('MithrilAudioUi')) {
+            this._audioRef = MithrilAudioUi.create(host);
+        } else {
+            this._audioRef = host.getChildByName('MithrilAudioUi')!.getComponent(MithrilAudioUi);
+        }
+        // 浏览器 / 试玩探针：地图未激活（选职业界面）时也能读到开关状态
+        const g = globalThis as unknown as { __mithrilAudio?: unknown };
+        g.__mithrilAudio = sfx;
     }
 
     // ==================== 调试接口（浏览器探针） ====================

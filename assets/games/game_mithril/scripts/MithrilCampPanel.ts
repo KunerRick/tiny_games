@@ -46,6 +46,7 @@ import {
 } from './MithrilProgress';
 import type { MithrilSave } from './MithrilProgress';
 import { mulberry32 } from './MithrilCore';
+import { sfx } from './MithrilAudio';
 
 const { ccclass } = _decorator;
 
@@ -812,6 +813,7 @@ export class MithrilCampPanel extends Component {
             return;
         }
         const lines = [`悬赏完成：金币 +${res.gold}`];
+        sfx.play('coin');
         if (res.consumeText) lines.push(`交付 ${res.consumeText}`);
         if (res.materialId && res.materialCount > 0) {
             lines.push(`${materialName(res.materialId)} +${res.materialCount}`);
