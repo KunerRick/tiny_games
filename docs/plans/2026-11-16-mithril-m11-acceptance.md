@@ -15,11 +15,11 @@
 | 3 | 大厅可见可点 | 卡片渲染正常、点击进入 `Mithril`、返回大厅正常 | web-mobile 产物 + Playwright 实机：卡片位于列表末行，图标为靛蓝梯形锭 + 顶面高光 + 两组星芒；点击后 `cc.director.getScene().name === 'Mithril'`；场景内「返回大厅」点回 `Lobby`；console **0 error**（`.playwright-mcp/m11-lobby-bottom3.png`、`m11-mithril-entry.png`） | ✅ |
 | 4 | 无变体选择符 | `assets/` 全量扫 `U+FE0E/U+FE0F` = 0 | 扫 `assets/` 下 `.ts/.json/.scene/.prefab/.meta/.txt` → **0 命中** | ✅ |
 | 5 | 构建场景清单三处齐 | `sync-build-scenes.js --check` 退出码 0 | 退出码 **0**，期望清单 **26 个**，末尾为 `Fridge → Mithril` | ✅ |
-| 6 | 微信产物可开 | 预检 9 项全绿 + 包装复现 + 模拟器点进本作 | 产物 26 场景 / 73 UUID、`replay-wechat-bundle.js` 通过、预检 **7/9 通过**（第 7、9 项需开发者工具 GUI 编译，本轮屏幕锁定无法操作，见 §4） | ⚠ 部分关闭 |
+| 6 | 微信产物可开 | 预检 9 项全绿 + 包装复现 + 模拟器点进本作 | 产物 26 场景 / 73 UUID、`replay-wechat-bundle.js` 通过；开发者工具编译后 **`check-wechat-build.js` 9/9 全绿、0 条提醒**（第 7 项最后编译 15:23:29、第 9 项 4 个模块均为小游戏包装）；模拟器实机：大厅「动作」页签 → 点「秘银远征」→ `LoadScene Mithril: 23.94 ms`，职业选择面板正常 → 「返回大厅」→ `LoadScene Lobby: 21.4 ms`，最近游玩已把本作排到首位；调试器 **Errors: 0 / Warnings: 1** | ✅ |
 | 7 | 回归 + 编译 | 8 个 mithril verify + 模板全绿、`tsc --noEmit` = TS_OK | `tsc --noEmit` = **TS_OK**（编辑器自带 5.8.2）；core 221 / audio 88 / wild 2,829 / camp 337 / dungeons 892 / trinkets 692 / bounty 471 / balance 136 / 模板 15，**全部退出码 0** | ✅ |
 | 8 | 文档归档 | 设计 / 验收 / 试玩报告索引进 `docs/README.md` | `docs/README.md` 新增「秘银远征（Mithril / mithril）」小节：设计总规格、M1–M10 验收链、M6–M10 计划、第 10–19 轮试玩、8 个回归脚本；27 条相对链接逐条核验存在（该小节现为 30 条，含 M11 验收 / 计划 / 第 20 轮的补链） | ✅ |
 
-**小结**：8 条判据 7 条全绿，第 6 条只差「微信开发者工具编译这一版新产物」这一步，属于环境限制（屏幕锁定）而非产物缺陷，处置见 §4.3。
+**小结**：**8 条判据全部通过**。第 6 条当时因 macOS 屏幕锁定无法启动开发者工具，记为环境受限；解锁后已用 GUI 编译本版产物并闭合（预检 9/9 全绿 + 模拟器实机点进本作），过程见 §4.3。
 
 ## 2. 交付内容
 
@@ -95,22 +95,33 @@
 | 4 JS 语法级别 | ✅ 12 个 `.js` 均可按 ES2015 / ES5 解析 |
 | 5 主包体积 | ✅ 3.95 MB / 4.00 MB（余量 55.2 KB） |
 | 6 变体选择符 | ✅ 无 U+FE0E / U+FE0F |
-| 7 工具是否需重编译 | ❌ 工具最后一次编译 10:34:43，早于本次构建 10:58:09 |
+| 7 工具是否需重编译 | ✅ 工具已跟上本次构建（最后编译 15:23:29，晚于构建落盘 10:58:09） |
 | 8 AppID | ✅ 已填写 `wx755…6b7e`（脚本无法核验归属，由第 9 项兜底） |
-| 9 包装方式 | ⚠ 缓存里没有本次构建的编译结果 |
+| 9 包装方式 | ✅ 缓存里 4 个模块均为「小游戏包装」（未套小程序的多余形参） |
 
-### 4.3 第 6 条判据的剩余动作（环境受限）
+### 4.3 第 6 条判据的闭合过程（开发者工具 GUI）
 
-第 7、9 项**本质要求开发者工具 GUI 编译一次本版产物**，无法在无 GUI 环境闭合。本轮 macOS 屏幕全程锁定（`cu status` → `"locked": true`），Cocos 编辑器与微信开发者工具都起不来（Electron 在锁屏下无窗口 / 无端口）。
+第 7、9 项**本质要求开发者工具 GUI 编译一次本版产物**，没法在无 GUI 环境闭合；构建完成时 macOS 屏幕处于锁定状态（`cu status` → `"locked": true`），先记为环境受限。解锁后按下列步骤闭合，全部留证：
 
-解锁后按顺序执行即可关闭：
+| 步骤 | 实测 |
+|---|---|
+| 打开工程 | `build/wechatgame` 已在开发者工具项目列表中，GUI 打开后**自动重新编译**（无需手动点「编译」） |
+| 复检 | `node tools/check-wechat-build.js` → **✅ 预检通过（0 条提醒）**；第 7 项「开发者工具已跟上本次构建（最后编译 15:23:29）」、第 9 项「4 个模块都用了小游戏包装」 |
+| 模拟器实机 | 大厅切「动作」页签（缩小列表以避开 ScrollView 不吃滚轮的问题）→ 点「秘银远征」→ 控制台 `LoadScene Mithril: 23.940185546875 ms`，职业选择面板（四职业 + 「以战士开局」）正常 |
+| 返回大厅 | 点场景内「返回大厅」→ `LoadScene Lobby: 21.407959884375 ms`，最近游玩已把本作排到首位 |
+| 调试器 | 悬停调试器页签得提示 **「Errors: 0, Warnings: 1」**（1 条 warning 为引擎 `Node.height` 弃用提示，与本作无关） |
+| 截图 | `.playwright-mcp/m11-devtools-sim-action-tab.png`、`m11-devtools-sim-mithril.png`、`m11-devtools-sim-back-lobby.png` |
+
+> 踩坑留档：开发者工具的进程名是 **Electron**（不是「微信开发者工具」），`cu front 微信开发者工具` 会报「找不到进程」；且 Electron 应用在 AX 树里几乎为空，只能靠坐标点击。窗口标题同为 `tiny_games` 时 `cu shot` 会截到终端，需用 `--window <id>` 定位（本次 862）。
+
+复现命令：
 
 ```bash
-# 1) 打开微信开发者工具 → 导入 build/wechatgame → 点「编译」
-# 2) 复检（应 9/9 全绿、0 提醒）
-node tools/check-wechat-build.js
-# 3) 模拟器里点「秘银远征」卡片进场景（大厅卡片在列表最后一格）
+open -a "wechatwebdevtools"        # 或从启动台打开
+node tools/check-wechat-build.js   # 应 9/9 全绿、0 提醒
 ```
+
+> 开发者工具的命令行接口需要开启「IDE 服务端口」（属于安全设置），本轮**未改动**该设置，全程走 GUI。
 
 ## 5. 已知限制与遗留
 
@@ -138,7 +149,7 @@ verify-template-core.js            15 项
 assets/ VS16 扫描                 0 命中
 ```
 
-提交：`feat(mithril): M11 大厅注册与专属图标、文档归档`（`develop`）。
+提交：`feat(mithril): M11 大厅注册与专属图标、文档归档`（`develop`，`8fcc1ba`）；补提交 `docs(mithril): 微信预检 9/9 闭合与模拟器实机点进本作`（闭合 §4.3）。
 
 改动文件：`assets/common/managers/GameConfig.ts`、`assets/main/scripts/GameIconArt.ts`、`docs/README.md`、`docs/tech/dev-toolchain-notes.md`、`docs/plans/2026-11-16-mithril-m11-plan.md`、本文件。
 
