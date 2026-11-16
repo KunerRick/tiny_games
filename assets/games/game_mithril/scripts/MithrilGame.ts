@@ -600,7 +600,7 @@ export class MithrilGame extends Component {
         const item = rollItem(rng, { ilvl: node.ilvl, classId: save.classId, minQuality: 'uncommon' });
         if (item) {
             maybeLowerQuality(rng, item, lowerChance);
-            const label = this._grantItem(save, item, [], lines);
+            const label = this._grantItem(save, item, [], lines, undefined, rng);
             if (label) lines.push(`获得装备：${label}`);
         }
         // 拾荒者背包：额外搜刮一件，代价是最大生命 5%（饕餮协同会把这口血补回来一部分）
@@ -611,7 +611,7 @@ export class MithrilGame extends Component {
             const bonus = rollItem(rng, { ilvl: node.ilvl, classId: save.classId, minQuality: 'uncommon' });
             if (bonus) {
                 maybeLowerQuality(rng, bonus, lowerChance);
-                const label = this._grantItem(save, bonus, [], lines);
+                const label = this._grantItem(save, bonus, [], lines, undefined, rng);
                 if (label) lines.push(`拾荒者背包 · 额外获得：${label}`);
             }
             const heal = feastHealOnExtraLoot(save.trinkets, maxHp);
@@ -797,6 +797,7 @@ export class MithrilGame extends Component {
         granted: EquipItem[],
         notes: string[],
         onGranted?: () => void,
+        rng?: () => number,
     ): string {
         const base = GEAR_BASE_BY_ID[item.baseId];
         const q = QUALITY_BY_ID[item.quality];
@@ -806,13 +807,22 @@ export class MithrilGame extends Component {
             if (onGranted) onGranted();
             // 改造词条「贪食」：拾取装备时 5% 再掉一件（同槽位、品质不高于当前）。
             // 只触发一层（额外那件直接入包，不再走本函数），避免连锁到背包爆仓。
+            // 随机数走本局种子（调用方传入），让「贪食触发」在复现脚本里可重放。
             if (equippedModifiers(save).indexOf('gluttony') >= 0) {
-                const extra = gluttonyExtraDrop(Math.random, item);
-                if (extra && addToInventory(save, extra)) {
-                    granted.push(extra);
+                const extra = gluttonyExtraDrop(rng || Math.random, item);
+                if (extra) {
                     const eq = GEAR_BASE_BY_ID[extra.baseId];
                     const eqq = QUALITY_BY_ID[extra.quality];
-                    notes.push(`贪食 · 额外拾取：${eqq ? eqq.name : ''}·${eq ? eq.name : extra.baseId}（${GEAR_SLOT_NAMES[extra.slot]} ${extra.ilvl}）`);
+                    const extraLabel = `${eqq ? eqq.name : ''}·${eq ? eq.name : extra.baseId}（${GEAR_SLOT_NAMES[extra.slot]} ${extra.ilvl}）`;
+                    if (addToInventory(save, extra)) {
+                        granted.push(extra);
+                        notes.push(`贪食 · 额外拾取：${extraLabel}`);
+                    } else {
+                        // 背包刚好被主件填满：按主件同一规则折金币，别让玩家「触发了却什么都没拿到」
+                        const gold = sellPrice(extra);
+                        save.gold = Math.max(0, Math.floor(save.gold || 0) + gold);
+                        notes.push(`贪食 · 背包已满：${extraLabel} 折算 ${gold} 金币`);
+                    }
                 }
             }
             return label;
@@ -945,7 +955,7 @@ export class MithrilGame extends Component {
                         if (firstClear && save.dungeonsCleared.indexOf(node.dungeonId!) < 0) {
                             save.dungeonsCleared.push(node.dungeonId!);
                         }
-                    });
+                    }, rng);
                 }
                 // 饰品（M7）：首通必给本副本未拥有的一件，重复通关 25%；
                 // 本副本饰品已集齐时退化为金币，结算行照实写，不假装出货
@@ -969,7 +979,7 @@ export class MithrilGame extends Component {
                 const item = rollItem(rng, { ilvl: node.ilvl, classId: save.classId, quality });
                 if (item) {
                     maybeLowerQuality(rng, item, greedChance);
-                    this._grantItem(save, item, granted, reward);
+                    this._grantItem(save, item, granted, reward, undefined, rng);
                 }
             } else {
                 const def = node.kind === 'battle' || node.kind === 'elite' ? WILD_REWARDS[node.kind] : null;
@@ -981,7 +991,7 @@ export class MithrilGame extends Component {
                     });
                     if (item) {
                         maybeLowerQuality(rng, item, greedChance);
-                        this._grantItem(save, item, granted, reward);
+                        this._grantItem(save, item, granted, reward, undefined, rng);
                     }
                 }
             }
@@ -995,7 +1005,7 @@ export class MithrilGame extends Component {
                     const bonus = rollItem(rng, { ilvl: node.ilvl, classId: save.classId });
                     if (!bonus) continue;
                     maybeLowerQuality(rng, bonus, greedChance);
-                    const label = this._grantItem(save, bonus, granted, reward);
+                    const label = this._grantItem(save, bonus, granted, reward, undefined, rng);
                     if (label) {
                         reward.push(`贪婪之眼 · 额外掉落：${label}`);
                         gained++;

@@ -1242,9 +1242,12 @@ export class MithrilWorld implements TrinketHost {
                     this._emit({ type: 'dodge', x: p.x, y: p.y, facing: dir });
                 }
                 // 战士沿用老公式（有 1s 下限与天赋减免），其它职业走统一冷却
-                cd.dodge = kit.resource === 'rage'
+                const baseCd = kit.resource === 'rage'
                     ? Math.max(1, act.cd * mod.cdMul / (1 + this.profile.haste) - tal.dodgeCdCut)
                     : this._skillCd(act.cd, mod);
+                // 改造词条「回响」对闪避同样生效（闪避也算技能槽），战士的 1s 下限仍在
+                const echoCd = this._echoAdjustedCd('dodge', baseCd);
+                cd.dodge = kit.resource === 'rage' ? Math.max(1, echoCd) : echoCd;
                 if (mod.v4.nextCrit || act.nextCrit) p.nextCrit = true;
                 if (tal.counterReflect > 0) p.counterReady = 1.5;
                 // 饰品（M7）：静默之铃 / 影回 / 影刺的窗口都从「闪避成功」起算
@@ -1987,11 +1990,16 @@ export class MithrilWorld implements TrinketHost {
                     if (dist2(b.x, b.y, e.x, e.y) > reach * reach) continue;
                     // 火球：先挂燃烧再结算直接伤害（直接伤害可能击杀并 splice 掉它）
                     // 饰品（M7）：余烬指环把「刷新燃烧」变成「叠加燃烧」
-                    // 改造词条「余烬」：同一次火球的 DoT 最多叠 3 层（比饰品更宽的叠加上限）
+                    // 改造词条「余烬」：同一次火球的 DoT 最多叠 3 层（比饰品更宽的叠加上限）。
+                    // 取 max 是为了单调不降：增伤窗口过去后单发 burnDps 会变小，
+                    // 不能因为「这一发更弱」把已经叠起来的燃烧倒扣下去。
                     if (b.burnDps && b.burnDur) {
                         if (this._mod('ember_stack')) {
                             const st = e.status;
-                            st.burnDps = Math.min(b.burnDps * EMBER_STACK_MAX, st.burnDps + b.burnDps);
+                            st.burnDps = Math.max(
+                                st.burnDps,
+                                Math.min(b.burnDps * EMBER_STACK_MAX, st.burnDps + b.burnDps),
+                            );
                             st.burnRemaining = Math.max(st.burnRemaining, b.burnDur);
                         } else {
                             this.trinkets.applyBurn(e, b.burnDps, b.burnDur);

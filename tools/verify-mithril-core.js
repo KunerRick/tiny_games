@@ -1829,6 +1829,34 @@ const BASE_DPS = C.measureDummyDps(BASE_PROFILE, 60);
     check('238. 秘境诅咒：受到的伤害 +15%',
         cursedLoss > plainLoss && near(cursedLoss, plainLoss * 1.15, 1e-6),
         `${plainLoss.toFixed(2)} → ${cursedLoss.toFixed(2)}`);
+
+    // 余烬叠层必须单调不降：增伤窗口过后单发 burnDps 变小，不能把已叠的燃烧倒扣
+    const monotoneCase = (ids, seed) => {
+        const w = new C.MithrilWorld(modProfile(ids), seed);
+        w.spawnEnemy('imp', 200, 200, 5000);
+        const hit = (dps) => {
+            const b = w.fireBullet('player', 200, 200, 0, 0, 1, 2, 'bolt');
+            b.burnDps = dps;
+            b.burnDur = 3;
+            w._tickBullets(0.016);
+        };
+        hit(10);
+        hit(10);
+        const stacked = w.enemies[0].status.burnDps;
+        hit(1); // 更弱的火球：不允许把 20 倒扣成 3
+        return { stacked, afterWeak: w.enemies[0].status.burnDps };
+    };
+    const mono = monotoneCase(['ember_stack'], 52);
+    check('239. 余烬：更弱的后续火球不会倒扣已叠的燃烧',
+        near(mono.stacked, 20) && near(mono.afterWeak, 20),
+        `${mono.stacked} → ${mono.afterWeak}`);
+
+    // 回响对闪避槽同样生效（闪避也算技能槽，计数与技能槽互相独立）
+    const echoDodgeW = new C.MithrilWorld(modProfile(['echo_cd']), 53);
+    const echoDodge = [];
+    for (let i = 0; i < 3; i++) echoDodge.push(echoDodgeW._echoAdjustedCd('dodge', 4));
+    check('240. 回响：闪避槽同样每第 3 次减半，且与技能槽独立计数',
+        deepEqual(echoDodge, [4, 4, 2]), echoDodge.join(','));
 }
 
 // ==================== 汇总 ====================
