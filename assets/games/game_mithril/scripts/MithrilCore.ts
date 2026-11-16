@@ -33,9 +33,11 @@ import {
     ORB_PICKUP_RADIUS,
     PLAYER_TUNING,
     dungeonRunPlan,
+    emptyBountyStats,
 } from './MithrilConfig';
 import type {
     BossScriptDef,
+    BountyStats,
     ClassId,
     ClassKitDef,
     EnemyDef,
@@ -315,6 +317,8 @@ export interface EnemyState {
     contactCd: number;
     /** BOSS 读条期间停止移动 */
     casting: boolean;
+    /** 出生时刻（world.time）：悬赏「精英无伤击杀」判定用 */
+    spawnTime: number;
     /**
      * 朝向（弧度）。敌人每次实际位移时更新为移动方向；
      * 站桩敌人保持出生朝向 —— 影刺协同的「背刺」判定读它。
@@ -457,6 +461,8 @@ export interface MithrilSnapshot {
     resourceMax: number;
     holyMax: number;
     kills: number;
+    /** 本局悬赏统计（M8）：只读副本，结算时交给悬赏系统 */
+    stats: BountyStats;
     stage: DungeonStage;
     encounterIndex: number;
     encounterName: string;
@@ -530,6 +536,14 @@ export class MithrilWorld implements TrinketHost {
     kills = 0;
     expGained = 0;
     goldGained = 0;
+
+    /** 本局悬赏统计（M8）：`startPlan()` 清零，渲染层只读 `snapshot().stats` */
+    readonly stats: BountyStats = emptyBountyStats();
+    private _killTimes: number[] = [];
+    /** 玩家上次真正被命中的时刻；-1 = 本局尚未挨打 */
+    private _lastPlayerDamageTime = -1;
+    /** 最近一次击杀的伤害来源（BOSS 技能尾刀判定） */
+    private _lastKillingSource: DamageSource = 'basic';
 
     player: PlayerState;
     enemies: EnemyState[] = [];
@@ -652,6 +666,7 @@ export class MithrilWorld implements TrinketHost {
             slamCd: def && def.slamCd ? def.slamCd : 0,
             contactCd: 0,
             casting: false,
+            spawnTime: this.time,
             // 出生朝向：面向玩家出发点（站桩敌人不会更新，背刺判定用它）
             facing: Math.atan2(PLAYER_START_Y - y, PLAYER_START_X - x),
         };
@@ -727,6 +742,7 @@ export class MithrilWorld implements TrinketHost {
         this._mechanicTimer = 0;
         this._regenTick = 0;
         this._gap = 0;
+        this._resetBountyStats();
         this.orbs.length = 0;
         this.traps.length = 0;
         this.phase = 'playing';
@@ -766,6 +782,23 @@ export class MithrilWorld implements TrinketHost {
         } else {
             this._spawnNextEncounter();
         }
+    }
+
+    /** 悬赏统计清零（每局开战 / 换盘时调用） */
+    private _resetBountyStats(): void {
+        const s = this.stats;
+        s.mobKills = 0;
+        s.eliteKills = 0;
+        s.bossKills = 0;
+        s.eliteNoHitKills = 0;
+        s.burstEliteKills = 0;
+        s.lowHpKills = 0;
+        s.maxKillsIn10s = 0;
+        s.crits = 0;
+        s.bossLastHitSkill = false;
+        this._killTimes.length = 0;
+        this._lastPlayerDamageTime = -1;
+        this._lastKillingSource = 'basic';
     }
 
     /** 当前遭遇结束到下一波之间的空档（秒） */
@@ -906,6 +939,8 @@ export class MithrilWorld implements TrinketHost {
         const tal = this.profile.talents;
         let dmg = Number.isFinite(damage) ? Math.max(0, damage) : 0;
         if (p.burst > 0) dmg *= Math.max(0, 1 + p.burstTakenMod);
+        // 悬赏「无伤击杀」：只要这一击有伤害（哪怕被护盾全吃）就算挨打
+        if (dmg > 0) this._lastPlayerDamageTime = this.time;
 
         // 护盾先吃伤害（钢铁阵型 / 后续职业的护盾技能共用这一池）
         let absorbed = 0;
@@ -1000,6 +1035,7 @@ export class MithrilWorld implements TrinketHost {
             resourceMax: this.kit.resourceMax,
             holyMax: this.kit.holyMax || 0,
             kills: this.kills,
+            stats: { ...this.stats },
             stage: this.stage,
             encounterIndex: this.encounterIndex,
             encounterName: this.plan
@@ -2063,6 +2099,8 @@ export class MithrilWorld implements TrinketHost {
         // 饰品（M7）：霜华坠饰（冻结目标 +25%）/ 影刺（背后 +40%），只作用于玩家自己的伤害
         dmg *= this.trinkets.damageMulVs(e, source);
         e.hp -= dmg;
+        // 悬赏统计（M8）：只算玩家直接命中（基本攻击 / 技能），DoT 与反伤不算暴击次数
+        if (crit && (source === 'basic' || source === 'skill')) this.stats.crits++;
         if (source !== 'reflect' && source !== 'dot') this._onHitLanded();
         this._emit({ type: 'damage', target: 'enemy', x: e.x, y: e.y, amount: dmg, crit });
 
@@ -2085,6 +2123,7 @@ export class MithrilWorld implements TrinketHost {
         }
 
         if (e.hp > 0) return false;
+        this._lastKillingSource = source;
         this._killEnemyAt(index);
         return true;
     }
@@ -2149,6 +2188,24 @@ export class MithrilWorld implements TrinketHost {
     private _killEnemyAt(index: number): void {
         const e = this.enemies[index];
         if (!e) return;
+        // 悬赏统计（M8）：击杀分类 / 无伤 / 爆发 / 低血 / 10 秒窗口 / BOSS 尾刀来源
+        const p = this.player;
+        const s = this.stats;
+        if (e.isBoss) {
+            s.bossKills++;
+            s.bossLastHitSkill = this._lastKillingSource === 'skill';
+        } else if (e.isElite) {
+            s.eliteKills++;
+            if (this._lastPlayerDamageTime < e.spawnTime) s.eliteNoHitKills++;
+            if (p.burst > 0) s.burstEliteKills++;
+        } else {
+            s.mobKills++;
+        }
+        // 玩家当前生命 <20%（击杀回血结算前读）
+        if (p.hp > 0 && p.hp / Math.max(1, p.maxHp) < 0.2) s.lowHpKills++;
+        this._killTimes.push(this.time);
+        while (this._killTimes.length > 0 && this.time - this._killTimes[0] > 10) this._killTimes.shift();
+        if (this._killTimes.length > s.maxKillsIn10s) s.maxKillsIn10s = this._killTimes.length;
         const def = ENEMY_BY_ID[e.kind];
         const exp = def ? def.exp : 0;
         const gold = def ? def.gold : 0;

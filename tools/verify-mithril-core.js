@@ -6,6 +6,7 @@
  *          配置表完整性 / 战斗骨架（确定性、实体上限、伤害无 NaN、无敌帧）。
  * M3 覆盖：天赋效果聚合与夹取 / 30 条天赋无空挂 / 技能等级与变体门控 /
  *          技能书与洗点 / **实战打桩 DPS 倍率 ∈ [8,11]** / 升级换 profile。
+ * M8 覆盖：悬赏战斗统计（击杀分类 / 精英无伤 / 爆发 / 低血 / 10 秒窗口 / 暴击 / BOSS 尾刀）。
  *
  * 用法：node tools/verify-mithril-core.js
  * 通过时打印 MITHRIL_CORE_OK；失败时逐条打印并以退出码 1 结束。
@@ -1479,6 +1480,126 @@ const BASE_DPS = C.measureDummyDps(BASE_PROFILE, 60);
     check('202. 30 级共 30 天赋点', P.talentPointsForLevel(30) === 30, P.talentPointsForLevel(30));
 }
 
+// ==================== 13. M8：悬赏战斗统计 ====================
+
+{
+    const w = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 41);
+    const s0 = w.snapshot().stats;
+    check('203. 新世界悬赏统计全 0', s0.mobKills === 0 && s0.eliteKills === 0 && s0.bossKills === 0
+        && s0.eliteNoHitKills === 0 && s0.burstEliteKills === 0 && s0.lowHpKills === 0
+        && s0.maxKillsIn10s === 0 && s0.crits === 0 && s0.bossLastHitSkill === false);
+
+    // ---- 普通击杀 / 暴击来源 ----
+    const mw = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 42);
+    mw.spawnEnemy('imp', 100, 100, 5);
+    mw._damageEnemy(0, 1e6, true, 'basic');
+    check('204. 击杀小怪计入 mobKills', mw.stats.mobKills === 1 && mw.stats.eliteKills === 0,
+        `mob ${mw.stats.mobKills} / elite ${mw.stats.eliteKills}`);
+    check('205. 基本攻击暴击计入 crits', mw.stats.crits === 1, mw.stats.crits);
+
+    mw.spawnEnemy('imp', 100, 100, 1e6);
+    mw._damageEnemy(0, 1, true, 'dot');
+    check('206. DoT 暴击不计入 crits', mw.stats.crits === 1, mw.stats.crits);
+    mw._damageEnemy(0, 1, true, 'reflect');
+    check('207. 反伤暴击不计入 crits', mw.stats.crits === 1, mw.stats.crits);
+
+    // ---- 精英无伤 ----
+    const ew = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 43);
+    ew.spawnDef('golem', 100, 100);
+    ew.time = 5;
+    ew._damageEnemy(0, 1e9, false, 'skill');
+    check('208. 精英存活期间玩家未受击 → eliteNoHitKills',
+        ew.stats.eliteKills === 1 && ew.stats.eliteNoHitKills === 1,
+        `elite ${ew.stats.eliteKills} / noHit ${ew.stats.eliteNoHitKills}`);
+
+    const hw = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 44);
+    hw.spawnDef('golem', 100, 100);
+    hw.time = 1;
+    hw.hitPlayer(10, { physical: true });
+    hw.time = 2;
+    hw._damageEnemy(0, 1e9, false, 'skill');
+    check('209. 精英存活期间挨过打 → 不算无伤',
+        hw.stats.eliteKills === 1 && hw.stats.eliteNoHitKills === 0,
+        `noHit ${hw.stats.eliteNoHitKills}`);
+
+    // ---- 爆发窗口 / 低血击杀 ----
+    const bw = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 45);
+    bw.player.burst = 3;
+    bw.spawnDef('golem', 100, 100);
+    bw._damageEnemy(0, 1e9, false, 'skill');
+    check('210. 爆发窗口内击杀精英 → burstEliteKills', bw.stats.burstEliteKills === 1,
+        bw.stats.burstEliteKills);
+
+    const lw = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 46);
+    lw.spawnEnemy('imp', 100, 100, 5);
+    lw._damageEnemy(0, 1e6, false, 'basic');
+    check('211. 满血击杀不计入 lowHpKills', lw.stats.lowHpKills === 0, lw.stats.lowHpKills);
+    lw.player.hp = Math.max(1, Math.round(lw.player.maxHp * 0.1));
+    lw.spawnEnemy('imp', 100, 100, 5);
+    lw._damageEnemy(0, 1e6, false, 'basic');
+    check('212. 玩家 <20% 生命时击杀计入 lowHpKills', lw.stats.lowHpKills === 1, lw.stats.lowHpKills);
+
+    // ---- 10 秒滑动窗口 ----
+    const tw = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 47);
+    for (let i = 0; i < 5; i++) {
+        tw.spawnEnemy('imp', 100 + i, 100, 5);
+        tw._damageEnemy(tw.enemies.length - 1, 1e6, false, 'basic');
+    }
+    check('213. 10 秒内连杀 5 只 → maxKillsIn10s = 5', tw.stats.maxKillsIn10s === 5, tw.stats.maxKillsIn10s);
+    tw.time = 5;
+    tw.spawnEnemy('imp', 200, 100, 5);
+    tw._damageEnemy(tw.enemies.length - 1, 1e6, false, 'basic');
+    check('214. 时间窗内继续击杀刷新为 6', tw.stats.maxKillsIn10s === 6, tw.stats.maxKillsIn10s);
+    tw.time = 20;
+    tw.spawnEnemy('imp', 300, 100, 5);
+    tw._damageEnemy(tw.enemies.length - 1, 1e6, false, 'basic');
+    check('215. 窗口外旧击杀滑出，峰值保留 6', tw.stats.maxKillsIn10s === 6 && tw._killTimes.length === 1,
+        `max ${tw.stats.maxKillsIn10s} / 窗口内 ${tw._killTimes.length}`);
+
+    // ---- BOSS 尾刀来源 ----
+    const sw = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 48);
+    sw.spawnDef('troll', 100, 100);
+    sw._damageEnemy(0, 1e9, false, 'skill');
+    check('216. BOSS 被技能打死 → bossKills + bossLastHitSkill',
+        sw.stats.bossKills === 1 && sw.stats.bossLastHitSkill === true,
+        `boss ${sw.stats.bossKills} / skill ${sw.stats.bossLastHitSkill}`);
+
+    const nb = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 49);
+    nb.spawnDef('troll', 100, 100);
+    nb._damageEnemy(0, 1e9, false, 'basic');
+    check('217. BOSS 被普攻打死 → bossLastHitSkill = false', nb.stats.bossLastHitSkill === false,
+        nb.stats.bossLastHitSkill);
+
+    // ---- 快照只读 / 开局重置 / 与 kills 一致 ----
+    const cw = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 50);
+    cw.spawnEnemy('imp', 100, 100, 5);
+    cw._damageEnemy(0, 1e6, false, 'basic');
+    const snap = cw.snapshot();
+    snap.stats.mobKills = 999;
+    check('218. snapshot().stats 是副本，改它不影响世界', cw.stats.mobKills === 1, cw.stats.mobKills);
+
+    const snapEnemy = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 51);
+    snapEnemy.spawnEnemy('imp', 100, 100, 10);
+    const se = snapEnemy.snapshot().enemies[0];
+    check('219. 敌人快照带 spawnTime', se && typeof se.spawnTime === 'number' && se.spawnTime === 0);
+
+    const gw = new C.MithrilWorld(C.makeProfile('warrior', 1, 1), 52);
+    for (let i = 0; i < 3; i++) {
+        gw.spawnEnemy('imp', 100 + i, 100, 5);
+        gw._damageEnemy(gw.enemies.length - 1, 1e6, false, 'basic');
+    }
+    check('220. 真实击杀数与 stats.mobKills 一致',
+        gw.stats.mobKills === 3 && gw.kills === 3 && gw.snapshot().stats.mobKills === 3,
+        `mob ${gw.stats.mobKills} / kills ${gw.kills}`);
+    gw.startDungeon('mine');
+    const reset = gw.stats;
+    check('221. startPlan 清零全部悬赏统计',
+        reset.mobKills === 0 && reset.eliteKills === 0 && reset.bossKills === 0
+        && reset.eliteNoHitKills === 0 && reset.burstEliteKills === 0 && reset.lowHpKills === 0
+        && reset.maxKillsIn10s === 0 && reset.crits === 0 && reset.bossLastHitSkill === false
+        && gw._killTimes.length === 0);
+}
+
 // ==================== 汇总 ====================
 
 const total = passed + failed;
@@ -1487,4 +1608,4 @@ if (failed > 0) {
     for (const f of failures) console.error(`  ✗ ${f}`);
     process.exit(1);
 }
-console.log(`MITHRIL_CORE_OK  ${passed}/${total} 项通过（M1 + M2 + M3）`);
+console.log(`MITHRIL_CORE_OK  ${passed}/${total} 项通过（M1 + M2 + M3 + M8 统计）`);

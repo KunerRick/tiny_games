@@ -50,6 +50,7 @@ import {
     talentPointsSpent,
 } from './MithrilProgress';
 import type { MithrilSave, TalentState } from './MithrilProgress';
+import { advanceBountyMetric } from './MithrilBounty';
 
 // ==================== 材料 ====================
 
@@ -319,6 +320,8 @@ export function dismantle(save: MithrilSave, uid: string): DismantleYield | null
     if (idx < 0) return null;
     save.inventory.splice(idx, 1);
     gainMaterial(save, check.yield.materialId, check.yield.count);
+    // 悬赏（M8）：分解类悬赏自动计数（所有入口共用，面板 / 脚本都走这里）
+    advanceBountyMetric(save, 'dismantle', 1);
     return check.yield;
 }
 

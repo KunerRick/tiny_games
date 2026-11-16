@@ -31,12 +31,13 @@ import {
     lowerQualityChanceOf,
 } from './MithrilTrinkets';
 import {
-    SAVE_STORAGE_KEY, addExp, defaultSave, expToNext, parseSave, pendingVariantCount, serializeSave,
-    talentPointsForLevel, talentPointsSpent,
+    SAVE_STORAGE_KEY, addExp, defaultSave, expToNext, facilityLevel, parseSave,
+    pendingVariantCount, serializeSave, talentPointsForLevel, talentPointsSpent,
 } from './MithrilProgress';
 import type { MithrilSave } from './MithrilProgress';
 import {
-    COMBAT_ILVL_FLOOR, FIRST_CLEAR_EXP, GEAR_BASE_BY_ID, GEAR_SLOT_NAMES, QUALITY_BY_ID,
+    COMBAT_ILVL_FLOOR, FIRST_CLEAR_EXP, GEAR_BASE_BY_ID, GEAR_SLOT_NAMES, GEAR_SLOTS,
+    QUALITY_BY_ID,
     REGION_BOSS_BY_ID, REGION_BY_ID, REGIONS, SKILL_BOOK_FIRST_CLEAR, SKILL_BOOK_PER_CLEAR,
     TRINKET_BY_ID, TRINKET_TAG_NAMES,
     WILD_NODE_COUNT, WILD_REWARDS, materialName, regionMaterialId,
@@ -52,7 +53,12 @@ import { MithrilWildMap } from './MithrilWildMap';
 import { MithrilGrowthMenu } from './MithrilGrowthMenu';
 import { MithrilCampPanel } from './MithrilCampPanel';
 import { MithrilClassSelect } from './MithrilClassSelect';
-import { consumeMealBattle } from './MithrilCamp';
+import { consumeMealBattle, bountySlots } from './MithrilCamp';
+import {
+    BOUNTY_DAILY_REFRESH_LEVEL, BOUNTY_UNLOCK_LEVEL, applyRunReport, bountyToday, ensureBountyBoard,
+    emptyBountyStats,
+} from './MithrilBounty';
+import type { BountyRunReport } from './MithrilBounty';
 import { MithrilHud } from './MithrilHud';
 import { MithrilJoystick } from './MithrilJoystick';
 import { MithrilMenu } from './MithrilMenu';
@@ -112,9 +118,16 @@ export class MithrilGame extends Component {
     private _settled = false;
     /** 路线图预览种子（`seed > 0` 时固定，便于复现） */
     private _mapSeed = 1;
+    /** 本局开打时全身是否只有白装 / 两个饰品槽是否都空（副本挑战悬赏要在开打前取快照） */
+    private _runWhiteOnly = false;
+    private _runNoTrinket = false;
+    /** 进场景时已跨日刷新过悬赏板 —— 首次打开营地要补一条提示（不然玩家看不到刷新） */
+    private _bountyRefreshPending = false;
 
     onLoad(): void {
         this._save = parseSave(StorageManager.instance.getItem('mithril', SAVE_STORAGE_KEY));
+        // 悬赏板（M8）：进游戏先把板补齐（军需官 Lv1 起；Lv4 跨日重置）
+        this._bountyRefreshPending = this._syncBountyBoard().refreshed;
         this._ensureField();
         this._ensureControls();
         this._ensureHud();
@@ -710,6 +723,9 @@ export class MithrilGame extends Component {
         this._firstClear = node.kind === 'dungeon' && !!node.dungeonId
             && save.dungeonsCleared.indexOf(node.dungeonId) < 0;
         this._nodeHpCost = Math.max(0, Math.floor(hpCost || 0));
+        // 悬赏挑战（M8）：这两个条件必须在开打前取快照 —— 打完拿到装备就不算「只用白装」
+        this._runWhiteOnly = this._isWhiteOnlyEquipped(save);
+        this._runNoTrinket = !save.trinkets || (!save.trinkets[0] && !save.trinkets[1]);
         this._settled = false;
         this._acc = 0;
         this._hudTimer = 0;
@@ -738,6 +754,15 @@ export class MithrilGame extends Component {
         this.renderer?.render(snap, 0);
         this._refreshGrowthHud();
         hud?.updateHud(snap);
+    }
+
+    /** 全身装备是否只有白装（空槽允许）：副本挑战悬赏「仅用白装」用 */
+    private _isWhiteOnlyEquipped(save: MithrilSave): boolean {
+        for (const slot of GEAR_SLOTS) {
+            const item = save.equips ? save.equips[slot] : null;
+            if (item && item.quality !== 'common') return false;
+        }
+        return true;
     }
 
     /**
@@ -968,6 +993,27 @@ export class MithrilGame extends Component {
             reward.push(lostText ? `丢失：${lostText}` : '本程还没有拾取材料');
         }
 
+        // 悬赏（M8）：胜/负都推进击杀类；通关类只在胜利且节点类型匹配时推进
+        const snap = this._lastSnapshot;
+        const stats = snap && snap.stats ? snap.stats : emptyBountyStats();
+        const reportKind: BountyRunReport['kind'] = node.kind === 'boss' ? 'boss'
+            : node.kind === 'dungeon' ? 'dungeon'
+                : node.kind === 'elite' ? 'elite'
+                    : node.kind === 'battle' ? 'battle' : 'other';
+        applyRunReport(save, {
+            won,
+            kind: reportKind,
+            elapsed: snap ? snap.time : 0,
+            stats,
+            lootCount: granted.length,
+            // 没有复活机制：输了就是死了；赢了全程无死亡
+            deaths: won ? 0 : 1,
+            whiteOnly: this._runWhiteOnly,
+            noTrinket: this._runNoTrinket,
+            fullRunDone: exp.done.length,
+            fullRunTotal: WILD_NODE_COUNT,
+        });
+
         this._persist();
         this._refreshGrowthHud();
         // HUD 在同一个 update 里随后刷新结果面板，收益 / 掉落行会一起出现
@@ -1089,15 +1135,38 @@ export class MithrilGame extends Component {
 
     // ==================== 营地面板（5 设施） ====================
 
+    /**
+     * 悬赏板（M8）：军需官 Lv1 起建板，Lv2 起 6 位，Lv4 跨日重置。
+     * 返回本次是否刷新 / 补位（面板用来提示「每日刷新」）。
+     */
+    private _syncBountyBoard(): { refreshed: boolean; added: number } {
+        const save = this._save;
+        const none = { refreshed: false, added: 0 };
+        if (!save) return none;
+        const level = facilityLevel(save, 'quartermaster');
+        if (level < BOUNTY_UNLOCK_LEVEL) return none;
+        const res = ensureBountyBoard(
+            save,
+            bountyToday(Date.now()),
+            bountySlots(save),
+            level >= BOUNTY_DAILY_REFRESH_LEVEL,
+        );
+        if (res.refreshed || res.added > 0) this._persist();
+        return res;
+    }
+
     private openCamp(): void {
         const camp = this._campRef;
         const save = this._save;
         if (!camp || !save) return;
+        const board = this._syncBountyBoard();
+        const refreshed = board.refreshed || this._bountyRefreshPending;
+        this._bountyRefreshPending = false;
         this._menuRef?.close();
         this._growthRef?.close();
         // 面板是运行时建的独立节点：每次打开都抬到最上层（AGENTS 教训 H）
         camp.node.setSiblingIndex(this.node.children.length - 1);
-        camp.open(save);
+        camp.open(save, refreshed ? '每日刷新：今日悬赏已更新（未领取进度已重置）' : '');
         this._joystick?.release();
         this._keys.clear();
         this._hudRef?.releaseAllHeld();

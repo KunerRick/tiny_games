@@ -11,6 +11,9 @@
 import {
     AFFIXES,
     AFFIX_BUDGET,
+    BOUNTIES,
+    BOUNTY_BY_ID,
+    BOUNTY_SLOTS_UPGRADED,
     FACILITY_IDS,
     GEAR_SLOTS,
     GEAR_BASE_BY_ID,
@@ -556,7 +559,14 @@ export interface MithrilSave {
     regionsCleared: string[];
     /** 进行中的野外远征；没有则为 null */
     expedition: ExpeditionState | null;
+    /** 悬赏板当前条目（M8；≤ 悬赏位，自动追踪） */
     bounties: string[];
+    /** 自动类悬赏进度（收集类读库存，不存这里） */
+    bountyProgress: Record<string, number>;
+    /** 上次刷新日（epoch day；Lv4 起跨日重置） */
+    bountyDay: number;
+    /** 洗牌序列游标（0..23） */
+    bountyCursor: number;
     facilities: Record<FacilityId, number>;
     /** 厨房料理（M5）：按场次生效，战斗结算时扣 1 场 */
     meals: MealState[];
@@ -596,6 +606,9 @@ export function defaultSave(classId: ClassId = 'warrior'): MithrilSave {
         regionsCleared: [],
         expedition: null,
         bounties: [],
+        bountyProgress: {},
+        bountyDay: 0,
+        bountyCursor: 0,
         facilities,
         meals: [],
         talentPresets: [],
@@ -821,10 +834,24 @@ export function sanitizeSave(raw: unknown): MithrilSave {
     if (Array.isArray(src.bounties)) {
         const ids: string[] = [];
         for (const id of src.bounties) {
-            if (typeof id === 'string' && ids.indexOf(id) < 0) ids.push(id);
+            if (typeof id !== 'string' || !BOUNTY_BY_ID[id] || ids.indexOf(id) >= 0) continue;
+            if (ids.length >= BOUNTY_SLOTS_UPGRADED) break;
+            ids.push(id);
         }
         out.bounties = ids;
     }
+
+    // 悬赏进度只保留板上的自动类条目；收集类读库存，不落盘
+    if (src.bountyProgress && typeof src.bountyProgress === 'object') {
+        const raw = src.bountyProgress as Record<string, unknown>;
+        for (const id of out.bounties) {
+            const def = BOUNTY_BY_ID[id];
+            if (!def || def.consume || raw[id] === undefined) continue;
+            out.bountyProgress[id] = toInt(raw[id], 0, def.target, 0);
+        }
+    }
+    out.bountyDay = toInt(src.bountyDay, 0, 100000000, 0);
+    out.bountyCursor = toInt(src.bountyCursor, 0, Math.max(0, BOUNTIES.length - 1), 0);
 
     if (Array.isArray(src.regionsCleared)) {
         const ids: string[] = [];

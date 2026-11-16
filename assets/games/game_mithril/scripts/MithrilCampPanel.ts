@@ -26,7 +26,7 @@ import {
     TALENT_TREE_NAMES, TALENT_TREE_ORDER, materialName,
 } from './MithrilConfig';
 import type { EquipItem, FacilityId, MealStat } from './MithrilConfig';
-import { affixValue, staminaOf } from './MithrilLoot';
+import { affixValue, addToInventory, sellPrice, staminaOf } from './MithrilLoot';
 import {
     activeMeals, availableMeals, bountySlots, buyMeal, canBuyMeal, canDismantle, canEnchant,
     canLoadTalentPreset, canReforge, canSaveTalentPreset, canUpgradeFacility, dismantle,
@@ -35,6 +35,10 @@ import {
     ownedItems, reforge, reforgeGold, saveTalentPreset, storageBonus, upgradeFacility,
 } from './MithrilCamp';
 import type { OwnedItem } from './MithrilCamp';
+import {
+    BOUNTY_DAILY_REFRESH_LEVEL, BOUNTY_UNLOCK_LEVEL, BOUNTY_KIND_NAMES,
+    bountyBoardRows, bountyItemIlvl, bountyToday, claimBounty,
+} from './MithrilBounty';
 import {
     facilityLevel, mealDurationFor, mealSlotsFor, respecTalents, respecVariants,
     talentPointsForLevel, talentPointsSpent, talentPresetSlots, talentRespecCost,
@@ -129,7 +133,7 @@ export class MithrilCampPanel extends Component {
 
     // ==================== 对外 ====================
 
-    open(save: MithrilSave): void {
+    open(save: MithrilSave, notice = ''): void {
         this._save = save;
         this._tab = 'smith';
         this._selUid = '';
@@ -144,6 +148,11 @@ export class MithrilCampPanel extends Component {
         if (!this._root) return;
         this._root.active = true;
         this.refresh();
+        // 打开时的外部提示（M8：每日刷新）只覆盖一次底部提示条
+        if (notice && this._hintLabel) {
+            this._hintLabel.string = notice;
+            this._hintLabel.color = hex(COLOR.INFO);
+        }
     }
 
     close(): void {
@@ -715,24 +724,112 @@ export class MithrilCampPanel extends Component {
         const bonus = storageBonus(save);
         const cap = 60 + bonus;
         const used = Array.isArray(save.inventory) ? save.inventory.length : 0;
-        const slotLine = bountySlots(save);
+        const slots = bountySlots(save);
         const mats = MATERIALS
             .map((m) => `${m.name} ${materialCount(save, m.id)}`)
             .join('    ');
 
         createLabel(content, [
             `装备仓库　${used} / ${cap} 格（基础 60 + 军需官 ${bonus}）`,
-            `悬赏位　　${slotLine} 个${lv >= 2 ? '（满编）' : '（Lv2 起 6 个）'}`,
-            '',
             `库存材料　${mats}`,
-            '',
-            `下一级：${lv < FACILITY_MAX_LEVEL ? FACILITY_BY_ID.quartermaster.effects[lv] : '已满级'}`,
-            '',
-            '仓库满时：战斗掉落的装备会折算成金币（不会白打）。',
-            '悬赏任务还没开放；开放后这里的悬赏位数量会直接生效。',
         ].join('\n'), 17, {
-            width: 620, height: 380, color: COLOR.TEXT_SECONDARY, x: 0, y: 150, lineHeight: 34,
+            width: 620, height: 56, color: COLOR.TEXT_SECONDARY, x: 0, y: 316,
+            lineHeight: 28, overflow: 'shrink',
         });
+
+        if (lv < BOUNTY_UNLOCK_LEVEL) {
+            createLabel(content, [
+                '悬赏板：还没建造',
+                '升到军需官 Lv1 解锁悬赏板：Lv1 3 条 → Lv2 起 6 条 → Lv4 每日刷新。',
+                `下一级：${lv < FACILITY_MAX_LEVEL ? FACILITY_BY_ID.quartermaster.effects[lv] : '已满级'}`,
+                '仓库满时：战斗掉落的装备会折算成金币（不会白打）。',
+            ].join('\n'), 16, {
+                width: 620, height: 120, color: COLOR.TEXT_SECONDARY, x: 0, y: 190, lineHeight: 28,
+            });
+            return;
+        }
+
+        // ---- 悬赏板（M8）：自动追踪，完成即可领取 ----
+        const rows = bountyBoardRows(save);
+        createLabel(content,
+            `悬赏板　${rows.length}/${slots} 条 · 自动追踪，完成即可领取 · `
+            + (lv >= BOUNTY_DAILY_REFRESH_LEVEL ? '每日刷新已开启' : 'Lv4 起每日刷新'),
+            16, {
+                width: 620, height: 28, color: COLOR.TEXT_PRIMARY, x: 0, y: 252, overflow: 'shrink',
+            });
+
+        const rowYs = [206, 134, 62, -10, -82, -154];
+        for (let i = 0; i < rows.length && i < rowYs.length; i++) {
+            const row = rows[i];
+            const y = rowYs[i];
+            const kind = BOUNTY_KIND_NAMES[row.def.kind] || '';
+            createLabel(content,
+                `【${kind}】${row.name}\n进度 ${row.progressText} · 奖励 ${row.def.reward}`,
+                15, {
+                    width: 400, height: 52,
+                    color: row.ready ? COLOR.SUCCESS : COLOR.TEXT_SECONDARY,
+                    align: 'left', x: -105, y, lineHeight: 22, overflow: 'shrink',
+                });
+            const btn = createButton(content, {
+                w: 120, h: 46, text: row.ready ? '领取' : '未完成', fontSize: 16,
+                fill: row.ready ? '#15803D' : '#1A2332',
+                textColor: row.ready ? '#FFFFFF' : COLOR.TEXT_DISABLED,
+                activeFill: '#166534', radius: 10,
+                onTap: () => this._onBountyClaim(row.def.id),
+            });
+            btn.node.setPosition(250, y, 0);
+        }
+        if (rows.length === 0) {
+            createLabel(content, '悬赏板空着：下一次战斗结算后会补上新悬赏。', 16, {
+                width: 620, height: 30, color: COLOR.TEXT_SECONDARY, x: 0, y: 190,
+            });
+        }
+
+        createLabel(content, [
+            '收集类悬赏按当前库存判定，领取时扣除（只扣背包，不动已装备）。',
+            `下一级：${lv < FACILITY_MAX_LEVEL ? FACILITY_BY_ID.quartermaster.effects[lv] : '已满级'}`,
+        ].join('\n'), 15, {
+            width: 620, height: 50, color: COLOR.TEXT_SECONDARY, x: 0, y: -240, lineHeight: 22,
+        });
+    }
+
+    /** 领取悬赏：扣收集物 → 发金币 / 材料 / 装备 → 补位 */
+    private _onBountyClaim(id: string): void {
+        const save = this._save;
+        if (!save) return;
+        const lv = facilityLevel(save, 'quartermaster');
+        const rng = mulberry32((this._rngTick++ * 2654435761) >>> 0);
+        const res = claimBounty(save, id, rng, bountyItemIlvl(save.level), {
+            day: bountyToday(Date.now()),
+            slots: bountySlots(save),
+            allowDaily: lv >= BOUNTY_DAILY_REFRESH_LEVEL,
+        });
+        if (!res.ok) {
+            const text = res.reason === 'insufficient' ? '收集物不够：先攒够再交'
+                : res.reason === 'not-ready' ? '还没完成这条悬赏'
+                    : '这条悬赏已经不在板上';
+            this._notice(text);
+            return;
+        }
+        const lines = [`悬赏完成：金币 +${res.gold}`];
+        if (res.consumeText) lines.push(`交付 ${res.consumeText}`);
+        if (res.materialId && res.materialCount > 0) {
+            lines.push(`${materialName(res.materialId)} +${res.materialCount}`);
+        }
+        if (res.item) {
+            const base = GEAR_BASE_BY_ID[res.item.baseId];
+            const q = QUALITY_BY_ID[res.item.quality];
+            const label = `${q ? q.name : ''}·${base ? base.name : res.item.baseId}`
+                + `（${GEAR_SLOT_NAMES[res.item.slot]} ${res.item.ilvl}）`;
+            if (addToInventory(save, res.item)) {
+                lines.push(`获得装备：${label}`);
+            } else {
+                const gold = sellPrice(res.item);
+                save.gold = Math.max(0, Math.floor(save.gold || 0) + gold);
+                lines.push(`背包已满：${label} 折算 ${gold} 金币`);
+            }
+        }
+        this._changed(lines.join(' · '));
     }
 
     // ==================== 触摸 handler（具名） ====================

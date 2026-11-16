@@ -947,38 +947,100 @@ export const SUPPLY_EXHAUST_HP_PCT = 0.08;
 
 export type BountyKind = 'hunt' | 'gather' | 'dungeon' | 'challenge';
 
+/**
+ * 悬赏进度指标。
+ *
+ * 前 18 个由战斗/结算自动推进（见 `MithrilBounty.applyRunReport`）；
+ * 后 5 个是「收集」类：进度 = 当前库存，领取时按 target 扣除。
+ * `dismantle` 由铁匠铺分解钩子推进。
+ */
+export type BountyMetric =
+    | 'kill' | 'elite_kill' | 'region_boss' | 'elite_no_hit' | 'kill_5_in_10s' | 'burst_elite_kill'
+    | 'dismantle'
+    | 'dungeon_clear' | 'dungeon_nodeath' | 'dungeon_speed' | 'dungeon_last_hit'
+    | 'dungeon_white' | 'dungeon_no_trinket' | 'low_hp_kill' | 'dungeon_crit' | 'dungeon_loot'
+    | 'full_run'
+    | 'turnin_ash' | 'turnin_frost' | 'turnin_mithril' | 'turnin_blue' | 'turnin_purple';
+
+/** 领取时从背包扣除的东西（只扣背包，不碰身上的装备） */
+export type BountyConsume =
+    | { kind: 'material'; materialId: string }
+    | { kind: 'gear'; quality: QualityId };
+
 export interface BountyDef {
     id: string;
     kind: BountyKind;
     name: string;
     reward: string;
+    metric: BountyMetric;
+    target: number;
+    gold: number;
+    /** 额外奖励装备（保底品质） */
+    item?: { quality: QualityId };
+    /** 额外奖励材料 */
+    material?: { id: string; count: number };
+    /** 收集类：领取时扣除 */
+    consume?: BountyConsume;
 }
 
 export const BOUNTIES: BountyDef[] = [
-    { id: 'hunt_mobs', kind: 'hunt', name: '击杀 30 只小怪', reward: '200 金' },
-    { id: 'hunt_elites', kind: 'hunt', name: '击杀 6 只精英', reward: '350 金' },
-    { id: 'hunt_region_boss', kind: 'hunt', name: '击杀 1 只区域首领', reward: '800 金 + 紫装' },
-    { id: 'hunt_no_hit', kind: 'hunt', name: '无伤击杀 1 只精英', reward: '500 金' },
-    { id: 'hunt_burst', kind: 'hunt', name: '10 秒内击杀 5 只怪', reward: '400 金' },
-    { id: 'hunt_burst_kill', kind: 'hunt', name: '用爆发技能击杀 3 只精英', reward: '600 金' },
-    { id: 'gather_ash', kind: 'gather', name: '交出 20 份灰烬', reward: '250 金' },
-    { id: 'gather_frost', kind: 'gather', name: '交出 10 份霜晶', reward: '300 金' },
-    { id: 'gather_mithril', kind: 'gather', name: '交出 8 份秘银', reward: '400 金' },
-    { id: 'gather_blue', kind: 'gather', name: '上交 3 件蓝装', reward: '350 金' },
-    { id: 'gather_purple', kind: 'gather', name: '上交 1 件紫装', reward: '700 金 + 材料' },
-    { id: 'gather_disassemble', kind: 'gather', name: '分解 10 件装备', reward: '300 金' },
-    { id: 'dungeon_1', kind: 'dungeon', name: '通关副本 1', reward: '400 金' },
-    { id: 'dungeon_3', kind: 'dungeon', name: '通关副本 3', reward: '600 金' },
-    { id: 'dungeon_6', kind: 'dungeon', name: '通关副本 6', reward: '1200 金' },
-    { id: 'dungeon_nodeath', kind: 'dungeon', name: '不死亡通关任一副本', reward: '800 金' },
-    { id: 'dungeon_speed', kind: 'dungeon', name: '5 分钟内通关副本 2', reward: '700 金' },
-    { id: 'dungeon_last_hit', kind: 'dungeon', name: '用单个技能完成副本 BOSS 最后一击', reward: '500 金' },
-    { id: 'challenge_white', kind: 'challenge', name: '仅用白装通关副本 1', reward: '600 金' },
-    { id: 'challenge_no_trinket', kind: 'challenge', name: '不带饰品通关副本 3', reward: '800 金' },
-    { id: 'challenge_low_hp', kind: 'challenge', name: '生命低于 20% 时击杀 10 只怪', reward: '500 金' },
-    { id: 'challenge_crit_streak', kind: 'challenge', name: '连续 20 次暴击', reward: '600 金' },
-    { id: 'challenge_loot', kind: 'challenge', name: '单次副本拾取 10 件装备', reward: '700 金' },
-    { id: 'challenge_full_run', kind: 'challenge', name: '一次远征走完全部 12 节点', reward: '1000 金 + 橙装碎片' },
+    { id: 'hunt_mobs', kind: 'hunt', name: '击杀 30 只小怪', reward: '200 金', metric: 'kill', target: 30, gold: 200 },
+    { id: 'hunt_elites', kind: 'hunt', name: '击杀 6 只精英', reward: '350 金', metric: 'elite_kill', target: 6, gold: 350 },
+    {
+        id: 'hunt_region_boss', kind: 'hunt', name: '击杀 1 只区域首领', reward: '800 金 + 紫装',
+        metric: 'region_boss', target: 1, gold: 800, item: { quality: 'epic' },
+    },
+    { id: 'hunt_no_hit', kind: 'hunt', name: '无伤击杀 1 只精英', reward: '500 金', metric: 'elite_no_hit', target: 1, gold: 500 },
+    { id: 'hunt_burst', kind: 'hunt', name: '10 秒内击杀 5 只怪', reward: '400 金', metric: 'kill_5_in_10s', target: 1, gold: 400 },
+    {
+        id: 'hunt_burst_kill', kind: 'hunt', name: '用爆发技能击杀 3 只精英', reward: '600 金',
+        metric: 'burst_elite_kill', target: 3, gold: 600,
+    },
+    {
+        id: 'gather_ash', kind: 'gather', name: '交出 20 份灰烬', reward: '250 金',
+        metric: 'turnin_ash', target: 20, gold: 250, consume: { kind: 'material', materialId: 'ash_dust' },
+    },
+    {
+        id: 'gather_frost', kind: 'gather', name: '交出 10 份霜晶', reward: '300 金',
+        metric: 'turnin_frost', target: 10, gold: 300, consume: { kind: 'material', materialId: 'frost_crystal' },
+    },
+    {
+        id: 'gather_mithril', kind: 'gather', name: '交出 8 份秘银', reward: '400 金',
+        metric: 'turnin_mithril', target: 8, gold: 400, consume: { kind: 'material', materialId: 'mithril_ore' },
+    },
+    {
+        id: 'gather_blue', kind: 'gather', name: '上交 3 件蓝装', reward: '350 金',
+        metric: 'turnin_blue', target: 3, gold: 350, consume: { kind: 'gear', quality: 'rare' },
+    },
+    {
+        id: 'gather_purple', kind: 'gather', name: '上交 1 件紫装', reward: '700 金 + 材料',
+        metric: 'turnin_purple', target: 1, gold: 700, consume: { kind: 'gear', quality: 'epic' },
+        material: { id: 'mithril_ore', count: 3 },
+    },
+    { id: 'gather_disassemble', kind: 'gather', name: '分解 10 件装备', reward: '300 金', metric: 'dismantle', target: 10, gold: 300 },
+    { id: 'dungeon_1', kind: 'dungeon', name: '通关副本 1', reward: '400 金', metric: 'dungeon_clear', target: 1, gold: 400 },
+    { id: 'dungeon_3', kind: 'dungeon', name: '通关副本 3', reward: '600 金', metric: 'dungeon_clear', target: 3, gold: 600 },
+    { id: 'dungeon_6', kind: 'dungeon', name: '通关副本 6', reward: '1200 金', metric: 'dungeon_clear', target: 6, gold: 1200 },
+    { id: 'dungeon_nodeath', kind: 'dungeon', name: '不死亡通关任一副本', reward: '800 金', metric: 'dungeon_nodeath', target: 1, gold: 800 },
+    { id: 'dungeon_speed', kind: 'dungeon', name: '5 分钟内通关副本 2', reward: '700 金', metric: 'dungeon_speed', target: 2, gold: 700 },
+    {
+        id: 'dungeon_last_hit', kind: 'dungeon', name: '用单个技能完成副本 BOSS 最后一击', reward: '500 金',
+        metric: 'dungeon_last_hit', target: 1, gold: 500,
+    },
+    { id: 'challenge_white', kind: 'challenge', name: '仅用白装通关副本 1', reward: '600 金', metric: 'dungeon_white', target: 1, gold: 600 },
+    {
+        id: 'challenge_no_trinket', kind: 'challenge', name: '不带饰品通关副本 3', reward: '800 金',
+        metric: 'dungeon_no_trinket', target: 3, gold: 800,
+    },
+    { id: 'challenge_low_hp', kind: 'challenge', name: '生命低于 20% 时击杀 10 只怪', reward: '500 金', metric: 'low_hp_kill', target: 10, gold: 500 },
+    // 设计写「连续 20 次暴击」：暴击率上限 30%（爆发 +30%），20 连暴击几乎不可完成；
+    // 改为「单次副本内累计 20 次暴击」，保留挑战强度但可达成（见 M8 计划 §数值红线）。
+    { id: 'challenge_crit_streak', kind: 'challenge', name: '单次副本内暴击 20 次', reward: '600 金', metric: 'dungeon_crit', target: 1, gold: 600 },
+    { id: 'challenge_loot', kind: 'challenge', name: '单次副本拾取 10 件装备', reward: '700 金', metric: 'dungeon_loot', target: 1, gold: 700 },
+    {
+        id: 'challenge_full_run', kind: 'challenge', name: '一次远征走完全部 12 节点', reward: '1000 金 + 橙装',
+        metric: 'full_run', target: 1, gold: 1000, item: { quality: 'legendary' },
+    },
 ];
 
 export const BOUNTY_BY_ID: Record<string, BountyDef> = (() => {
@@ -986,6 +1048,44 @@ export const BOUNTY_BY_ID: Record<string, BountyDef> = (() => {
     for (const b of BOUNTIES) out[b.id] = b;
     return out;
 })();
+
+/**
+ * 一局战斗的悬赏统计（M8）。由 `MithrilCore` 在每局内累计，
+ * `startPlan()` 清零；结算时整份交给 `MithrilBounty.applyRunReport()`。
+ * 放在 Config 是为了让 Core 与 Bounty 都只依赖数据层，不互相 import。
+ */
+export interface BountyStats {
+    /** 非精英非 BOSS 击杀 */
+    mobKills: number;
+    eliteKills: number;
+    bossKills: number;
+    /** 精英存活期间玩家一次都没被打到 */
+    eliteNoHitKills: number;
+    /** 爆发窗口内击杀的精英 */
+    burstEliteKills: number;
+    /** 玩家 <20% 生命时完成的击杀 */
+    lowHpKills: number;
+    /** 10 秒滑动窗口内的最大击杀数 */
+    maxKillsIn10s: number;
+    /** 直接命中（普攻/技能，不含 DoT / 反伤）的暴击次数 */
+    crits: number;
+    /** 本局 BOSS 的最后一击是否来自技能 */
+    bossLastHitSkill: boolean;
+}
+
+export function emptyBountyStats(): BountyStats {
+    return {
+        mobKills: 0,
+        eliteKills: 0,
+        bossKills: 0,
+        eliteNoHitKills: 0,
+        burstEliteKills: 0,
+        lowHpKills: 0,
+        maxKillsIn10s: 0,
+        crits: 0,
+        bossLastHitSkill: false,
+    };
+}
 
 // ==================== 玩法身份色（只放十六进制，不 import cc） ====================
 
