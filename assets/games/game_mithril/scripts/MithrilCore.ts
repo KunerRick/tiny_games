@@ -16,22 +16,30 @@ import {
     BOSS_INTRO_GAP,
     BOSS_PHASE_HEAL_PCT,
     CLASS_KITS,
+    EMBER_STACK_MAX,
+    ECHO_CD_EVERY,
     ENCOUNTER_GAP,
     ENCOUNTER_HEAL_PCT,
     ENEMY_BY_ID,
     FIELD_H,
     FIELD_W,
     FIXED_DT,
+    GEAR_SLOTS,
     MAX_BULLETS,
     MAX_ENEMIES,
     MAX_ORBS,
     MINE_BOSS_SCRIPT,
+    MODIFIER_BY_ID,
+    MYTHIC_CURSE_TAKEN,
     ORB_ADD_DROP_CHANCE,
     ORB_DROP_CHANCE,
     ORB_HEAL_PCT,
     ORB_LIFE,
     ORB_PICKUP_RADIUS,
     PLAYER_TUNING,
+    SOUL_SPLIT_CHANCE,
+    THORN_ARMOR_MAX_HP,
+    THORN_ARMOR_REFLECT,
     dungeonRunPlan,
     emptyBountyStats,
 } from './MithrilConfig';
@@ -43,6 +51,7 @@ import type {
     EnemyDef,
     EquipItem,
     GearSlot,
+    ModifierId,
     RunPlan,
     SkillActDef,
 } from './MithrilConfig';
@@ -133,6 +142,31 @@ export interface CombatProfile {
     talents: TalentEffects;
     /** 技能等级 / 变体修正（M3；默认 1 级无变体） */
     skills: SkillMods;
+    /** 已装备的改造词条（取并集，M2 补全：规则改写类效果） */
+    modifiers: ModifierId[];
+    /** 是否穿着秘境（红）装备：带「诅咒」，受到伤害 +15% */
+    curse: boolean;
+}
+
+/** 已装备的改造词条并集（不含背包里没穿的） */
+export function equippedModifiers(save: MithrilSave): ModifierId[] {
+    const out: ModifierId[] = [];
+    for (const slot of GEAR_SLOTS) {
+        const item = save.equips ? (save.equips as Record<string, EquipItem | undefined>)[slot] : null;
+        const id = item && item.modifier;
+        if (id && MODIFIER_BY_ID[id] && out.indexOf(id as ModifierId) < 0) out.push(id as ModifierId);
+    }
+    return out;
+}
+
+/** 是否穿着秘境（红）装备（诅咒来源） */
+export function wearingMythic(save: MithrilSave): boolean {
+    if (!save.equips) return false;
+    for (const slot of GEAR_SLOTS) {
+        const item = (save.equips as Record<string, EquipItem | undefined>)[slot];
+        if (item && item.quality === 'mythic') return true;
+    }
+    return false;
 }
 
 /** 由等级 + 装备装等 + 词条配点推导出实战属性 */
@@ -155,6 +189,8 @@ export function makeProfile(
         vers: sec.vers,
         talents: emptyTalentEffects(),
         skills: emptySkillMods(),
+        modifiers: [],
+        curse: false,
     };
 }
 
@@ -176,7 +212,10 @@ export function profileFromSave(save: MithrilSave, minIlvl = 0): CombatProfile {
     const ap = base.attackPower * gearApMultiplier(st.ilvl) * (1 + tal.apPct);
     // 营地料理（M5）：进本前吃下的 buff 按场次生效，面板与实战必须读同一份乘数
     const meal = mealMultipliers(save);
-    const maxHp = (base.maxHp + st.bonusHp) * (1 + meal.hp);
+    // 改造词条「荆棘」：近战反伤 30%，代价最大生命 -10%（与料理 / 耐力同层乘算）
+    const mods = equippedModifiers(save);
+    const thorn = mods.indexOf('thorn_armor') >= 0;
+    const maxHp = (base.maxHp + st.bonusHp) * (1 + meal.hp) * (thorn ? 1 - THORN_ARMOR_MAX_HP : 1);
     return {
         ...base,
         attackPower: ap * (1 + meal.ap),
@@ -188,6 +227,8 @@ export function profileFromSave(save: MithrilSave, minIlvl = 0): CombatProfile {
         vers: Math.max(st.vers, floor.vers) + meal.vers,
         talents: tal,
         skills: skillModsFromSave(save),
+        modifiers: mods,
+        curse: wearingMythic(save),
     };
 }
 
@@ -579,6 +620,18 @@ export class MithrilWorld implements TrinketHost {
         return CLASS_KITS[this.profile.classId] || CLASS_KITS.warrior;
     }
 
+    /** 身上是否带某条改造词条（每帧多处查询，做成 O(5) 的数组查找即可） */
+    private _mod(id: ModifierId): boolean {
+        return this.profile.modifiers.indexOf(id) >= 0;
+    }
+
+    /**
+     * 改造词条「回响」的施放计数：按技能槽累计，每第 3 次把这次冷却减半。
+     * 放进 world 而不是 player，是因为它属于「这一局」而不是角色属性；
+     * 重新开始 / 换关卡时随世界一起丢弃即可。
+     */
+    private _castCounts: Record<string, number> = {};
+
     constructor(profile: CombatProfile, seed = 1, trinkets: Array<string | null> | null = null) {
         this.profile = profile;
         this.rng = mulberry32(seed);
@@ -776,6 +829,8 @@ export class MithrilWorld implements TrinketHost {
         for (const key of Object.keys(this.player.cd) as Array<keyof PlayerCooldowns>) {
             this.player.cd[key] = 0;
         }
+        // 回响的施放计数按「每一局」重新开始（换节点 / 重开都不继承）
+        this._castCounts = {};
         if (plan.encounters.length === 0) {
             if (plan.boss) this._enterBoss();
             else this._finishRun();
@@ -959,6 +1014,8 @@ export class MithrilWorld implements TrinketHost {
         if (opts.melee) dr += Math.max(0, this.kit.contactDr || 0);
         dr = Math.max(0, Math.min(0.75, dr));
         dmg *= 1 - dr;
+        // 秘境（红）诅咒：受到伤害 +15%（放在减伤之后，是实打实多挨的血）
+        if (this.profile.curse) dmg *= 1 + MYTHIC_CURSE_TAKEN;
 
         // 免死（不朽）：致命伤触发一次，回 35% 生命并给 1.5s 无敌
         if (dmg > 0 && p.hp - dmg <= 0 && p.cheatDeaths > 0) {
@@ -991,6 +1048,8 @@ export class MithrilWorld implements TrinketHost {
         const taken = landed + absorbed;
         if (taken > 0 && opts.attacker) {
             let reflect = opts.melee ? tal.meleeReflect : 0;
+            // 改造词条「荆棘」：近战反伤 30%（代价是最大生命 -10%，在 profile 里扣）
+            if (opts.melee && this._mod('thorn_armor')) reflect += THORN_ARMOR_REFLECT;
             if (p.counterReady > 0) reflect += tal.counterReflect;
             if (reflect > 0) this._reflect(opts.attacker, taken * reflect);
         }
@@ -1196,7 +1255,7 @@ export class MithrilWorld implements TrinketHost {
         // 普攻
         if (input.basic && cd.basic <= 0) {
             this._basicAttack(skills.basic);
-            cd.basic = kit.basic.cd * skills.basic.cdMul / (1 + this._effHaste());
+            cd.basic = this._echoAdjustedCd('basic', kit.basic.cd * skills.basic.cdMul / (1 + this._effHaste()));
         }
 
         // 技能槽 1 / 2 / 3（cd.charge / cd.whirlwind / cd.armorBreak 是槽位名，不是技能名）
@@ -1208,7 +1267,7 @@ export class MithrilWorld implements TrinketHost {
 
         // 爆发（战士血怒 / 法师奥术强化 / 游侠鹰眼 / 牧师圣能爆发）
         if (input.burst && cd.burst <= 0 && this._tryBurst(skills.burst)) {
-            cd.burst = this._skillCd(kit.burst.cd, skills.burst);
+            cd.burst = this._echoAdjustedCd('burst', this._skillCd(kit.burst.cd, skills.burst));
         }
     }
 
@@ -1223,7 +1282,18 @@ export class MithrilWorld implements TrinketHost {
         if (this.trinkets.consumeForcedSkillCrit()) this.player.nextCrit = true;
         if (!this._castSlot(act, mod)) return cd;
         this.trinkets.onSkillCast(slot, free);
-        return this._skillCd(act.cd, mod);
+        return this._echoAdjustedCd(slot, this._skillCd(act.cd, mod));
+    }
+
+    /**
+     * 改造词条「回响」：每第 3 次施放同一技能，这次冷却减半。
+     * 计数在「真正施放成功」之后累加 —— 被资源不足挡下的施放不该推进计数。
+     */
+    private _echoAdjustedCd(slot: string, cd: number): number {
+        if (!this._mod('echo_cd')) return cd;
+        const n = (this._castCounts[slot] = (this._castCounts[slot] || 0) + 1);
+        if (n % ECHO_CD_EVERY !== 0) return cd;
+        return Math.max(0.2, cd * 0.5);
     }
 
     /** 普攻按职业分派：战士近战扇形，法系发射投射物 */
@@ -1369,7 +1439,13 @@ export class MithrilWorld implements TrinketHost {
         const forced = p.nextCrit;
         if (forced) p.nextCrit = false;
         const burstCrit = p.burst > 0 ? (this.kit.burst.critBonus || 0) : 0;
-        return computeDamage(this.profile, this.rng, mult, forced, burstCrit);
+        const res = computeDamage(this.profile, this.rng, mult, forced, burstCrit);
+        // 改造词条「裂魂」：暴击时 20% 概率重置闪避（只在真的暴击后才多掷一次骰子，
+        // 没带这条词条时随机序列完全不变，老自检的确定性断言不受影响）
+        if (res.crit && this._mod('soul_split') && this.rng() < SOUL_SPLIT_CHANCE) {
+            p.cd.dodge = 0;
+        }
+        return res;
     }
 
     private _dash(dir: number, distance: number): void {
@@ -1911,8 +1987,15 @@ export class MithrilWorld implements TrinketHost {
                     if (dist2(b.x, b.y, e.x, e.y) > reach * reach) continue;
                     // 火球：先挂燃烧再结算直接伤害（直接伤害可能击杀并 splice 掉它）
                     // 饰品（M7）：余烬指环把「刷新燃烧」变成「叠加燃烧」
+                    // 改造词条「余烬」：同一次火球的 DoT 最多叠 3 层（比饰品更宽的叠加上限）
                     if (b.burnDps && b.burnDur) {
-                        this.trinkets.applyBurn(e, b.burnDps, b.burnDur);
+                        if (this._mod('ember_stack')) {
+                            const st = e.status;
+                            st.burnDps = Math.min(b.burnDps * EMBER_STACK_MAX, st.burnDps + b.burnDps);
+                            st.burnRemaining = Math.max(st.burnRemaining, b.burnDur);
+                        } else {
+                            this.trinkets.applyBurn(e, b.burnDps, b.burnDur);
+                        }
                     }
                     this._damageEnemy(j, b.damage, !!b.crit);
                     remove = true;

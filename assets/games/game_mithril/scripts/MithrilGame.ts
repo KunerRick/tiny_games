@@ -19,10 +19,13 @@ import { SceneManager } from '../../../common/managers/SceneManager';
 import { StorageManager } from '../../../common/managers/StorageManager';
 import { showTutorialOnce } from '../../../common/ui/GameUIKit';
 import {
-    FIXED_DT, MithrilWorld, PLAYER_START_X, PLAYER_START_Y, mulberry32, profileFromSave,
+    FIXED_DT, MithrilWorld, PLAYER_START_X, PLAYER_START_Y, equippedModifiers, mulberry32, profileFromSave,
 } from './MithrilCore';
 import type { CoreEvent, MithrilInput, MithrilSnapshot } from './MithrilCore';
-import { addToInventory, addTrinket, bossLoot, bossTrinket, maybeLowerQuality, rollItem, sellPrice, trinketGoldValue, unownedTrinkets } from './MithrilLoot';
+import {
+    addToInventory, addTrinket, bossLoot, bossTrinket, gluttonyExtraDrop, maybeLowerQuality,
+    rollItem, sellPrice, trinketGoldValue, unownedTrinkets,
+} from './MithrilLoot';
 import {
     chestExtraOptionOf,
     chestHpCostOf,
@@ -801,6 +804,17 @@ export class MithrilGame extends Component {
         if (addToInventory(save, item)) {
             granted.push(item);
             if (onGranted) onGranted();
+            // 改造词条「贪食」：拾取装备时 5% 再掉一件（同槽位、品质不高于当前）。
+            // 只触发一层（额外那件直接入包，不再走本函数），避免连锁到背包爆仓。
+            if (equippedModifiers(save).indexOf('gluttony') >= 0) {
+                const extra = gluttonyExtraDrop(Math.random, item);
+                if (extra && addToInventory(save, extra)) {
+                    granted.push(extra);
+                    const eq = GEAR_BASE_BY_ID[extra.baseId];
+                    const eqq = QUALITY_BY_ID[extra.quality];
+                    notes.push(`贪食 · 额外拾取：${eqq ? eqq.name : ''}·${eq ? eq.name : extra.baseId}（${GEAR_SLOT_NAMES[extra.slot]} ${extra.ilvl}）`);
+                }
+            }
             return label;
         }
         const gold = sellPrice(item);

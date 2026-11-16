@@ -7,6 +7,8 @@
  * M3 覆盖：天赋效果聚合与夹取 / 30 条天赋无空挂 / 技能等级与变体门控 /
  *          技能书与洗点 / **实战打桩 DPS 倍率 ∈ [8,11]** / 升级换 profile。
  * M8 覆盖：悬赏战斗统计（击杀分类 / 精英无伤 / 爆发 / 低血 / 10 秒窗口 / 暴击 / BOSS 尾刀）。
+ * M2 补全（2026-11-16）：15/50 手工改造词条 / 传说与秘境必带词条 / 秘境装等 +3 与诅咒 /
+ *          五条词条的实战行为（叠层 / 冷却 / 闪避 / 反伤 / 贪食额外掉落）。
  *
  * 用法：node tools/verify-mithril-core.js
  * 通过时打印 MITHRIL_CORE_OK；失败时逐条打印并以退出码 1 结束。
@@ -1598,6 +1600,235 @@ const BASE_DPS = C.measureDummyDps(BASE_PROFILE, 60);
         && reset.eliteNoHitKills === 0 && reset.burstEliteKills === 0 && reset.lowHpKills === 0
         && reset.maxKillsIn10s === 0 && reset.crits === 0 && reset.bossLastHitSkill === false
         && gw._killTimes.length === 0);
+}
+
+// ==================== 13. M2 补全：改造词条 / 品质特效（2026-11-16） ====================
+//
+// 设计 §4.3 的两条硬线在 M2 时只落了数据位（改造词条随机 30%、品质特效只有颜色），
+// 2026-11-16 补全：50 件基型里 15 件手工带改造词条；传说 = 唯一特效（必带改造词条）、
+// 秘境 = 诅咒（受到伤害 +15%，补偿装等 +3）。五条改造词条都必须真的改写规则
+// （叠层 / 冷却 / 闪避 / 反伤 / 掉落），而不是加数值。
+{
+    // ---- 配置层：15 / 50 ----
+    const modCounts = {};
+    for (const k of Object.keys(F.BASE_MODIFIERS)) {
+        const id = F.BASE_MODIFIERS[k];
+        modCounts[id] = (modCounts[id] || 0) + 1;
+    }
+    check('222. BASE_MODIFIERS = 15 / 50 件手工基型，5 条词条各 3 件',
+        F.GEAR_BASES.length === 50 && Object.keys(F.BASE_MODIFIERS).length === 15
+        && Object.keys(modCounts).length === 5
+        && Object.keys(modCounts).every((k) => modCounts[k] === 3),
+        `基型 ${F.GEAR_BASES.length} · ${JSON.stringify(modCounts)}`);
+
+    const badKeys = Object.keys(F.BASE_MODIFIERS).filter(
+        (k) => !F.GEAR_BASE_BY_ID[k] || !F.MODIFIER_BY_ID[F.BASE_MODIFIERS[k]],
+    );
+    check('223. 15 件基型 id 与 5 条词条 id 全部存在（无错字 / 无空挂）',
+        badKeys.length === 0 && F.MODIFIERS.length === 5
+        && F.MODIFIERS.every((m) => m.name && m.desc),
+        badKeys.join(',') || 'ok');
+
+    // ---- 掉落：传说 / 秘境必带词条；秘境装等 +3 ----
+    const rngLeg = C.mulberry32(777);
+    let legWith = 0;
+    let mythWith = 0;
+    let epicWith = 0;
+    for (let i = 0; i < 200; i++) {
+        const a = L.rollItem(rngLeg, { ilvl: 30, quality: 'legendary', slot: 'mainHand', classId: 'warrior' });
+        if (a && a.modifier && F.MODIFIER_BY_ID[a.modifier]) legWith++;
+        const b = L.rollItem(rngLeg, { ilvl: 30, quality: 'mythic', slot: 'ring' });
+        if (b && b.modifier && F.MODIFIER_BY_ID[b.modifier]) mythWith++;
+        const c = L.rollItem(rngLeg, { ilvl: 30, quality: 'epic', slot: 'head' });
+        if (c && c.modifier) epicWith++;
+    }
+    check('224. 传说 / 秘境 100% 带改造词条（唯一特效兜底），史诗只有手工基型才有',
+        legWith === 200 && mythWith === 200 && epicWith > 0 && epicWith < 200,
+        `传说 ${legWith}/200 · 秘境 ${mythWith}/200 · 史诗 ${epicWith}/200`);
+
+    const rngMyth = C.mulberry32(778);
+    const m38 = L.rollItem(rngMyth, { ilvl: 38, quality: 'mythic', slot: 'head', allowModifier: false });
+    const m10 = L.rollItem(rngMyth, { ilvl: 10, quality: 'mythic', slot: 'head', allowModifier: false });
+    const e10 = L.rollItem(rngMyth, { ilvl: 10, quality: 'epic', slot: 'head', allowModifier: false });
+    check('225. 秘境装等 +3 且封顶 40（诅咒的补偿），其它品质不加',
+        m38.ilvl === 40 && m10.ilvl === 13 && e10.ilvl === 10,
+        `${m38.ilvl} / ${m10.ilvl} / ${e10.ilvl}`);
+
+    let anyMod = 0;
+    const rngOff = C.mulberry32(779);
+    for (let i = 0; i < 60; i++) {
+        const it = L.rollItem(rngOff, {
+            ilvl: 40, quality: i % 2 ? 'legendary' : 'mythic',
+            slot: 'mainHand', classId: 'warrior', allowModifier: false,
+        });
+        if (it && it.modifier) anyMod++;
+    }
+    check('226. allowModifier:false 时无论品质 / 基型都不挂词条（自检锁随机序列用）',
+        anyMod === 0, anyMod);
+
+    let fcOk = true;
+    const fcRng = C.mulberry32(780);
+    const dungeonIds = Object.keys(F.DUNGEON_LOOT);
+    for (const d of dungeonIds) {
+        for (const cls of ['warrior', 'mage', 'ranger', 'priest']) {
+            const item = L.firstClearDrop(fcRng, cls, d);
+            if (!item) { fcOk = false; continue; }
+            const expect = F.BASE_MODIFIERS[item.baseId] || undefined;
+            if ((item.modifier || undefined) !== expect) fcOk = false;
+        }
+    }
+    check('227. 首通固定装只吃手工基型那一条词条（不吃随机，不能刷首通凑词条）',
+        fcOk, `${dungeonIds.length} 副本 × 4 职业`);
+
+    // ---- 贪食 / 品质特效文本 ----
+    const gluttonySrc = {
+        uid: 'g1', baseId: 'head_0', slot: 'head', ilvl: 20, quality: 'epic', affixes: [],
+    };
+    const seqRng = (seq) => {
+        let i = 0;
+        return () => (i < seq.length ? seq[i++] : 0.5);
+    };
+    const neverDrop = L.gluttonyExtraDrop(() => 0.9, gluttonySrc);
+    const sameQ = L.gluttonyExtraDrop(seqRng([0.01, 0.1]), gluttonySrc);
+    const lowerQ = L.gluttonyExtraDrop(seqRng([0.01, 0.9]), gluttonySrc);
+    check('228. 贪食额外掉落：5% 触发、同槽位同装等、品质不高于原件',
+        neverDrop === null && !!sameQ && !!lowerQ
+        && sameQ.slot === 'head' && lowerQ.slot === 'head'
+        && sameQ.ilvl === gluttonySrc.ilvl && lowerQ.ilvl === gluttonySrc.ilvl
+        && L.qualityIndex(sameQ.quality) === L.qualityIndex('epic')
+        && L.qualityIndex(lowerQ.quality) === L.qualityIndex('epic') - 1,
+        `${neverDrop === null} / ${sameQ && sameQ.quality} / ${lowerQ && lowerQ.quality}`);
+
+    const lineFor = (q) => L.qualitySpecialLines({
+        uid: 'x', baseId: 'head_0', slot: 'head', ilvl: 10, quality: q, affixes: [],
+    });
+    const mythLines = lineFor('mythic');
+    check('229. 品质特效文本只对传说 / 秘境出现，秘境写明 +15%',
+        lineFor('legendary').length === 1 && mythLines.length === 1
+        && mythLines[0].indexOf('15%') >= 0
+        && lineFor('epic').length === 0 && lineFor('common').length === 0,
+        mythLines[0] || 'none');
+
+    // ---- 属性聚合：只认已装备，负重不生效 ----
+    const modSave = mkBagSave();
+    modSave.equips.head = mkEquip({ baseId: 'head_5', slot: 'head', modifier: 'echo_cd' });
+    modSave.equips.chest = mkEquip({ uid: 'u2', baseId: 'chest_5', slot: 'chest', modifier: 'ember_stack' });
+    modSave.equips.ring = mkEquip({ uid: 'u3', baseId: 'ring_4', slot: 'ring', modifier: 'ember_stack' });
+    modSave.equips.feet = mkEquip({ uid: 'u4', baseId: 'feet_0', slot: 'feet', modifier: 'nope' });
+    modSave.inventory = [mkEquip({ uid: 'u5', baseId: 'hands_5', slot: 'hands', modifier: 'soul_split' })];
+    const unionMods = C.equippedModifiers(modSave);
+    check('230. 改造词条取「已装备」并集（去重 / 不含背包 / 过滤非法 id）',
+        unionMods.length === 2 && unionMods.indexOf('echo_cd') >= 0
+        && unionMods.indexOf('ember_stack') >= 0 && unionMods.indexOf('soul_split') < 0,
+        unionMods.join(',') || 'empty');
+
+    const thornSave = mkBagSave();
+    thornSave.level = 10;
+    thornSave.equips.chest = mkEquip({ baseId: 'chest_4', slot: 'chest', ilvl: 20 });
+    const thornPlain = C.profileFromSave(thornSave);
+    thornSave.equips.chest.modifier = 'thorn_armor';
+    const thornProf = C.profileFromSave(thornSave);
+    check('231. 荆棘：最大生命 -10%（与耐力 / 料理同层乘算）',
+        near(thornProf.maxHp, thornPlain.maxHp * 0.9, 1e-9)
+        && thornProf.modifiers.indexOf('thorn_armor') >= 0,
+        `${thornPlain.maxHp.toFixed(1)} → ${thornProf.maxHp.toFixed(1)}`);
+
+    thornSave.equips.chest.quality = 'mythic';
+    const curseProf = C.profileFromSave(thornSave);
+    thornSave.equips.chest.quality = 'legendary';
+    const legProf = C.profileFromSave(thornSave);
+    check('232. 只有穿秘境（红）装备才带诅咒标记',
+        curseProf.curse === true && legProf.curse === false,
+        `${curseProf.curse} / ${legProf.curse}`);
+
+    // ---- 五条词条的实战行为 ----
+    const modProfile = (ids) => {
+        const p = C.makeProfile('warrior', 10, 10);
+        p.modifiers = ids.slice();
+        return p;
+    };
+
+    const echoW = new C.MithrilWorld(modProfile(['echo_cd']), 31);
+    const echoSeq = [];
+    for (let i = 0; i < 6; i++) echoSeq.push(echoW._echoAdjustedCd('charge', 4));
+    const noEchoW = new C.MithrilWorld(modProfile([]), 32);
+    const noEchoSeq = [];
+    for (let i = 0; i < 3; i++) noEchoSeq.push(noEchoW._echoAdjustedCd('charge', 4));
+    const echoOtherSlot = echoW._echoAdjustedCd('burst', 4);
+    check('233. 回响：每第 3 次施放同一技能冷却减半（按槽位独立计数）',
+        deepEqual(echoSeq, [4, 4, 2, 4, 4, 2]) && deepEqual(noEchoSeq, [4, 4, 4]) && echoOtherSlot === 4,
+        `${echoSeq.join(',')} · 无词条 ${noEchoSeq.join(',')} · 另一槽 ${echoOtherSlot}`);
+
+    echoW.startDungeon('mine');
+    check('234. 新一局清空回响计数',
+        Object.keys(echoW._castCounts).length === 0, Object.keys(echoW._castCounts).join(',') || 'empty');
+
+    const soulW = new C.MithrilWorld(modProfile(['soul_split']), 33);
+    soulW.rng = () => 0.1;
+    soulW.player.nextCrit = true;
+    soulW.player.cd.dodge = 5;
+    const soulRes = soulW._rollDamage(1);
+    const soulHit = soulW.player.cd.dodge === 0;
+
+    const soulW2 = new C.MithrilWorld(modProfile(['soul_split']), 34);
+    soulW2.rng = () => 0.5;
+    soulW2.player.nextCrit = true;
+    soulW2.player.cd.dodge = 5;
+    soulW2._rollDamage(1);
+
+    const soulW3 = new C.MithrilWorld(modProfile([]), 35);
+    soulW3.rng = () => 0.1;
+    soulW3.player.nextCrit = true;
+    soulW3.player.cd.dodge = 5;
+    soulW3._rollDamage(1);
+    check('235. 裂魂：暴击后 20% 概率重置闪避（未触发 / 无词条都不重置）',
+        soulRes.crit && soulHit && soulW2.player.cd.dodge === 5 && soulW3.player.cd.dodge === 5,
+        `crit ${soulRes.crit} · 触发 ${soulHit}`);
+
+    const burnCase = (ids, seed) => {
+        const w = new C.MithrilWorld(modProfile(ids), seed);
+        w.spawnEnemy('imp', 200, 200, 500);
+        for (let i = 0; i < 4; i++) {
+            const b = w.fireBullet('player', 200, 200, 0, 0, 1, 2, 'bolt');
+            b.burnDps = 5;
+            b.burnDur = 3;
+        }
+        w._tickBullets(0.016);
+        return w.enemies[0] ? w.enemies[0].status.burnDps : -1;
+    };
+    const emberBurn = burnCase(['ember_stack'], 36);
+    const plainBurn = burnCase([], 37);
+    check('236. 余烬：同源燃烧最多叠 3 层（无词条仍只刷新不叠加）',
+        near(emberBurn, 15) && near(plainBurn, 5),
+        `余烬 ${emberBurn} / 普通 ${plainBurn}`);
+
+    const reflectCase = (ids, seed) => {
+        const w = new C.MithrilWorld(modProfile(ids), seed);
+        const e = w.spawnEnemy('imp', 300, 300, 1000);
+        const enemyHp = e.hp;
+        const playerHp = w.player.hp;
+        w.hitPlayer(100, { physical: true, melee: true, attacker: e });
+        return { landed: playerHp - w.player.hp, reflected: enemyHp - e.hp };
+    };
+    const thornCase = reflectCase(['thorn_armor'], 38);
+    const noThornCase = reflectCase([], 39);
+    check('237. 荆棘：近战受击反伤 30%（无词条时没有任何额外反伤）',
+        thornCase.landed > 0 && near(thornCase.reflected, thornCase.landed * 0.3, 1e-6)
+        && noThornCase.reflected === 0,
+        `反伤 ${thornCase.reflected.toFixed(2)} / 承伤 ${thornCase.landed.toFixed(2)}`);
+
+    const curseW = new C.MithrilWorld(modProfile([]), 40);
+    const plainW = new C.MithrilWorld(modProfile([]), 41);
+    curseW.profile.curse = true;
+    const cHp = curseW.player.hp;
+    curseW.hitPlayer(100, { physical: true });
+    const pHp = plainW.player.hp;
+    plainW.hitPlayer(100, { physical: true });
+    const cursedLoss = cHp - curseW.player.hp;
+    const plainLoss = pHp - plainW.player.hp;
+    check('238. 秘境诅咒：受到的伤害 +15%',
+        cursedLoss > plainLoss && near(cursedLoss, plainLoss * 1.15, 1e-6),
+        `${plainLoss.toFixed(2)} → ${cursedLoss.toFixed(2)}`);
 }
 
 // ==================== 汇总 ====================

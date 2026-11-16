@@ -15,12 +15,17 @@ import {
     AFFIXES,
     AFFIX_BY_ID,
     AFFIX_POINT_CAP,
+    BASE_MODIFIERS,
     DUNGEON_LOOT,
     GEAR_BASES,
     GEAR_BASE_BY_ID,
     GEAR_SLOTS,
+    GLUTTONY_CHANCE,
     ILVL_MAX,
     MODIFIERS,
+    MODIFIER_BY_ID,
+    MYTHIC_CURSE_TAKEN,
+    MYTHIC_ILVL_BONUS,
     QUALITIES,
     QUALITY_BY_ID,
     STAMINA_HP_PER_POINT,
@@ -34,6 +39,7 @@ import type {
     ClassId,
     EquipItem,
     GearSlot,
+    ModifierId,
     QualityId,
 } from './MithrilConfig';
 import type { MithrilSave } from './MithrilProgress';
@@ -155,6 +161,25 @@ export interface RollItemOpts {
     allowModifier?: boolean;
 }
 
+/**
+ * 改造词条归属（设计 §4.3）：15 件手工基型必带；传说 / 秘境作为「唯一特效」
+ * 兜底再挂一条随机。`allow === false` 时一件都不挂（自检要锁死随机序列时用）。
+ */
+function modifierFor(
+    rng: () => number,
+    baseId: string,
+    quality: QualityId,
+    allow = true,
+): ModifierId | undefined {
+    if (allow === false) return undefined;
+    const fixed = BASE_MODIFIERS[baseId];
+    if (fixed && MODIFIER_BY_ID[fixed]) return fixed;
+    if (QUALITY_BY_ID[quality]?.special) {
+        return MODIFIERS[Math.floor(rng() * MODIFIERS.length)].id;
+    }
+    return undefined;
+}
+
 export function rollItem(rng: () => number, opts: RollItemOpts): EquipItem | null {
     const ilvl = Math.max(1, Math.min(ILVL_MAX, Math.round(Number(opts.ilvl) || 1)));
     const slot: GearSlot = opts.slot || GEAR_SLOTS[Math.floor(rng() * GEAR_SLOTS.length)];
@@ -162,16 +187,16 @@ export function rollItem(rng: () => number, opts: RollItemOpts): EquipItem | nul
     const base = GEAR_BASE_BY_ID[baseId];
     if (!base) return null;
     const quality = opts.quality || rollQuality(rng, ilvl, opts.minQuality || 'common');
+    // 秘境（红）带诅咒，补偿是装等 +3（上限仍是 ILVL_MAX），见 Config 常量注释
+    const finalIlvl = quality === 'mythic' ? Math.min(ILVL_MAX, ilvl + MYTHIC_ILVL_BONUS) : ilvl;
     const qdef = QUALITY_BY_ID[quality];
-    const affixes = rollAffixes(rng, ilvl, qdef ? qdef.affixCount : 1);
-    const modifier = opts.allowModifier !== false && rng() < 0.3
-        ? MODIFIERS[Math.floor(rng() * MODIFIERS.length)].id
-        : undefined;
+    const affixes = rollAffixes(rng, finalIlvl, qdef ? qdef.affixCount : 1);
+    const modifier = modifierFor(rng, baseId, quality, opts.allowModifier);
     return {
         uid: `it_${Math.floor(rng() * 0x7fffffff).toString(36)}`,
         baseId,
         slot,
-        ilvl,
+        ilvl: finalIlvl,
         quality,
         affixes,
         modifier,
@@ -193,7 +218,8 @@ export function firstClearDrop(rng: () => number, classId: ClassId, dungeonId: s
         ilvl,
         quality: 'epic',
         affixes: rollAffixes(rng, ilvl, QUALITY_BY_ID.epic.affixCount),
-        modifier: rng() < 0.5 ? MODIFIERS[Math.floor(rng() * MODIFIERS.length)].id : undefined,
+        // 首通固定装只吃「手工基型」那一份改造词条，不再掷随机（可复现、不让人刷首通凑词条）
+        modifier: BASE_MODIFIERS[baseId],
     };
 }
 
@@ -226,6 +252,26 @@ export function maybeLowerQuality(rng: () => number, item: EquipItem, chance: nu
     if (!item || !(chance > 0)) return item;
     if (rng() >= chance) return item;
     return lowerQualityOne(item);
+}
+
+/**
+ * 改造词条「贪食」：拾取装备时 5% 额外掉一件，**品质不高于当前**
+ * （同槽位、同装等，一半概率同品质、一半降一档）。
+ * 返回 null 表示这次没触发。调用方负责入包与结算文案。
+ */
+export function gluttonyExtraDrop(rng: () => number, src: EquipItem): EquipItem | null {
+    if (!src) return null;
+    if (!(rng() < GLUTTONY_CHANCE)) return null;
+    const quality: QualityId = rng() < 0.5 ? src.quality : QUALITY_ORDER[Math.max(0, qualityIndex(src.quality) - 1)];
+    return rollItem(rng, { ilvl: src.ilvl, slot: src.slot, quality });
+}
+
+/** 品质特效的可读文本（装备详情用）：传说 = 必带改造词条；秘境 = 诅咒 */
+export function qualitySpecialLines(item: EquipItem): string[] {
+    const q = QUALITY_BY_ID[item.quality];
+    if (!q || !q.special) return [];
+    if (q.special === 'unique') return ['传说特效：必带一条改造词条（规则改写）'];
+    return [`秘境诅咒：受到伤害 +${Math.round(MYTHIC_CURSE_TAKEN * 100)}%（掉落装等 +${MYTHIC_ILVL_BONUS}）`];
 }
 
 // ==================== 饰品（M7） ====================

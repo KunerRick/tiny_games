@@ -1,0 +1,150 @@
+# 《秘银远征》设计深度差距补全（改造词条 / 品质特效 / 手工基型）
+
+> 日期：2026-11-16 · 分支：`develop` · 触发：M11 收尾后「第一阶段是否全部实现」的最终复核
+> 设计规格：`plans/2026-11-14-game-mithril-design.md` §4.3（装备 / 词条 / 品质）与 §0 的 8 条承诺
+> 结论：**3 个 P1 设计深度差距全部闭合**；24 技能变体只做了 7 个（17 个待做，记入 §6，进试玩不阻塞）
+
+## 1. 复核发现了什么
+
+M0–M11 的机械判据（行数 / 表项 / 断言 / 构建）全绿，但把设计稿逐条对着实机读，发现三处**「数据在、效果不在」**：
+
+| # | 设计承诺（§4.3） | 补全前的实际状态 | 级别 |
+|---|------------------|------------------|------|
+| 1 | 5 条改造词条（余烬 / 回响 / 裂魂 / 荆棘 / 贪食）**改写规则** | 有 id、名称、描述，有 30% 掉落概率；**战斗内核里没有任何一处读它们**，装上等于没装 | P1 |
+| 2 | 传说 = 4 词条 + **唯一特效**；秘境 = 4 词条 + **负面** | 品质表有 `special: 'unique' / 'negative'` 字段，但**没有任何实现或提示**，两者与史诗只在颜色和词条数上不同 | P1 |
+| 3 | 「50 件基型里约 15 件带改造词条，全部**手工命名 + 手工写效果**，不随机」 | 改为「任何掉落 30% 随机挂一条」——**随机生成**，与设计明确相反 | P1 |
+
+另有 4 处 P2 偏差（技能变体 7/24 等）已记录，本轮不动（见 §6）。
+
+## 2. 补齐后的实现
+
+### 2.1 配置层（`scripts/MithrilConfig.ts`）
+
+```ts
+export type ModifierId = 'ember_stack' | 'echo_cd' | 'soul_split' | 'thorn_armor' | 'gluttony';
+
+/** 手工指定「基型 → 改造词条」：5 条 × 3 件 = 15/50，与设计「约 15 件」一致 */
+export const BASE_MODIFIERS: Record<string, ModifierId> = {
+    mainHand_2: 'ember_stack', ring_4: 'ember_stack', chest_5: 'ember_stack',   // 橡木法杖 / 灰烬之戒 / 深渊长袍
+    mainHand_3: 'echo_cd',     head_5: 'echo_cd',     ring_5: 'echo_cd',       // 霜晶魔杖 / 秘银王冠 / 深渊之戒
+    mainHand_5: 'soul_split',  hands_5: 'soul_split', feet_5: 'soul_split',    // 连弩 / 秘银指套 / 秘银踏靴
+    offHand_0: 'thorn_armor',  chest_4: 'thorn_armor', head_4: 'thorn_armor',  // 塔盾 / 鳞甲 / 巨魔骨盔
+    ring_0: 'gluttony',        feet_4: 'gluttony',    hands_4: 'gluttony',     // 力量之戒 / 巨魔战靴 / 巨魔护手
+};
+
+export const EMBER_STACK_MAX = 3;        // 余烬：同源燃烧最多 3 层
+export const ECHO_CD_EVERY = 3;          // 回响：每第 3 次施放
+export const SOUL_SPLIT_CHANCE = 0.2;    // 裂魂：暴击后 20%
+export const THORN_ARMOR_REFLECT = 0.3;  // 荆棘：反伤 30%
+export const THORN_ARMOR_MAX_HP = 0.1;   // 荆棘：最大生命 -10%
+export const GLUTTONY_CHANCE = 0.05;     // 贪食：5% 额外掉一件
+export const MYTHIC_CURSE_TAKEN = 0.15;  // 秘境诅咒：受到伤害 +15%
+export const MYTHIC_ILVL_BONUS = 3;      // 秘境补偿：装等 +3（仍封顶 40）
+```
+
+### 2.2 掉落层（`scripts/MithrilLoot.ts`）
+
+- `modifierFor()`：**基型优先**（15 件手工基型必带）→ 传说 / 秘境作为「唯一特效」兜底**必带**一条随机 → 其它品质不挂。`allowModifier: false` 时一条都不挂（自检锁随机序列用）。
+- `rollItem()`：秘境装等 `+3`、封顶 `ILVL_MAX`（补偿诅咒）。
+- `firstClearDrop()`：首通固定紫装只吃手工基型那一条 —— **不能刷首通凑词条**。
+- `gluttonyExtraDrop()`（贪食）：5% 触发，同槽位同装等、品质不高于原件（50% 同档 / 50% 降一档）。
+- `qualitySpecialLines()`（面板文案）：传说 / 秘境各一条，秘境写明 `+15%` 与装等补偿。
+
+### 2.3 战斗层（`scripts/MithrilCore.ts`）
+
+`CombatProfile` 增 `modifiers: ModifierId[]` 与 `curse: boolean`（`profileFromSave` 从**已装备**的并集算，不含背包）。
+
+| 词条 | 接线点 | 行为 |
+|------|--------|------|
+| 余烬 `ember_stack` | `_tickBullets` 玩家弹命中 | 燃烧改为叠加：`min(burnDps × 3, 当前 + burnDps)`，持续取 max（无词条仍走饰品 `applyBurn` 的「刷新不叠加」） |
+| 回响 `echo_cd` | `_echoAdjustedCd()`，普攻 / 技能槽 / 爆发全走它 | 同一槽位**第 3 次真正施放**后本次冷却 ×0.5（下限 0.2s）；被资源不足挡下的施放不计数 |
+| 裂魂 `soul_split` | `_rollDamage()` | 暴击后额外掷一次骰，20% 重置闪避冷却。**只在暴击后才多掷**，没带词条时随机序列与旧版完全一致（老确定性断言不受影响） |
+| 荆棘 `thorn_armor` | `profileFromSave` 扣血 + `hitPlayer` 近战分支 | 最大生命 −10%（与耐力 / 料理同层乘算）+ 近战受击按实受伤反伤 30% |
+| 贪食 `gluttony` | `MithrilGame._grantItem()`（宝箱 / 战斗奖励 / BOSS 掉落都过这里） | 5% 额外掉一件并写结算行「贪食 · 额外拾取：…」；**只触发一层**（额外那件直接入包，不走本函数），避免连锁爆仓 |
+
+秘境诅咒同样落在 `hitPlayer` 的减伤之后：`dmg *= 1 + 0.15` —— 实打实多挨血，不被减伤稀释。
+
+### 2.4 面板层（`scripts/MithrilMenu.ts`）
+
+- 装备详情在改造词条行后追加 `qualitySpecialLines()`：传说「传说特效：必带一条改造词条（规则改写）」、秘境「秘境诅咒：受到伤害 +15%（掉落装等 +3）」。
+- 最坏情况 7 行（4 词条 + 耐力 + 改造 + 品质特效）：详情体 `lineHeight` 30→26、中心 −355→−389，动作按钮行 −485→−512，**7 行不压按钮**（[截图](../assets/2026-11-16-mithril-modifier-detail-7lines.png)）。
+- 顺带修掉一个 M7 起就存在的遮挡：「装备 / 饰品」页签（y=478）压住属性块第一行，属性改为 3 行（y=400 / lineHeight 30 / 19 号字），攻击强度与生命上限不再被吃掉（[截图](../assets/2026-11-16-mithril-stats-3lines.png)）。
+
+## 3. 数值口径自洽检查
+
+| 项 | 结论 |
+|---|---|
+| 15 / 50 基型 | 5 条词条 × 3 件 = 15，占 30%，与「约 30% 掉落带改造词条」同源 |
+| 传说 / 秘境 | 100% 带词条（兜底随机）；秘境另有 +3 装等与 +15% 承伤，两者都写在面板上 |
+| 荆棘的代价 | 最大生命 −10% 与反伤 30% 同一条词条：堆血 build 拿它换站桩反伤 |
+| 裂魂的随机性 | 只在暴击后多掷一次 ⇒ 不带词条时对 `mulberry32` 序列零影响，保证既有平衡长跑可复现 |
+
+## 4. 验证
+
+### 4.1 纯逻辑（`tools/verify-mithril-core.js`，新增 17 项，222–238）
+
+| 断言组 | 内容 |
+|---|---|
+| 222–223 | 15/50 基型、5×3 分布、基型 id 与词条 id 全部存在 |
+| 224–227 | 传说 / 秘境 200 次全带词条；史诗只有手工基型才有；秘境 +3 且封顶 40；`allowModifier:false` 一件不挂；首通固定装只吃手工词条 |
+| 228–229 | 贪食 5% 触发 + 同槽位 + 品质不高于原件（同档 / 降档两支）；品质特效文本只对传说 / 秘境出现且含 `15%` |
+| 230–232 | 已装备并集（去重 / 不含背包 / 过滤非法 id）；荆棘最大生命 −10%；只有秘境带诅咒 |
+| 233–238 | 回响 `[4,4,2,4,4,2]`（按槽位独立计数，换局清零）；裂魂暴击重置闪避（20% 门限两侧都对）；余烬 4 发 → 15（3 层）而普通只刷新 5；荆棘反伤 = 实受伤 ×0.3；诅咒承伤 ×1.15 |
+
+`node tools/verify-mithril-core.js` → **238/238 通过**（原 221 + 新增 17）。
+
+### 4.2 回归（全部退出码 0）
+
+```
+tsc --noEmit                      TS_OK（编辑器自带 5.8.2）
+verify-mithril-core.js            238 项
+verify-mithril-audio.js            88 项
+verify-mithril-wild.js          2,829 项
+verify-mithril-camp.js            337 项
+verify-mithril-dungeons.js        892 项
+verify-mithril-trinkets.js        692 项
+verify-mithril-bounty.js          471 项
+verify-mithril-balance.js         136 项
+```
+
+掉落随机序列因「不再无条件掷 30%」而改变，但 8 个脚本（含平衡长跑与副本种子断言）**无一回归**。
+
+### 4.3 构建产物实机（`build/web-mobile` + `127.0.0.1:8123`，Cocos 编辑器未启动）
+
+CLI 构建 26 场景 / 73 UUID、`Can not find the importer` = 0、`.meta` 零改动；注入「五条词条全带 + 秘境戒指 + 传说头盔」的合法存档（先过 `parseSave`）后走真实入口。属性面板三行化后**重新构建一次**，下表取自最终产物：
+
+| 探针 | 实测 |
+|---|---|
+| 角色面板 · 秘境详情 | `深渊之戒（秘境 · 戒指 · 装等 40）` + 4 行：暴击 / 耐力 / `改造「回响」…` / `秘境诅咒：受到伤害 +15%（掉落装等 +3）` |
+| 角色面板 · 传说详情 | `巨魔骨盔（传说 · 头 · 装等 30）` + `传说特效：必带一条改造词条（规则改写）` |
+| 最坏 7 行布局 | 4 词条 + 耐力 + 改造 + 品质特效 = 7 行，不压「穿上 / 出售」 |
+| 属性块 vs 页签 | 标签实测高 97.8px、中心 y=400 ⇒ 占 351–449；页签在 y=478 ⇒ **留白 7px 以上**，`攻击强度 17.8 / 生命上限 862` 完整可见 |
+| 装备秘境戒 | `equips.ring = ring_5 / mythic / echo_cd` |
+| 贪食接线（`_grantItem` × 400） | 命中 **14 次**（期望 20，5%），示例行「贪食 · 额外拾取：稀有·铁盔（头 20）」——品质确实低于原件的史诗 |
+| 开远征 → 点 battle 节点 | `_mode = combat`、`phase = playing` |
+| `profile.modifiers` | `ember_stack, thorn_armor, echo_cd, soul_split, gluttony`（5/5） |
+| `profile.curse` | `true`（已穿秘境戒）；`maxHp = 952.2` |
+| 回响 | `_echoAdjustedCd('probeSlot', 4)` × 6 → `[4,4,2,4,4,2]` |
+| 余烬 | 同源 4 发燃烧：`0 → 15`（3 层 ×5） |
+| 荆棘 | 近战受击：实受伤 **57.5**，反伤 **17.25**（= ×0.3） |
+| 秘境诅咒 | 同一世界同 100 点伤害：`85 → 97.75`（×1.15） |
+| 裂魂 | 必暴 + rng 0.1：`crit = true`、`cd.dodge = 5 → 0` |
+| 控制台 | 20 条，**0 error、0 warning** |
+
+> 存档安全：产物跑在 `127.0.0.1:8123`，与编辑器预览 `127.0.0.1:7456` 不同源，玩家既有存档不受影响；注入的测试档只存在于本页 `localStorage`。
+> 产物目录里的 `mithril-mod-save.json` 是本次注入用的临时文件（`build/` 已 gitignore）。
+
+## 5. 改动文件
+
+`assets/games/game_mithril/scripts/MithrilConfig.ts`、`MithrilLoot.ts`、`MithrilCore.ts`、`MithrilGame.ts`、`MithrilMenu.ts`、`tools/verify-mithril-core.js`、本文件、`docs/README.md`。
+
+## 6. 仍未闭合（不影响试玩，记账）
+
+1. **技能变体 7 / 24**：设计 §3.4 的「24 技能 × 4 变体 = 96 种形态」目前只有 7 个技能配了 2/4 级变体，其余 17 个只吃等级。属**内容量**差距，不是机制缺口；下一批次按职业逐条补，每补 1 个技能同步补自检。
+2. **P2 偏差 4 条**（技能变体外的细节，见 M11 最终复核记录）留待试玩反馈一并排序。
+
+## 7. 提交
+
+```
+feat(mithril): 补全改造词条 / 品质特效 / 15 件手工基型，属性面板三行化
+```

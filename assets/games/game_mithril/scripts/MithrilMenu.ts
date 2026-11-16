@@ -23,7 +23,8 @@ import {
 import type { AffixId, EquipItem, GearSlot, TrinketDef } from './MithrilConfig';
 import {
     affixValue, equipFromInventory, equipStats, equipTrinket, findInventoryIndex, ownsTrinket,
-    sellFromInventory, sellPrice, sortedInventory, staminaOf, unequipToInventory, unequipTrinket,
+    qualitySpecialLines, sellFromInventory, sellPrice, sortedInventory, staminaOf,
+    unequipToInventory, unequipTrinket,
 } from './MithrilLoot';
 import type { EquipStats } from './MithrilLoot';
 import type { MithrilSave } from './MithrilProgress';
@@ -224,8 +225,8 @@ export class MithrilMenu extends Component {
         });
         closeBtn.node.setPosition(268, 540, 0);
 
-        this._statsLabel = createLabel(panel, '', 20, {
-            width: 600, height: 132, color: COLOR.TEXT_SECONDARY, x: 0, y: 415, lineHeight: 33,
+        this._statsLabel = createLabel(panel, '', 19, {
+            width: 660, height: 90, color: COLOR.TEXT_SECONDARY, x: 0, y: 400, lineHeight: 30,
         });
         this._hintLabel = createLabel(panel, HINT_TEXT, 17, {
             width: 600, height: 24, color: COLOR.WARNING, x: 0, y: 342,
@@ -278,8 +279,10 @@ export class MithrilMenu extends Component {
         this._detailTitle = createLabel(panel, '', 22, {
             width: 600, height: 30, color: COLOR.TEXT_PRIMARY, bold: true, x: 0, y: -280,
         });
+        // 高度自助增长（Overflow.NONE 会把节点撑到内容大小）：4 词条 + 耐力 + 改造 + 品质特效
+        // 最多 7 行，lineHeight 26 时 182 px，正好落在标题（−295）与按钮（−484）之间。
         this._detailBody = createLabel(panel, '', 18, {
-            width: 600, height: 130, color: COLOR.TEXT_SECONDARY, x: 0, y: -355, lineHeight: 30,
+            width: 600, height: 130, color: COLOR.TEXT_SECONDARY, x: 0, y: -389, lineHeight: 26,
         });
 
         this._equipBtn = createButton(panel, {
@@ -287,19 +290,19 @@ export class MithrilMenu extends Component {
             fill: COLOR.SUCCESS, textColor: '#FFFFFF', activeFill: '#15803D',
             radius: 12, onTap: () => this._onEquipTap(),
         });
-        this._equipBtn.node.setPosition(-180, -485, 0);
+        this._equipBtn.node.setPosition(-180, -512, 0);
         this._unequipBtn = createButton(panel, {
             w: 160, h: 56, text: '卸下', fontSize: 24,
             fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
             radius: 12, onTap: () => this._onUnequipTap(),
         });
-        this._unequipBtn.node.setPosition(0, -485, 0);
+        this._unequipBtn.node.setPosition(0, -512, 0);
         this._sellBtn = createButton(panel, {
             w: 160, h: 56, text: '出售', fontSize: 24,
             fill: '#B45309', textColor: '#FFFFFF', activeFill: '#92400E',
             radius: 12, onTap: () => this._onSellTap(),
         });
-        this._sellBtn.node.setPosition(180, -485, 0);
+        this._sellBtn.node.setPosition(180, -512, 0);
 
         // ---- 页签（常驻）与饰品页（M7） ----
         // 先给装备页拍快照：此刻面板的子节点全部是装备页控件，
@@ -409,11 +412,11 @@ export class MithrilMenu extends Component {
         const save = this._save!;
         const prof = profileFromSave(save, this._floorIlvl);
         const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+        // 3 行（不是 4 行）：「装备 / 饰品」页签压在 y=478，4 行会被页签吃掉第一行
         return [
-            `攻击强度 ${prof.attackPower.toFixed(1)}    生命上限 ${Math.round(prof.maxHp)}（耐力 +${extra.stamina} / 生命 +${extra.bonusHp}）`,
-            `暴击 ${pct(prof.critChance)}    急速 ${pct(prof.haste)}`,
-            `精通 ${pct(prof.mastery)}    全能 ${pct(prof.vers)}`,
-            `平均装等 ${extra.ilvl.toFixed(1)}    已装备 ${extra.equipped}/8`,
+            `攻击强度 ${prof.attackPower.toFixed(1)}    生命上限 ${Math.round(prof.maxHp)}`,
+            `暴击 ${pct(prof.critChance)}    急速 ${pct(prof.haste)}    精通 ${pct(prof.mastery)}    全能 ${pct(prof.vers)}`,
+            `平均装等 ${extra.ilvl.toFixed(1)}    已装备 ${extra.equipped}/8    耐力 +${extra.stamina}（生命 +${extra.bonusHp}）`,
         ].join('\n');
     }
 
@@ -513,6 +516,7 @@ export class MithrilMenu extends Component {
             const m = MODIFIER_BY_ID[item.modifier];
             if (m) lines.push(`改造「${m.name}」：${m.desc}`);
         }
+        for (const line of qualitySpecialLines(item)) lines.push(line);
         this._detailBody.string = lines.join('\n');
 
         const isInv = this._sel?.kind === 'inv';

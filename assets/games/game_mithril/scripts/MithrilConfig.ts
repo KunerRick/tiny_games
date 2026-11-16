@@ -641,9 +641,12 @@ export interface EquipItem {
     modifier?: string;
 }
 
+/** 改造词条 id —— 五条都是「改写规则」而非加数值（设计 §4.3） */
+export type ModifierId = 'ember_stack' | 'echo_cd' | 'soul_split' | 'thorn_armor' | 'gluttony';
+
 /** 改造词条：不写数值，写行为（本方案「不缩水」的分界线） */
 export interface ModifierDef {
-    id: string;
+    id: ModifierId;
     name: string;
     desc: string;
 }
@@ -661,6 +664,52 @@ export const MODIFIER_BY_ID: Record<string, ModifierDef> = (() => {
     for (const m of MODIFIERS) out[m.id] = m;
     return out;
 })();
+
+/**
+ * 手工指定「基型 → 改造词条」（设计 §4.3：50 件基型里约 15 件带改造词条，
+ * 全部手工命名 + 手工写效果，**不随机生成**）。5 条 × 3 件 = 15/50 = 30%，
+ * 与「约 30% 掉落带改造词条」同源；不再额外掷 30% 随机。
+ */
+export const BASE_MODIFIERS: Record<string, ModifierId> = {
+    // 余烬：火系持续伤害叠层
+    mainHand_2: 'ember_stack',   // 橡木法杖
+    ring_4: 'ember_stack',       // 灰烬之戒
+    chest_5: 'ember_stack',      // 深渊长袍
+    // 回响：每第 3 次施放同一技能冷却减半
+    mainHand_3: 'echo_cd',       // 霜晶魔杖
+    head_5: 'echo_cd',           // 秘银王冠
+    ring_5: 'echo_cd',           // 深渊之戒
+    // 裂魂：暴击重置闪避
+    mainHand_5: 'soul_split',    // 连弩
+    hands_5: 'soul_split',       // 秘银指套
+    feet_5: 'soul_split',        // 秘银踏靴
+    // 荆棘：近战反伤 + 最大生命 -10%
+    offHand_0: 'thorn_armor',    // 塔盾
+    chest_4: 'thorn_armor',      // 鳞甲
+    head_4: 'thorn_armor',       // 巨魔骨盔
+    // 贪食：拾取掉落 5% 额外一件
+    ring_0: 'gluttony',          // 力量之戒
+    feet_4: 'gluttony',          // 巨魔战靴
+    hands_4: 'gluttony',         // 巨魔护手
+};
+
+// ---- 改造词条 / 品质特效的数值口径（实现与文案共用同一份常量） ----
+
+/** 余烬：火系 DoT 最多叠 3 层 */
+export const EMBER_STACK_MAX = 3;
+/** 回响：每第 3 次施放同一技能 */
+export const ECHO_CD_EVERY = 3;
+/** 裂魂：暴击重置闪避的概率 */
+export const SOUL_SPLIT_CHANCE = 0.2;
+/** 荆棘：近战反伤比例 / 最大生命惩罚 */
+export const THORN_ARMOR_REFLECT = 0.3;
+export const THORN_ARMOR_MAX_HP = 0.1;
+/** 贪食：额外掉落的概率 */
+export const GLUTTONY_CHANCE = 0.05;
+/** 秘境（红）诅咒：受到伤害提高 15% */
+export const MYTHIC_CURSE_TAKEN = 0.15;
+/** 秘境（红）额外装等：掉落时 +3，作为「带诅咒」的补偿 */
+export const MYTHIC_ILVL_BONUS = 3;
 
 // ==================== 饰品（20 件 · 10 tag × 2） ====================
 
