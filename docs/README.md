@@ -218,6 +218,18 @@
 | 游戏设计（M1–M4 已实现，M5 音效震动已实现） | [`specs/2026-11-09-game-fridge-design.md`](./specs/2026-11-09-game-fridge-design.md) | 房间制地牢 Roguelike：四层世界（冷藏/玩具箱/游戏机/压缩机）× 7 房、40 道具靠 14 标签涌现 14 条协同、6 角色条件式解锁与充能制主动槽、冰箱贴「只解锁内容不卖数值」、**房间级断点续玩 + 存档跨版本迁移**、Boss 核心三选一、解锁树 / 图鉴 / 每日挑战 / 热度模式、**程序化合成音效 + 震动开关**、确定性地图与 56 项自检目标 |
 | 回归自检 | [`../tools/verify-fridge-core.js`](../tools/verify-fridge-core.js) | 纯逻辑单测（**M1+M2+M3+M4 共 261 项**：随机数、40 道具 / 6 角色 / 16 敌人表、属性公式与夹取、移动 / 开火 / 命中、拾取、无敌帧与死亡、敌人生成上限、地图生成与门锁、宝箱、Boss、40 道具触发 / 14 协同 / 6 角色主动槽、免死与复活、商店 / 祭坛 / 炸弹 / 秘密房、**四层 Boss 与核心三选一 / 冰箱贴各来源 / 解锁条件 / 每日挑战 / 热度诅咒 / 电梯 / v3 存档迁移**、确定性与 60 秒长跑） |
 
+### 秘银远征（Mithril / mithril）
+
+单机 WoW 风 ARPG：野外路线图远征 + 六座秘境 + 装备 / 饰品 / 营地养成。M1–M11 已实现并验收，已注册进游戏大厅（第 25 款，专属秘银锭图标）。
+
+| 类型 | 文件 | 说明 |
+|------|------|------|
+| 游戏设计（总规格） | [`plans/2026-11-14-game-mithril-design.md`](./plans/2026-11-14-game-mithril-design.md) | 野外路线图 + 六秘境节点制战斗、装备 / 词条 / 饰品与 12 条协同、技能 / 天赋 / 变体、营地与悬赏、v2 存档迁移、程序化合成音效 + 震动开关、M1–M11 里程碑与退出判据 |
+| 里程碑验收 | [`plans/2026-11-14-mithril-m1-acceptance.md`](./plans/2026-11-14-mithril-m1-acceptance.md) → [`m2`](./plans/2026-11-15-mithril-m2-acceptance.md) → [`m3`](./plans/2026-11-15-mithril-m3-acceptance.md) → [`m4`](./plans/2026-11-15-mithril-m4-acceptance.md) → [`m5`](./plans/2026-11-15-mithril-m5-acceptance.md) → [`m6`](./plans/2026-11-15-mithril-m6-acceptance.md) → [`m7`](./plans/2026-11-15-mithril-m7-acceptance.md) → [`m8`](./plans/2026-11-16-mithril-m8-acceptance.md) → [`m9`](./plans/2026-11-16-mithril-m9-acceptance.md) → [`m10`](./plans/2026-11-16-mithril-m10-acceptance.md) → [`m11`](./plans/2026-11-16-mithril-m11-acceptance.md) | 每份含退出判据实测表、交付内容、回归与提交 |
+| 阶段计划 | [`m6`](./plans/2026-11-15-mithril-m6-plan.md)、[`m7`](./plans/2026-11-15-mithril-m7-plan.md)、[`m8`](./plans/2026-11-16-mithril-m8-plan.md)、[`m9`](./plans/2026-11-16-mithril-m9-plan.md)、[`m10`](./plans/2026-11-16-mithril-m10-plan.md)、[`m11`](./plans/2026-11-16-mithril-m11-plan.md) | 各阶段的实现拆解与风险 |
+| 试玩报告 | 第 10–19 轮：[`round10`](./plans/2026-11-15-playtest-round10-mithril.md)、[`round11`](./plans/2026-11-15-playtest-round11-mithril-m4.md)、[`round12`](./plans/2026-11-15-playtest-round12-mithril-m4-recheck.md)、[`round13`](./plans/2026-11-15-playtest-round13-mithril-m5.md)、[`round14`](./plans/2026-11-15-playtest-round14-mithril-m5-recheck.md)、[`round15`](./plans/2026-11-15-playtest-round15-mithril-m6.md)、[`round16`](./plans/2026-11-15-playtest-round16-mithril-m7.md)、[`round17`](./plans/2026-11-16-playtest-round17-mithril-m8.md)、[`round18`](./plans/2026-11-16-playtest-round18-mithril-m9.md)、[`round19`](./plans/2026-11-16-playtest-round19-mithril-m10.md) | fresh 子代理试玩，P0/P1 清零后进入下一阶段 |
+| 回归自检 | `tools/verify-mithril-core.js`、`-wild`、`-camp`、`-dungeons`、`-trinkets`、`-bounty`、`-balance`、`-audio` | 纯逻辑 + 映射表 + 工程约束共 7,600+ 项断言，清单与「何时跑」见 [`tech/verify-scripts.md`](./tech/verify-scripts.md) |
+
 ### 未单列小节的新游戏（规格与自检都在）
 
 | 游戏 | 设计规格 | 回归自检 |

@@ -46,6 +46,7 @@ const ACCENTS: Record<string, Accent> = {
     shmup: { main: new Color(99, 102, 241, 255), soft: new Color(165, 180, 252, 255) },
     thunder: { main: new Color(234, 179, 8, 255), soft: new Color(255, 237, 160, 255) },
     fridge: { main: new Color(13, 148, 136, 255), soft: new Color(153, 246, 228, 255) },
+    mithril: { main: new Color(67, 56, 202, 255), soft: new Color(224, 231, 255, 255) },
 };
 
 const DEFAULT_ACCENT: Accent = {
@@ -381,6 +382,33 @@ function drawShape(g: Graphics, id: string, accent: Accent): void {
             fill(g, soft);
             g.roundRect(-34, -40, 68, 10, 5);
             fill(g, soft);
+            break;
+        }
+        case 'mithril': {
+            // 秘银锭：梯形锭体 + 顶面高光 + 两点星芒
+            g.moveTo(-34, -20);
+            g.lineTo(34, -20);
+            g.lineTo(20, 18);
+            g.lineTo(-20, 18);
+            g.close();
+            fill(g, INK);
+            g.moveTo(-28, -14);
+            g.lineTo(28, -14);
+            g.lineTo(15, 12);
+            g.lineTo(-15, 12);
+            g.close();
+            fill(g, main);
+            g.moveTo(-15, 12);
+            g.lineTo(15, 12);
+            g.lineTo(20, 18);
+            g.lineTo(-20, 18);
+            g.close();
+            fill(g, soft);
+            // 星芒：一大一小，呼应「秘银」的金属光泽
+            line(g, 24, 34, 36, 34, soft, 4);
+            line(g, 30, 28, 30, 40, soft, 4);
+            line(g, -32, 36, -24, 36, soft, 3);
+            line(g, -28, 32, -28, 40, soft, 3);
             break;
         }
         default: {

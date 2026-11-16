@@ -45,6 +45,7 @@ export const GAME_LIST: GameConfig[] = [
     { id: 'shmup', name: '星际弹幕', icon: 'default', sceneName: 'Shmup', description: '拖动飞船自动开火，9 波弹幕闯关', category: 'action' },
     { id: 'thunder', name: '雷霆战机', icon: 'default', sceneName: 'Thunder', description: '关卡制养成弹幕，升级机库击破雷霆核心', category: 'action' },
     { id: 'fridge', name: '冰箱底下', icon: 'default', sceneName: 'Fridge', description: '房间制地牢肉鸽，攒调味料道具打出标签组合', category: 'growth' },
+    { id: 'mithril', name: '秘银远征', icon: 'default', sceneName: 'Mithril', description: '野外远征与六座秘境，装备饰品构筑 + 营地养成', category: 'action' },
 ];
 
 export function getGameById(id: string): GameConfig | undefined {

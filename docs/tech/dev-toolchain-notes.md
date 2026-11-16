@@ -56,3 +56,24 @@ npx tsc --noEmit         # 见 §2 的版本注意事项
 
 **不要提交**：`build/`、`library/`、`temp/`、`local/`、`profiles/`、`native/`（已在 `.gitignore`）。
 个别 `settings/` 文件（如 `settings/v2/packages/information.json`）可能是本机编辑器的本地差异，提交前逐条确认，别顺手带上。
+
+## 4. Cocos CLI 构建必须脱离沙箱跑（否则产物空场景 + 毁 `.meta`）
+
+用 `CocosCreator --project . --build "configPath=…"` 做无 GUI 构建时，若命令跑在受限沙箱里（例如 AI 工具的默认 Bash 沙箱），会出现一组很隐蔽的症状：
+
+| 症状 | 证据位置 |
+|---|---|
+| 构建 3–9 s「成功」结束，但 `build/wechatgame/assets/main/config.json` 的 `scenes` / `uuids` 是空的 | 产物只剩 2 MB 左右，场景表 0 条 |
+| 日志刷 `Can not find the importer image/video-clip/fbx in editor`（一次构建 1000+ 条） | `temp/asset-db/log/<时间>.log` |
+| 资产库把**全项目重新导入**一遍（`%cImport%c:` 上千条） | 同上；正常构建该计数为 0 |
+| **`assets/**/*.meta` 被改写成 `"ver": "0.0.1", "importer": "*"`**，`subMetas`（纹理/精灵帧）全部丢失 | `git status` 突然出现几百个 `.meta` 变更 |
+
+根因：沙箱阻断了编辑器插件（importer）的加载，asset-db 退化成「不认识任何资源类型」的模式，于是按未知类型重写 meta 并跳过打包。
+
+**处置**：
+
+1. 构建命令以非沙箱方式执行（本仓库的工具约定里对应 `dangerouslyDisableSandbox: true`）。
+2. 已经中招就 `git checkout --` 还原被改写的 `.meta`（它们都是**受 git 跟踪**的，别用编辑器重新导入来"修"）。
+3. 判据：构建日志 `grep -c "Can not find the importer"` = **0**，且 `git status` 只剩你自己的改动。
+4. 构建正常时 `config.json` 的场景数 = `tools/sync-build-scenes.js --check` 打印的清单长度。
+
