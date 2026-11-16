@@ -23,8 +23,8 @@ import {
 } from './MithrilCore';
 import type { CoreEvent, MithrilInput, MithrilSnapshot } from './MithrilCore';
 import {
-    addToInventory, addTrinket, bossLoot, bossTrinket, gluttonyExtraDrop, maybeLowerQuality,
-    rollItem, sellPrice, trinketGoldValue, unownedTrinkets,
+    addToInventory, addTrinket, bossLoot, bossTrinket, firstClearDrop, gluttonyExtraDrop,
+    maybeLowerQuality, rollItem, sellPrice, trinketGoldValue, unownedTrinkets,
 } from './MithrilLoot';
 import {
     chestExtraOptionOf,
@@ -34,8 +34,9 @@ import {
     lowerQualityChanceOf,
 } from './MithrilTrinkets';
 import {
-    SAVE_STORAGE_KEY, addExp, defaultSave, expToNext, facilityLevel, parseSave,
-    pendingVariantCount, serializeSave, talentPointsForLevel, talentPointsSpent,
+    SAVE_STORAGE_KEY, addExp, defaultSave, expToNext, facilityLevel, inventoryCapFor, markDungeonCleared,
+    parseSave, pendingVariantCount, queuePendingFirstClear, serializeSave, takePendingFirstClear,
+    talentPointsForLevel, talentPointsSpent,
 } from './MithrilProgress';
 import type { MithrilSave } from './MithrilProgress';
 import {
@@ -943,19 +944,47 @@ export class MithrilGame extends Component {
                     reward.push(`升级！现在是 Lv ${save.level}（天赋点 +${levels}）`);
                     settleLevels = levels;
                 }
+                const dgId = node.dungeonId;
+                // 首通欠账必须排在本局随机掉落之前（试玩 P2-5 复核）：否则玩家只腾出一格时，
+                // 随机紫装会先占掉最后一格，记账永远补不出去。
+                if (!firstClear
+                    && save.pendingFirstClear.indexOf(dgId) >= 0
+                    && save.inventory.length < inventoryCapFor(save)) {
+                    const owed = firstClearDrop(rng, save.classId, dgId);
+                    if (!owed) {
+                        // 没配置固定掉落就没有东西可欠，别让这笔记账永远挂着
+                        takePendingFirstClear(save, dgId);
+                    } else {
+                        maybeLowerQuality(rng, owed, greedChance);
+                        if (this._grantItem(save, owed, granted, reward, undefined, rng) !== '') {
+                            takePendingFirstClear(save, dgId);
+                            // 结算面板只保留前 4 行收益：补发说明紧跟「本局收益」才不会被截掉
+                            reward.splice(1, 0, '补发首通固定装备（上次首通时背包已满）');
+                        }
+                    }
+                }
                 const item = bossLoot(rng, {
                     classId: save.classId,
-                    dungeonId: node.dungeonId,
+                    dungeonId: dgId,
                     firstClear,
                 });
+                // 首通记账与物品入包解耦（试玩 P2-5）：满包折金币那一轮也要记账，
+                // 否则下次通关仍判定为首通，首通经验 / 技能书 / 保底饰品可以无限刷。
+                let firstClearItemOwed = false;
                 if (item) {
-                    // 首通只在奖励真正入包时才消耗：满包折金币那一轮，首通紫装保留到下次
                     maybeLowerQuality(rng, item, greedChance);
-                    this._grantItem(save, item, granted, reward, () => {
-                        if (firstClear && save.dungeonsCleared.indexOf(node.dungeonId!) < 0) {
-                            save.dungeonsCleared.push(node.dungeonId!);
-                        }
-                    }, rng);
+                    // _grantItem 返回 '' = 背包满、已按同一规则折金币
+                    firstClearItemOwed = this._grantItem(save, item, granted, reward, undefined, rng) === '';
+                }
+                if (firstClear) {
+                    markDungeonCleared(save, dgId);
+                    if (firstClearItemOwed && item) {
+                        queuePendingFirstClear(save, dgId);
+                        // 试玩 N64：面板只留 4 行收益，_grantItem 追加的「折算 N 金币」会被挤掉，
+                        // 玩家对不上金币差额 —— 把金额直接并进这句靠前的记账提示。
+                        const folded = sellPrice(item);
+                        reward.splice(1, 0, `首通紫装：满包折 ${folded} 金币，已记账（下次通关补发）`);
+                    }
                 }
                 // 饰品（M7）：首通必给本副本未拥有的一件，重复通关 25%；
                 // 本副本饰品已集齐时退化为金币，结算行照实写，不假装出货

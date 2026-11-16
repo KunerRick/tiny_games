@@ -562,6 +562,12 @@ export interface MithrilSave {
     /** 技能书（通关掉落，成长面板里升级技能用） */
     skillBooks: number;
     dungeonsCleared: string[];
+    /**
+     * 首通固定装备「欠账」（试玩 P2-5）：首通时背包满、固定紫装只能折金币，
+     * 记下副本 id，下次通关同副本且背包有空位时补发。与 dungeonsCleared 解耦，
+     * 保证首通经验 / 技能书 / 饰品只发一次。
+     */
+    pendingFirstClear: string[];
     /** 已击败区域首领的区域 id（M4 野外） */
     regionsCleared: string[];
     /** 进行中的野外远征；没有则为 null */
@@ -610,6 +616,7 @@ export function defaultSave(classId: ClassId = 'warrior'): MithrilSave {
         variants: {},
         skillBooks: 0,
         dungeonsCleared: [],
+        pendingFirstClear: [],
         regionsCleared: [],
         expedition: null,
         bounties: [],
@@ -620,6 +627,34 @@ export function defaultSave(classId: ClassId = 'warrior'): MithrilSave {
         meals: [],
         talentPresets: [],
     };
+}
+
+// ==================== 副本首通记账（试玩 P2-5） ====================
+
+/**
+ * 记录副本首通。**与首通装备是否入包解耦**：满包折金币也要记账，
+ * 否则下一次通关会再次判定为首通，经验 / 技能书 / 保底饰品可以无限刷。
+ * 返回 true = 本次新记；false = 之前已记过。
+ */
+export function markDungeonCleared(save: MithrilSave, dungeonId: string): boolean {
+    if (!dungeonId) return false;
+    if (save.dungeonsCleared.indexOf(dungeonId) >= 0) return false;
+    save.dungeonsCleared.push(dungeonId);
+    return true;
+}
+
+/** 首通固定装备因满包没发出：记入待补发队列（同一副本只记一条） */
+export function queuePendingFirstClear(save: MithrilSave, dungeonId: string): void {
+    if (!dungeonId) return;
+    if (save.pendingFirstClear.indexOf(dungeonId) < 0) save.pendingFirstClear.push(dungeonId);
+}
+
+/** 补发成功（或不再需要）后清账；返回是否确实清掉了一条欠账 */
+export function takePendingFirstClear(save: MithrilSave, dungeonId: string): boolean {
+    const i = save.pendingFirstClear.indexOf(dungeonId);
+    if (i < 0) return false;
+    save.pendingFirstClear.splice(i, 1);
+    return true;
 }
 
 function toInt(value: unknown, min: number, max: number, fallback: number): number {
@@ -836,6 +871,16 @@ export function sanitizeSave(raw: unknown): MithrilSave {
             if (typeof id === 'string' && ids.indexOf(id) < 0) ids.push(id);
         }
         out.dungeonsCleared = ids;
+    }
+
+    // 首通装备欠账（试玩 P2-5）：旧档没有这个字段 → 空数组；坏值逐条丢弃
+    if (Array.isArray(src.pendingFirstClear)) {
+        const ids: string[] = [];
+        for (const id of src.pendingFirstClear) {
+            if (typeof id !== 'string' || !id || ids.indexOf(id) >= 0) continue;
+            ids.push(id);
+        }
+        out.pendingFirstClear = ids;
     }
 
     if (Array.isArray(src.bounties)) {

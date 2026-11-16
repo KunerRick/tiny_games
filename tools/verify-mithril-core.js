@@ -1859,6 +1859,38 @@ const BASE_DPS = C.measureDummyDps(BASE_PROFILE, 60);
         deepEqual(echoDodge, [4, 4, 2]), echoDodge.join(','));
 }
 
+// 首通记账与物品入包解耦（试玩 P2-5）：满包折金币也要记账，装备欠账下次补发
+{
+    const s = mkBagSave();
+    const first = P.markDungeonCleared(s, 'mine');
+    const again = P.markDungeonCleared(s, 'mine');
+    check('241. 首通记账幂等：同一副本只记一次',
+        first === true && again === false && deepEqual(s.dungeonsCleared, ['mine']),
+        `first ${first} again ${again} list ${s.dungeonsCleared.join(',')}`);
+
+    P.queuePendingFirstClear(s, 'mine');
+    P.queuePendingFirstClear(s, 'mine');
+    const queued = s.pendingFirstClear.slice();
+    const took = P.takePendingFirstClear(s, 'mine');
+    const tookAgain = P.takePendingFirstClear(s, 'mine');
+    check('242. 首通装备欠账：入队去重，补发后清账且不重复补',
+        deepEqual(queued, ['mine']) && took === true && tookAgain === false && s.pendingFirstClear.length === 0,
+        `queued ${queued.join(',')} took ${took}/${tookAgain} left ${s.pendingFirstClear.length}`);
+
+    const raw = JSON.parse(P.serializeSave(s));
+    raw.pendingFirstClear = ['mine', 'mine', 7, '', 'chapel'];
+    const parsed = P.parseSave(JSON.stringify(raw));
+    check('243. 存档净化：pendingFirstClear 去重并丢弃非字符串 / 空串',
+        !!parsed && deepEqual(parsed.pendingFirstClear, ['mine', 'chapel']),
+        parsed ? parsed.pendingFirstClear.join(',') : 'null');
+
+    const legacy = P.parseSave(JSON.stringify({ v: 2, classId: 'warrior' }));
+    check('244. 旧档缺 pendingFirstClear → 空数组，不重置其它字段',
+        !!legacy && Array.isArray(legacy.pendingFirstClear) && legacy.pendingFirstClear.length === 0
+            && legacy.classId === 'warrior' && deepEqual(legacy.dungeonsCleared, []),
+        legacy ? `class ${legacy.classId} pending ${legacy.pendingFirstClear.length}` : 'null');
+}
+
 // ==================== 汇总 ====================
 
 const total = passed + failed;
