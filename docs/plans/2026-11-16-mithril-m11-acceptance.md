@@ -4,6 +4,7 @@
 > 计划：`docs/plans/2026-11-16-mithril-m11-plan.md`
 > 设计规格：`docs/plans/2026-11-14-game-mithril-design.md` §11（里程碑表，M11 = 收尾）
 > 前置：M10 已验收（`2026-11-16-mithril-m10-acceptance.md`，`0add810`）
+> 试玩：`2026-11-16-playtest-round20-mithril-m11.md`（第 20 轮 · 构建产物发布前冒烟）
 
 ## 1. 退出判据与实测
 
@@ -16,7 +17,7 @@
 | 5 | 构建场景清单三处齐 | `sync-build-scenes.js --check` 退出码 0 | 退出码 **0**，期望清单 **26 个**，末尾为 `Fridge → Mithril` | ✅ |
 | 6 | 微信产物可开 | 预检 9 项全绿 + 包装复现 + 模拟器点进本作 | 产物 26 场景 / 73 UUID、`replay-wechat-bundle.js` 通过、预检 **7/9 通过**（第 7、9 项需开发者工具 GUI 编译，本轮屏幕锁定无法操作，见 §4） | ⚠ 部分关闭 |
 | 7 | 回归 + 编译 | 8 个 mithril verify + 模板全绿、`tsc --noEmit` = TS_OK | `tsc --noEmit` = **TS_OK**（编辑器自带 5.8.2）；core 221 / audio 88 / wild 2,829 / camp 337 / dungeons 892 / trinkets 692 / bounty 471 / balance 136 / 模板 15，**全部退出码 0** | ✅ |
-| 8 | 文档归档 | 设计 / 验收 / 试玩报告索引进 `docs/README.md` | `docs/README.md` 新增「秘银远征（Mithril / mithril）」小节：设计总规格、M1–M10 验收链、M6–M10 计划、第 10–19 轮试玩、8 个回归脚本；27 条相对链接逐条核验存在 | ✅ |
+| 8 | 文档归档 | 设计 / 验收 / 试玩报告索引进 `docs/README.md` | `docs/README.md` 新增「秘银远征（Mithril / mithril）」小节：设计总规格、M1–M10 验收链、M6–M10 计划、第 10–19 轮试玩、8 个回归脚本；27 条相对链接逐条核验存在（该小节现为 30 条，含 M11 验收 / 计划 / 第 20 轮的补链） | ✅ |
 
 **小结**：8 条判据 7 条全绿，第 6 条只差「微信开发者工具编译这一版新产物」这一步，属于环境限制（屏幕锁定）而非产物缺陷，处置见 §4.3。
 
@@ -140,3 +141,26 @@ assets/ VS16 扫描                 0 命中
 提交：`feat(mithril): M11 大厅注册与专属图标、文档归档`（`develop`）。
 
 改动文件：`assets/common/managers/GameConfig.ts`、`assets/main/scripts/GameIconArt.ts`、`docs/README.md`、`docs/tech/dev-toolchain-notes.md`、`docs/plans/2026-11-16-mithril-m11-plan.md`、本文件。
+
+## 7. 独立复核：第 20 轮（构建产物发布前冒烟）
+
+M11 的退出判据不要求试玩，但既然产物已构建、且本轮新增了大厅入口，补跑了一轮**独立子代理**冒烟（fresh agent，非开发者），入口换成 **`build/web-mobile` + `http://127.0.0.1:8127`**（编辑器不可用），报告 `docs/plans/2026-11-16-playtest-round20-mithril-m11.md`。
+
+| 必测点 | 实测 |
+|---|---|
+| 大厅渲染 | 场景 `Lobby`、标题正确、`allGamesGrid` 子节点 **25** 张卡 |
+| 末行卡片 | `scrollToBottom(0)` 后最后一行只有「秘银远征」，世界 `(165,154)` → CSS `(165,1126)`；图标为靛蓝梯形锭 + 高光 + 两组星芒 |
+| 点击进入 | 真实 `mouse.click(165,1126)` → 场景 `Mithril`、`ClassSelect` 激活，四职业卡与「以战士开局」齐全 |
+| 开局 → 战斗 | 点「以战士开局」→ 路线图（生命 60/60、补给 3/3、12 节点）→ 点战斗节点 → HUD 齐全（Lv1 / 生命 / 怒气 / 遭遇 1/3 / 6 技能键） |
+| 技能真实生效 | 按住「斩」350 ms：`cd.basic = 0.169`、`swingCount = 1`；按住「冲」敌人 `61.8 → 41.7`；连续普攻玩家 `60 → 8`、小怪最低 `5.2`；20.45 s 阵亡，死亡面板与文案完整，存档 `expedition = null` |
+| 返回大厅 + 其它游戏 | 死亡面板「返回大厅」→ `Lobby`（25 卡仍在）→ 点 2048 → `Game2048` 棋盘正常 |
+| 控制台 | 33 条消息，**1 error（仅 favicon 404）**、0 warning |
+
+**结论：P0 = 0 · P1 = 0 · P2 = 0 · P3 = 0，N61 起编号未占用。**
+
+两条方法论产出（已写进 `docs/tech/browser-verify-cocos-preview.md` §11.9）：
+
+1. 「按住施放」类按键（技能 / 摇杆 / 蓄力）在桌面 QA 必须用 `down → wait → up`；Playwright `click` 同帧按下抬起不会进帧轮询的 `held` 位，事件本身是到达的（只读计数器可证），**不是缺陷**。
+2. 构建内置的 Profiler 覆盖左下角，会压住末行左列卡片；截图前 `cc.profiler.hideStats()`（不要用 `hide()`）。
+
+观察（非缺陷，留档）：新档战士只站桩按普攻、不走位，会被 3 只小怪在 20 s 内打死（玩家 60 血 / 小怪各 66 血）。第 15 轮有走位的战士 48.3 s 通关首战，两者一致，说明差异来自操作而非数值；若后续要降新手门槛，属单独平衡批次。

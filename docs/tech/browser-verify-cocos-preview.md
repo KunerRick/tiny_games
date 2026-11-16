@@ -685,6 +685,25 @@ input.on(Input.EventType.MOUSE_UP, this.onAnyMouseUp, this);     // 桌面（少
 把 `x` 当成左边界写 `-340`，整行会被推出屏幕（实测顶栏只剩句尾）。
 运行时建 Label 时按对齐方式设锚点：`ut.setAnchorPoint(align === LEFT ? 0 : 0.5, 0.5)`。
 
+### 11.9 「按住施放」的技能键：桌面 QA 必须按住，`click` 同帧按下+抬起不生效
+
+**来源**：第 20 轮发布前冒烟（`docs/plans/2026-11-16-playtest-round20-mithril-m11.md` §2.5 / §4）。
+秘银远征的 HUD 技能键在 `TOUCH_START` 置 `held` 位、`TOUCH_END` 清零，**每帧轮询**这个位来施法（这样长按可以连续施放）。
+Playwright 的 `page.mouse.click(x, y)` 把 down / up 放在**同一帧**，于是：触摸事件确实到达了技能节点（只读计数器能证明 `getUILocation` 与节点世界中心一致），但那一帧里 `held` 从未被读到为 true ⇒ 冷却不进、`swingCount` 仍 0。
+
+**判据**：用只读 `TOUCH_START/END` 计数器确认**事件已到达**（排除命中和坐标问题）；再把操作换成
+
+```js
+await page.mouse.move(x, y);
+await page.mouse.down();
+await page.waitForTimeout(350);
+await page.mouse.up();
+```
+
+技能立刻生效（`cd.basic = 0.169`、`swingCount = 1`）。真机触屏天然跨帧，所以**这不是缺陷**，是桌面自动化的操作方式问题 —— 别把它记成「点了没反应」的 P1。
+
+**推论（写报告时用）**：凡是「按下期间持续生效」的交互（技能键、摇杆、蓄力条、长按删除），桌面验证一律用 `down → wait → up`；只有一次性点击语义（按钮、卡片）才用 `click`。
+
 ---
 
 ## 12. 场景切换 / 异步探针的四个新坑（2026-11-13 第五、六轮实测）
