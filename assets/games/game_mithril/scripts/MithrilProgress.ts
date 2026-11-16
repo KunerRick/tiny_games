@@ -65,7 +65,14 @@ export type { FacilityId };
 
 // ==================== 等级曲线 ====================
 
-export const SAVE_VERSION = 1;
+/**
+ * 存档版本。
+ * - v1：M0–M4 的初版 schema（等级 / 装备 / 背包 / 远征）
+ * - v2（M9）：把 M5–M8 新增的 `facilities / meals / talentPresets / trinketBag /
+ *   bounties / bountyProgress / bountyDay / bountyCursor / expedition` 纳入正式 schema，
+ *   并在 `migrateSave` 里显式补齐旧档。
+ */
+export const SAVE_VERSION = 2;
 export const LEVEL_MAX = 30;
 /** 基础攻击强度：1 级 10 → 30 级 20（贡献 2.00×） */
 export const LEVEL_AP_BASE = 10;
@@ -892,6 +899,79 @@ export function sanitizeSave(raw: unknown): MithrilSave {
     return out;
 }
 
+// ==================== 存档迁移（v1 → v2） ====================
+
+export interface SaveMigrationInfo {
+    /** 原始版本号；缺失 / 非法 = 0 */
+    fromVersion: number;
+    /** 迁移目标版本（= SAVE_VERSION） */
+    toVersion: number;
+    /** 本次迁移实际做了什么；空数组 = 已经是当前版本 */
+    notes: string[];
+}
+
+/**
+ * 把任意历史版本的存档方言补齐到当前 schema，再交给 `sanitizeSave` 逐字段兜底。
+ *
+ * 职责边界：
+ *  - 迁移**只补结构**（缺失字段、旧字段语义、版本号），不做数值夹取 —— 夹取只在 sanitizeSave；
+ *  - 不修改调用方传入的对象（读档要可重放、可幂等）；
+ *  - 任何输入都不抛：坏 JSON 由 `parseSave` 负责，非对象在这里当 `{}`。
+ */
+export function migrateSave(raw: unknown): { save: MithrilSave; info: SaveMigrationInfo } {
+    const notes: string[] = [];
+    const src = raw && typeof raw === 'object' && !Array.isArray(raw)
+        ? raw as Record<string, unknown>
+        : {};
+    const rawVersion = typeof src.v === 'number' && Number.isFinite(src.v) ? Math.floor(src.v) : 0;
+    const fromVersion = Math.max(0, rawVersion);
+    // 浅拷贝：迁移过程不碰调用方的对象
+    const work: Record<string, unknown> = Object.assign({}, src);
+
+    if (fromVersion === 0) notes.push('v0：补全缺失字段');
+    if (fromVersion > SAVE_VERSION) notes.push(`v${fromVersion}→v${SAVE_VERSION}：未知字段丢弃`);
+
+    // 过期经验：老档 / 坏档可能把溢出经验留在 exp 里；折算成等级，余数保留
+    const level = toInt(work.level, 1, LEVEL_MAX, 1);
+    const exp = toInt(work.exp, 0, 1e9, 0);
+    if (level >= LEVEL_MAX) {
+        if (exp > 0) {
+            work.exp = 0;
+            notes.push('满级经验清零');
+        }
+    } else if (exp >= expToNext(level)) {
+        const probe = defaultSave(isClassId(work.classId) ? work.classId : 'warrior');
+        probe.level = level;
+        probe.exp = 0;
+        const levels = addExp(probe, exp);
+        work.level = probe.level;
+        work.exp = probe.exp;
+        notes.push(`经验折算：+${levels} 级`);
+    }
+
+    // pre-M7：已装备的饰品必须登记为已拥有（旧档只有两格，没有 trinketBag）
+    if (!Array.isArray(work.trinketBag) && Array.isArray(work.trinkets)) {
+        const bag: string[] = [];
+        for (const id of work.trinkets) {
+            if (typeof id === 'string' && TRINKET_BY_ID[id] && bag.indexOf(id) < 0) bag.push(id);
+        }
+        work.trinketBag = bag;
+        notes.push('pre-M7：已装备饰品登记为已拥有');
+    }
+
+    // pre-M8：补齐悬赏字段；板面内容交给 `ensureBountyBoard` 懒填充，迁移只给空形状
+    let bountyFilled = false;
+    if (work.bounties === undefined) { work.bounties = []; bountyFilled = true; }
+    if (work.bountyProgress === undefined) { work.bountyProgress = {}; bountyFilled = true; }
+    if (work.bountyDay === undefined) { work.bountyDay = 0; bountyFilled = true; }
+    if (work.bountyCursor === undefined) { work.bountyCursor = 0; bountyFilled = true; }
+    if (bountyFilled) notes.push('pre-M8：补齐悬赏字段');
+
+    const save = sanitizeSave(work);
+    save.v = SAVE_VERSION;
+    return { save, info: { fromVersion, toVersion: SAVE_VERSION, notes } };
+}
+
 /** 便捷：某个职业在当前等级下的技能列表 */
 export function skillsForSave(save: MithrilSave): SkillDef[] {
     return SKILLS.filter((sk) => sk.classId === save.classId);
@@ -909,8 +989,8 @@ export function serializeSave(save: MithrilSave): string {
 
 /**
  * 读档：无档返回 **null**（M6 起据此进入职业选择），
- * 坏 JSON / 旧 schema 回落默认战士档（老玩家的档不能一升级就丢），绝不抛。
- * 坏字段交给 sanitizeSave 逐字段兜底。
+ * 坏 JSON 回落默认战士档（老玩家的档不能一升级就丢），绝不抛。
+ * 版本方言由 `migrateSave` 补齐，坏字段交给 `sanitizeSave` 逐字段兜底。
  */
 export function parseSave(raw: string | null | undefined): MithrilSave | null {
     if (!raw) return null;
@@ -920,7 +1000,7 @@ export function parseSave(raw: string | null | undefined): MithrilSave | null {
     } catch (e) {
         return defaultSave('warrior');
     }
-    return sanitizeSave(data);
+    return migrateSave(data).save;
 }
 
 /** 便捷：某个职业的全部天赋 */

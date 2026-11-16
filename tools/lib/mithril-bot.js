@@ -213,14 +213,30 @@ function botInput(world) {
     };
 }
 
-function runDungeon(classId, dungeonId, seconds, trinkets) {
-    const band = BANDS[dungeonId];
+/**
+ * 跑任意 `RunPlan`（副本或野外节点）。
+ * `opts`：`{ classId, level, ilvl, seconds, trinkets, hp, seed, profile }`。
+ * `profile` 显式给出战斗档案（例如带装备倍率 / 天赋的 `profileFromSave`）；省略时
+ * 用 `makeProfile(classId, level, ilvl)`（副本矩阵的既有口径，勿改）。
+ * `hp` 省略 = 满血；野外节点传远征当前生命即可（`startWild` 与 `startDungeon` 共用 `startPlan`）。
+ */
+function runPlan(plan, opts) {
+    const o = opts || {};
+    const classId = o.classId || 'warrior';
+    const seconds = o.seconds || 300;
+    const label = plan ? plan.id : 'no-plan';
     const world = new C.MithrilWorld(
-        C.makeProfile(classId, band.level, band.ilvl),
-        9000 + dungeonId.length * 31 + classId.length,
-        trinkets || null,
+        o.profile || C.makeProfile(classId, o.level || 30, o.ilvl || 1),
+        o.seed === undefined ? 1234 : o.seed,
+        o.trinkets || null,
     );
-    world.startDungeon(dungeonId);
+    if (!plan) {
+        return {
+            world, seconds: 0, seen: new Set(), badState: 'no-plan', bossPhases: 0,
+            minHp: 1, sawAdds: false, sawTelegraph: false, plan: null,
+        };
+    }
+    world.startWild(plan, o.hp);
     const maxSteps = Math.round(seconds / F.FIXED_DT);
     const seen = new Set();
     const addsId = world.plan && world.plan.boss ? world.plan.boss.addsEnemyId : '';
@@ -248,7 +264,7 @@ function runDungeon(classId, dungeonId, seconds, trinkets) {
             const bossNow = world.boss
                 ? `${(world.boss.hp / world.boss.maxHp * 100).toFixed(0)}%p${world.bossPhase}` : '-';
             console.log(
-                `  ${classId}/${dungeonId} t=${(steps * F.FIXED_DT).toFixed(0)}s ${world.stage}#${world.encounterIndex}` +
+                `  ${classId}/${label} t=${(steps * F.FIXED_DT).toFixed(0)}s ${world.stage}#${world.encounterIndex}` +
                 ` hp=${pl.hp.toFixed(0)}/${pl.maxHp} boss=${bossNow} enemies=${world.enemies.length}` +
                 ` nearest=${nearest.toFixed(0)} orbs=${world.orbs.length} shielding=${pl.shield.toFixed(0)}`,
             );
@@ -293,8 +309,21 @@ function runDungeon(classId, dungeonId, seconds, trinkets) {
         minHp,
         sawAdds,
         sawTelegraph,
-        plan: F.dungeonRunPlan(dungeonId),
+        plan,
     };
 }
-    return { BANDS, botInput, pickMove, runDungeon, IDLE };
+
+function runDungeon(classId, dungeonId, seconds, trinkets) {
+    const band = BANDS[dungeonId];
+    return runPlan(F.dungeonRunPlan(dungeonId) || F.dungeonRunPlan('mine'), {
+        classId,
+        level: band.level,
+        ilvl: band.ilvl,
+        seconds,
+        trinkets,
+        // 保持 M6/M7 的种子口径不变（同种子可复现）
+        seed: 9000 + dungeonId.length * 31 + classId.length,
+    });
+}
+    return { BANDS, botInput, pickMove, runDungeon, runPlan, IDLE };
 }
