@@ -322,8 +322,10 @@ export class MithrilGrowthMenu extends Component {
 
         const variantCost = variantRespecCost(save);
         const campReady = facilityLevel(save, 'training') > 0;
+        // 试玩 N61：200 宽时「变体重置（需训练场 Lv1）」会被折成两行、第二行只剩一个「）」，
+        // 加宽到 250 并左移保持右缘不变（右缘 324，仍留 6px 内边距）。
         const respec = createButton(content, {
-            w: 200, h: 46,
+            w: 250, h: 46,
             text: !campReady ? '变体重置（需训练场 Lv1）'
                 : (variantCost > 0 ? `重置变体 ${variantCost} 金` : '重置变体（免费）'),
             fontSize: 18,
@@ -332,7 +334,7 @@ export class MithrilGrowthMenu extends Component {
             activeFill: '#475569',
             radius: 12, onTap: () => this._onRespecVariants(),
         });
-        respec.node.setPosition(224, 316, 0);
+        respec.node.setPosition(199, 316, 0);
     }
 
     private _makeSkillRow(parent: Node, def: SkillDef, y: number): void {

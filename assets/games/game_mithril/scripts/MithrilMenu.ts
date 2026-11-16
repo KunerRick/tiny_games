@@ -494,6 +494,15 @@ export class MithrilMenu extends Component {
         if (!this._detailTitle || !this._detailBody) return;
         const item = this._selectedItem();
         if (!item) {
+            // 试玩 N63：点到空槽位时给明确反馈，别让玩家以为自己点空了
+            const sel = this._sel;
+            if (sel?.kind === 'slot') {
+                this._detailTitle.string = `${GEAR_SLOT_NAMES[sel.slot]} · 空槽位`;
+                this._detailTitle.color = hex(COLOR.TEXT_SECONDARY);
+                this._detailBody.string = '该槽位为空，可从背包选一件同槽位装备穿上。';
+                this._setActions(false, false, false);
+                return;
+            }
             this._detailTitle.string = '点击上方装备槽或背包物品查看详情';
             this._detailTitle.color = hex(COLOR.TEXT_SECONDARY);
             this._detailBody.string = '';
@@ -613,8 +622,7 @@ export class MithrilMenu extends Component {
         if (!def) {
             this._tDetailTitle.string = '点上方两格看已装备，点下方列表看详情';
             this._tDetailTitle.color = hex(COLOR.TEXT_SECONDARY);
-            this._tDetailBody.string = '饰品只改规则、不加固定数值：\n'
-                + `两件不同 tag 的饰品同时装备会点亮协同（共 ${SYNERGIES.length} 条）。`;
+            this._tDetailBody.string = '饰品只改规则、不加固定数值：\n击败副本首领可以获得。';
             this._setTrinketActions(false, false);
             this._refreshSynergyFooter();
             return;
