@@ -267,14 +267,20 @@ node tools/sync-build-scenes.js --all     # 顺带修其它平台的构建任务
 
 完整手册（坐标换算代码、加速注入与声明纪律、易错字段表、可复用验证顺序、**拖拽/手势验证与能力边界**）：[`docs/tech/browser-verify-cocos-preview.md`](./docs/tech/browser-verify-cocos-preview.md)。
 
-### 试玩-修复闭环（不用人工当信使）
+### 试玩-打磨闭环（台账驱动，不用人工当信使）
 
 「试玩者出报告 → 开发者修 → 复核」不要再用两个会话人工转发。说 **「试玩循环」**（或
-`/playtest <范围>`）即可，协议见 [`tech/playtest-cycle.md`](./docs/tech/playtest-cycle.md)：
-主会话当调度者 + 开发者，**fresh 子代理**当试玩者/复核者（`fork` 会继承开发者结论，不能用），
-通过 `docs/plans/<日期>-playtest-round<N>-<scope>.md` 的文件交接，串行跑，P0/P1 清零即止。
-三条硬约束：预览/MCP 单例 → 不能并行；编辑器只编译启动目录 → 不在 worktree 里验；
-试玩者不得改状态作弊。
+`/playtest <游戏> [维度]`）即可。协议见 [`tech/playtest-cycle.md`](./docs/tech/playtest-cycle.md)，
+五维方法与达标线见 [`tech/playtest-dimensions.md`](./docs/tech/playtest-dimensions.md)。
+主会话当调度者 + 开发者，**fresh 子代理**当试玩者 / 系统验证者 / 数值分析师 / 复核者
+（`fork` 会继承开发者结论，不能用），通过 `docs/plans/<日期>-playtest-round<N>-<维度>-<scope>.md` 交接，
+状态记在 `docs/plans/playtest-ledger-<game>.md`，问题编号从 `playtest-ledger-index.md` 取（不要硬编码）。
+
+- 每拍一个**焦点维度** + 回归冒烟，默认轮转 UI → 玩法 → 交互 → 数值 → 稳定性；
+- **P0/P1 是发布闸门，不是打磨终点**；打磨分（0–3）与覆盖矩阵决定维度何时冻结；
+- 单批默认 **3 拍或 90 分钟**，触顶写 `stop_reason` 后停，用户说「继续」再续；
+- 三条硬约束：预览/MCP 单例 → 不能并行；编辑器只编译启动目录 → 不在 worktree 里验；
+  注入存档 / debug 必须按「声明式捷径」写进报告，禁止无声明地伪造进度当纯净路径证据。
 
 ## Git 规范
 
@@ -308,7 +314,9 @@ node tools/sync-build-scenes.js --all     # 顺带修其它平台的构建任务
 - [微信文本渲染（VS16 → 图标方框）](./docs/tech/wechat-text-rendering.md)
 - [微信小游戏构建产物与预检](./docs/tech/wechat-build-pitfalls.md)
 - [开发工具链备忘（编码 / `tsc` / 提交检查）](./docs/tech/dev-toolchain-notes.md)
-- [试玩-修复闭环（说「试玩循环」或 `/playtest`）](./docs/tech/playtest-cycle.md)
+- [试玩-打磨闭环（说「试玩循环」或 `/playtest`）](./docs/tech/playtest-cycle.md)
+- [试玩五维方法与达标清单](./docs/tech/playtest-dimensions.md)
+- [试玩台账索引（全局编号源）](./docs/plans/playtest-ledger-index.md)
 - [tools 脚本清单](./docs/tech/verify-scripts.md)
 - [品类盘点与下一批路线图](./docs/plans/2026-11-05-game-catalog-and-roadmap.md)
 

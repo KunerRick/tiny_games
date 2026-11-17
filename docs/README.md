@@ -26,8 +26,8 @@
 | 规划剩余 8 款的玩法/美术/复核开工顺序 | [`plans/2026-11-07-remaining-games-polish-plan.md`](./plans/2026-11-07-remaining-games-polish-plan.md) |
 | **想知道全部 24 款有哪些体验坑 / 该先修什么** | [`plans/2026-11-10-all-games-playtest-ux-report.md`](./plans/2026-11-10-all-games-playtest-ux-report.md)（玩家视角实机试玩：跨游戏共性问题 + 逐款清单 + P0/P1/P2 批次） |
 | **想知道上一轮修复哪些真生效、哪些没落地** | [`plans/2026-11-11-playtest-fix-review.md`](./plans/2026-11-11-playtest-fix-review.md)（第二轮复核：A 批 10 条全过、B/C 5 处未生效、18 条新问题 + 4 条原报告更正） |
-| **想追最新的试玩轮次与闭环状态** | 见下方 **试玩巡检归档**（第九轮为当前最新） |
-| **要跑「试玩 → 修复 → 复核」闭环（不想再人工转发报告）** | [`tech/playtest-cycle.md`](./tech/playtest-cycle.md)（fresh 子代理当试玩者/复核者，文件交接，串行，P0/P1 清零即止） |
+| **想追最新的试玩轮次、未关闭问题与下一批焦点** | [`plans/playtest-ledger-index.md`](./plans/playtest-ledger-index.md) → 各游戏台账（状态唯一源；报告只是证据） |
+| **要跑「试玩 → 修复 → 复核」打磨循环（不想再人工转发报告）** | [`tech/playtest-cycle.md`](./tech/playtest-cycle.md)（fresh 子代理、台账驱动、按维度轮转）+ [`tech/playtest-dimensions.md`](./tech/playtest-dimensions.md)（五维方法与达标线） |
 
 ---
 
@@ -45,7 +45,9 @@
 - [`tech/wechat-text-rendering.md`](./tech/wechat-text-rendering.md) — 微信文本渲染：变体选择符 VS16 导致图标方框、图标单一来源规约
 - [`tech/wechat-build-pitfalls.md`](./tech/wechat-build-pitfalls.md) — 微信小游戏构建产物：开发者工具「编译报错」的时序根因、**「能编译但一打开就崩」的包装器/项目类型根因**、日志与缓存取证、预检脚本与声明纪律
 - [`tech/dev-toolchain-notes.md`](./tech/dev-toolchain-notes.md) — 文本编码（PowerShell 陷阱）、`tsc` 版本注意事项、提交前检查
-- [`tech/playtest-cycle.md`](./tech/playtest-cycle.md) — 试玩-修复闭环：fresh 子代理分工、报告机读格式与编号规则、退出判据、三条硬约束（预览单例 / 不在 worktree 验 / 不改状态作弊）
+- [`tech/playtest-cycle.md`](./tech/playtest-cycle.md) — 试玩-打磨闭环：fresh 子代理分工、拍/批/阶段、台账与报告格式、级别 + 打磨分两根轴、单拍 / 维度 / 全局结束条件、双轨捷径（纯净路径 / 声明式捷径）
+- [`tech/playtest-dimensions.md`](./tech/playtest-dimensions.md) — 试玩五维方法与达标清单：UI 逐屏巡检、玩法系统盘点（五验证点）、交互 15 项清单、数值脚本 + 三进度点 + 预算对照、稳定性回归冒烟
+- [`plans/playtest-ledger-index.md`](./plans/playtest-ledger-index.md) — 试玩台账索引：全局问题编号唯一分配源、各游戏台账与未关闭项
 - [`tech/verify-scripts.md`](./tech/verify-scripts.md) — `tools/` 全部脚本的唯一清单：纯逻辑自检覆盖范围、图标/构建/场景同步脚本的「何时跑」
 - [`design/2026-11-10-ui-art-style-guide.md`](./design/2026-11-10-ui-art-style-guide.md) — 全站 UI / 图标美术规范：设计令牌（`UITheme` / `GameUIKit` / `SceneSkin`）、大厅图标四色法与登记表、新增游戏第四步与 `tools/check-game-icons.js`
 
@@ -54,10 +56,11 @@
 ## 试玩巡检归档（玩家视角，按轮次倒序）
 
 > 每轮结构固定：玩家报告（只验不改）→ 开发方复核修复 → `*-reverify.md` 闭环记录。
-> 追进度只看每轮最后一份复验文档。
+> **追进度只看台账**（[`plans/playtest-ledger-index.md`](./plans/playtest-ledger-index.md)）；本表保留历史轮次的证据链接。
 
 | 轮次 | 报告 | 闭环 / 结论 |
 |------|------|-------------|
+| 第十至二十四轮（2026-11-15 ~ 17，秘银远征） | 见下文「秘银远征」小节与 [`plans/playtest-ledger-mithril.md`](./plans/playtest-ledger-mithril.md) | 第 10–24 轮按里程碑与维度推进；第 23 轮深度回归、第 24 轮 UI 全量首扫；当前 P0/P1 = 0，未关闭仅 N89/N90 两条 P3，下一批焦点 UI 收尾 |
 | 第九轮（2026-11-14） | [`plans/2026-11-14-playtest-round9-fridge.md`](./plans/2026-11-14-playtest-round9-fridge.md) | 第八轮 P1/P2/P3 全修（自检 276/276、双角色真通关）；新增 N34/N35（P3，待处理） |
 | 第八轮（2026-11-13） | [`plans/2026-11-13-playtest-round8-fridge.md`](./plans/2026-11-13-playtest-round8-fridge.md) | 首次不作弊真通关 + 全房型覆盖；新增 P1 N31（Boss 房炸弹开墙死局）/ N32（开局道具从未发放） |
 | 第七轮（2026-11-13） | [`plans/2026-11-13-playtest-round7-player.md`](./plans/2026-11-13-playtest-round7-player.md) | 第六轮 N19–N24 全成立；新增 N25–N29（冰箱 P2/P3） |
@@ -229,6 +232,7 @@
 | 阶段计划 | [`m6`](./plans/2026-11-15-mithril-m6-plan.md)、[`m7`](./plans/2026-11-15-mithril-m7-plan.md)、[`m8`](./plans/2026-11-16-mithril-m8-plan.md)、[`m9`](./plans/2026-11-16-mithril-m9-plan.md)、[`m10`](./plans/2026-11-16-mithril-m10-plan.md)、[`m11`](./plans/2026-11-16-mithril-m11-plan.md) | 各阶段的实现拆解与风险 |
 | 设计差距补全（M2 词条 / 品质特效） | [`plans/2026-11-16-mithril-design-gap-closure.md`](./plans/2026-11-16-mithril-design-gap-closure.md) | 5 条改造词条接线到战斗 / 掉落、传说唯一特效 + 秘境诅咒落地、15/50 手工基型、属性面板三行化修遮挡；含 240 项自检与构建产物实机探针、一轮独立子代理复核 |
 | 试玩报告 | 第 10–24 轮：[`round10`](./plans/2026-11-15-playtest-round10-mithril.md)、[`round11`](./plans/2026-11-15-playtest-round11-mithril-m4.md)、[`round12`](./plans/2026-11-15-playtest-round12-mithril-m4-recheck.md)、[`round13`](./plans/2026-11-15-playtest-round13-mithril-m5.md)、[`round14`](./plans/2026-11-15-playtest-round14-mithril-m5-recheck.md)、[`round15`](./plans/2026-11-15-playtest-round15-mithril-m6.md)、[`round16`](./plans/2026-11-15-playtest-round16-mithril-m7.md)、[`round17`](./plans/2026-11-16-playtest-round17-mithril-m8.md)、[`round18`](./plans/2026-11-16-playtest-round18-mithril-m9.md)、[`round19`](./plans/2026-11-16-playtest-round19-mithril-m10.md)、[`round20`](./plans/2026-11-16-playtest-round20-mithril-m11.md)、[`round21`](./plans/2026-11-16-playtest-round21-mithril-m12.md)、[`round22`](./plans/2026-11-16-playtest-round22-mithril-p25.md)、[`round23`](./plans/2026-11-17-playtest-round23-mithril-deep.md)、[`round24`](./plans/2026-11-17-playtest-round24-mithril-ui.md) | fresh 子代理试玩，P0/P1 清零后进入下一阶段；第 20 轮是**构建产物**（`build/web-mobile`）发布前冒烟；第 21 轮验 M12 词条/菜单/排版；第 22 轮验 P2-5 首通记账与结算顺序，P0/P1/P2 = 0，唯一 P3（N64 折算金额被截断）已修并独立复核关闭；第 23 轮深度回归 N66–N74；第 24 轮是 **UI 巡检轮**（N75–N86：面板纯文字、受击全屏红 P1），修复记录见报告 §9（含本轮新增 N87/N88），独立复核 §10：全部判定已修复、P0/P1 清零，仅余 N89/N90 两条 P3 观感项留下一轮 |
+| 打磨台账（状态源） | [`plans/playtest-ledger-mithril.md`](./plans/playtest-ledger-mithril.md) | 五维打磨分、界面/系统覆盖矩阵、问题台账（N36–N90）、每拍收敛指标、下一批焦点（UI 收尾 → 数值 → 交互）；报告只是证据，追进度看这里 |
 | 体验官报告（首次接触） | [`plans/2026-11-17-mithril-experience-review.md`](./plans/2026-11-17-mithril-experience-review.md) | 2 小时真实试玩（未用 debug 捷径）：首战引导缺失 **P1**、副本 Lv8 标签掩盖真实装等 **P2**、营地首日空转等 5 条 P3；含实测读数、截图索引、复现方式与改法验收判据 |
 | 体验官报告处理（E1–E7） | [`plans/2026-11-17-mithril-experience-fixes.md`](./plans/2026-11-17-mithril-experience-fixes.md) | 逐条落地：首战内嵌引导（学会才关 + 首波 650px）、副本确认卡与「装等」标签、营地首档 3 灰烬 + 再赢 N 场、战斗暂停层、装备生效文案、跨职业提示；E7 未能复现并留加固；含同类问题排查与预览实机点击回归（20 项检查全过、控制台 0 error） |
 | 回归自检 | `tools/verify-mithril-core.js`、`-wild`、`-camp`、`-dungeons`、`-trinkets`、`-bounty`、`-balance`、`-audio` | 纯逻辑 + 映射表 + 工程约束共 7,600+ 项断言，清单与「何时跑」见 [`tech/verify-scripts.md`](./tech/verify-scripts.md) |
