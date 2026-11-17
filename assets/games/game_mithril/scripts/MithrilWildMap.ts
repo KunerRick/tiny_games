@@ -27,6 +27,7 @@ import {
     regionMaterialId,
 } from './MithrilConfig';
 import type { NodeKind } from './MithrilConfig';
+import { REGION_GLYPH, addGlyphNode, inkOnFill, repaintGlyphNode } from './MithrilArt';
 import {
     isAdjacent,
     isNodeDone,
@@ -101,6 +102,10 @@ export class MithrilWildMap extends Component {
     private _hint: ReturnType<typeof createLabel> | null = null;
 
     private _tabs: Array<{ id: string; btn: UiButton }> = [];
+    /** 区域页签选中下划线 */
+    private _tabMarks: Record<string, Node> = {};
+    /** 区域页签图标节点（选中时换成对比墨色，N88） */
+    private _tabIcons: Record<string, Node> = {};
     private _primaryBtn: UiButton | null = null;
 
     private _edgeGfx: Graphics | null = null;
@@ -121,6 +126,7 @@ export class MithrilWildMap extends Component {
     onDestroy(): void {
         this._view = null;
         this._tabs = [];
+        this._tabIcons = {};
         this._nodeIds.clear();
         this._modal = null;
         this._primaryBtn = null;
@@ -326,6 +332,26 @@ export class MithrilWildMap extends Component {
                 stroke: '#334155', radius: 12, onTap: () => this._onRegionTap(region.id),
             });
             btn.node.setPosition(-220 + i * 220, 478, 0);
+            // 地形图标 + 选中下划线（N76：选中态不能只靠底色）
+            const rg = REGION_GLYPH[region.id];
+            if (rg) {
+                this._tabIcons[region.id] = addGlyphNode(
+                    btn.node, `RegionIcon_${region.id}`, rg.kind, 12, rg.color, -72, 0, 45,
+                );
+            }
+            btn.label.node.setPosition(12, 0);
+            const ut = btn.label.node.getComponent(UITransform);
+            if (ut) ut.setContentSize(200 - 44, 38);
+            const mark = new Node(`RegionMark_${region.id}`);
+            mark.layer = btn.node.layer;
+            mark.addComponent(UITransform).setContentSize(200, 42);
+            const mk = mark.addComponent(Graphics);
+            mk.fillColor = hex('#93C5FD', 255);
+            mk.roundRect(-36, -19, 72, 3, 1.5);
+            mk.fill();
+            btn.node.addChild(mark);
+            mark.active = false;
+            this._tabMarks[region.id] = mark;
             this._tabs.push({ id: region.id, btn });
         }
     }
@@ -387,40 +413,57 @@ export class MithrilWildMap extends Component {
             radius: 16, onTap: () => this._onPrimaryTap(),
         });
         this._primaryBtn.node.setPosition(-238, -556, 0);
+        // 底部按钮图标（N76）：图标在上、文字在下，按钮不再只是一块色
+        addGlyphNode(this._primaryBtn.node, 'PrimaryIcon', 'growth', 12, '#FFFFFF', -58, 0, 70);
+        this._primaryBtn.label.node.setPosition(16, 0);
+        const pUt = this._primaryBtn.label.node.getComponent(UITransform);
+        if (pUt) pUt.setContentSize(176 - 46, 60);
 
         // M5 起这一行放 5 个按钮：开始远征 + 营地 / 成长 / 装备 / 返回大厅
         const camp = createButton(this.node, {
-            w: 104, h: 64, text: '营地', fontSize: 20,
+            w: 104, h: 64, text: '营地', fontSize: 18,
             fill: '#0E7490', textColor: '#FFFFFF', activeFill: '#155E75',
             radius: 16, onTap: () => { if (this.onOpenCamp) this.onOpenCamp(); },
         });
         camp.node.setPosition(-88, -556, 0);
+        this._bottomIcon(camp, 'camp', '#A5F3FC');
 
         const grow = createButton(this.node, {
-            w: 104, h: 64, text: '成长', fontSize: 20,
+            w: 104, h: 64, text: '成长', fontSize: 18,
             fill: '#B45309', textColor: '#FFFFFF', activeFill: '#92400E',
             radius: 16, onTap: () => { if (this.onOpenGrowth) this.onOpenGrowth(); },
         });
         grow.node.setPosition(22, -556, 0);
+        this._bottomIcon(grow, 'growth', '#FDE68A');
 
         const bag = createButton(this.node, {
-            w: 104, h: 64, text: '装备', fontSize: 20,
+            w: 104, h: 64, text: '装备', fontSize: 18,
             fill: '#A855F7', textColor: '#FFFFFF', activeFill: '#7E3AF2',
             radius: 16, onTap: () => { if (this.onOpenBag) this.onOpenBag(); },
         });
         bag.node.setPosition(132, -556, 0);
+        this._bottomIcon(bag, 'bag', '#E9D5FF');
 
         const exit = createButton(this.node, {
-            w: 112, h: 64, text: '返回大厅', fontSize: 19,
+            w: 112, h: 64, text: '返回大厅', fontSize: 17,
             fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
             radius: 16, onTap: () => { if (this.onExit) this.onExit(); },
         });
         exit.node.setPosition(244, -556, 0);
+        this._bottomIcon(exit, 'exit', '#CBD5E1');
 
         // 这行是全游戏唯一解释 8% 规则的地方，字号 / 对比度不能再往低调（试玩 N45）
         createLabel(this.node, '补给耗尽后每新节点 −8% 生命 · 已清理节点可路过 · 死亡失去本程材料', 16, {
             width: 690, height: 24, color: COLOR.TEXT_SECONDARY, y: -614,
         });
+    }
+
+    /** 底部方按钮：图标在上（y=14）、文字压到下半（y=-14） */
+    private _bottomIcon(btn: UiButton, kind: string, color: string): void {
+        addGlyphNode(btn.node, `BottomIcon_${kind}`, kind, 12, color, 0, 15, 55);
+        btn.label.node.setPosition(0, -15);
+        const ut = btn.label.node.getComponent(UITransform);
+        if (ut) ut.setContentSize(100, 26);
     }
 
     // ==================== 刷新 ====================
@@ -436,6 +479,26 @@ export class MithrilWildMap extends Component {
                 ? `${region.name} Lv${region.levelMin}`
                 : (cleared ? `${region.name}·已通关` : region.name));
             tab.btn.setActive(active);
+            // 选中底是主题蓝：图标 / 下划线换对比墨色，否则同色系图形会整块消失（N88）
+            const rg = REGION_GLYPH[tab.id];
+            if (rg) {
+                repaintGlyphNode(
+                    this._tabIcons[tab.id] || null, rg.kind, 12,
+                    active ? inkOnFill(COLOR.PRIMARY) : (unlocked ? rg.color : '#64748B'),
+                    active ? 70 : 45,
+                );
+            }
+            const mark = this._tabMarks[tab.id];
+            if (mark && mark.isValid) {
+                mark.active = active;
+                const mg = mark.getComponent(Graphics);
+                if (mg) {
+                    mg.clear();
+                    mg.fillColor = hex('#FFFFFF', 255);
+                    mg.roundRect(-36, -19, 72, 3, 1.5);
+                    mg.fill();
+                }
+            }
             if (!active) {
                 // setActive(false) 已恢复到默认配色，这里按「未解锁 / 已通关」再压一层
                 tab.btn.setColor(

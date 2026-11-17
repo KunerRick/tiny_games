@@ -16,10 +16,21 @@ import type { CoreEvent, MithrilSnapshot } from './MithrilCore';
 import { sfx } from './MithrilAudio';
 import { CLASS_KITS, PLAYER_TUNING, GEAR_BASE_BY_ID, GEAR_SLOT_NAMES, QUALITY_BY_ID } from './MithrilConfig';
 import type { ClassId, EquipItem } from './MithrilConfig';
+import { SKILL_GLYPH_KIND, addGlyphNode, drawMithrilGlyph } from './MithrilArt';
 
 const { ccclass } = _decorator;
 
 export type SkillKey = 'basic' | 'skill1' | 'skill2' | 'skill3' | 'burst' | 'dodge';
+
+/** HUD 技能位 → 技能表后缀（六位同名，图形也共用一套） */
+const SKILL_SLOT_OF: Record<SkillKey, string> = {
+    basic: 'basic',
+    skill1: 'a1',
+    skill2: 'a2',
+    skill3: 'a3',
+    dodge: 'dodge',
+    burst: 'burst',
+};
 
 interface SkillBtn {
     key: SkillKey;
@@ -27,6 +38,12 @@ interface SkillBtn {
     g: Graphics;
     label: Label;
     cdLabel: Label;
+    /** 技能图形（N85）：圆形色块上叠一个白色图标 */
+    glyph: Node;
+    glyphKind: string;
+    glyphRadius: number;
+    /** 上次画图标时的可用状态：只在状态翻转时重画，不在每帧重绘 */
+    glyphReady: boolean | null;
     size: number;
     color: string;
     /** 冷却总时长（秒），来自 PLAYER_TUNING */
@@ -888,16 +905,25 @@ export class MithrilHud extends Component {
             this.node.addChild(node);
             const g = node.addComponent(Graphics);
             const text = (CLASS_SKILL_NAME[this._classId] || CLASS_SKILL_NAME.warrior)[key];
+            // 技能图标（N85）：白线图标压在色块上半，文字压到下半
+            const glyphRadius = Math.max(10, Math.round(size * 0.15));
+            const glyphKind = SKILL_GLYPH_KIND[SKILL_SLOT_OF[key]] || 'skill';
+            const glyph = addGlyphNode(node, `SkillIcon_${key}`, glyphKind, glyphRadius, '#FFFFFF',
+                0, Math.round(size * 0.18), 95);
             const label = createLabel(node, text, this._skillFontSize(text, size), {
-                width: size - 8, height: size - 8, color: '#FFFFFF', bold: true,
+                width: size - 8, height: Math.round(size * 0.36), color: '#FFFFFF', bold: true,
+                y: -Math.round(size * 0.2),
             });
             // 两字文案在 84px 圆键里不能再折行
             label.enableWrapText = false;
-            const cdLabel = createLabel(node, '', 17, {
-                width: size - 8, height: 22, color: '#FFFFFF', bold: true, y: -size * 0.3,
+            const cdLabel = createLabel(node, '', Math.round(size * 0.26), {
+                width: size - 8, height: Math.round(size * 0.3), color: '#FFFFFF', bold: true, y: 0,
             });
             cdLabel.node.active = false;
-            this._skills.push({ key, node, g, label, cdLabel, size, color, total, pressed: false });
+            this._skills.push({
+                key, node, g, label, cdLabel, glyph, glyphKind, glyphRadius, glyphReady: null,
+                size, color, total, pressed: false,
+            });
             node.on(Node.EventType.TOUCH_START, this.onSkillDown, this);
             node.on(Node.EventType.TOUCH_END, this.onSkillUp, this);
             node.on(Node.EventType.TOUCH_CANCEL, this.onSkillUp, this);
@@ -964,6 +990,17 @@ export class MithrilHud extends Component {
             const rageOk = poolNow >= needRage;
             const ready = cd <= 0.001 && rageOk;
             const r = b.size / 2;
+
+            // 图标只在可用状态翻转时重画（每帧重绘 6 个图标没必要）
+            if (b.glyphReady !== ready) {
+                b.glyphReady = ready;
+                const gg = b.glyph.getComponent(Graphics);
+                if (gg) {
+                    gg.clear();
+                    drawMithrilGlyph(gg, b.glyphKind, b.glyphRadius,
+                        ready ? '#FFFFFF' : '#94A3B8', ready ? 95 : 38);
+                }
+            }
 
             b.g.clear();
             // 底
@@ -1113,6 +1150,8 @@ export class MithrilHud extends Component {
             // 250 高、中心 y=30 ⇒ 顶边 155，12 行（行高 20）实测 245 也不会压到标题（试玩 N73）。
             width: 470, height: 250, color: COLOR.TEXT_SECONDARY, y: 30,
             lineHeight: 26,
+            // N86：默认 Overflow.NONE 不换行，超宽的一行会横向越出面板；clamp 兜底（文案也已缩短）
+            overflow: 'clamp',
         });
 
         // 四个按钮均分：再来一次 / 成长 / 装备 / 返回大厅

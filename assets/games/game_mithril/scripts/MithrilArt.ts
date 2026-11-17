@@ -7,7 +7,7 @@
  * 风格与大厅 / 冰箱保持一致：粗轮廓 + 双色块 + 一个高光点，不做细腻渐变。
  */
 
-import { Color, Graphics } from 'cc';
+import { Color, Graphics, Node, UITransform } from 'cc';
 
 /** 颜色缓存：每帧上百次绘制不能反复 new Color（微信小游戏 GC 压力） */
 const colorCache: Record<string, Color> = {};
@@ -875,4 +875,558 @@ export function drawEnemyBar(
         g.rect(x - width / 2, y, w, h);
         g.fill();
     }
+}
+
+// ==================== 界面图标（程序化，零贴图） ====================
+//
+// 2026-11-17 第 24 轮试玩 N75–N81：营地 / 装备 / 饰品 / 天赋 / 技能 / 职业选择
+// 整屏只有 Label，玩家反馈「像半成品」。这里补一套统一风格的矢量图标：
+// 粗轮廓 + 低透明度填充 + 一个高光点，与战斗单位的画法一致。
+// 调用方只需给一个半径 r，所有图形都在 [-r, r] 的方框内。
+
+function _mgPoly(g: Graphics, pts: number[][], close = true): void {
+    if (!pts.length) return;
+    g.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]);
+    if (close) g.close();
+}
+
+/** 设施强调色（页签 / 页头徽记 / 水印共用） */
+export const FACILITY_ACCENT: Record<string, string> = {
+    smith: '#F59E0B',
+    enchant: '#A855F7',
+    training: '#0EA5E9',
+    kitchen: '#22C55E',
+    quartermaster: '#F43F5E',
+};
+
+/** 职业强调色（职业卡 / 选职业按钮共用） */
+export const CLASS_ACCENT: Record<string, string> = {
+    warrior: '#3B82F6',
+    mage: '#A855F7',
+    ranger: '#22C55E',
+    priest: '#F59E0B',
+};
+
+/** 12 条天赋线的图标与颜色（同名幻术不再整屏一样） */
+export const TREE_GLYPH: Record<string, { kind: string; color: string }> = {
+    steel: { kind: 'shield', color: '#60A5FA' },
+    fury: { kind: 'flame', color: '#F97316' },
+    tactic: { kind: 'growth', color: '#22D3EE' },
+    fire: { kind: 'flame', color: '#FB923C' },
+    frost: { kind: 'frost', color: '#38BDF8' },
+    arcane: { kind: 'star', color: '#C084FC' },
+    marks: { kind: 'bow', color: '#22C55E' },
+    survival: { kind: 'boot', color: '#A3E635' },
+    beast: { kind: 'paw', color: '#D97706' },
+    holy: { kind: 'cross', color: '#FBBF24' },
+    shadow: { kind: 'eye', color: '#8B5CF6' },
+    discipline: { kind: 'scroll', color: '#F472B6' },
+};
+
+export function treeGlyph(tree: string): { kind: string; color: string } {
+    return TREE_GLYPH[tree] || TREE_GLYPH.steel;
+}
+
+/** 区域地形图形（路线图页签；N76） */
+export const REGION_GLYPH: Record<string, { kind: string; color: string }> = {
+    ash: { kind: 'flame', color: '#F97316' },
+    frost: { kind: 'frost', color: '#7DD3FC' },
+    abyss: { kind: 'eye', color: '#8B5CF6' },
+};
+
+/** 饰品标签强调色（饰品槽 / 列表行 / 详情共用；N78） */
+export const TRINKET_TAG_ACCENT: Record<string, string> = {
+    blood: '#EF4444',
+    shadow: '#8B5CF6',
+    echo: '#38BDF8',
+    thorn: '#84CC16',
+    greed: '#F59E0B',
+    ember: '#FB923C',
+    frost: '#7DD3FC',
+    storm: '#FDE047',
+    oath: '#FACC15',
+    hunger: '#A3E635',
+};
+
+export function trinketAccent(tag: string): string {
+    return TRINKET_TAG_ACCENT[tag] || '#FBBF24';
+}
+
+/** 技能位 → 图形（六个技能位全职业同名，颜色取职业强调色；N80/N85） */
+export const SKILL_GLYPH_KIND: Record<string, string> = {
+    basic: 'skill',
+    a1: 'charge',
+    a2: 'whirl',
+    a3: 'break',
+    dodge: 'dodge',
+    burst: 'burst',
+};
+
+/**
+ * 画一个界面图标。kind 见下方 case；r 是外接半径；坐标以调用点为中心。
+ * fillAlpha 控制填充强度（纯线条图标可以传 0）；strokeAlpha 给水印这类要整只压淡的场景用。
+ */
+export function drawMithrilGlyph(
+    g: Graphics, kind: string, r: number, colorHex: string, fillAlpha = 40, strokeAlpha = 245,
+): void {
+    const c = CA(colorHex, strokeAlpha);
+    const f = CA(colorHex, fillAlpha);
+    const lw = Math.max(1.6, r * 0.1);
+    g.lineWidth = lw;
+    g.strokeColor = c;
+    g.fillColor = f;
+
+    // 归一化点（[-1,1]）→ 设计坐标：必须乘 r，否则所有多边形都会缩成 2px 小黑点
+    const scaled = (pts: number[][]): number[][] => pts.map(([x, y]) => [x * r, y * r]);
+    const path = (pts: number[][]): void => _mgPoly(g, scaled(pts));
+    const paintPoly = (pts: number[][], fill = true): void => {
+        const q = scaled(pts);
+        _mgPoly(g, q);
+        if (fill) { g.fillColor = f; g.fill(); }
+        _mgPoly(g, q);
+        g.strokeColor = c; g.stroke();
+    };
+
+    switch (kind) {
+        // ---- 营地五设施 ----
+        case 'smith': {
+            // 铁砧 + 斜置铁锤
+            paintPoly([
+                [-0.92, 0.16], [0.2, 0.16], [0.64, 0.02], [0.3, -0.08],
+                [0.22, -0.46], [-0.42, -0.46], [-0.48, -0.08], [-0.92, -0.04],
+            ]);
+            g.strokeColor = c;
+            g.moveTo(0.16, 0.4); g.lineTo(0.9, -0.34); g.stroke();
+            paintPoly([[0.06, 0.64], [0.44, 0.9], [0.72, 0.56], [0.34, 0.32]]);
+            break;
+        }
+        case 'enchant': {
+            // 符文环：外环 + 中心菱形 + 四角光点
+            g.strokeColor = c;
+            g.circle(0, 0, 0.76 * r); g.stroke();
+            g.fillColor = f;
+            g.circle(0, 0, 0.4 * r); g.fill();
+            g.circle(0, 0, 0.4 * r); g.stroke();
+            _mgPoly(g, [[0, 0.3 * r], [0.26 * r, 0], [0, -0.3 * r], [-0.26 * r, 0]]);
+            g.stroke();
+            g.fillColor = c;
+            for (let i = 0; i < 4; i++) {
+                const a = Math.PI / 4 + (i * Math.PI) / 2;
+                g.circle(Math.cos(a) * 0.6 * r, Math.sin(a) * 0.6 * r, 0.1 * r);
+                g.fill();
+            }
+            break;
+        }
+        case 'training': {
+            // 交叉双剑
+            g.moveTo(-0.66 * r, 0.72 * r); g.lineTo(0.66 * r, -0.72 * r);
+            g.moveTo(0.66 * r, 0.72 * r); g.lineTo(-0.66 * r, -0.72 * r);
+            g.stroke();
+            g.strokeColor = c;
+            g.moveTo(-0.34 * r, 0.42 * r); g.lineTo(-0.7 * r, 0.78 * r);
+            g.moveTo(0.34 * r, 0.42 * r); g.lineTo(0.7 * r, 0.78 * r);
+            g.moveTo(-0.34 * r, -0.42 * r); g.lineTo(-0.7 * r, -0.78 * r);
+            g.moveTo(0.34 * r, -0.42 * r); g.lineTo(0.7 * r, -0.78 * r);
+            g.stroke();
+            g.fillColor = c;
+            g.circle(-0.72 * r, 0.8 * r, 0.08 * r); g.fill();
+            g.circle(0.72 * r, 0.8 * r, 0.08 * r); g.fill();
+            break;
+        }
+        case 'kitchen': {
+            // 吊锅 + 蒸汽
+            paintPoly([
+                [-0.74, 0.06], [0.74, 0.06], [0.58, -0.5], [0.26, -0.7],
+                [-0.26, -0.7], [-0.58, -0.5],
+            ]);
+            g.strokeColor = c;
+            g.moveTo(-0.9 * r, 0.14 * r); g.lineTo(0.9 * r, 0.14 * r); g.stroke();
+            g.circle(-0.8 * r, 0.0, 0.13 * r); g.stroke();
+            g.circle(0.8 * r, 0.0, 0.13 * r); g.stroke();
+            g.moveTo(-0.24 * r, 0.32 * r);
+            g.bezierCurveTo(-0.46 * r, 0.52 * r, -0.04 * r, 0.64 * r, -0.2 * r, 0.86 * r);
+            g.moveTo(0.22 * r, 0.32 * r);
+            g.bezierCurveTo(0.0, 0.52 * r, 0.42 * r, 0.64 * r, 0.26 * r, 0.86 * r);
+            g.stroke();
+            break;
+        }
+        case 'quartermaster': {
+            // 军旗：旗杆 + 燕尾旗
+            g.strokeColor = c;
+            g.moveTo(-0.46 * r, -0.9 * r); g.lineTo(-0.46 * r, 0.88 * r); g.stroke();
+            paintPoly([
+                [-0.36, 0.8], [0.76, 0.58], [0.56, 0.24], [0.76, -0.12], [-0.36, 0.08],
+            ]);
+            break;
+        }
+
+        // ---- 四职业 ----
+        case 'warrior': {
+            paintPoly([
+                [0, 0.86], [0.62, 0.6], [0.5, -0.32], [0, -0.86], [-0.5, -0.32], [-0.62, 0.6],
+            ]);
+            g.strokeColor = c;
+            g.moveTo(0, 0.5 * r); g.lineTo(0, -0.52 * r);
+            g.moveTo(-0.28 * r, 0.14 * r); g.lineTo(0.28 * r, 0.14 * r);
+            g.stroke();
+            break;
+        }
+        case 'mage': {
+            g.strokeColor = c;
+            g.moveTo(-0.36 * r, -0.86 * r); g.lineTo(0.1 * r, 0.42 * r); g.stroke();
+            g.fillColor = f;
+            g.circle(0.2 * r, 0.6 * r, 0.3 * r); g.fill();
+            g.strokeColor = c; g.circle(0.2 * r, 0.6 * r, 0.3 * r); g.stroke();
+            g.fillColor = c;
+            g.circle(0.62 * r, 0.82 * r, 0.07 * r); g.fill();
+            g.circle(-0.16 * r, 0.88 * r, 0.05 * r); g.fill();
+            break;
+        }
+        case 'ranger':
+        case 'bow': {
+            g.strokeColor = c;
+            g.moveTo(-0.58 * r, -0.82 * r);
+            g.bezierCurveTo(0.44 * r, -0.52 * r, 0.44 * r, 0.52 * r, -0.58 * r, 0.82 * r);
+            g.stroke();
+            g.moveTo(-0.58 * r, -0.82 * r); g.lineTo(-0.58 * r, 0.82 * r); g.stroke();
+            g.moveTo(-0.78 * r, 0); g.lineTo(0.7 * r, 0); g.stroke();
+            paintPoly([[0.9, 0], [0.52, 0.22], [0.52, -0.22]]);
+            break;
+        }
+        case 'priest':
+        case 'cross': {
+            paintPoly([
+                [-0.2, 0.74], [0.2, 0.74], [0.2, 0.18], [0.72, 0.18], [0.72, -0.18],
+                [0.2, -0.18], [0.2, -0.84], [-0.2, -0.84], [-0.2, -0.18],
+                [-0.72, -0.18], [-0.72, 0.18], [-0.2, 0.18],
+            ]);
+            g.strokeColor = c;
+            g.circle(0, 0.94 * r, 0.14 * r); g.stroke();
+            break;
+        }
+
+        // ---- 装备八槽 ----
+        case 'mainHand': {
+            paintPoly([[0, 0.95], [0.18, 0.52], [0.18, -0.16], [-0.18, -0.16], [-0.18, 0.52]]);
+            g.strokeColor = c;
+            g.moveTo(-0.44 * r, -0.16 * r); g.lineTo(0.44 * r, -0.16 * r);
+            g.moveTo(0, -0.16 * r); g.lineTo(0, -0.62 * r);
+            g.stroke();
+            g.fillColor = c;
+            g.circle(0, -0.7 * r, 0.1 * r); g.fill();
+            break;
+        }
+        case 'offHand':
+        case 'shield': {
+            paintPoly([
+                [0, 0.9], [0.68, 0.62], [0.54, -0.38], [0, -0.9], [-0.54, -0.38], [-0.68, 0.62],
+            ]);
+            g.strokeColor = c;
+            g.moveTo(0, 0.46 * r); g.lineTo(0, -0.46 * r);
+            g.moveTo(-0.3 * r, 0.1 * r); g.lineTo(0.3 * r, 0.1 * r);
+            g.stroke();
+            break;
+        }
+        case 'head': {
+            paintPoly([
+                [-0.7, -0.46], [-0.7, 0.08], [-0.46, 0.54], [0, 0.72], [0.46, 0.54],
+                [0.7, 0.08], [0.7, -0.46], [0.36, -0.56], [0.3, -0.12],
+                [0.12, -0.04], [-0.12, -0.04], [-0.3, -0.12], [-0.36, -0.56],
+            ]);
+            g.fillColor = c;
+            g.circle(0, 0.3 * r, 0.07 * r); g.fill();
+            break;
+        }
+        case 'chest': {
+            paintPoly([
+                [-0.76, 0.28], [-0.46, 0.66], [-0.16, 0.5], [0, 0.64], [0.16, 0.5],
+                [0.46, 0.66], [0.76, 0.28], [0.62, -0.62], [0.2, -0.78],
+                [-0.2, -0.78], [-0.62, -0.62],
+            ]);
+            g.strokeColor = c;
+            g.moveTo(0, 0.4 * r); g.lineTo(0, -0.4 * r);
+            g.stroke();
+            break;
+        }
+        case 'hands': {
+            paintPoly([
+                [-0.56, 0.48], [-0.2, 0.7], [0.54, 0.56], [0.66, 0.0],
+                [0.36, -0.66], [-0.3, -0.72], [-0.6, -0.22],
+            ]);
+            paintPoly([[-0.58, 0.1], [-0.88, 0.26], [-0.82, -0.16], [-0.52, -0.22]]);
+            break;
+        }
+        case 'legs': {
+            g.fillColor = f;
+            g.roundRect(-0.6 * r, -0.78 * r, 0.46 * r, 1.5 * r, 0.16 * r); g.fill();
+            g.roundRect(0.14 * r, -0.78 * r, 0.46 * r, 1.5 * r, 0.16 * r); g.fill();
+            g.strokeColor = c;
+            g.roundRect(-0.6 * r, -0.78 * r, 0.46 * r, 1.5 * r, 0.16 * r); g.stroke();
+            g.roundRect(0.14 * r, -0.78 * r, 0.46 * r, 1.5 * r, 0.16 * r); g.stroke();
+            g.circle(0, 0.34 * r, 0.09 * r); g.stroke();
+            break;
+        }
+        case 'feet':
+        case 'boot': {
+            paintPoly([
+                [-0.5, 0.78], [-0.06, 0.78], [-0.06, -0.32], [0.5, -0.32],
+                [0.66, -0.66], [-0.5, -0.66], [-0.5, 0.1],
+            ]);
+            g.strokeColor = c;
+            g.moveTo(-0.5 * r, -0.56 * r); g.lineTo(0.64 * r, -0.56 * r); g.stroke();
+            break;
+        }
+        case 'ring': {
+            g.lineWidth = Math.max(2, r * 0.14);
+            g.strokeColor = c;
+            g.circle(0, -0.12 * r, 0.56 * r); g.stroke();
+            g.lineWidth = lw;
+            paintPoly([[0, 0.6], [0.28, 0.32], [0, 0.02], [-0.28, 0.32]]);
+            break;
+        }
+
+        // ---- 饰品 / 天赋 / 技能 / 通用按钮 ----
+        case 'trinket': {
+            g.strokeColor = c;
+            g.circle(0, 0.76 * r, 0.16 * r); g.stroke();
+            g.moveTo(-0.1 * r, 0.64 * r); g.lineTo(-0.44 * r, -0.06 * r);
+            g.moveTo(0.1 * r, 0.64 * r); g.lineTo(0.44 * r, -0.06 * r);
+            g.stroke();
+            paintPoly([[0, -0.02], [0.4, -0.36], [0, -0.86], [-0.4, -0.36]]);
+            g.strokeColor = c;
+            g.moveTo(0, -0.02 * r); g.lineTo(0, -0.86 * r);
+            g.stroke();
+            break;
+        }
+        case 'talent':
+        case 'star': {
+            const star: number[][] = [];
+            for (let i = 0; i < 8; i++) {
+                const a = Math.PI / 2 + (i * Math.PI) / 4;
+                const rad = i % 2 === 0 ? 1 : 0.32;
+                star.push([Math.cos(a) * rad, Math.sin(a) * rad]);
+            }
+            paintPoly(star);
+            g.fillColor = c;
+            g.circle(0.7 * r, 0.62 * r, 0.1 * r); g.fill();
+            break;
+        }
+        case 'skill':
+        case 'flame': {
+            paintPoly([
+                [0, 0.9], [0.34, 0.38], [0.56, 0.02], [0.36, -0.56], [0, -0.84],
+                [-0.36, -0.56], [-0.56, 0.02], [-0.32, 0.32],
+            ]);
+            g.fillColor = CA(colorHex, 120);
+            paintPoly([[0, 0.4], [0.22, 0.0], [0.16, -0.44], [0, -0.62], [-0.16, -0.44], [-0.22, 0.0]]);
+            break;
+        }
+        case 'frost': {
+            g.strokeColor = c;
+            for (let i = 0; i < 3; i++) {
+                const a = (i * Math.PI) / 3;
+                const dx = Math.cos(a) * 0.8 * r;
+                const dy = Math.sin(a) * 0.8 * r;
+                g.moveTo(-dx, -dy); g.lineTo(dx, dy);
+                const b = a + Math.PI / 2;
+                for (const s of [-0.55, 0.55]) {
+                    const px = dx * s;
+                    const py = dy * s;
+                    g.moveTo(px, py);
+                    g.lineTo(px + Math.cos(b) * 0.2 * r, py + Math.sin(b) * 0.2 * r);
+                    g.moveTo(px, py);
+                    g.lineTo(px - Math.cos(b) * 0.2 * r, py - Math.sin(b) * 0.2 * r);
+                }
+            }
+            g.stroke();
+            break;
+        }
+        case 'growth': {
+            g.strokeColor = c;
+            for (let i = 0; i < 3; i++) {
+                const y = -0.58 + i * 0.42;
+                path([[-0.56, y], [0, y + 0.3], [0.56, y]]);
+                g.stroke();
+            }
+            break;
+        }
+        case 'camp': {
+            paintPoly([[0, 0.86], [0.86, -0.72], [-0.86, -0.72]]);
+            g.strokeColor = c;
+            path([[0, 0.12], [0.3, -0.72], [-0.3, -0.72]]);
+            g.stroke();
+            break;
+        }
+        case 'bag': {
+            paintPoly([
+                [-0.46, 0.34], [0.46, 0.34], [0.72, -0.18], [0.48, -0.78],
+                [-0.48, -0.78], [-0.72, -0.18],
+            ]);
+            g.strokeColor = c;
+            g.moveTo(-0.34 * r, 0.34 * r); g.lineTo(0.34 * r, 0.34 * r);
+            g.moveTo(-0.1 * r, 0.34 * r); g.lineTo(0.1 * r, 0.34 * r);
+            g.stroke();
+            break;
+        }
+        case 'exit': {
+            g.strokeColor = c;
+            g.roundRect(-0.7 * r, -0.82 * r, 0.78 * r, 1.64 * r, 0.1 * r);
+            g.stroke();
+            g.fillColor = c;
+            g.circle(-0.22 * r, 0, 0.07 * r); g.fill();
+            g.strokeColor = c;
+            g.moveTo(0.2 * r, 0); g.lineTo(0.9 * r, 0); g.stroke();
+            paintPoly([[0.92, 0], [0.62, 0.2], [0.62, -0.2]]);
+            break;
+        }
+        case 'eye': {
+            g.strokeColor = c;
+            g.moveTo(-0.86 * r, 0);
+            g.bezierCurveTo(-0.4 * r, 0.62 * r, 0.4 * r, 0.62 * r, 0.86 * r, 0);
+            g.bezierCurveTo(0.4 * r, -0.62 * r, -0.4 * r, -0.62 * r, -0.86 * r, 0);
+            g.stroke();
+            g.fillColor = c;
+            g.circle(0, 0, 0.22 * r); g.fill();
+            break;
+        }
+        case 'paw': {
+            g.fillColor = f;
+            g.circle(0, -0.24 * r, 0.4 * r); g.fill();
+            g.strokeColor = c; g.circle(0, -0.24 * r, 0.4 * r); g.stroke();
+            g.fillColor = c;
+            for (const [px, py, pr] of [[-0.46, 0.3, 0.16], [-0.16, 0.5, 0.16], [0.16, 0.5, 0.16], [0.46, 0.3, 0.16]]) {
+                g.circle(px * r, py * r, pr * r); g.fill();
+            }
+            break;
+        }
+        case 'scroll': {
+            g.fillColor = f;
+            g.roundRect(-0.62 * r, -0.8 * r, 1.24 * r, 1.6 * r, 0.2 * r); g.fill();
+            g.strokeColor = c;
+            g.roundRect(-0.62 * r, -0.8 * r, 1.24 * r, 1.6 * r, 0.2 * r); g.stroke();
+            g.lineWidth = Math.max(1.4, r * 0.08);
+            for (const y of [0.36, 0.04, -0.28]) {
+                g.moveTo(-0.32 * r, y * r); g.lineTo(0.32 * r, y * r);
+            }
+            g.stroke();
+            break;
+        }
+        case 'charge': {
+            g.strokeColor = c;
+            for (const dx of [0, 0.34]) {
+                path([[-0.66 + dx, 0.56], [-0.18 + dx, 0], [-0.66 + dx, -0.56]]);
+                g.stroke();
+            }
+            break;
+        }
+        case 'whirl': {
+            g.lineWidth = Math.max(2, r * 0.13);
+            g.strokeColor = c;
+            g.arc(0, 0, 0.66 * r, 0.5, Math.PI * 1.9, false);
+            g.stroke();
+            paintPoly([[0.62, 0.34], [0.72, -0.1], [0.3, 0.06]]);
+            break;
+        }
+        case 'break': {
+            g.strokeColor = c;
+            g.moveTo(-0.36 * r, 0.28 * r); g.lineTo(0.6 * r, -0.68 * r); g.stroke();
+            paintPoly([[-0.1, 0.66], [0.28, 0.9], [0.58, 0.56], [0.2, 0.3]]);
+            g.strokeColor = c;
+            g.moveTo(-0.72 * r, -0.1 * r); g.lineTo(-0.48 * r, -0.42 * r); g.lineTo(-0.7 * r, -0.62 * r);
+            g.moveTo(-0.46 * r, -0.4 * r); g.lineTo(-0.58 * r, -0.78 * r);
+            g.stroke();
+            break;
+        }
+        case 'dodge': {
+            g.strokeColor = c;
+            for (const dx of [0, 0.3]) {
+                path([[-0.3 + dx, 0.5], [0.16 + dx, 0], [-0.3 + dx, -0.5]]);
+                g.stroke();
+            }
+            g.lineWidth = Math.max(1.4, r * 0.08);
+            for (const y of [-0.62, -0.82, -1.0]) {
+                g.moveTo(-0.7 * r, y * r); g.lineTo(0.12 * r, y * r);
+            }
+            g.stroke();
+            break;
+        }
+        case 'burst': {
+            const spikes: number[][] = [];
+            for (let i = 0; i < 12; i++) {
+                const a = Math.PI / 2 + (i * Math.PI) / 6;
+                const rad = i % 2 === 0 ? 1 : 0.45;
+                spikes.push([Math.cos(a) * rad, Math.sin(a) * rad]);
+            }
+            paintPoly(spikes);
+            break;
+        }
+        default: {
+            g.strokeColor = c;
+            g.circle(0, 0, 0.7 * r); g.stroke();
+            g.fillColor = f;
+            g.circle(0, 0, 0.28 * r); g.fill();
+            break;
+        }
+    }
+}
+
+/** 建一个图标节点（自动挂 Graphics 并画好），返回节点方便后续重画/显隐 */
+export function addGlyphNode(
+    parent: Node, name: string, kind: string, r: number, colorHex: string,
+    x = 0, y = 0, fillAlpha = 40,
+): Node {
+    const node = new Node(name);
+    node.layer = parent.layer;
+    node.addComponent(UITransform).setContentSize(r * 2 + 6, r * 2 + 6);
+    node.setPosition(x, y, 0);
+    const g = node.addComponent(Graphics);
+    drawMithrilGlyph(g, kind, r, colorHex, fillAlpha);
+    parent.addChild(node);
+    return node;
+}
+
+/**
+ * 选中页签的图标 / 下划线用色（N88）。
+ * 页签选中态的底色常常就是强调色本身（营地 = 设施色、成长 = 主题蓝），
+ * 图形再用同色就等于消失 —— 按底色亮度换成深墨或白墨。
+ */
+export function inkOnFill(fillHex: string): string {
+    const h = fillHex.replace('#', '');
+    const r = parseInt(h.slice(0, 2), 16) / 255;
+    const g = parseInt(h.slice(2, 4), 16) / 255;
+    const b = parseInt(h.slice(4, 6), 16) / 255;
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6 ? '#141B28' : '#FFFFFF';
+}
+
+/** 重画已有 glyph 节点（页签在「选中 / 未选中」之间换色用；不新建节点） */
+export function repaintGlyphNode(
+    node: Node | null, kind: string, r: number, colorHex: string, fillAlpha = 40,
+): void {
+    if (!node || !node.isValid) return;
+    const g = node.getComponent(Graphics);
+    if (!g) return;
+    g.clear();
+    drawMithrilGlyph(g, kind, r, colorHex, fillAlpha);
+}
+
+/** 圆形徽记：光晕 + 内盘 + 双环 + 纹章（营地页头 / 职业卡用） */
+export function drawGlyphMedallion(
+    g: Graphics, kind: string, r: number, accentHex: string, bgHex = '#1B2331',
+): void {
+    g.fillColor = CA(accentHex, 34);
+    g.circle(0, 0, r + 4);
+    g.fill();
+    g.fillColor = CA(bgHex, 248);
+    g.circle(0, 0, r);
+    g.fill();
+    g.strokeColor = CA(accentHex, 230);
+    g.lineWidth = Math.max(2, r * 0.075);
+    g.circle(0, 0, r - 1);
+    g.stroke();
+    g.strokeColor = CA(accentHex, 70);
+    g.lineWidth = 1.5;
+    g.circle(0, 0, r * 0.82);
+    g.stroke();
+    drawMithrilGlyph(g, kind, r * 0.56, accentHex, 95);
 }

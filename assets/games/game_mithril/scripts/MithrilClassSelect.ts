@@ -17,6 +17,9 @@ import {
 import type { UiButton } from '../../../common/ui/GameUIKit';
 import { CLASSES, SKILLS } from './MithrilConfig';
 import type { ClassId } from './MithrilConfig';
+import {
+    CLASS_ACCENT, drawGlyphMedallion, drawMithrilGlyph,
+} from './MithrilArt';
 
 const { ccclass } = _decorator;
 
@@ -174,10 +177,21 @@ export class MithrilClassSelect extends Component {
             g.lineWidth = selected ? 4 : 2;
             g.roundRect(-CARD_W / 2, -CARD_H / 2, CARD_W, CARD_H, 18);
             g.stroke();
+            // 职业剪影水印（N81：卡面不能只有文字）
+            const accent = CLASS_ACCENT[def.id] || COLOR.PRIMARY;
+            drawMithrilGlyph(g, def.id, 74, accent, selected ? 20 : 12, 26);
+            // 名称左侧徽记
+            const medal = new Node(`ClassMedal_${def.id}`);
+            medal.layer = card.layer;
+            medal.addComponent(UITransform).setContentSize(46, 46);
+            medal.setPosition(-98, 84, 0);
+            const mgG = medal.addComponent(Graphics);
+            drawGlyphMedallion(mgG, def.id, 21, accent);
+            card.addChild(medal);
 
-            createLabel(card, def.name, 30, {
-                width: 250, height: 40, color: selected ? '#FDE68A' : COLOR.TEXT_PRIMARY,
-                bold: true, x: 0, y: 84,
+            createLabel(card, def.name, 28, {
+                width: 186, height: 40, color: selected ? '#FDE68A' : COLOR.TEXT_PRIMARY,
+                bold: true, x: 22, y: 84, overflow: 'shrink',
             });
             createLabel(card, def.archetype, 16, {
                 width: 250, height: 22, color: COLOR.TEXT_SECONDARY, x: 0, y: 52,

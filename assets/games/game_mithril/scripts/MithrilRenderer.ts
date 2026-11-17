@@ -78,6 +78,10 @@ export class MithrilRenderer extends Component {
     private _numberPool: Label[] = [];
     private _shake = 0;
     private _hurtFlash = 0;
+    /** 上一帧的最大生命：把 damage 事件的绝对伤害换算成「占最大生命比例」 */
+    private _lastMaxHp = 100;
+    /** 上一帧的血量比例（低血暗角用） */
+    private _hpRatio = 1;
     private _time = 0;
     private _tmp = new Color();
 
@@ -140,6 +144,8 @@ export class MithrilRenderer extends Component {
         this._time += dt;
         this._shake = Math.max(0, this._shake - dt * 3);
         this._hurtFlash = Math.max(0, this._hurtFlash - dt * 4);
+        this._lastMaxHp = Math.max(1, snap.player.maxHp);
+        this._hpRatio = Math.max(0, Math.min(1, snap.player.hp / this._lastMaxHp));
 
         g.clear();
 
@@ -208,8 +214,11 @@ export class MithrilRenderer extends Component {
                     break;
                 case 'damage':
                     if (ev.target === 'player') {
-                        this._hurtFlash = Math.max(this._hurtFlash, 0.8);
-                        this._shake = Math.max(this._shake, 0.35);
+                        // 试玩 N82/N83：受击反馈按「本次伤害 / 最大生命」分级。
+                        // 以前无论 2 点还是 30 点都用同一个全屏红，玩家读不出这一下有多疼。
+                        const frac = Math.max(0, ev.amount) / this._lastMaxHp;
+                        this._hurtFlash = Math.max(this._hurtFlash, Math.min(1, 0.12 + frac * 3.2));
+                        this._shake = Math.max(this._shake, Math.min(0.5, 0.08 + frac * 2.2));
                     } else {
                         this._addNumber(
                             ev.x, ev.y + 8,
@@ -529,12 +538,45 @@ export class MithrilRenderer extends Component {
     }
 
     private _drawHurtFlash(g: Graphics): void {
-        if (this._hurtFlash <= 0) return;
-        this._tmp.set(this._cHurt);
-        this._tmp.a = Math.round(90 * this._hurtFlash);
-        g.fillColor = this._tmp;
-        g.rect(-FIELD_W / 2, -FIELD_H / 2, FIELD_W, FIELD_H);
-        g.fill();
+        // 低血警示（试玩 N84）：血量低于 30% 时四条边持续脉动，余光能看见；
+        // 与受击红闪分开计算，满血被小怪摸一下不会再整屏发红（N82）。
+        const low = this._hpRatio < 0.3 ? (0.3 - this._hpRatio) / 0.3 : 0;
+        const pulse = low > 0 ? (0.55 + 0.45 * Math.sin(this._time * 5.2)) * low : 0;
+        const edge = Math.max(this._hurtFlash, pulse * 0.75);
+        if (edge <= 0.01) return;
+
+        // 暗角 = 5 层由外向内的边带，强度向中心递减。
+        // 用叠加边带代替一整块 rect：普通掉血只在屏幕边缘泛红，不遮挡战场。
+        const baseA = 150 * edge;
+        const band = 26;
+        for (let i = 0; i < 5; i++) {
+            const a = Math.round(baseA * (1 - i / 5) * 0.55);
+            if (a <= 2) continue;
+            const inset = i * band;
+            const x0 = -FIELD_W / 2 + inset;
+            const y0 = -FIELD_H / 2 + inset;
+            const x1 = FIELD_W / 2 - inset;
+            const y1 = FIELD_H / 2 - inset;
+            const innerW = FIELD_W - inset * 2;
+            const innerH = FIELD_H - inset * 2;
+            this._tmp.set(this._cHurt);
+            this._tmp.a = a;
+            g.fillColor = this._tmp;
+            g.rect(x0, y0, innerW, band);                       // 下
+            g.rect(x0, y1 - band, innerW, band);                // 上
+            g.rect(x0, y0 + band, band, innerH - band * 2);     // 左
+            g.rect(x1 - band, y0 + band, band, innerH - band * 2); // 右
+            g.fill();
+        }
+
+        // 只有重击才补一层很淡的全屏红；小伤害到此为止（N82 的核心判定）
+        if (this._hurtFlash > 0.55) {
+            this._tmp.set(this._cHurt);
+            this._tmp.a = Math.round((this._hurtFlash - 0.55) * 70);
+            g.fillColor = this._tmp;
+            g.rect(-FIELD_W / 2, -FIELD_H / 2, FIELD_W, FIELD_H);
+            g.fill();
+        }
     }
 
     private _pushFx(

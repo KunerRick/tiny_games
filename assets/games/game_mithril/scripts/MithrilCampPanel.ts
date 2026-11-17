@@ -47,6 +47,9 @@ import {
 import type { MithrilSave } from './MithrilProgress';
 import { mulberry32 } from './MithrilCore';
 import { sfx } from './MithrilAudio';
+import {
+    FACILITY_ACCENT, addGlyphNode, drawGlyphMedallion, inkOnFill, repaintGlyphNode,
+} from './MithrilArt';
 
 const { ccclass } = _decorator;
 
@@ -61,6 +64,9 @@ const TAB_X = [-260, -130, 0, 130, 260];
 
 /** 内容区第一行标题的 y（面板中心为 0） */
 const TOP = 336;
+
+/** 操作按钮统一描边：禁用态填充 #1A2332 与面板底几乎同色，没有描边就只剩一行灰字（N75） */
+const BTN_STROKE = '#3A4658';
 
 /** 每页行数（铁匠铺装备列表 / 附魔源与目标） */
 const SMITH_ROWS = 5;
@@ -128,6 +134,14 @@ export class MithrilCampPanel extends Component {
     private _upgradeBtn: UiButton | null = null;
     private _hintLabel: Label | null = null;
     private _tabBtns: Partial<Record<FacilityId, UiButton>> = {};
+    /** 页签选中下划线：颜色二次信号（N76：不能只靠底色） */
+    private _tabMarks: Partial<Record<FacilityId, Node>> = {};
+    /** 页签图标节点：选中时底色=设施色，图标要换成对比墨色（N88） */
+    private _tabIcons: Partial<Record<FacilityId, Node>> = {};
+    /** 页头圆形徽记（随设施切换重画） */
+    private _emblem: Node | null = null;
+    /** 升级进度条（5 段，替代纯文字 Lv n/5） */
+    private _levelBar: Node | null = null;
 
     /** 重铸随机数种子（每次点重铸换一个，页内不重复消耗同一串） */
     private _rngTick = 1;
@@ -172,7 +186,11 @@ export class MithrilCampPanel extends Component {
         for (const id of FACILITIES.map((f) => f.id)) {
             const btn = this._tabBtns[id];
             if (btn) btn.setActive(id === this._tab);
+            const mark = this._tabMarks[id];
+            if (mark && mark.isValid) mark.active = id === this._tab;
+            this._paintTab(id, id === this._tab);
         }
+        this._refreshFacilityArt(save);
         this._refreshHeader(save);
         if (this._hintLabel) {
             this._hintLabel.string = this._defaultHint(save);
@@ -232,7 +250,7 @@ export class MithrilCampPanel extends Component {
         const closeBtn = createButton(panel, {
             w: 116, h: 50, text: '返回', fontSize: 22,
             fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
-            radius: 14, onTap: () => this._onCloseTap(),
+            radius: 14, stroke: BTN_STROKE, onTap: () => this._onCloseTap(),
         });
         closeBtn.node.setPosition(272, 540, 0);
 
@@ -242,22 +260,51 @@ export class MithrilCampPanel extends Component {
 
         for (let i = 0; i < FACILITIES.length; i++) {
             const def = FACILITIES[i];
+            const accent = FACILITY_ACCENT[def.id] || COLOR.PRIMARY;
             const btn = createButton(panel, {
-                w: TAB_W, h: TAB_H, text: def.name, fontSize: 19,
+                w: TAB_W, h: TAB_H, text: def.name, fontSize: 17,
                 fill: '#334155', textColor: COLOR.TEXT_PRIMARY,
-                activeFill: COLOR.PRIMARY, activeTextColor: '#FFFFFF',
-                radius: 12, onTap: () => this._onTabTap(def.id),
+                activeFill: accent, activeTextColor: '#FFFFFF',
+                radius: 12, stroke: '#46536B', onTap: () => this._onTabTap(def.id),
             });
             btn.node.setPosition(TAB_X[i], TAB_Y, 0);
+            // 页签图标（N75/N76）：文字左移，左边留出 22px 图标位
+            btn.label.node.setPosition(13, 0);
+            const labelUt = btn.label.node.getComponent(UITransform);
+            if (labelUt) labelUt.setContentSize(TAB_W - 34, TAB_H - 4);
+            this._tabIcons[def.id] = addGlyphNode(
+                btn.node, `TabIcon_${def.id}`, def.id, 11, accent, -34, 0, 34,
+            );
+            // 选中态第二重信号：底部 3px 下划线
+            const mark = new Node(`TabMark_${def.id}`);
+            mark.layer = btn.node.layer;
+            mark.addComponent(UITransform).setContentSize(TAB_W, TAB_H);
+            const mg = mark.addComponent(Graphics);
+            mg.fillColor = hex(accent, 255);
+            mg.roundRect(-40, -TAB_H / 2 + 1, 80, 3, 1.5);
+            mg.fill();
+            btn.node.addChild(mark);
+            mark.active = false;
+            this._tabMarks[def.id] = mark;
             this._tabBtns[def.id] = btn;
         }
 
+        // 页头徽记：设施一换就重画（见 _refreshFacilityArt）
+        const emblem = new Node('FacilityEmblem');
+        emblem.layer = this.node.layer;
+        emblem.addComponent(UITransform).setContentSize(72, 72);
+        emblem.setPosition(-292, 402, 0);
+        emblem.addComponent(Graphics);
+        panel.addChild(emblem);
+        this._emblem = emblem;
+
         this._summaryLabel = createLabel(panel, '', 17, {
-            width: 640, height: 26, color: COLOR.TEXT_PRIMARY, x: 0, y: 402, overflow: 'shrink',
+            width: 552, height: 26, color: COLOR.TEXT_PRIMARY, x: 34, y: 402,
+            overflow: 'shrink', align: 'left',
         });
         this._effectLabel = createLabel(panel, '', 15, {
-            width: 640, height: 42, color: COLOR.TEXT_SECONDARY, x: 0, y: 366, lineHeight: 20,
-            overflow: 'shrink',
+            width: 552, height: 42, color: COLOR.TEXT_SECONDARY, x: 34, y: 366,
+            lineHeight: 20, overflow: 'shrink', align: 'left',
         });
 
         const content = new Node('Content');
@@ -266,10 +313,19 @@ export class MithrilCampPanel extends Component {
         panel.addChild(content);
         this._content = content;
 
+        // 设施等级 5 段进度条（N75：原来只有一行 "Lv n/5" 文字）
+        const levelBar = new Node('FacilityLevelBar');
+        levelBar.layer = this.node.layer;
+        levelBar.addComponent(UITransform).setContentSize(520, 18);
+        levelBar.setPosition(0, -432, 0);
+        levelBar.addComponent(Graphics);
+        panel.addChild(levelBar);
+        this._levelBar = levelBar;
+
         this._upgradeBtn = createButton(panel, {
             w: 340, h: 52, text: '升级', fontSize: 20,
             fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
-            radius: 14, onTap: () => this._onUpgradeTap(),
+            radius: 14, stroke: BTN_STROKE, onTap: () => this._onUpgradeTap(),
         });
         this._upgradeBtn.node.setPosition(0, -470, 0);
 
@@ -277,6 +333,58 @@ export class MithrilCampPanel extends Component {
             width: 640, height: 44, color: COLOR.TEXT_SECONDARY, x: 0, y: -536, lineHeight: 20,
             overflow: 'shrink',
         });
+    }
+
+    // ==================== 页头 / 设施美术 ====================
+
+    /** 页签图标 + 下划线换色（N88）：选中态底色就是设施色，同色图形会整块消失 */
+    private _paintTab(id: FacilityId, active: boolean): void {
+        const accent = FACILITY_ACCENT[id] || COLOR.PRIMARY;
+        const ink = inkOnFill(accent);
+        repaintGlyphNode(this._tabIcons[id] || null, id, 11, active ? ink : accent, active ? 70 : 34);
+        const mark = this._tabMarks[id];
+        if (!mark || !mark.isValid) return;
+        const g = mark.getComponent(Graphics);
+        if (!g) return;
+        g.clear();
+        g.fillColor = hex(active ? ink : accent, 255);
+        g.roundRect(-40, -TAB_H / 2 + 1, 80, 3, 1.5);
+        g.fill();
+    }
+
+    /** 页签切换时重画：徽记、水印、5 段等级条（都只在 refresh 里跑一次） */
+    private _refreshFacilityArt(save: MithrilSave): void {
+        const accent = FACILITY_ACCENT[this._tab] || COLOR.PRIMARY;
+        const lv = facilityLevel(save, this._tab);
+
+        if (this._emblem) {
+            const g = this._emblem.getComponent(Graphics);
+            if (g) {
+                g.clear();
+                drawGlyphMedallion(g, this._tab, 27, accent);
+            }
+        }
+
+        if (this._levelBar) {
+            const g = this._levelBar.getComponent(Graphics);
+            if (g) {
+                g.clear();
+                const segW = 92;
+                const gap = 10;
+                const total = FACILITY_MAX_LEVEL * segW + (FACILITY_MAX_LEVEL - 1) * gap;
+                let x = -total / 2;
+                for (let i = 0; i < FACILITY_MAX_LEVEL; i++) {
+                    g.fillColor = hex(i < lv ? accent : '#2E3A4D', i < lv ? 255 : 255);
+                    g.roundRect(x, -5, segW, 10, 5);
+                    g.fill();
+                    x += segW + gap;
+                }
+                g.strokeColor = hex('#3A4658', 170);
+                g.lineWidth = 1;
+                g.roundRect(-total / 2 - 3, -8, total + 6, 16, 8);
+                g.stroke();
+            }
+        }
     }
 
     // ==================== 头部与升级条 ====================
@@ -360,10 +468,15 @@ export class MithrilCampPanel extends Component {
                 fill: entry.uid === this._selUid ? '#1E3A5F' : '#1E293B',
                 textColor: q ? q.color : COLOR.TEXT_PRIMARY,
                 activeFill: '#1E3A5F',
-                radius: 10, onTap: () => this._onSelectItem(entry.uid),
+                radius: 10, stroke: BTN_STROKE, onTap: () => this._onSelectItem(entry.uid),
             });
             btn.node.setPosition(-150, TOP - 46 - i * 62, 0);
             btn.setText(`${q ? q.name : ''}·${itemName(entry.item)} · ${entry.item.ilvl}${entry.equipped ? '（穿）' : ''}`);
+            // 部位图标（N75：列表条目不能只有文字）+ 品质色描边环
+            addGlyphNode(btn.node, `ItemIcon_${entry.uid}`, entry.item.slot, 13, q ? q.color : COLOR.TEXT_SECONDARY, -140, 0, 55);
+            const rowLabelUt = btn.label.node.getComponent(UITransform);
+            if (rowLabelUt) rowLabelUt.setContentSize(320 - 46, 50 - 4);
+            btn.label.node.setPosition(12, 0);
         }
         if (pages > 1) {
             this._pager(content, -150, TOP - 46 - SMITH_ROWS * 62, this._smPage, pages,
@@ -390,7 +503,7 @@ export class MithrilCampPanel extends Component {
                     fill: locked ? '#3B2A0B' : '#1E293B',
                     textColor: locked ? COLOR.WARNING : COLOR.TEXT_PRIMARY,
                     activeFill: '#3B2A0B',
-                    radius: 10, onTap: () => this._onToggleLock(i),
+                    radius: 10, stroke: BTN_STROKE, onTap: () => this._onToggleLock(i),
                 });
                 btn.node.setPosition(190, TOP - 46 - i * 52, 0);
                 const name = def ? def.name : rolls[i].id;
@@ -415,7 +528,7 @@ export class MithrilCampPanel extends Component {
             fill: gate ? '#1A2332' : (canForge && canForge.ok ? '#B45309' : '#334155'),
             textColor: gate ? COLOR.TEXT_DISABLED : (canForge && canForge.ok ? '#FFFFFF' : COLOR.TEXT_SECONDARY),
             activeFill: '#92400E',
-            radius: 12, onTap: () => this._onReforgeTap(),
+            radius: 12, stroke: BTN_STROKE, onTap: () => this._onReforgeTap(),
         });
         forge.node.setPosition(-70, -140, 0);
 
@@ -431,7 +544,7 @@ export class MithrilCampPanel extends Component {
             fill: gate ? '#1A2332' : (yieldInfo ? '#334155' : '#1A2332'),
             textColor: gate ? COLOR.TEXT_DISABLED : (yieldInfo ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED),
             activeFill: '#475569',
-            radius: 12, onTap: () => this._onDismantleTap(),
+            radius: 12, stroke: BTN_STROKE, onTap: () => this._onDismantleTap(),
         });
         dismantleBtn.node.setPosition(150, -140, 0);
 
@@ -492,7 +605,7 @@ export class MithrilCampPanel extends Component {
                 fill: picked ? '#1D4ED8' : '#1E293B',
                 textColor: picked ? '#FFFFFF' : COLOR.TEXT_PRIMARY,
                 activeFill: '#1D4ED8',
-                radius: 9, onTap: () => this._onPickTap(i),
+                radius: 9, stroke: BTN_STROKE, onTap: () => this._onPickTap(i),
             });
             btn.node.setPosition(0, TOP - 46 - i * 48, 0);
             btn.setText(`${picked ? '[已选] ' : ''}${def ? def.name : srcRolls[i].id} ${srcRolls[i].points} 点`);
@@ -528,7 +641,7 @@ export class MithrilCampPanel extends Component {
             fill: ok ? '#1D4ED8' : '#334155',
             textColor: ok ? '#FFFFFF' : COLOR.TEXT_SECONDARY,
             activeFill: '#1E40AF',
-            radius: 14, onTap: () => this._onEnchantTap(),
+            radius: 14, stroke: BTN_STROKE, onTap: () => this._onEnchantTap(),
         });
         cast.node.setPosition(0, -120, 0);
 
@@ -566,6 +679,10 @@ export class MithrilCampPanel extends Component {
             });
             btn.node.setPosition(x, TOP - 46 - i * 56, 0);
             btn.setText(`${q ? q.name : ''}·${itemName(entry.item)} ${entry.item.ilvl}${entry.equipped ? '（穿）' : ''}`);
+            addGlyphNode(btn.node, `PickIcon_${kind}_${entry.uid}`, entry.item.slot, 10, q ? q.color : COLOR.TEXT_SECONDARY, -78, 0, 55);
+            const pickUt = btn.label.node.getComponent(UITransform);
+            if (pickUt) pickUt.setContentSize(190 - 34, 46 - 4);
+            btn.label.node.setPosition(10, 0);
         }
         if (pages > 1) {
             this._pager(parent, x, TOP - 46 - ENCHANT_ROWS * 56, page, pages,
@@ -594,7 +711,7 @@ export class MithrilCampPanel extends Component {
             fill: unlocked ? '#334155' : '#1A2332',
             textColor: unlocked ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED,
             activeFill: '#475569',
-            radius: 12, onTap: () => this._onRespecTalents(),
+            radius: 12, stroke: BTN_STROKE, onTap: () => this._onRespecTalents(),
         });
         respecT.node.setPosition(-150, 268, 0);
         const respecV = createButton(content, {
@@ -605,7 +722,7 @@ export class MithrilCampPanel extends Component {
             fill: unlocked ? '#334155' : '#1A2332',
             textColor: unlocked ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED,
             activeFill: '#475569',
-            radius: 12, onTap: () => this._onRespecVariants(),
+            radius: 12, stroke: BTN_STROKE, onTap: () => this._onRespecVariants(),
         });
         respecV.node.setPosition(150, 268, 0);
 
@@ -631,7 +748,7 @@ export class MithrilCampPanel extends Component {
                 fill: canSave.ok ? '#334155' : '#1A2332',
                 textColor: canSave.ok ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED,
                 activeFill: '#475569',
-                radius: 10, onTap: () => this._onSavePreset(slot),
+                radius: 10, stroke: BTN_STROKE, onTap: () => this._onSavePreset(slot),
             });
             saveBtn.node.setPosition(158, y, 0);
             const canLoad = canLoadTalentPreset(save, slot);
@@ -640,7 +757,7 @@ export class MithrilCampPanel extends Component {
                 fill: canLoad.ok ? '#1D4ED8' : '#1A2332',
                 textColor: canLoad.ok ? '#FFFFFF' : COLOR.TEXT_DISABLED,
                 activeFill: '#1E40AF',
-                radius: 10, onTap: () => this._onLoadPreset(slot),
+                radius: 10, stroke: BTN_STROKE, onTap: () => this._onLoadPreset(slot),
             });
             loadBtn.node.setPosition(268, y, 0);
         }
@@ -696,7 +813,7 @@ export class MithrilCampPanel extends Component {
                 fill: check.ok ? '#15803D' : '#1A2332',
                 textColor: check.ok ? '#FFFFFF' : COLOR.TEXT_DISABLED,
                 activeFill: '#166534',
-                radius: 10, onTap: () => this._onBuyMeal(meal.id),
+                radius: 10, stroke: BTN_STROKE, onTap: () => this._onBuyMeal(meal.id),
             });
             buyBtn.node.setPosition(258, y, 0);
         }
@@ -1207,6 +1324,10 @@ export class MithrilCampPanel extends Component {
         this._upgradeBtn = null;
         this._hintLabel = null;
         this._tabBtns = {};
+        this._tabMarks = {};
+        this._tabIcons = {};
+        this._emblem = null;
+        this._levelBar = null;
     }
 }
 

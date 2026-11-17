@@ -30,6 +30,9 @@ import type { EquipStats } from './MithrilLoot';
 import type { MithrilSave } from './MithrilProgress';
 import { profileFromSave } from './MithrilCore';
 import { equippedTags, litSynergies } from './MithrilTrinkets';
+import {
+    addGlyphNode, drawGlyphMedallion, drawMithrilGlyph, trinketAccent,
+} from './MithrilArt';
 
 const { ccclass } = _decorator;
 
@@ -71,6 +74,8 @@ export class MithrilMenu extends Component {
     private _detailTitle: Label | null = null;
     private _detailBody: Label | null = null;
     private _slotBtns: Partial<Record<GearSlot, UiButton>> = {};
+    /** 槽位部位图标：刷新时按品质色重画（N77） */
+    private _slotIcons: Partial<Record<GearSlot, Node>> = {};
     private _rowRoot: Node | null = null;
     private _equipBtn: UiButton | null = null;
     private _unequipBtn: UiButton | null = null;
@@ -83,6 +88,8 @@ export class MithrilMenu extends Component {
     private _gearNodes: Node[] = [];
     private _trinketRoot: Node | null = null;
     private _tSlotBtns: UiButton[] = [];
+    /** 饰品槽图形（空槽灰宝石 / 已装备按标签色画徽章） */
+    private _tSlotIcons: Node[] = [];
     private _tRowRoot: Node | null = null;
     private _tCountLabel: Label | null = null;
     private _tPageLabel: Label | null = null;
@@ -91,6 +98,8 @@ export class MithrilMenu extends Component {
     private _tNextBtn: UiButton | null = null;
     private _gearTabBtn: UiButton | null = null;
     private _trinketTabBtn: UiButton | null = null;
+    private _gearTabMark: Node | null = null;
+    private _trinketTabMark: Node | null = null;
     private _tDetailTitle: Label | null = null;
     private _tDetailBody: Label | null = null;
     private _tSynergyLabel: Label | null = null;
@@ -159,6 +168,27 @@ export class MithrilMenu extends Component {
         if (this._trinketTabBtn) {
             this._trinketTabBtn.setColor(gear ? '#334155' : '#1E3A5F', COLOR.TEXT_PRIMARY);
         }
+        if (this._gearTabMark && this._gearTabMark.isValid) this._gearTabMark.active = gear;
+        if (this._trinketTabMark && this._trinketTabMark.isValid) this._trinketTabMark.active = !gear;
+    }
+
+    /** 给页签补图标与选中下划线（N76）；文字左移给图标让位 */
+    private _tabMarkOf(btn: UiButton, kind: string, color: string, tab: MenuTab): void {
+        btn.label.node.setPosition(12, 0);
+        const ut = btn.label.node.getComponent(UITransform);
+        if (ut) ut.setContentSize(140 - 36, 40);
+        addGlyphNode(btn.node, `TabIcon_${tab}`, kind, 10, color, -42, 0, 40);
+        const mark = new Node(`TabMark_${tab}`);
+        mark.layer = btn.node.layer;
+        mark.addComponent(UITransform).setContentSize(140, 44);
+        const g = mark.addComponent(Graphics);
+        g.fillColor = hex(color, 255);
+        g.roundRect(-34, -20, 68, 3, 1.5);
+        g.fill();
+        btn.node.addChild(mark);
+        mark.active = false;
+        if (tab === 'gear') this._gearTabMark = mark;
+        else this._trinketTabMark = mark;
     }
 
     private _setTab(tab: MenuTab): void {
@@ -244,9 +274,15 @@ export class MithrilMenu extends Component {
             const btn = createButton(panel, {
                 w: 156, h: 66, text: '', fontSize: 17,
                 fill: '#1E293B', textColor: COLOR.TEXT_PRIMARY, activeFill: '#1E3A5F',
-                radius: 12, onTap: () => this._onSlotTap(slot),
+                radius: 12, stroke: '#3A4658', onTap: () => this._onSlotTap(slot),
             });
             btn.node.setPosition(x, y, 0);
+            // 部位剪影 + 品质色（N77：槽位不能只是一行文字）
+            const icon = addGlyphNode(btn.node, `SlotIcon_${slot}`, slot, 14, '#64748B', -54, 0, 60);
+            this._slotIcons[slot] = icon;
+            btn.label.node.setPosition(17, 0);
+            const ut = btn.label.node.getComponent(UITransform);
+            if (ut) ut.setContentSize(156 - 48, 62);
             this._slotBtns[slot] = btn;
         }
 
@@ -312,17 +348,20 @@ export class MithrilMenu extends Component {
         this._gearNodes = panel.children.filter((n) => n !== closeBtn.node && n !== titleLabel.node);
 
         this._gearTabBtn = createButton(panel, {
-            w: 140, h: 44, text: '装备', fontSize: 22,
+            w: 140, h: 44, text: '装备', fontSize: 21,
             fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
-            radius: 10, onTap: () => this._onGearTabTap(),
+            radius: 10, stroke: '#46536B', onTap: () => this._onGearTabTap(),
         });
         this._gearTabBtn.node.setPosition(-92, 478, 0);
         this._trinketTabBtn = createButton(panel, {
-            w: 140, h: 44, text: '饰品', fontSize: 22,
+            w: 140, h: 44, text: '饰品', fontSize: 21,
             fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
-            radius: 10, onTap: () => this._onTrinketTabTap(),
+            radius: 10, stroke: '#46536B', onTap: () => this._onTrinketTabTap(),
         });
         this._trinketTabBtn.node.setPosition(64, 478, 0);
+        // 页签图标 + 选中下划线（N76：选中态不能只靠底色）
+        this._tabMarkOf(this._gearTabBtn, 'mainHand', '#93C5FD', 'gear');
+        this._tabMarkOf(this._trinketTabBtn, 'trinket', '#FBBF24', 'trinket');
 
         this._buildTrinketPage(panel);
         this._applyTabVisibility();
@@ -340,10 +379,16 @@ export class MithrilMenu extends Component {
             const btn = createButton(root, {
                 w: 300, h: 96, text: '', fontSize: 19,
                 fill: '#1E293B', textColor: COLOR.TEXT_PRIMARY, activeFill: '#1E3A5F',
-                radius: 14, onTap: () => this._onTrinketSlotTap(i),
+                radius: 14, stroke: '#3A4658', onTap: () => this._onTrinketSlotTap(i),
             });
             btn.node.setPosition(i === 0 ? -160 : 160, 400, 0);
             btn.node.name = `TrinketSlot_${i}`;
+            // 饰品槽图形（N78）：空槽是灰宝石，装上后按标签色画成徽章
+            const icon = addGlyphNode(btn.node, `TrinketSlotIcon_${i}`, 'trinket', 26, '#64748B', -104, 0, 30);
+            this._tSlotIcons[i] = icon;
+            btn.label.node.setPosition(28, 0);
+            const ut = btn.label.node.getComponent(UITransform);
+            if (ut) ut.setContentSize(300 - 76, 92);
             this._tSlotBtns[i] = btn;
         }
 
@@ -435,15 +480,21 @@ export class MithrilMenu extends Component {
             const btn = this._slotBtns[slot];
             if (!btn) continue;
             const item = save.equips[slot];
+            const q = item ? QUALITY_BY_ID[item.quality] : null;
             if (item) {
-                const q = QUALITY_BY_ID[item.quality];
                 btn.setText(`${GEAR_SLOT_NAMES[slot]} ${item.ilvl}`);
                 btn.setColor('#1E293B', q ? q.color : COLOR.TEXT_PRIMARY);
-                btn.node.name = `Slot_${slot}`;
             } else {
                 btn.setText(`${GEAR_SLOT_NAMES[slot]} 空`);
                 btn.setColor('#1E293B', '#64748B');
-                btn.node.name = `Slot_${slot}`;
+            }
+            btn.node.name = `Slot_${slot}`;
+            // 部位图标按品质上色：空槽灰、有装备取品质色
+            const icon = this._slotIcons[slot];
+            const g = icon ? icon.getComponent(Graphics) : null;
+            if (g) {
+                g.clear();
+                drawMithrilGlyph(g, slot, 14, q ? q.color : '#64748B', item ? 70 : 26);
             }
         }
     }
@@ -487,6 +538,12 @@ export class MithrilMenu extends Component {
             btn.node.name = `Row_${item.uid}`;
             const moved = item.modifier ? ' ◆' : '';
             btn.setText(`${itemDesc(item)}${moved}`);
+            // 行首部位图标 + 品质色（N77）
+            addGlyphNode(btn.node, `RowIcon_${item.uid}`, item.slot, 14,
+                q ? q.color : COLOR.TEXT_SECONDARY, -286, 0, 55);
+            btn.label.node.setPosition(18, 0);
+            const rowUt = btn.label.node.getComponent(UITransform);
+            if (rowUt) rowUt.setContentSize(620 - 46, 52);
         }
     }
 
@@ -561,9 +618,17 @@ export class MithrilMenu extends Component {
             const def = id ? TRINKET_BY_ID[id] : null;
             const picked = this._sel?.kind === 'trinketSlot' && this._sel.slot === i;
             btn.setText(def
-                ? `槽 ${i + 1} · ${def.name}（${TRINKET_TAG_NAMES[def.tag]}）`
-                : `槽 ${i + 1} · 空`);
+                ? `槽 ${i + 1} · ${def.name}\n${TRINKET_TAG_NAMES[def.tag]}`
+                : `槽 ${i + 1} · 空\n点下方饰品再「装备」`);
             btn.setColor(picked ? '#1E3A5F' : '#1E293B', def ? COLOR.TEXT_PRIMARY : '#64748B');
+            // 槽位图形：装上后按标签色画徽章，空槽留灰宝石
+            const icon = this._tSlotIcons[i];
+            const g = icon ? icon.getComponent(Graphics) : null;
+            if (g) {
+                g.clear();
+                if (def) drawGlyphMedallion(g, 'trinket', 30, trinketAccent(def.tag));
+                else drawMithrilGlyph(g, 'trinket', 24, '#64748B', 22);
+            }
         }
 
         const owned = this._ownedTrinkets();
@@ -605,6 +670,12 @@ export class MithrilMenu extends Component {
             btn.node.name = `TrinketRow_${def.id}`;
             const mark = equippedAt >= 0 ? `[已装备 ${equippedAt + 1}]` : '';
             btn.setText(`${def.name}（${TRINKET_TAG_NAMES[def.tag]}）${mark}`);
+            // 行首徽章按标签色（N78）
+            addGlyphNode(btn.node, `TrinketRowIcon_${def.id}`, 'trinket', 14,
+                trinketAccent(def.tag), -286, 0, 55);
+            btn.label.node.setPosition(18, 0);
+            const tRowUt = btn.label.node.getComponent(UITransform);
+            if (tRowUt) tRowUt.setContentSize(620 - 46, 52);
         }
 
         this._refreshTrinketDetail();
