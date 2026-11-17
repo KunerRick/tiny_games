@@ -584,7 +584,11 @@ export class MithrilWildMap extends Component {
         // 副本标签写「装等 1-10」而不是节点层数 Lv：两座副本都落在第 4 层，
         // 旧的「都写 Lv8」掩盖了 1–10 / 10–16 的真实强度差（体验官 E2）
         const dg = node.kind === 'dungeon' && node.dungeonId ? DUNGEON_BY_ID[node.dungeonId] : null;
-        createLabel(holder, dg ? `装等 ${dg.ilvlMin}-${dg.ilvlMax}` : `Lv${node.level}`, 11, {
+        // 区域首领也标推荐装等：Lv{层数} 看不出强度，玩家在 ilvl 7 就点进 3536 血首领（试玩 N69）
+        const subLabel = dg
+            ? `装等 ${dg.ilvlMin}-${dg.ilvlMax}`
+            : boss ? `推荐装等 ${node.ilvl}` : `Lv${node.level}`;
+        createLabel(holder, subLabel, 11, {
             width: 100, height: 18, color: COLOR.TEXT_SECONDARY, y: -r - 34,
         });
 

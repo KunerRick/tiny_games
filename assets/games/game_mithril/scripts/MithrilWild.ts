@@ -91,6 +91,13 @@ export interface ExpeditionState {
     runMaterials: Record<string, number>;
     /** 首领已击败（或已失败，等待界面清理） */
     complete: boolean;
+    /**
+     * 战斗中途主动离开（暂停层「返回路线图」/「返回大厅」/ 切后台）留下的标记（试玩 N66 / 复核 N72）。
+     * 置位后再次点当前节点不是免费续开，而是**新一次挑战**：重新扣一次入场消耗。
+     * 正常退出路径（含整页刷新、切后台）都会触发 `onGameHide` 而置位；
+     * 只有进程被直接杀掉、没走到落盘的存档才可能是 false，此时按免费续开处理。
+     */
+    retreat?: boolean;
 }
 
 export type EnterFailReason = 'not_reachable' | 'complete' | 'unknown' | 'done';
@@ -173,6 +180,21 @@ export function regionOf(regionId: string): RegionDef {
 export function regionUnlocked(regionId: string, level: number): boolean {
     const region = REGION_BY_ID[regionId];
     return !!region && level >= region.levelMin;
+}
+
+/**
+ * 区域首领结算后的「下一区域」提示（试玩 N68）：
+ * 没有下一区域（终局区域）或区域 id 无效时返回 null，不产出空文案。
+ * 等级不足时给出门槛，够级则提示回路线图切换区域。
+ */
+export function nextRegionHint(regionId: string, level: number): string | null {
+    const idx = REGIONS.findIndex((r) => r.id === regionId);
+    const next = idx >= 0 ? REGIONS[idx + 1] : undefined;
+    if (!next) return null;
+    const lv = Math.max(1, Math.floor(Number(level) || 1));
+    return lv < next.levelMin
+        ? `下一区域 ${next.name} 将在 Lv${next.levelMin} 解锁（当前 Lv${lv}）`
+        : `下一区域 ${next.name} 已解锁：回路线图切换区域`;
 }
 
 /** 生成一张 12 节点图：同 (regionId, seed) 必得同一张图 */
@@ -306,6 +328,7 @@ export function createExpedition(regionId: string, seed: number, maxHp: number):
         done: [],
         runMaterials: {},
         complete: false,
+        retreat: false,
     };
 }
 
@@ -378,6 +401,26 @@ export function enterNode(
     exp.pos = nodeId;
     if (exp.visited.indexOf(nodeId) < 0) exp.visited.push(nodeId);
 
+    const charged = chargeNodeEntry(exp, maxHp);
+    return {
+        ok: true,
+        reason: 'ok',
+        supplySpent: charged.supplySpent,
+        hpCost: charged.hpCost,
+        dead: charged.dead,
+    };
+}
+
+/**
+ * 扣一次「进入节点」的消耗：优先补给，补给耗尽按最大生命 8% 扣血。
+ * 供 `enterNode` 与「中途离开后的重新挑战」共用（试玩 N66：撤离再进必须重新付费，
+ * 否则可以反复刷同一节点的击杀收益）。
+ */
+export function chargeNodeEntry(
+    exp: ExpeditionState | null,
+    maxHp: number,
+): { supplySpent: boolean; hpCost: number; dead: boolean } {
+    if (!exp) return { supplySpent: false, hpCost: 0, dead: false };
     let supplySpent = false;
     let hpCost = 0;
     if (exp.supply > 0) {
@@ -389,7 +432,7 @@ export function enterNode(
     }
     const dead = exp.hp <= 0;
     if (dead) exp.hp = 0;
-    return { ok: true, reason: 'ok', supplySpent, hpCost, dead };
+    return { supplySpent, hpCost, dead };
 }
 
 export function markNodeDone(exp: ExpeditionState | null, nodeId: number): void {
@@ -541,7 +584,8 @@ export function buildWildPlan(map: WildMap, node: WildNode | null): RunPlan | nu
             bossTitle: bdef ? bdef.name : boss.enemyId,
             bossHint: bdef ? bdef.phases.map((p) => p.name).join(' · ') : '',
             scale: 1,
-            bossScale: 1 + Math.max(0, node.level - region.levelMin) * 0.04,
+            // 试玩 N69：4%/级让灰烬荒原终局首领到 1.36×，与实测玩家输出曲线脱节；降到 3%/级
+            bossScale: 1 + Math.max(0, node.level - region.levelMin) * 0.03,
             ilvl: node.ilvl,
         };
     }
@@ -628,5 +672,6 @@ export function sanitizeExpedition(raw: unknown): ExpeditionState | null {
         done: uniqueIds(src.done),
         runMaterials,
         complete: src.complete === true,
+        retreat: src.retreat === true,
     };
 }

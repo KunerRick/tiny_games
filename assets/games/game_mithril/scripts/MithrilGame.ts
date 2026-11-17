@@ -49,9 +49,9 @@ import {
 } from './MithrilConfig';
 import type { ClassId, EquipItem, RunPlan } from './MithrilConfig';
 import {
-    WILD_EVENT_OPTIONS, applyWildEvent, buildWildPlan, chestGold, chestHasTrap, chestTrapDamage,
+    WILD_EVENT_OPTIONS, applyWildEvent, buildWildPlan, chargeNodeEntry, chestGold, chestHasTrap, chestTrapDamage,
     createExpedition, enterNode, failExpedition, generateWildMap, grantRunMaterials, isReachable,
-    markNodeDone,
+    markNodeDone, nextRegionHint,
     nodeById, nodeName, rollNodeMaterials, supplyHeal, wildRng,
 } from './MithrilWild';
 import type { ExpeditionState, WildEventChoice, WildMap, WildNode } from './MithrilWild';
@@ -369,7 +369,10 @@ export class MithrilGame extends Component {
         if (exp) {
             // 刷新 / 意外退出会停在「进了节点但内容没结算」的状态：提示直接续开
             if (exp.pos !== 0 && exp.done.indexOf(exp.pos) < 0) {
-                return '上次的节点还没结算：点当前节点（白圈）把内容接上';
+                // 主动撤离（暂停层 / 切后台）会置 retreat：再点当前节点是新挑战，要重新付入场消耗
+                return exp.retreat
+                    ? '上次的战斗未结算：点当前节点重新挑战（会再扣一次入场消耗）'
+                    : '上次的节点还没结算：点当前节点（白圈）把内容接上';
             }
             const supplyNote = exp.supply <= 0 ? ' · 补给耗尽：下一节点按 8% 生命扣血' : '';
             return `远征进行中：已清理 ${exp.done.length}/${WILD_NODE_COUNT} 个节点 · 绿圈进新节点，蓝圈可路过${supplyNote}`;
@@ -548,6 +551,22 @@ export class MithrilGame extends Component {
             this._refreshMap(text);
             return;
         }
+        // 中途主动离开后再点当前节点（试玩 N66）：不免费续开，而是新一次挑战，重新扣入场消耗。
+        // 离开时生命已落盘（见 _commitCombatExit），所以撤离不能当成免费回血；
+        // 不重新收费的话可以「打几只 → 回地图 → 再进」无限刷击杀金币 / 经验。
+        let hpCost = res.hpCost;
+        const combatNode = node.kind === 'battle' || node.kind === 'elite'
+            || node.kind === 'boss' || node.kind === 'dungeon';
+        if (res.reason === 'resume' && exp.retreat && combatNode) {
+            exp.retreat = false;
+            const again = chargeNodeEntry(exp, maxHp);
+            hpCost += again.hpCost;
+            if (again.dead) {
+                this._persist();
+                this._expeditionDown('补给耗尽，倒在了路上', []);
+                return;
+            }
+        }
         this._persist();
         if (res.dead) {
             this._expeditionDown('补给耗尽，倒在了路上', []);
@@ -567,16 +586,16 @@ export class MithrilGame extends Component {
 
         switch (node.kind) {
             case 'chest':
-                this._openChest(node, res.hpCost);
+                this._openChest(node, hpCost);
                 return;
             case 'event':
-                this._openEvent(node, res.hpCost);
+                this._openEvent(node, hpCost);
                 return;
             case 'supply':
-                this._resolveSupply(node, maxHp, res.hpCost);
+                this._resolveSupply(node, maxHp, hpCost);
                 return;
             default:
-                if (plan) this._beginNodeCombat(node, plan, res.hpCost);
+                if (plan) this._beginNodeCombat(node, plan, hpCost);
                 else this._refreshMap();
                 return;
         }
@@ -958,6 +977,8 @@ export class MithrilGame extends Component {
             this._enterMapMode();
             return;
         }
+        // 这场已经打完：撤离标记没有意义了，别让下一次进别的节点被误收一次入场消耗
+        exp.retreat = false;
         const hud = this._hudRef;
         // 料理按「打完一场」扣场次：本场仍吃到效果，结算时才递减。
         // 必须在 maxHp 之前——扣完之后上限可能下降，后面写回 exp.hp 才不会被夹错。
@@ -1121,6 +1142,9 @@ export class MithrilGame extends Component {
                 if (save.regionsCleared.indexOf(exp.regionId) < 0) save.regionsCleared.push(exp.regionId);
                 save.expedition = null;
                 reward.push(`区域通关：${nodeName(node)}已击败（生命 ${exp.hp}/${maxHp}）`);
+                // 下一区域的等级门槛直接写进结算：否则玩家回到地图点页签才被拒绝（试玩 N68）
+                const nextHint = nextRegionHint(exp.regionId, save.level);
+                if (nextHint) reward.push(nextHint);
             } else {
                 reward.push(`节点结束：生命 ${exp.hp}/${maxHp} · 补给 ${exp.supply} · 返回路线图继续`);
             }
@@ -1336,11 +1360,30 @@ export class MithrilGame extends Component {
         if (this._mode === 'map') this._refreshMap();
     }
 
-    /** 暂停层「返回路线图」：落盘后直接回地图，节点保持「进了但没结算」可续开 */
+    /** 暂停层「返回路线图」：落盘后直接回地图；本节点算中断，再进是新一次挑战（N66） */
     private onPauseBackToMap(): void {
+        this._commitCombatExit();
         this._persist();
         this._enterMapMode();
-        this._refreshMap('已退出当前节点：本节点内容还在，点白圈可接上');
+        this._refreshMap('已退出当前节点：生命已保留，点白圈重新挑战（会再扣一次入场消耗）');
+    }
+
+    /**
+     * 战斗中途离开：把当前生命写回远征状态，并标记「再进是新挑战」。
+     * 不写回生命的话，撤离再进 = 满血重开，配合击杀收益已入账就是无限刷（试玩 N66）。
+     * 只对未结算的战斗有效；结算后的生命由 `_settle` 负责写回。
+     */
+    private _commitCombatExit(): boolean {
+        const save = this._save;
+        const exp = save ? save.expedition : null;
+        if (!save || !exp || this._mode !== 'combat' || this._settled) return false;
+        const snap = this._lastSnapshot;
+        if (snap && snap.player) {
+            const maxHp = profileFromSave(save, COMBAT_ILVL_FLOOR).maxHp;
+            exp.hp = Math.max(1, Math.min(maxHp, Math.round(snap.player.hp)));
+        }
+        exp.retreat = true;
+        return true;
     }
 
     /** 首战引导学会（3 击杀 / 按住普攻 1 秒）：写成持久标记，之后不再打扰 */
@@ -1352,12 +1395,17 @@ export class MithrilGame extends Component {
     }
 
     private exitToLobby(): void {
+        // 战斗内 / 地图直接回大厅同样算「中途离开」：不落盘生命与 retreat 的话，
+        // 从大厅重进可以零成本续开同一节点，击杀收益保留 → 无限刷（复核 N72）
+        this._commitCombatExit();
         this._persist();
         SceneManager.gotoLobby();
     }
 
     private onGameHide(): void {
         // 击杀收益是逐帧写内存、按需落盘的，切后台时补一次，避免进程被杀丢金币 / 经验
+        // 同时把战斗当前生命落盘：进程被杀后重进不会满血续开（N66）
+        this._commitCombatExit();
         this._persist();
         // 切后台不会派发 TOUCH_END，HUD 的 held 不清就会一直普攻 / 持续施法
         this._joystick?.release();

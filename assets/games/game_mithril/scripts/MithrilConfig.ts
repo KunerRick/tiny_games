@@ -1214,7 +1214,10 @@ export const ENEMIES: EnemyDef[] = [
     // ---- 灰烬荒原区域首领（野外 BOSS 节点） ----
     {
         id: 'ash_lord', name: '灰烬领主', kind: 'boss',
-        hp: 2600, speed: 55, radius: 42, contactDamage: 8, exp: 450, gold: 140,
+        // 试玩 N69：ilvl≈7.5 / Lv9–10 的实测玩家在 3536 血首领前连死两次（TTK ≈ 140s）。
+        // 基准从 2600 降到 2350，配合 `bossScale` 4%/级 → 3%/级，终局约 2985 血（TTK ≈ 119s），
+        // 仍然明显长于小怪 / 精英，但不至于把「装等没拉满」直接判死。
+        hp: 2350, speed: 55, radius: 42, contactDamage: 8, exp: 450, gold: 140,
         shotCd: 4.0, shotDamage: 9, shotSpeed: 260,
     },
 

@@ -315,6 +315,28 @@ export class MithrilRenderer extends Component {
         for (const e of snap.enemies) {
             const x = e.x - FIELD_W / 2;
             const y = e.y - FIELD_H / 2;
+            // 远程锁定预警（试玩 N70）：快开火前从敌人向玩家拉一条淡红线。
+            // 幽魂这类站桩远程没有出手动画，玩家只看到血在掉、不知道谁在打。
+            // 只画非 BOSS 的远程单位（近战 shotCd 恒为 0，不会误触发）。
+            if (!e.isBoss && e.shotCd > 0 && e.shotCd <= 0.55) {
+                const px = snap.player.x - FIELD_W / 2;
+                const py = snap.player.y - FIELD_H / 2;
+                const dx = px - x;
+                const dy = py - y;
+                const dist = Math.hypot(dx, dy);
+                if (dist > 30) {
+                    const ux = dx / dist;
+                    const uy = dy / dist;
+                    const k = (0.55 - e.shotCd) / 0.55;
+                    this._tmp.set(this._cRed);
+                    this._tmp.a = 80 + Math.round(90 * k);
+                    g.strokeColor = this._tmp;
+                    g.lineWidth = 2;
+                    g.moveTo(x + ux * (e.radius + 4), y + uy * (e.radius + 4));
+                    g.lineTo(px - ux * 22, py - uy * 22);
+                    g.stroke();
+                }
+            }
             if (e.kind === 'imp') drawImp(g, x, y, this._time);
             else if (e.kind === 'miner') drawMiner(g, x, y, this._time);
             else if (e.kind === 'wraith') drawWraith(g, x, y, this._time);

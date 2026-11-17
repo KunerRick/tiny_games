@@ -151,6 +151,19 @@ check('霜牙 Lv9 未解锁', !W.regionUnlocked('frost', 9));
 check('霜牙 Lv10 解锁', W.regionUnlocked('frost', 10));
 check('未知区域不解锁', !W.regionUnlocked('nowhere', 99));
 
+// 区域首领结算时的「下一区域」提示（试玩 N68）：门槛文案 / 已解锁文案 / 终局无文案
+{
+    const nextRegion = F.REGIONS[1];
+    const lastRegion = F.REGIONS[F.REGIONS.length - 1];
+    const locked = W.nextRegionHint(F.REGIONS[0].id, 1);
+    check('N68 未到门槛 → 写明下一区域与 Lv 要求',
+        !!locked && locked.indexOf(nextRegion.name) >= 0 && locked.indexOf(`Lv${nextRegion.levelMin}`) >= 0, locked);
+    const open = W.nextRegionHint(F.REGIONS[0].id, nextRegion.levelMin);
+    check('N68 已到门槛 → 提示已解锁', !!open && open.indexOf('已解锁') >= 0, open);
+    eq('N68 终局区域 → 无下一区域提示', W.nextRegionHint(lastRegion.id, 99), null);
+    eq('N68 未知区域 → null', W.nextRegionHint('nowhere', 99), null);
+}
+
 const implemented = F.implementedDungeonIds();
 check('当前至少实装一个副本', implemented.length >= 1, implemented.join(','));
 
@@ -260,6 +273,30 @@ for (const region of F.REGIONS) {
         W.markNodeDone(exp, l1a);
         const doneClick = W.enterNode(map, exp, l1a, maxHp);
         check('站在已结算节点上 → done', !doneClick.ok && doneClick.reason === 'done');
+    }
+
+    // N66：中途主动撤离后再点当前节点 = 新一次挑战，要重新付入场消耗
+    {
+        const exp = W.createExpedition('ash', 4242, maxHp);
+        W.enterNode(map, exp, l1a, maxHp);
+        exp.retreat = true;
+        const supply = exp.supply;
+        const hp = exp.hp;
+        const again = W.chargeNodeEntry(exp, maxHp);
+        check('重新挑战扣补给', again.supplySpent && exp.supply === supply - 1);
+        eq('重新挑战扣补给时不扣血', exp.hp, hp);
+
+        exp.supply = 0;
+        const hpBefore = exp.hp;
+        const paid = W.chargeNodeEntry(exp, maxHp);
+        check('补给耗尽时重新挑战改扣血', !paid.supplySpent && paid.hpCost > 0);
+        eq('扣血为 8% 上限（至少 1）', paid.hpCost,
+            Math.max(1, Math.round(maxHp * F.SUPPLY_EXHAUST_HP_PCT)));
+        eq('生命扣减正确', exp.hp, hpBefore - paid.hpCost);
+
+        exp.hp = 3;
+        const lethal = W.chargeNodeEntry(exp, maxHp);
+        check('扣血致死会返回 dead', lethal.dead && exp.hp === 0);
     }
 
     // 路过：相邻的已结算节点可以免费走
@@ -484,7 +521,10 @@ for (const boss of F.REGION_BOSSES) {
         eq('非法材料被丢弃', Object.keys(clean.runMaterials).join(','), 'ash_dust');
         eq('负数材料被丢弃', clean.runMaterials.frost_crystal, undefined);
         check('pos 在 visited 里', clean.visited.indexOf(clean.pos) >= 0);
+        eq('retreat 缺省为 false', clean.retreat, false);
     }
+    const retreatSave = W.sanitizeExpedition({ regionId: 'ash', seed: 1, hp: 50, retreat: true });
+    check('retreat=true 可还原', !!retreatSave && retreatSave.retreat === true);
 }
 
 // ==================== 9. 完整走图：起点 → BOSS ====================

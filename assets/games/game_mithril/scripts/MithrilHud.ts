@@ -295,7 +295,7 @@ export class MithrilHud extends Component {
 
     private _refreshHintText(): void {
         if (this._hintLabel) {
-            this._hintLabel.string = `按住「${this._basicName()}」持续攻击\n移动会自动朝向最近的敌人`;
+            this._hintLabel.string = `按住「${this._basicName()}」持续攻击\n移动会自动朝向最近的敌人\n站着不动会被围殴：边打边走`;
         }
     }
 
@@ -330,22 +330,22 @@ export class MithrilHud extends Component {
         const root = new Node('CombatHint');
         root.layer = this.node.layer;
         const ut = root.addComponent(UITransform);
-        ut.setContentSize(600, 108);
-        root.setPosition(0, 380, 0);
+        ut.setContentSize(600, 124);
+        root.setPosition(0, 386, 0);
         this.node.addChild(root);
         this._hintRoot = root;
 
         const g = root.addComponent(Graphics);
         g.fillColor = hex(COLOR.PANEL_BG, 238);
-        g.roundRect(-300, -54, 600, 108, 18);
+        g.roundRect(-300, -62, 600, 124, 18);
         g.fill();
         g.strokeColor = hex(COLOR.WARNING, 235);
         g.lineWidth = 2.5;
-        g.roundRect(-300, -54, 600, 108, 18);
+        g.roundRect(-300, -62, 600, 124, 18);
         g.stroke();
 
         this._hintLabel = createLabel(root, '', 22, {
-            width: 560, height: 88, color: COLOR.TEXT_PRIMARY, bold: true, lineHeight: 34,
+            width: 560, height: 104, color: COLOR.TEXT_PRIMARY, bold: true, lineHeight: 34,
         });
         this._refreshHintText();
         root.active = false;
@@ -445,7 +445,7 @@ export class MithrilHud extends Component {
         createLabel(panel, '暂停', 40, {
             width: 460, height: 52, color: COLOR.TEXT_PRIMARY, bold: true, y: 172,
         });
-        createLabel(panel, '本节点进度已保留\n返回路线图后可点白圈接上', 18, {
+        createLabel(panel, '离开时当前生命保留\n再进本节点算重新挑战，会再扣一次入场消耗', 18, {
             width: 440, height: 64, color: COLOR.TEXT_SECONDARY, lineHeight: 28, y: 96,
         });
 
@@ -529,7 +529,10 @@ export class MithrilHud extends Component {
      * 由 MithrilGame 在判定通关后、updateHud 之前调用。
      */
     setRewardLines(lines: string[]): void {
-        this._rewardLines = lines.slice(0, 4);
+        // 早先只留 4 行，首通副本在「本局收益 + 材料 + 补给扣血 + 料理」之后
+        // 会把「首通奖励：经验 +800」和技能书整行截掉，玩家只看到普通收益（试玩 N67）。
+        // 结算正文实测能容纳 8–9 行（第 22 轮），放到 8 行；再多仍截断，避免压到按钮。
+        this._rewardLines = lines.slice(0, 8);
         if (this._resultShown) this._refreshResultBody();
     }
 
@@ -1044,11 +1047,17 @@ export class MithrilHud extends Component {
             this._lastWin ? this._resultWinLine : `推进到 ${this._lastProgress}`,
         ];
         if (this._rewardLines.length > 0) lines.push(...this._rewardLines);
-        // 正文高度有限（8 行）：收益行优先，掉落最多两行
+        // 正文高度有限：收益行优先，掉落最多两行
         if (this._lootLines.length > 0) lines.push(...this._lootLines.slice(0, 2));
         const hint = this._growthHintText();
         if (hint) lines.push(hint);
-        this._resultBody.string = lines.join('\n');
+        // 试玩 N73：正文区高 250、原先固定行高 26，12 行时顶部会顶到标题。
+        // 行数超过舒适区时自动缩小行高（最多容纳 12 行 = 240），仍超过则截断尾部。
+        const shown = lines.length > 12 ? lines.slice(0, 12) : lines;
+        const n = shown.length;
+        this._resultBody.lineHeight = n <= 8 ? 26 : n <= 10 ? 23 : 20;
+        this._resultBody.fontSize = n <= 8 ? 17 : n <= 10 ? 16 : 14;
+        this._resultBody.string = shown.join('\n');
     }
 
     /** 结算面板最后一行：还有多少东西可以花 */
@@ -1100,7 +1109,9 @@ export class MithrilHud extends Component {
             width: 460, height: 60, color: COLOR.TEXT_PRIMARY, bold: true, y: 198,
         });
         this._resultBody = createLabel(panel, '', 17, {
-            width: 470, height: 224, color: COLOR.TEXT_SECONDARY, y: 58,
+            // 标题实际行高 69（配置 60），底边约 163；正文顶边必须低于它。
+            // 250 高、中心 y=30 ⇒ 顶边 155，12 行（行高 20）实测 245 也不会压到标题（试玩 N73）。
+            width: 470, height: 250, color: COLOR.TEXT_SECONDARY, y: 30,
             lineHeight: 26,
         });
 
