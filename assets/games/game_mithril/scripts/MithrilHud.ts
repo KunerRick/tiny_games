@@ -13,6 +13,7 @@ import {
     COLOR, createBackButton, createButton, createLabel, hex,
 } from '../../../common/ui/GameUIKit';
 import type { CoreEvent, MithrilSnapshot } from './MithrilCore';
+import { sfx } from './MithrilAudio';
 import { CLASS_KITS, PLAYER_TUNING, GEAR_BASE_BY_ID, GEAR_SLOT_NAMES, QUALITY_BY_ID } from './MithrilConfig';
 import type { ClassId, EquipItem } from './MithrilConfig';
 
@@ -34,20 +35,24 @@ interface SkillBtn {
 }
 
 const SKILL_NAME: Record<SkillKey, string> = {
-    basic: '斩',
-    skill1: '冲',
-    skill2: '旋',
-    skill3: '破',
-    burst: '怒',
-    dodge: '闪',
+    basic: '劈砍',
+    skill1: '冲锋',
+    skill2: '旋风',
+    skill3: '破甲',
+    burst: '血怒',
+    dodge: '侧步',
 };
 
-/** 技能键单字文案（按职业；单字是为了在 84–112px 的圆键里不折行） */
+/**
+ * 技能键两字文案（按职业，取自技能面板全名的前两字 / 可辨识缩写）。
+ * 体验官 E1：单字「斩/冲/旋」和技能面板「劈砍/冲锋/旋风斩」对不上，新玩家不知道
+ * 右下哪个键是「按住就持续攻击」的普攻，所以键面直接写两字，与面板同名。
+ */
 const CLASS_SKILL_NAME: Record<ClassId, Record<SkillKey, string>> = {
     warrior: SKILL_NAME,
-    mage: { basic: '弹', skill1: '火', skill2: '冰', skill3: '闪', burst: '奥', dodge: '屏' },
-    ranger: { basic: '射', skill1: '多', skill2: '陷', skill3: '跃', burst: '鹰', dodge: '滚' },
-    priest: { basic: '光', skill1: '愈', skill2: '新', skill3: '盾', burst: '圣', dodge: '步' },
+    mage: { basic: '奥弹', skill1: '火球', skill2: '冰霜', skill3: '闪现', burst: '强化', dodge: '屏障' },
+    ranger: { basic: '射击', skill1: '多重', skill2: '陷阱', skill3: '后跃', burst: '鹰眼', dodge: '翻滚' },
+    priest: { basic: '圣光', skill1: '治疗', skill2: '神圣', skill3: '守护', burst: '圣能', dodge: '圣步' },
 };
 
 /** 资源条配色：怒气 / 法力 / 能量 / 圣能 */
@@ -85,6 +90,10 @@ export class MithrilHud extends Component {
     onOpenBag: (() => void) | null = null;
     /** 结算面板「成长」 */
     onOpenGrowth: (() => void) | null = null;
+    /** 战斗中返回 → 暂停层选「返回路线图」 */
+    onBackToMap: (() => void) | null = null;
+    /** 首战操作引导已学会（累计 3 击杀或按住普攻满 1 秒） */
+    onCombatHintDone: (() => void) | null = null;
 
     /** 各技能键当前是否按住（主组件每帧读取） */
     readonly held: Record<SkillKey, boolean> = {
@@ -144,6 +153,25 @@ export class MithrilHud extends Component {
     /** 当前职业（技能键文案与资源条按它切换；首次快照时同步） */
     private _classId: ClassId = 'warrior';
 
+    // ---- 首战操作引导（体验官 E1）：不是 once-only toast，学会才关 ----
+    private _hintRoot: Node | null = null;
+    private _hintLabel: Label | null = null;
+    private _hintActive = false;
+    /** 提示出现时的击杀数基线；第一次 updateHud 时按真实快照校准 */
+    private _hintBaseKills = -1;
+    /** 按住普攻累计秒数（HUD 刷新节拍 0.1s） */
+    private _hintHold = 0;
+
+    // ---- 暂停层（体验官 E4）：战斗中返回不再直接换场景 ----
+    private _pauseRoot: Node | null = null;
+    private _pauseAudioBtn: ReturnType<typeof createButton> | null = null;
+    private _paused = false;
+
+    /** 圆键里的字号：两字比单字再缩一点，保证 84–112px 的键面不折行 */
+    private _skillFontSize(text: string, size: number): number {
+        return Math.round(size * (text.length > 1 ? 0.26 : 0.34));
+    }
+
     /** 职业切换时改技能键文案与冷却总时长（只改文案与数值，不动布局） */
     private _syncClass(snap: MithrilSnapshot): void {
         if (!snap.classId || snap.classId === this._classId) return;
@@ -151,7 +179,10 @@ export class MithrilHud extends Component {
         const kit = CLASS_KITS[snap.classId] || CLASS_KITS.warrior;
         const names = CLASS_SKILL_NAME[snap.classId] || CLASS_SKILL_NAME.warrior;
         for (const b of this._skills) {
-            b.label.string = names[b.key];
+            const text = names[b.key];
+            b.label.string = text;
+            b.label.fontSize = this._skillFontSize(text, b.size);
+            b.label.lineHeight = Math.round(b.label.fontSize * 1.15);
             if (b.key === 'basic') b.total = kit.basic.cd;
             else if (b.key === 'skill1') b.total = kit.a1.cd;
             else if (b.key === 'skill2') b.total = kit.a2.cd;
@@ -159,6 +190,7 @@ export class MithrilHud extends Component {
             else if (b.key === 'dodge') b.total = kit.dodge.cd;
             else if (b.key === 'burst') b.total = kit.burst.cd;
         }
+        if (this._hintActive) this._refreshHintText();
     }
 
     onLoad(): void {
@@ -191,6 +223,10 @@ export class MithrilHud extends Component {
         this._resultRoot = null;
         this._resultTitle = null;
         this._resultBody = null;
+        this._hintRoot = null;
+        this._hintLabel = null;
+        this._pauseRoot = null;
+        this._pauseAudioBtn = null;
     }
 
     // ==================== 对外 ====================
@@ -201,6 +237,7 @@ export class MithrilHud extends Component {
         this._updateBanner(snap);
         this._updateBoss(snap);
         this._updateSkills(snap);
+        this._tickCombatHint(snap);
         if (snap.phase !== 'playing') this._showResult(snap);
     }
 
@@ -221,8 +258,229 @@ export class MithrilHud extends Component {
         if (this._resultRoot) this._resultRoot.active = false;
         for (const key of Object.keys(this.held) as SkillKey[]) this.held[key] = false;
         for (const b of this._skills) b.pressed = false;
+        this.closePause();
+        this.hideCombatHint();
         this._lastHp = -1;
         this._lastRage = -1;
+    }
+
+    // ==================== 首战操作引导（E1） ====================
+
+    /**
+     * 首战内嵌提示：讲清「按住普攻持续攻击」和「移动自动朝向」。
+     * 与 once-only 的 tutorial toast 不同，它由 `combatHintDone` 存档位控制 ——
+     * 玩家没学会之前，每场战斗开头都会再出现，学会（3 击杀 / 按住 1 秒）才永久关闭。
+     */
+    showCombatHint(): void {
+        this._buildHint();
+        this._hintActive = true;
+        this._hintBaseKills = -1;
+        this._hintHold = 0;
+        this._refreshHintText();
+        if (this._hintRoot) {
+            this._hintRoot.active = true;
+            this._hintRoot.setSiblingIndex(this.node.children.length - 1);
+        }
+    }
+
+    hideCombatHint(): void {
+        this._hintActive = false;
+        if (this._hintRoot) this._hintRoot.active = false;
+    }
+
+    private _basicName(): string {
+        const names = CLASS_SKILL_NAME[this._classId] || CLASS_SKILL_NAME.warrior;
+        return names.basic;
+    }
+
+    private _refreshHintText(): void {
+        if (this._hintLabel) {
+            this._hintLabel.string = `按住「${this._basicName()}」持续攻击\n移动会自动朝向最近的敌人`;
+        }
+    }
+
+    private _tickCombatHint(snap: MithrilSnapshot): void {
+        if (!this._hintActive) return;
+        // 结算 / 死亡时安静收掉：这不代表「学会」，下一场开局还会再提示
+        if (snap.phase !== 'playing') {
+            this.hideCombatHint();
+            return;
+        }
+        if (this._hintBaseKills < 0) this._hintBaseKills = snap.kills;
+        if (snap.kills - this._hintBaseKills >= 3) {
+            this._learnCombatHint();
+            return;
+        }
+        // updateHud 的节拍是 HUD_REFRESH(0.1s)
+        if (this.held.basic) this._hintHold += 0.1;
+        else this._hintHold = 0;
+        if (this._hintHold >= 0.999) this._learnCombatHint();
+    }
+
+    private _learnCombatHint(): void {
+        if (!this._hintActive) return;
+        this.hideCombatHint();
+        if (this.onCombatHintDone) this.onCombatHintDone();
+    }
+
+    private _buildHint(): void {
+        if (this._hintRoot) return;
+        // 位置约束：横幅下沿 233、BOSS 条上沿 546、技能键最高点 −316（触顶约 316），
+        // 所以 300–460 是战斗中的空带；提示放 380，不压任何常驻信息。
+        const root = new Node('CombatHint');
+        root.layer = this.node.layer;
+        const ut = root.addComponent(UITransform);
+        ut.setContentSize(600, 108);
+        root.setPosition(0, 380, 0);
+        this.node.addChild(root);
+        this._hintRoot = root;
+
+        const g = root.addComponent(Graphics);
+        g.fillColor = hex(COLOR.PANEL_BG, 238);
+        g.roundRect(-300, -54, 600, 108, 18);
+        g.fill();
+        g.strokeColor = hex(COLOR.WARNING, 235);
+        g.lineWidth = 2.5;
+        g.roundRect(-300, -54, 600, 108, 18);
+        g.stroke();
+
+        this._hintLabel = createLabel(root, '', 22, {
+            width: 560, height: 88, color: COLOR.TEXT_PRIMARY, bold: true, lineHeight: 34,
+        });
+        this._refreshHintText();
+        root.active = false;
+    }
+
+    // ==================== 暂停层（E4） ====================
+
+    /** 暂停期间主组件应跳过 update（核心状态冻结） */
+    isPaused(): boolean {
+        return this._paused;
+    }
+
+    closePause(): void {
+        this._paused = false;
+        this.releaseAllHeld();
+        if (this._pauseRoot) this._pauseRoot.active = false;
+    }
+
+    private _openPause(): void {
+        this._buildPause();
+        if (!this._pauseRoot) return;
+        this.releaseAllHeld();
+        this._refreshPauseAudio();
+        this._paused = true;
+        this._pauseRoot.active = true;
+        this._pauseRoot.setSiblingIndex(this.node.children.length - 1);
+    }
+
+    private _onBackTap = (): void => {
+        // 结算面板已经在顶层时，返回键语义就是「离开」，不再叠一层暂停
+        if (this._resultShown) {
+            if (this.onExit) this.onExit();
+            return;
+        }
+        this._openPause();
+    };
+
+    private _onPauseResume = (): void => {
+        this.closePause();
+    };
+
+    private _onPauseMap = (): void => {
+        this.closePause();
+        if (this.onBackToMap) this.onBackToMap();
+    };
+
+    private _onPauseLobby = (): void => {
+        this.closePause();
+        if (this.onExit) this.onExit();
+    };
+
+    private _onPauseAudio = (): void => {
+        sfx.toggle();
+        this._refreshPauseAudio();
+    };
+
+    private _refreshPauseAudio(): void {
+        if (this._pauseAudioBtn) {
+            this._pauseAudioBtn.setText(sfx.sfxOn || sfx.vibOn ? '音效与震动：开' : '音效与震动：关');
+        }
+    }
+
+    private _buildPause(): void {
+        if (this._pauseRoot) return;
+        const root = new Node('Pause');
+        root.layer = this.node.layer;
+        const ut = root.addComponent(UITransform);
+        ut.setContentSize(720, 1280);
+        this.node.addChild(root);
+        this._pauseRoot = root;
+
+        const mask = new Node('Mask');
+        mask.layer = this.node.layer;
+        const mut = mask.addComponent(UITransform);
+        mut.setContentSize(720, 1280);
+        const mg = mask.addComponent(Graphics);
+        mg.fillColor = hex(COLOR.BG_OVERLAY, 235);
+        mg.rect(-360, -640, 720, 1280);
+        mg.fill();
+        mask.addComponent(BlockInputEvents);
+        root.addChild(mask);
+
+        const panel = new Node('Panel');
+        panel.layer = this.node.layer;
+        const put = panel.addComponent(UITransform);
+        put.setContentSize(520, 470);
+        const pg = panel.addComponent(Graphics);
+        pg.fillColor = hex(COLOR.PANEL_BG, 255);
+        pg.roundRect(-260, -235, 520, 470, 24);
+        pg.fill();
+        pg.strokeColor = hex(COLOR.PANEL_BORDER, 255);
+        pg.lineWidth = 3;
+        pg.roundRect(-260, -235, 520, 470, 24);
+        pg.stroke();
+        root.addChild(panel);
+
+        createLabel(panel, '暂停', 40, {
+            width: 460, height: 52, color: COLOR.TEXT_PRIMARY, bold: true, y: 172,
+        });
+        createLabel(panel, '本节点进度已保留\n返回路线图后可点白圈接上', 18, {
+            width: 440, height: 64, color: COLOR.TEXT_SECONDARY, lineHeight: 28, y: 96,
+        });
+
+        const w = 156;
+        const h = 58;
+        const resume = createButton(panel, {
+            w, h, text: '继续战斗', fontSize: 22,
+            fill: COLOR.PRIMARY, textColor: '#FFFFFF', activeFill: COLOR.PRIMARY_DARK,
+            radius: 14, onTap: () => this._onPauseResume(),
+        });
+        resume.node.setPosition(0, 20, 0);
+
+        const map = createButton(panel, {
+            w, h, text: '返回路线图', fontSize: 20,
+            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            radius: 14, onTap: () => this._onPauseMap(),
+        });
+        map.node.setPosition(-120, -56, 0);
+
+        const lobby = createButton(panel, {
+            w, h, text: '返回大厅', fontSize: 22,
+            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            radius: 14, onTap: () => this._onPauseLobby(),
+        });
+        lobby.node.setPosition(120, -56, 0);
+
+        // 音效开关（报告 §8：战斗中想静音不必退出场景）
+        this._pauseAudioBtn = createButton(panel, {
+            w: 250, h: 48, text: '音效与震动：开', fontSize: 19,
+            fill: '#1E293B', textColor: COLOR.TEXT_SECONDARY, activeFill: '#334155',
+            radius: 12, onTap: () => this._onPauseAudio(),
+        });
+        this._pauseAudioBtn.node.setPosition(0, -142, 0);
+
+        root.active = false;
     }
 
     /** 等级 / 经验 / 技能书 / 待选变体（每次刷顶栏前调用，值没变也只是覆盖几个字段） */
@@ -426,7 +684,7 @@ export class MithrilHud extends Component {
     }
 
     private _buildExit(): void {
-        const btn = createBackButton(this.node, this._onExitTap);
+        const btn = createBackButton(this.node, this._onBackTap);
         btn.node.setSiblingIndex(this.node.children.length - 1);
     }
 
@@ -626,9 +884,12 @@ export class MithrilHud extends Component {
             node.setPosition(x, y, 0);
             this.node.addChild(node);
             const g = node.addComponent(Graphics);
-            const label = createLabel(node, SKILL_NAME[key], Math.round(size * 0.34), {
+            const text = (CLASS_SKILL_NAME[this._classId] || CLASS_SKILL_NAME.warrior)[key];
+            const label = createLabel(node, text, this._skillFontSize(text, size), {
                 width: size - 8, height: size - 8, color: '#FFFFFF', bold: true,
             });
+            // 两字文案在 84px 圆键里不能再折行
+            label.enableWrapText = false;
             const cdLabel = createLabel(node, '', 17, {
                 width: size - 8, height: 22, color: '#FFFFFF', bold: true, y: -size * 0.3,
             });

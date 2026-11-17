@@ -34,8 +34,8 @@ import { equippedTags, litSynergies } from './MithrilTrinkets';
 const { ccclass } = _decorator;
 
 const ROWS_PER_PAGE = 6;
-const HINT_TEXT = '装备变更将在下一局生效';
-const TRINKET_HINT_TEXT = '饰品变更将在下一局生效';
+const HINT_TEXT = '装备变更将在下一场战斗生效（面板数值已按新装备计算）';
+const TRINKET_HINT_TEXT = '饰品变更将在下一场战斗生效（面板数值已按新饰品计算）';
 const PANEL_W = 680;
 const PANEL_H = 1180;
 
@@ -228,7 +228,7 @@ export class MithrilMenu extends Component {
         this._statsLabel = createLabel(panel, '', 19, {
             width: 660, height: 90, color: COLOR.TEXT_SECONDARY, x: 0, y: 400, lineHeight: 30,
         });
-        this._hintLabel = createLabel(panel, HINT_TEXT, 17, {
+        this._hintLabel = createLabel(panel, HINT_TEXT, 16, {
             width: 600, height: 24, color: COLOR.WARNING, x: 0, y: 342,
         });
         this._goldLabel = createLabel(panel, '', 18, {
@@ -367,7 +367,7 @@ export class MithrilMenu extends Component {
         });
         next.node.setPosition(298, 320, 0);
         this._tNextBtn = next;
-        this._tHintLabel = createLabel(root, TRINKET_HINT_TEXT, 17, {
+        this._tHintLabel = createLabel(root, TRINKET_HINT_TEXT, 16, {
             width: 600, height: 24, color: COLOR.WARNING, x: 0, y: 284,
         });
 
@@ -520,7 +520,9 @@ export class MithrilMenu extends Component {
             if (!def) continue;
             lines.push(`${def.name} +${(affixValue(roll.id, roll.points) * 100).toFixed(1)}%（${roll.points} 点）`);
         }
-        lines.push(`耐力 +${staminaOf(item)}（生命 +${staminaOf(item) * STAMINA_HP_PER_POINT}）`);
+        // 非主手基型共用掉落池（体验官 E6）：名字里的职业词只是美术主题，属性不分职业
+        const wearNote = item.slot === 'mainHand' ? '' : ' · 任何职业可穿';
+        lines.push(`耐力 +${staminaOf(item)}（生命 +${staminaOf(item) * STAMINA_HP_PER_POINT}）${wearNote}`);
         if (item.modifier) {
             const m = MODIFIER_BY_ID[item.modifier];
             if (m) lines.push(`改造「${m.name}」：${m.desc}`);

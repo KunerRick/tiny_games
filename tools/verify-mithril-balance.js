@@ -547,7 +547,8 @@ const essentialSinks = F.TALENT_RESPEC_GOLD + F.SKILL_RESPEC_GOLD + F.ENCHANT_GO
     for (const def of F.FACILITIES) {
         for (const c of def.costs) need[c.materialId] = (need[c.materialId] || 0) + c.count;
     }
-    eq('050. 灰烬满级总需求 = 70', need.ash_dust, 70);
+    // 首档 4 → 3（体验官 E3）：每个设施灰烬需求 3+10=13，5 个设施共 65
+    eq('050. 灰烬满级总需求 = 65', need.ash_dust, 65);
     eq('051. 霜晶满级总需求 = 120', need.frost_crystal, 120);
     eq('052. 秘银满级总需求 = 60', need.mithril_ore, 60);
 
@@ -666,6 +667,12 @@ function gear(uid, slot, ilvl, quality, affixes) {
     const empty = P.parseSave('{}');
     eq('097. 空对象回落 1 级', empty.level, 1);
     eq('098. 空对象带上本职业基础技能', empty.skills.warrior_basic, 1);
+    // 首战操作引导标记（体验官 E1）：旧档没有这个字段时必须回落 false（会再提示一次）
+    eq('098a. combatHintDone 默认 false', empty.combatHintDone, false);
+    eq('098b. combatHintDone 非布尔回落 false',
+        P.parseSave(JSON.stringify({ combatHintDone: 'yes' })).combatHintDone, false);
+    eq('098c. combatHintDone true 保留',
+        P.parseSave(JSON.stringify({ combatHintDone: true })).combatHintDone, true);
     let typesThrew = false;
     let typesSave = null;
     try {

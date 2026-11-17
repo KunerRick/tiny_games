@@ -314,7 +314,11 @@ export class MithrilCampPanel extends Component {
             return;
         }
         const have = materialCount(save, cost.materialId);
-        btn.setText(`升级到 Lv${check.nextLevel}（${materialName(cost.materialId)} ×${cost.count}）`);
+        // 材料不足时把「现有 / 所需」直接写在按钮上（体验官 E3：五个页签全是灰按钮，
+        // 玩家看不出还要刷几场）
+        btn.setText(have >= cost.count
+            ? `升级到 Lv${check.nextLevel}（${materialName(cost.materialId)} ×${cost.count}）`
+            : `升级到 Lv${check.nextLevel} · ${materialName(cost.materialId)} ${have}/${cost.count}`);
         btn.setColor(check.ok ? '#1D4ED8' : '#334155',
             check.ok ? '#FFFFFF' : (have > 0 ? COLOR.TEXT_SECONDARY : COLOR.TEXT_DISABLED));
     }
@@ -1160,7 +1164,17 @@ export class MithrilCampPanel extends Component {
     private _defaultHint(save: MithrilSave): string {
         const def = FACILITY_BY_ID[this._tab];
         const lv = facilityLevel(save, this._tab);
-        // effects[0] 自带「解锁」字样，这里不要再套一层「解锁：」
+        // 材料不够时直接给出进度与预估场次（体验官 E3：别让首访营地只看到一排灰按钮）
+        const check = canUpgradeFacility(save, this._tab);
+        if (check.cost && !check.ok) {
+            const have = materialCount(save, check.cost.materialId);
+            const need = Math.max(1, check.cost.count - have);
+            // 战斗节点掉 1–2 灰烬、精英 2–3：按每场 2 保守估，宁可说少了不夸大
+            const wins = Math.max(1, Math.ceil(need / 2));
+            const progress = `${materialName(check.cost.materialId)} ${have}/${check.cost.count} · 再赢 ${wins} 场可升 Lv${check.nextLevel}`;
+            // effects[0] 自带「解锁」字样，这里不要再套一层「解锁：」
+            return lv <= 0 ? `升到 Lv1 就能用：${def.effects[0]}\n${progress}` : progress;
+        }
         if (lv <= 0) return `升到 Lv1 就能用：${def.effects[0]}`;
         return `设施升级只用材料 · 金币留给重铸 / 附魔 / 料理 / 洗点`;
     }

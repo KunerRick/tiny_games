@@ -2405,8 +2405,16 @@ export class MithrilWorld implements TrinketHost {
         let i = 0;
         for (const group of enc.spawns) {
             for (let n = 0; n < group.count; n++) {
-                const x = 130 + ((i * 97 + this.encounterIndex * 53) % 460);
-                const y = 840 + ((i * 61 + this.encounterIndex * 47) % 260);
+                // 首场第一波出生点更远（体验官 E1：原来 y≈840，3 个敌人 4 秒就贴脸，
+                // 新玩家还没学会「按住普攻」就先掉血）。玩家在 (360,380)，这里给到
+                // 650+ 像素的接近距离，按小怪 ~105 速度约 6 秒，留足读提示的时间。
+                const firstWave = this.encounterIndex === 0;
+                const x = firstWave
+                    ? 190 + ((i * 113) % 340)
+                    : 130 + ((i * 97 + this.encounterIndex * 53) % 460);
+                const y = firstWave
+                    ? 1030 + ((i * 71) % 170)
+                    : 840 + ((i * 61 + this.encounterIndex * 47) % 260);
                 this.spawnDef(group.enemyId, x, y, plan.scale);
                 i++;
             }

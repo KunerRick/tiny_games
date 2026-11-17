@@ -16,6 +16,7 @@ import {
 } from '../../../common/ui/GameUIKit';
 import type { UiButton } from '../../../common/ui/GameUIKit';
 import {
+    DUNGEON_BY_ID,
     MATERIAL_BY_ID,
     NODE_KIND_NAMES,
     REGION_BY_ID,
@@ -239,9 +240,9 @@ export class MithrilWildMap extends Component {
         }]);
     }
 
-    showConfirm(title: string, lines: string[], okLabel: string, onOk: () => void): void {
+    showConfirm(title: string, lines: string[], okLabel: string, onOk: () => void, okFill?: string): void {
         this.showModal(title, lines, [
-            { label: okLabel, fill: COLOR.DANGER, onTap: onOk },
+            { label: okLabel, fill: okFill || COLOR.DANGER, onTap: onOk },
             { label: '取消', fill: '#334155', onTap: () => this.closeModal() },
         ]);
     }
@@ -293,6 +294,26 @@ export class MithrilWildMap extends Component {
             width: 680, height: 24, color: COLOR.WARNING, bold: true, y: -334,
         });
         this._supplyWarn.node.active = false;
+
+        // 「?」操作说明：音效开关左侧的空位（音效占 248–352，标题字形到 ±140）。
+        // 一次性 toast 错过就没了，这里可随时重看（体验官 E1 建议③）。
+        const help = createButton(this.node, {
+            w: 56, h: 44, text: '?', fontSize: 26,
+            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            radius: 12, onTap: () => this._onHelpTap(),
+        });
+        help.node.setPosition(180, 598, 0);
+    }
+
+    private _onHelpTap(): void {
+        this.showMessage('操作说明', [
+            '地图：点绿圈进入节点，沿途清剿推进',
+            '战斗：左侧拖动移动 · 移动会自动朝向最近的敌人',
+            '攻击：按住右下最大的普攻键 → 持续攻击',
+            '技能与闪避：点按即可；闪避没有前摇，可穿身躲开',
+            '面板：路线图底部按钮（桌面 B 装备 / T 成长 / C 营地）',
+            '战斗中返回会打开暂停层，节点进度保留',
+        ]);
     }
 
     private _buildTabs(): void {
@@ -560,8 +581,11 @@ export class MithrilWildMap extends Component {
             width: 110, height: 20, color: done ? COLOR.TEXT_DISABLED : COLOR.TEXT_PRIMARY,
             bold: boss, y: -r - 16,
         });
-        createLabel(holder, `Lv${node.level}`, 11, {
-            width: 80, height: 18, color: COLOR.TEXT_SECONDARY, y: -r - 34,
+        // 副本标签写「装等 1-10」而不是节点层数 Lv：两座副本都落在第 4 层，
+        // 旧的「都写 Lv8」掩盖了 1–10 / 10–16 的真实强度差（体验官 E2）
+        const dg = node.kind === 'dungeon' && node.dungeonId ? DUNGEON_BY_ID[node.dungeonId] : null;
+        createLabel(holder, dg ? `装等 ${dg.ilvlMin}-${dg.ilvlMax}` : `Lv${node.level}`, 11, {
+            width: 100, height: 18, color: COLOR.TEXT_SECONDARY, y: -r - 34,
         });
 
         holder.on(Node.EventType.TOUCH_END, this.onNodeTap, this);

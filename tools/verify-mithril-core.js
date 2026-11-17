@@ -619,6 +619,11 @@ function makeBossWorld(profile = C.makeProfile('warrior', 30, 40), seed = 90210)
     const rw2 = new C.MithrilWorld(C.makeProfile('warrior', 10, 10), 301);
     rw2.startDungeon('mine');
     check('118. 开局进入遭遇 1/3 并生成 4 只小怪', rw2.stage === 'encounter' && rw2.encounterIndex === 0 && rw2.enemies.length === 4, `${rw2.encounterIndex}/${rw2.enemies.length}`);
+    // 体验官 E1：首波出生点拉远到 650+ 像素，给新玩家读「按住普攻」提示的时间
+    const firstGap = Math.min(...rw2.enemies.map(
+        (e) => Math.hypot(e.x - rw2.player.x, e.y - rw2.player.y),
+    ));
+    check('118b. 首波出生距离 ≥ 600', firstGap >= 600, firstGap.toFixed(0));
 
     clearAllEnemies(rw2);
     stepFor(rw2, F.ENCOUNTER_GAP + 0.2);

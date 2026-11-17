@@ -17,13 +17,13 @@ import {
 } from 'cc';
 import { SceneManager } from '../../../common/managers/SceneManager';
 import { StorageManager } from '../../../common/managers/StorageManager';
-import { showTutorialOnce } from '../../../common/ui/GameUIKit';
+import { COLOR, showTutorialOnce } from '../../../common/ui/GameUIKit';
 import {
     FIXED_DT, MithrilWorld, PLAYER_START_X, PLAYER_START_Y, equippedModifiers, mulberry32, profileFromSave,
 } from './MithrilCore';
 import type { CoreEvent, MithrilInput, MithrilSnapshot } from './MithrilCore';
 import {
-    addToInventory, addTrinket, bossLoot, bossTrinket, firstClearDrop, gluttonyExtraDrop,
+    addToInventory, addTrinket, bossLoot, bossTrinket, equipStats, firstClearDrop, gluttonyExtraDrop,
     maybeLowerQuality, rollItem, sellPrice, trinketGoldValue, unownedTrinkets,
 } from './MithrilLoot';
 import {
@@ -40,16 +40,18 @@ import {
 } from './MithrilProgress';
 import type { MithrilSave } from './MithrilProgress';
 import {
-    COMBAT_ILVL_FLOOR, FIRST_CLEAR_EXP, GEAR_BASE_BY_ID, GEAR_SLOT_NAMES, GEAR_SLOTS,
+    COMBAT_ILVL_FLOOR, DUNGEON_BY_ID, FIRST_CLEAR_EXP, GEAR_BASE_BY_ID, GEAR_SLOT_NAMES, GEAR_SLOTS,
     QUALITY_BY_ID,
     REGION_BOSS_BY_ID, REGION_BY_ID, REGIONS, SKILL_BOOK_FIRST_CLEAR, SKILL_BOOK_PER_CLEAR,
+    SUPPLY_EXHAUST_HP_PCT, SUPPLY_PER_RUN,
     TRINKET_BY_ID, TRINKET_TAG_NAMES,
     WILD_NODE_COUNT, WILD_REWARDS, materialName, regionMaterialId,
 } from './MithrilConfig';
 import type { ClassId, EquipItem, RunPlan } from './MithrilConfig';
 import {
     WILD_EVENT_OPTIONS, applyWildEvent, buildWildPlan, chestGold, chestHasTrap, chestTrapDamage,
-    createExpedition, enterNode, failExpedition, generateWildMap, grantRunMaterials, markNodeDone,
+    createExpedition, enterNode, failExpedition, generateWildMap, grantRunMaterials, isReachable,
+    markNodeDone,
     nodeById, nodeName, rollNodeMaterials, supplyHeal, wildRng,
 } from './MithrilWild';
 import type { ExpeditionState, WildEventChoice, WildMap, WildNode } from './MithrilWild';
@@ -151,6 +153,8 @@ export class MithrilGame extends Component {
             hud.onRestart = () => this.onRestartRequested();
             hud.onOpenBag = () => this.openMenu();
             hud.onOpenGrowth = () => this.openGrowth();
+            hud.onBackToMap = () => this.onPauseBackToMap();
+            hud.onCombatHintDone = () => this.onCombatHintDone();
         }
         const menu = this._menuRef;
         if (menu) {
@@ -189,7 +193,7 @@ export class MithrilGame extends Component {
 
         this._mapSeed = this.seed > 0 ? (this.seed & 0x7fffffff) : (Date.now() & 0x7fffffff);
         if (this._save) {
-            showTutorialOnce(this.node, 'mithril', '路线图选节点启程 · 左侧拖动移动 · 右下技能键', 3.4);
+            showTutorialOnce(this.node, 'mithril', '路线图点绿圈启程 · 按住右下最大的键持续攻击 · 右上角「?」可重看操作', 4.2);
             this._enterMapMode();
         } else {
             // 首次进入：先选职业。战斗层与路线图都先收起来，避免玩家透过面板点到摇杆
@@ -230,6 +234,8 @@ export class MithrilGame extends Component {
         const growthOpen = this._growthRef && this._growthRef.isOpen();
         const campOpen = this._campRef && this._campRef.isOpen();
         if (menuOpen || growthOpen || campOpen) return;
+        // 暂停层（E4）：整局冻结，核心与计时器都不推进
+        if (this._hudRef && this._hudRef.isPaused()) return;
 
         // 切后台回来 / 长卡顿时 dt 可能是 NaN 或巨大值：
         // NaN 会永久污染 _acc（`_acc >= FIXED_DT` 恒假且再也不会回正），巨大值会让蓄积步数无限涨。
@@ -512,8 +518,29 @@ export class MithrilGame extends Component {
             }
         }
 
+        // 副本新进入先出确认卡（E2）：装等区间 / 机制 / 首通奖励 / 消耗，
+        // 点了「进入」才扣补给 —— 之前一点即进，Lv4 撞 ilvl16 的教堂毫无提示。
+        if (node.kind === 'dungeon' && node.dungeonId && !exp.complete
+            && node.id !== exp.pos
+            && isReachable(map, exp, node.id)
+            && exp.done.indexOf(node.id) < 0) {
+            this._confirmDungeon(node);
+            return;
+        }
+        this._enterWildNode(node, plan);
+    }
+
+    /** 进节点的公共后半段：扣补给 / 生命，按节点类型开内容 */
+    private _enterWildNode(node: WildNode, plan: RunPlan | null): void {
+        const save = this._save;
+        const map = this._wildMap;
+        const exp = save ? save.expedition : null;
+        if (!save || !map || !exp) {
+            this._refreshMap();
+            return;
+        }
         const maxHp = profileFromSave(save, COMBAT_ILVL_FLOOR).maxHp;
-        const res = enterNode(map, exp, nodeId, maxHp);
+        const res = enterNode(map, exp, node.id, maxHp);
         if (!res.ok) {
             let text = '远征已结束，请重新开始';
             if (res.reason === 'not_reachable') text = '只能走绿色连线连着的相邻节点';
@@ -553,6 +580,43 @@ export class MithrilGame extends Component {
                 else this._refreshMap();
                 return;
         }
+    }
+
+    /**
+     * 副本入口确认卡（体验官 E2）：标签写的是「装等 1-10 / 10-16」，
+     * 但玩家点进来之前看不到机制、首通和消耗，也不知道自己装等够不够。
+     */
+    private _confirmDungeon(node: WildNode): void {
+        const wild = this._wildMapRef;
+        const save = this._save;
+        const map = this._wildMap;
+        const exp = save ? save.expedition : null;
+        const def = node.dungeonId ? DUNGEON_BY_ID[node.dungeonId] : null;
+        if (!wild || !save || !map || !exp || !def) return;
+        const plan = buildWildPlan(map, node);
+        const cur = equipStats(save.equips).ilvl;
+        const under = cur + 0.05 < def.ilvlMin;
+        const cleared = save.dungeonsCleared.indexOf(def.id) >= 0;
+        const lines = [
+            `推荐装等 ${def.ilvlMin}–${def.ilvlMax}　当前平均装等 ${cur.toFixed(1)}`,
+            `阶段：${def.phases.map((p) => p.name).join(' → ')}`,
+            cleared
+                ? '已通关：本次没有首通奖励（仍掉副本装备与技能书）'
+                : `首通奖励：经验 +${FIRST_CLEAR_EXP} · 技能书 +${SKILL_BOOK_FIRST_CLEAR} · 一件紫装`,
+            under
+                ? `警告：装等低于推荐下限 ${def.ilvlMin}，建议先清野外节点`
+                : '难度：与节点等级无关，按副本装等固定结算',
+        ];
+        const maxHp = profileFromSave(save, COMBAT_ILVL_FLOOR).maxHp;
+        if (exp.supply > 0) {
+            lines.push(`进入消耗：补给 −1（当前 ${exp.supply}/${SUPPLY_PER_RUN}）· 阵亡会丢失本程材料`);
+        } else {
+            const cost = Math.max(1, Math.round(maxHp * SUPPLY_EXHAUST_HP_PCT));
+            lines.push(`进入消耗：补给已耗尽，生命 −${cost}（${Math.round(SUPPLY_EXHAUST_HP_PCT * 100)}% 上限）`);
+        }
+        wild.showConfirm(def.name, lines, '进入副本',
+            () => this._enterWildNode(node, plan),
+            under ? COLOR.DANGER : COLOR.PRIMARY);
     }
 
     private _openChest(node: WildNode, hpCost: number): void {
@@ -777,6 +841,9 @@ export class MithrilGame extends Component {
         this.renderer?.render(snap, 0);
         this._refreshGrowthHud();
         hud?.updateHud(snap);
+        // 首战操作引导（E1）：不写进 once-only toast —— 玩家真学会（3 击杀 / 按住 1 秒）才关，
+        // 在那之前每场战斗开头都会再出现一次。
+        if (hud && !save.combatHintDone) hud.showCombatHint();
     }
 
     /** 全身装备是否只有白装（空槽允许）：副本挑战悬赏「仅用白装」用 */
@@ -1269,6 +1336,21 @@ export class MithrilGame extends Component {
         if (this._mode === 'map') this._refreshMap();
     }
 
+    /** 暂停层「返回路线图」：落盘后直接回地图，节点保持「进了但没结算」可续开 */
+    private onPauseBackToMap(): void {
+        this._persist();
+        this._enterMapMode();
+        this._refreshMap('已退出当前节点：本节点内容还在，点白圈可接上');
+    }
+
+    /** 首战引导学会（3 击杀 / 按住普攻 1 秒）：写成持久标记，之后不再打扰 */
+    private onCombatHintDone(): void {
+        const save = this._save;
+        if (!save || save.combatHintDone) return;
+        save.combatHintDone = true;
+        this._persist();
+    }
+
     private exitToLobby(): void {
         this._persist();
         SceneManager.gotoLobby();
@@ -1372,7 +1454,7 @@ export class MithrilGame extends Component {
         this._save = defaultSave(classId);
         this._persist();
         this._classRef?.close();
-        showTutorialOnce(this.node, 'mithril', '路线图选节点启程 · 左侧拖动移动 · 右下技能键', 3.4);
+        showTutorialOnce(this.node, 'mithril', '路线图点绿圈启程 · 按住右下最大的键持续攻击 · 右上角「?」可重看操作', 4.2);
         this._enterMapMode();
     }
 
@@ -1496,11 +1578,11 @@ export class MithrilGame extends Component {
      */
     private _ensureAudio(): void {
         const host = this._wildMapRef ? this._wildMapRef.node : this.node;
-        if (!host.getChildByName('MithrilAudioUi')) {
-            this._audioRef = MithrilAudioUi.create(host);
-        } else {
-            this._audioRef = host.getChildByName('MithrilAudioUi')!.getComponent(MithrilAudioUi);
-        }
+        const existing = host.getChildByName('MithrilAudioUi');
+        // 节点在但组件被摘掉（热重载 / 旧构建残留）时补挂，别留一个读到 null 的引用
+        this._audioRef = existing
+            ? (existing.getComponent(MithrilAudioUi) || existing.addComponent(MithrilAudioUi))
+            : MithrilAudioUi.create(host);
         // 浏览器 / 试玩探针：地图未激活（选职业界面）时也能读到开关状态
         const g = globalThis as unknown as { __mithrilAudio?: unknown };
         g.__mithrilAudio = sfx;

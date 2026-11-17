@@ -585,6 +585,13 @@ export interface MithrilSave {
     meals: MealState[];
     /** 训练场天赋方案（M5）：下标 0/1，null = 空槽；槽位数由训练场等级决定 */
     talentPresets: Array<TalentState | null>;
+    /**
+     * 首战操作引导是否已学会（体验官 E1，2026-11-17）。
+     * 不放进 `seen_tutorial`：那条 3.4 秒 toast 一辈子只弹一次，玩家错过就再也看不到
+     * 「按住普攻」。这里由战斗内提示在「累计 3 击杀或按住普攻满 1 秒」后置 true，
+     * 之前每进一场战斗都会再提示，直到真学会为止。
+     */
+    combatHintDone: boolean;
 }
 
 /** 一份生效中的料理 */
@@ -626,6 +633,7 @@ export function defaultSave(classId: ClassId = 'warrior'): MithrilSave {
         facilities,
         meals: [],
         talentPresets: [],
+        combatHintDone: false,
     };
 }
 
@@ -940,6 +948,9 @@ export function sanitizeSave(raw: unknown): MithrilSave {
             out.talentPresets[i] = Object.keys(normalized).length > 0 ? normalized : null;
         }
     }
+
+    // 首战引导标记（体验官 E1）：旧档没有该字段 → false，下次进战斗会再提示一次
+    out.combatHintDone = src.combatHintDone === true;
 
     return out;
 }
