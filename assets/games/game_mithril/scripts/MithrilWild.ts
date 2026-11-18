@@ -372,6 +372,10 @@ export function onlyForwardIsElite(map: WildMap, exp: ExpeditionState | null): b
         if (id === exp.pos || exp.done.indexOf(id) >= 0) continue;
         const next = nodeById(map, id);
         if (!next) continue;
+        // 试玩 N187：起点永不进 done（回起点免费，且它是回退边），不能算前进边。
+        // 否则站在「与起点相邻、唯一真前路是精英」的已结算节点上，
+        // forward 会多算一条起点、danger 仍是 1 → 返回 false，回退提醒静默失效。
+        if (next.kind === 'start') continue;
         forward++;
         if (next.kind === 'elite' || next.kind === 'boss') danger++;
     }

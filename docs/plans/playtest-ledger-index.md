@@ -9,14 +9,14 @@
 
 | 项 | 值 |
 |---|---|
-| 全局下一编号 | **N184** |
-| 最后更新 | 2026-11-19（**round33 五条经 fresh 独立复核全部 CONFIRMED → `verified`**；复核另开 **N183（P3：首领三行 Label 包围盒重叠 3.2 design px）**；N182 维持 `open` P2；E1–E4 仍为 round32 的 **2/2/2/2**，待 fresh 玩家重测） |
+| 全局下一编号 | **N188** |
+| 最后更新 | 2026-11-19（**round34 玩法拍 fresh 玩家：E1–E4 = 2/3/2/1**，E2 首次到 3、**E4 掉到 1**；新开 **N184（P2 副本难度断崖）/ N185（P2 成长页无法对比）/ N186 / N187（起点被算前进边，已读码证实）**，N177 证据加强；round33 五条已复核 `verified`） |
 
 ## 台账一览
 
 | 游戏 | 台账 | 当前阶段 | 未关闭 P0/P1 | 未关闭 P2/P3 | 最近全量轮 | 下一批焦点 |
 |---|---|---|---|---|---|---|
-| 秘银远征（mithril） | [`playtest-ledger-mithril.md`](./playtest-ledger-mithril.md) | 可玩（P0/P1 = 0；稳定性 `frozen`；round32 五条与 **round33 五条均已 `verified`**；N182 累计 0/4 阴性、维持 open P2 不阻塞） | 0 | **17**（口径：14 `open`（含跨维度 N177 / N182 / 复核新开 N183）+ 2 `accepted`(N107/N127) + 1 `deferred`(N141)；§3.3 有意保留 N78/N80/N81/N128–N132 另计） | **round33 + 独立复核（五条全 CONFIRMED）** | **fresh 玩家 E 分重测（round34）** → N171 / N172 / N180 / N181 / N183 |
+| 秘银远征（mithril） | [`playtest-ledger-mithril.md`](./playtest-ledger-mithril.md) | 可玩（P0/P1 = 0；稳定性 `frozen`；round32 / round33 各五条均 `verified`；N182 累计 0/4 阴性、维持 open P2 不阻塞；**E4 = 1 为本轮主信号**） | 0 | **22**（口径：19 `open`（含跨维度 N177 / N182 / N183 / N184 / N185）+ 2 `accepted`(N107/N127) + 1 `deferred`(N141)；§3.3 有意保留 N78/N80/N81/N128–N132 另计） | **round34（玩法拍 fresh 玩家，E=2/3/2/1）** | **数值分析师复核 N184 + N177** → 修复批（N185 / N186 / N187 + N171 / N172 / N180 / N181 / N183）→ 复核 → E 分重测 |
 | 冰箱底下（fridge） | 未建（下次跑该游戏时按模板建立） | 可玩 | 0 | 2（N34/N35，均 P3，round9 遗留） | round9 | UI / 交互 |
 
 ## 其他历史轮次（未单独立台账）
@@ -25,7 +25,7 @@
 |---|---|
 | N1–N18（全站 UX 大扫，round1–2） | 跨游戏共性问题；修复与未落地项见 [`2026-11-11-playtest-fix-review.md`](./2026-11-11-playtest-fix-review.md) 与各轮复验 |
 | N19–N33（冰箱，round3–9） | 状态见 [`2026-11-13-playtest-round5-reverify.md`](./2026-11-13-playtest-round5-reverify.md)、[`2026-11-13-playtest-round6-reverify.md`](./2026-11-13-playtest-round6-reverify.md) 与 round7–9 报告；**N34/N35 仍未关闭** |
-| N36–N182（秘银，round10–32） | 见 [`playtest-ledger-mithril.md`](./playtest-ledger-mithril.md) 的归档区间与未关闭项；round27 新开 N133–N143，经独立复核关闭 7 条、N135 判 `within`；round28 新开 N144–N147（N144/N145 经独立复核 CONFIRMED 关闭），复核另开 N148/N149；round29 修 N147（副本首领血 1800，033 下限 1.20）并落地 N142/N149/N150，新开 N150–N152；round29 复核四条全部 CONFIRMED 关闭；round30 修 N151（四表面回退文案 + 条件化警示，wild 闸 2973 项）与 N139（0 ms 短按），新开 N153–N156；round30 复核五条全 CONFIRMED 关闭（N151/N139 按 P1 口径），另开 N157 / N158；round31 UI 拍新开 N159–N172，当拍修 N159 / N160 / N156 / N162 / N165，N161 / N163 带理由延期；round31 复核五条 + N157 全部 CONFIRMED → verified，另开 N173 注释漂移并当日修；round32 UI 信息呈现拍新开 N174–N181，复用 N164 / N172，当拍修 N164 / N174 / N175 / N176 / N179；**round32 复核五条全部 CONFIRMED → verified**，另开 **N182（P2 待复现：退出未结算战斗后 `expedition.hp` 88→60，存档类优先）**，N172 / N177 / N178 / N180 / N181 留 open；**N182 二次定向复现再次阴性**（Lv2 / 上限 78 档：暂停 HUD「32/78」→ 落盘 32 → reload 32/78；代码级 60 只能来自 Lv1）；**独立裁决复核在纯净 Lv3 裸装 96 档两轮均阴性（88/96、9/96 跨 reload 正确），累计 0/4，维持 open P2**；**round33 UI 收尾专项把 round31/32 延期的五条（N161 天赋一屏一线 / N163 触控下限 / N178 字号下限 / N166 将来时 / N167 开关外观）全部落地，经 fresh 独立复核逐条 CONFIRMED → `verified`**，复核另开 **N183（P3 首领三行 Label 包围盒重叠 3.2 design px）** |
+| N36–N182（秘银，round10–32） | 见 [`playtest-ledger-mithril.md`](./playtest-ledger-mithril.md) 的归档区间与未关闭项；round27 新开 N133–N143，经独立复核关闭 7 条、N135 判 `within`；round28 新开 N144–N147（N144/N145 经独立复核 CONFIRMED 关闭），复核另开 N148/N149；round29 修 N147（副本首领血 1800，033 下限 1.20）并落地 N142/N149/N150，新开 N150–N152；round29 复核四条全部 CONFIRMED 关闭；round30 修 N151（四表面回退文案 + 条件化警示，wild 闸 2973 项）与 N139（0 ms 短按），新开 N153–N156；round30 复核五条全 CONFIRMED 关闭（N151/N139 按 P1 口径），另开 N157 / N158；round31 UI 拍新开 N159–N172，当拍修 N159 / N160 / N156 / N162 / N165，N161 / N163 带理由延期；round31 复核五条 + N157 全部 CONFIRMED → verified，另开 N173 注释漂移并当日修；round32 UI 信息呈现拍新开 N174–N181，复用 N164 / N172，当拍修 N164 / N174 / N175 / N176 / N179；**round32 复核五条全部 CONFIRMED → verified**，另开 **N182（P2 待复现：退出未结算战斗后 `expedition.hp` 88→60，存档类优先）**，N172 / N177 / N178 / N180 / N181 留 open；**N182 二次定向复现再次阴性**（Lv2 / 上限 78 档：暂停 HUD「32/78」→ 落盘 32 → reload 32/78；代码级 60 只能来自 Lv1）；**独立裁决复核在纯净 Lv3 裸装 96 档两轮均阴性（88/96、9/96 跨 reload 正确），累计 0/4，维持 open P2**；**round33 UI 收尾专项把 round31/32 延期的五条（N161 天赋一屏一线 / N163 触控下限 / N178 字号下限 / N166 将来时 / N167 开关外观）全部落地，经 fresh 独立复核逐条 CONFIRMED → `verified`**，复核另开 **N183（P3 首领三行 Label 包围盒重叠 3.2 design px）**；**round34 玩法拍（fresh 玩家）E1–E4 = 2/3/2/1**，E2 首次到 3、E4 掉到 1（副本杂兵可无伤风筝、BOSS 1800 血硬墙），新开 **N184 / N185 / N186 / N187** 并给 N177 补证据 |
 
 ## 编号规则
 

@@ -14,7 +14,8 @@
  *  8. 事件三选一：回血 / 材料 / 冒险深挖（掉血）与死亡
  *  9. 材料入档与本程合计、失败清空、存档净化（坏档回落 null）
  * 10. Wild 模块纯度：不许 import cc / Date.now / Math.random / localStorage
- * 11. N151：`onlyForwardIsElite` 只在「唯一前进边全是精英 / 首领」时为真（已清理边不算前进）
+ * 11. N151：`onlyForwardIsElite` 只在「唯一前进边全是精英 / 首领」时为真（已清理边不算前进；
+ *     N187：起点是回退边，即使不在 done 里也不算前进）
  *
  * 用法：node tools/verify-mithril-wild.js
  * 通过时打印 MITHRIL_WILD_OK；失败逐条打印并以退出码 1 结束。
@@ -648,7 +649,8 @@ for (const boss of F.REGION_BOSSES) {
                 const keep = node.links[0];
                 const exp = W.createExpedition(region.id, seed, 200);
                 exp.pos = node.id;
-                exp.done = node.links.filter((id) => id !== keep);
+                // N187：起点永不进 done（真实状态），这里也不能把起点塞进 done 掩盖路径
+                exp.done = node.links.filter((id) => id !== keep && rawMap.nodes[id].kind !== 'start');
                 const kind = rawMap.nodes[keep].kind;
                 const expected = kind === 'elite' || kind === 'boss';
                 eq(`[${region.id}/${seed}/${node.id}] N151 唯一前进边是 ${kind} → ${expected}`,
@@ -676,6 +678,25 @@ for (const boss of F.REGION_BOSSES) {
     exp3.complete = true;
     check('N151 远征结束后不再提示回退', W.onlyForwardIsElite(m2, exp3) === false);
     check('N151 无远征状态不提示', W.onlyForwardIsElite(m2, null) === false);
+
+    // N187：起点是回退边，即使不在 done 里也不能算「前进边」。
+    // 站在与起点相邻、唯一真前路是精英的节点上，必须提示「可以退回起点换另一支」。
+    const synth = {
+        nodes: [
+            { id: 0, kind: 'start', links: [1] },
+            { id: 1, kind: 'battle', links: [0, 2] },
+            { id: 2, kind: 'elite', links: [1] },
+        ],
+    };
+    const expS = W.createExpedition('ash', 1, 200);
+    expS.pos = 1;
+    expS.done = [];
+    check('N187 起点边不算前进边（唯一真前路是精英 → 提醒）',
+        W.onlyForwardIsElite(synth, expS) === true);
+    const expS2 = W.createExpedition('ash', 1, 200);
+    expS2.pos = 1;
+    expS2.done = [2];
+    check('N187 精英已清理时不再提示', W.onlyForwardIsElite(synth, expS2) === false);
 }
 
 // ==================== 结果 ====================
