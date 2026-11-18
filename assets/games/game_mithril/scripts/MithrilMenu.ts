@@ -333,8 +333,9 @@ export class MithrilMenu extends Component {
         this._detailTitle = createLabel(panel, '', 22, {
             width: 600, height: 30, color: T.parchment, bold: true, x: 0, y: -282,
         });
-        // 高度自助增长（Overflow.NONE 会把节点撑到内容大小）：4 词条 + 耐力 + 改造 + 品质特效
-        // 最多 7 行，lineHeight 26 时 182 px，落在详情凹板（−250 ~ −494）内。
+        // 高度自助增长（Overflow.NONE 会把节点撑到内容大小）。行数上限 9：
+        // 4 词条 + 耐力 + 改造 + 品质特效（传说 unique / 秘境 negative）+ 2 行换装预览。
+        // 此处只给初始值，实际字号 / 行高 / 纵向锚点由 _refreshDetail 按行数分三档设置。
         this._detailBody = createLabel(panel, '', 18, {
             width: 600, height: 130, color: T.parchmentDim, x: 0, y: -398, lineHeight: 26,
         });
