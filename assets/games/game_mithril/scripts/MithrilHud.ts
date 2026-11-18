@@ -210,6 +210,8 @@ export class MithrilHud extends Component {
     private _resultShown = false;
     private _lootLines: string[] = [];
     private _rewardLines: string[] = [];
+    /** 掉落之后才说的引导（试玩 N156）：必须排在「获得 X」下面，否则玩家先看到「已入背包」再看到掉了什么 */
+    private _postLootLines: string[] = [];
     private _lastWin = false;
     private _lastTimeText = '0:00';
     private _lastKills = 0;
@@ -244,6 +246,13 @@ export class MithrilHud extends Component {
     private _hintTravelled = 0;
     private _hintLastX: number | null = null;
     private _hintLastY: number | null = null;
+    /**
+     * 本局全程累计位移（结算归因用，试玩 N160）。
+     * `_hintTravelled` 只在教学提示存活期间累加，学会后停更；失败归因需要的是整局。
+     */
+    private _runTravelled = 0;
+    private _runLastX: number | null = null;
+    private _runLastY: number | null = null;
 
     // ---- 暂停层（体验官 E4）：战斗中返回不再直接换场景 ----
     private _pauseRoot: Node | null = null;
@@ -326,6 +335,7 @@ export class MithrilHud extends Component {
         this._updateBanner(snap);
         this._updateBoss(snap);
         this._updateSkills(snap);
+        this._trackRunMovement(snap);
         this._tickCombatHint(snap);
         if (snap.phase !== 'playing') this._showResult(snap);
     }
@@ -343,6 +353,7 @@ export class MithrilHud extends Component {
         this._resultShown = false;
         this._lootLines = [];
         this._rewardLines = [];
+        this._postLootLines = [];
         this._growthTimer = 0;
         if (this._resultRoot) this._resultRoot.active = false;
         for (const key of Object.keys(this.held) as SkillKey[]) this.held[key] = false;
@@ -350,6 +361,9 @@ export class MithrilHud extends Component {
         for (const b of this._skills) b.pressed = false;
         this.closePause();
         this.hideCombatHint();
+        this._runTravelled = 0;
+        this._runLastX = null;
+        this._runLastY = null;
         this._lastHp = -1;
         this._lastRage = -1;
     }
@@ -390,8 +404,33 @@ export class MithrilHud extends Component {
         if (this._hintLabel) {
             // 试玩 N145：只教「边打边走」不够 —— 只走位不追的输入 30 分钟 0 胜 19 死。
             // 真正的解法是追远程（远程保持 keep=260 会后撤），第三行必须写出来。
-            this._hintLabel.string = `按住「${this._basicName()}」持续攻击，边打边走\n移动会自动朝向最近的敌人\n远程敌人会后撤：追上去再打`;
+            // 试玩 N159（round31）：整张卡说「边打边走」，却没写「怎么走」——
+            // 新玩家不知道左半屏能拖，首战 0 击杀 21 秒死亡。输入方式必须进第一行。
+            this._hintLabel.string = `左半屏拖动移动 · 按住「${this._basicName()}」边打边走\n移动会自动朝向最近的敌人\n远程敌人会后撤：追上去再打`;
         }
+    }
+
+    /**
+     * 整局位移统计（试玩 N160）：失败结算是玩家唯一会追问「我做错了什么」的界面。
+     * 首次失败的典型是「不知道能移动」→ 0 击杀 21 秒死亡，面板必须能把这条归因说出来。
+     */
+    private _trackRunMovement(snap: MithrilSnapshot): void {
+        if (snap.phase !== 'playing') {
+            this._runLastX = null;
+            this._runLastY = null;
+            return;
+        }
+        const x = snap.player.x;
+        const y = snap.player.y;
+        if (this._runLastX !== null && this._runLastY !== null) {
+            const dx = x - this._runLastX;
+            const dy = y - this._runLastY;
+            const d = Math.sqrt(dx * dx + dy * dy);
+            // >150 视为闪现 / 传送，不计入（与教学提示同口径）
+            if (d > 0 && d < 150) this._runTravelled += d;
+        }
+        this._runLastX = x;
+        this._runLastY = y;
     }
 
     private _tickCombatHint(snap: MithrilSnapshot): void {
@@ -670,6 +709,15 @@ export class MithrilHud extends Component {
                 `获得 ${q ? q.name : ''}·${base ? base.name : item.baseId}（${GEAR_SLOT_NAMES[item.slot]} ${item.ilvl}）`,
             );
         }
+        if (this._resultShown) this._refreshResultBody();
+    }
+
+    /**
+     * 掉落之后的引导行（试玩 N156）：由 MithrilGame 在 setLootItems 之后调用。
+     * 结算正文的行序固定是「收益 → 掉落 → 引导」，引导必须跟着它指向的那件装备。
+     */
+    setPostLootLines(lines: string[]): void {
+        this._postLootLines = lines.slice(0, 2);
         if (this._resultShown) this._refreshResultBody();
     }
 
@@ -1341,8 +1389,17 @@ export class MithrilHud extends Component {
         ].join('\n');
         // 收益：金币 / 经验 / 首通 / 材料 / 掉落 / 成长提示。羊皮纸正文字号，只当「拿到了什么」
         const lines: string[] = [];
+        // 试玩 N160：失败面板先说「为什么输」，再说收益 —— 首次失败最需要的是可行动的归因。
+        if (!this._lastWin) {
+            if (this._runTravelled < 120) {
+                lines.push('本局几乎没有移动：战斗中在左半屏拖动即可移动');
+            } else if (this._lastKills === 0) {
+                lines.push('本局没有击杀：贴近敌人再按住普攻，远程会后撤');
+            }
+        }
         if (this._rewardLines.length > 0) lines.push(...this._rewardLines);
         if (this._lootLines.length > 0) lines.push(...this._lootLines.slice(0, 2));
+        if (this._postLootLines.length > 0) lines.push(...this._postLootLines);
         const hint = this._growthHintText();
         if (hint) lines.push(hint);
         // 收益区高 198（顶边 62 → 底边 −136）：9 行 × 20 = 180 仍留 18px 余量

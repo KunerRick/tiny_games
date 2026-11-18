@@ -424,6 +424,7 @@ export class MithrilGame extends Component {
         if (hud) {
             hud.setRewardLines([]);
             hud.setLootItems([]);
+            hud.setPostLootLines([]);
         }
         this._enterMapMode();
     }
@@ -1204,7 +1205,7 @@ export class MithrilGame extends Component {
                 const nextHint = nextRegionHint(exp.regionId, save.level);
                 if (nextHint) reward.push(nextHint);
             } else {
-                reward.push(`节点结束：生命 ${exp.hp}/${maxHp} · 补给 ${exp.supply} · 返回路线图继续`);
+                reward.push(`节点结束：生命 ${exp.hp}/${maxHp} · 补给 ${exp.supply}/${SUPPLY_PER_RUN} · 返回路线图继续`);
             }
         } else {
             // 死亡只丢本程材料，装备 / 经验 / 等级保留（设计 §7 决策 3）
@@ -1253,12 +1254,27 @@ export class MithrilGame extends Component {
             fullRunTotal: WILD_NODE_COUNT,
         });
 
+        // 试玩 N156（round31 fresh 玩家复核为 P2）：掉落行只写「获得 X」，玩家不知道
+        // 它进了背包，也不知道结算面板本身就有「装备」按钮。有空槽时给一句可行动引导；
+        // 无空槽（只能换装）时提示换装，避免玩家以为掉落丢了。
+        // 这句必须排在「获得 X」之后（N156 复核）：先看到「已入背包」再看掉落，行序是反的。
+        const postLoot: string[] = [];
+        if (won && granted.length > 0) {
+            const emptySlots = GEAR_SLOTS.filter((slot) => !save.equips[slot]).length;
+            if (emptySlots > 0) {
+                postLoot.push(`新装备已入背包：点下方「装备」穿上（空槽 ${emptySlots}/${GEAR_SLOTS.length}）`);
+            } else {
+                postLoot.push('新装备已入背包：点下方「装备」可比对并换装');
+            }
+        }
+
         this._persist();
         this._refreshGrowthHud();
         // HUD 在同一个 update 里随后刷新结果面板，收益 / 掉落行会一起出现
         if (hud) {
             hud.setRewardLines(reward);
             hud.setLootItems(granted);
+            hud.setPostLootLines(postLoot);
         }
         // 结算一次性奖励升了级：把新 profile 同步给核心并重画顶栏，
         // 免得 HUD「生命 x / 168」与成长页「生命上限 186」对不上（试玩 N37）

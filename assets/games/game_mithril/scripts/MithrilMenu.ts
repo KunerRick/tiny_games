@@ -650,6 +650,17 @@ export class MithrilMenu extends Component {
             lines.push(`平均装等 ${stBefore.ilvl.toFixed(1)} → ${stAfter.ilvl.toFixed(1)}（攻击强度按平均装等折算）`);
         }
         this._detailBody.string = lines.join('\n');
+        // 试玩 N162（round31）：判断「是否变强」的关键行只有 18px ≈ 9.8 CSS px。
+        // 可用区是**标题下沿到板底**：标题中心 −282（高 30 ⇒ 下沿 −297），凹板底 −492，
+        // 约 186 px。一开始按「板顶 −250」排会直接顶进标题里（复核截图 43）。
+        // 行高按行数压，保证 n × lh ≤ 186；Label 按 n × lineHeight 估算高度，
+        // 不用 UITransform.height —— 它要等渲染帧才更新，同步读到的是上一条文案的旧值。
+        const n = lines.length;
+        const lh = n <= 7 ? 26 : n === 8 ? 23 : 20;
+        this._detailBody.fontSize = 20;
+        this._detailBody.lineHeight = lh;
+        // 正文块顶端固定在标题下沿 −305（留 8 px 呼吸），按实际文字高度反算中心
+        this._detailBody.node.setPosition(0, -305 - (n * lh) / 2, 0);
 
         // 出售只对背包件有效；选槽位时不给一个点了没反应的按钮
         this._setActions(isInv, this._sel?.kind === 'slot', isInv);
