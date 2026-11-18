@@ -613,11 +613,14 @@ export class MithrilGame extends Component {
         const def = node.dungeonId ? DUNGEON_BY_ID[node.dungeonId] : null;
         if (!wild || !save || !map || !exp || !def) return;
         const plan = buildWildPlan(map, node);
-        const cur = equipStats(save.equips).ilvl;
+        const st = equipStats(save.equips);
+        const cur = st.ilvl;
         const under = cur + 0.05 < def.ilvlMin;
         const cleared = save.dungeonsCleared.indexOf(def.id) >= 0;
         const lines = [
-            `推荐装等 ${def.ilvlMin}–${def.ilvlMax}　当前平均装等 ${cur.toFixed(1)}`,
+            // 试玩 N138：平均装等只按已装备槽算，2 件高装等会显示成 18.0，
+            // 玩家会拿它和「推荐 12」直接比。槽数必须同屏写出来。
+            `推荐装等 ${def.ilvlMin}–${def.ilvlMax}　当前平均装等 ${cur.toFixed(1)}（${st.equipped}/8 槽）`,
             `阶段：${def.phases.map((p) => p.name).join(' → ')}`,
             cleared
                 ? '已通关：本次没有首通奖励（仍掉副本装备与技能书）'
@@ -1100,6 +1103,10 @@ export class MithrilGame extends Component {
                 }
             } else {
                 const def = node.kind === 'battle' || node.kind === 'elite' ? WILD_REWARDS[node.kind] : null;
+                let dropped = false;
+                // rolled ≠ dropped：背包满时 _grantItem 返回 ''（已折金币），装备其实掷出来了，
+                // 此时同屏已有「背包已满…折算 N 金币」，不能再写「本节点无装备掉落」。
+                let rolled = false;
                 if (def && def.gearChance > 0 && rng() < def.gearChance) {
                     const item = rollItem(rng, {
                         ilvl: node.ilvl,
@@ -1107,9 +1114,32 @@ export class MithrilGame extends Component {
                         minQuality: def.gearMinQuality,
                     });
                     if (item) {
+                        rolled = true;
                         maybeLowerQuality(rng, item, greedChance);
-                        this._grantItem(save, item, granted, reward, undefined, rng);
+                        dropped = this._grantItem(save, item, granted, reward, undefined, rng) !== '';
                     }
+                }
+                // 试玩 N134：首件装备必须在玩家第一次清掉战斗节点时到手。
+                // 原来战斗节点只有 25% 掉率，新手「首胜 → 什么都没有」，前 30 分钟没有成长感（E3=1）。
+                // 只在「身上与背包都没有任何装备」时保底；拿到第一件后立刻恢复常规概率，不滚雪球。
+                if (!dropped) {
+                    const st = equipStats(save.equips);
+                    if (st.equipped === 0 && save.inventory.length === 0) {
+                        const item = rollItem(rng, {
+                            ilvl: node.ilvl,
+                            classId: save.classId,
+                            minQuality: 'uncommon',
+                        });
+                        if (item) {
+                            rolled = true;
+                            maybeLowerQuality(rng, item, greedChance);
+                            dropped = this._grantItem(save, item, granted, reward, undefined, rng) !== '';
+                        }
+                    }
+                }
+                if (!rolled && (node.kind === 'battle' || node.kind === 'elite')) {
+                    // 试玩 N137：无掉落时明说，避免玩家以为漏领
+                    reward.push('本节点无装备掉落（精英 / 宝箱更容易出装备）');
                 }
             }
 
@@ -1159,6 +1189,19 @@ export class MithrilGame extends Component {
             // N86：原句 30 字，在 470 宽的正文里越出面板；压到 21 字一行放得下。
             reward.push('远征结束：本程进度不保留，回路线图重新开始');
             reward.push(lostText ? `丢失：${lostText}` : '本程还没有拾取材料');
+            // 试玩 N136：副本 / 区域首领失败要给可行动的归因。
+            // 只说「远征失败」时，玩家分不清是装等不够还是机制没躲（打掉 84% 后阵亡尤其憋屈）。
+            const dieSnap = this._lastSnapshot;
+            if ((node.kind === 'dungeon' || node.kind === 'boss') && dieSnap && dieSnap.boss) {
+                const bos = dieSnap.boss;
+                const pct = Math.max(0, Math.round((bos.hp / Math.max(1, bos.maxHp)) * 100));
+                reward.push(`首领还剩 ${pct}%（${Math.round(bos.hp)}/${Math.round(bos.maxHp)} 生命）`);
+                const worn = equipStats(save.equips);
+                const rec = node.kind === 'dungeon' && node.dungeonId
+                    ? `${DUNGEON_BY_ID[node.dungeonId].ilvlMin}–${DUNGEON_BY_ID[node.dungeonId].ilvlMax}`
+                    : `${node.ilvl}`;
+                reward.push(`推荐装等 ${rec} · 当前平均装等 ${worn.ilvl.toFixed(1)}（${worn.equipped}/8 槽）`);
+            }
         }
 
         // 悬赏（M8）：胜/负都推进击杀类；通关类只在胜利且节点类型匹配时推进

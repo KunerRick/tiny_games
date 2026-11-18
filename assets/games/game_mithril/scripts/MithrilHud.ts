@@ -150,7 +150,7 @@ export class MithrilHud extends Component {
     onOpenGrowth: (() => void) | null = null;
     /** 战斗中返回 → 暂停层选「返回路线图」 */
     onBackToMap: (() => void) | null = null;
-    /** 首战操作引导已学会（累计 3 击杀或按住普攻满 1 秒） */
+    /** 首战操作引导已学会（累计 3 击杀 / 按住普攻满 1 秒，**且**走位累计 ≥120 像素） */
     onCombatHintDone: (() => void) | null = null;
 
     /** 各技能键当前是否按住（主组件每帧读取） */
@@ -226,6 +226,14 @@ export class MithrilHud extends Component {
     private _hintBaseKills = -1;
     /** 按住普攻累计秒数（HUD 刷新节拍 0.1s） */
     private _hintHold = 0;
+    /**
+     * 首战提示期间累计走位距离（世界像素）。
+     * 试玩 N133：原判定「按住普攻 1 秒」就算学会，导致站桩输出 1 秒后提示消失，
+     * 玩家仍不知道要「边打边走」。现在必须真的移动过（≥120）才收起提示。
+     */
+    private _hintTravelled = 0;
+    private _hintLastX: number | null = null;
+    private _hintLastY: number | null = null;
 
     // ---- 暂停层（体验官 E4）：战斗中返回不再直接换场景 ----
     private _pauseRoot: Node | null = null;
@@ -340,13 +348,16 @@ export class MithrilHud extends Component {
     /**
      * 首战内嵌提示：讲清「按住普攻持续攻击」和「移动自动朝向」。
      * 与 once-only 的 tutorial toast 不同，它由 `combatHintDone` 存档位控制 ——
-     * 玩家没学会之前，每场战斗开头都会再出现，学会（3 击杀 / 按住 1 秒）才永久关闭。
+     * 玩家没学会之前，每场战斗开头都会再出现，学会（3 击杀 / 按住 1 秒，且走位 ≥120 像素）才永久关闭。
      */
     showCombatHint(): void {
         this._buildHint();
         this._hintActive = true;
         this._hintBaseKills = -1;
         this._hintHold = 0;
+        this._hintTravelled = 0;
+        this._hintLastX = null;
+        this._hintLastY = null;
         this._refreshHintText();
         if (this._hintRoot) {
             this._hintRoot.active = true;
@@ -378,14 +389,21 @@ export class MithrilHud extends Component {
             return;
         }
         if (this._hintBaseKills < 0) this._hintBaseKills = snap.kills;
-        if (snap.kills - this._hintBaseKills >= 3) {
-            this._learnCombatHint();
-            return;
+        // 学会「边打边走」必须真的走过位：只站桩输出不收起提示。
+        // 单次位移 >150 视为闪现 / 传送，不计入（HUD 节拍 0.1s，正常移速约 20–40）。
+        if (this._hintLastX !== null && this._hintLastY !== null) {
+            const dx = snap.player.x - this._hintLastX;
+            const dy = snap.player.y - this._hintLastY;
+            const d = Math.sqrt(dx * dx + dy * dy);
+            if (d > 0 && d < 150) this._hintTravelled += d;
         }
+        this._hintLastX = snap.player.x;
+        this._hintLastY = snap.player.y;
         // updateHud 的节拍是 HUD_REFRESH(0.1s)
         if (this.held.basic) this._hintHold += 0.1;
         else this._hintHold = 0;
-        if (this._hintHold >= 0.999) this._learnCombatHint();
+        const attacked = snap.kills - this._hintBaseKills >= 3 || this._hintHold >= 0.999;
+        if (attacked && this._hintTravelled >= 120) this._learnCombatHint();
     }
 
     private _learnCombatHint(): void {

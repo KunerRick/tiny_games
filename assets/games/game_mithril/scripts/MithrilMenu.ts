@@ -39,7 +39,9 @@ const { ccclass } = _decorator;
 
 const ROWS_PER_PAGE = 6;
 const HINT_TEXT = '装备变更将在下一场战斗生效（面板数值已按新装备计算）';
-const TRINKET_HINT_TEXT = '饰品变更将在下一场战斗生效（面板数值已按新饰品计算）';
+// 试玩 N140：原句「面板数值已按新饰品计算」与「饰品只改规则、不加固定数值」同屏互相矛盾。
+// 饰品既然不加数值，就不要承诺「已按新饰品计算」，只说明生效时点。
+const TRINKET_HINT_TEXT = '饰品规则从下一场战斗开始生效';
 const PANEL_W = 680;
 const PANEL_H = 1180;
 
