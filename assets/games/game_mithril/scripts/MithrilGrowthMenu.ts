@@ -20,9 +20,9 @@ import {
 import type { UiButton } from '../../../common/ui/GameUIKit';
 import {
     COMBAT_ILVL_FLOOR, SKILL_BY_ID, SKILLS, TALENT_BY_ID, TALENT_LINE_CAP,
-    TALENT_TREE_NAMES, TALENT_TREE_ORDER, talentTierGate,
+    TALENT_TREE_NAMES, TALENT_TREE_ORDER, talentTierGate, talentsOf,
 } from './MithrilConfig';
-import type { SkillDef, TalentDef } from './MithrilConfig';
+import type { SkillDef, TalentDef, TalentTree } from './MithrilConfig';
 import {
     canChooseVariant, canSpendTalent, canUpgradeSkill, chooseVariant, facilityLevel,
     pendingVariantCount,
@@ -31,7 +31,8 @@ import {
     upgradeSkill, variantRespecCost, variantState,
 } from './MithrilProgress';
 import type { MithrilSave, TalentSpendReason } from './MithrilProgress';
-import { SKILL_CD_PER_LEVEL, SKILL_DMG_PER_LEVEL } from './MithrilTalents';
+import { SKILL_CD_PER_LEVEL, SKILL_DMG_PER_LEVEL, talentEffects } from './MithrilTalents';
+import type { TalentEffects } from './MithrilTalents';
 import { profileFromSave } from './MithrilCore';
 import {
     CLASS_ACCENT, SKILL_GLYPH_KIND, addGlyphNode, inkOnFill, repaintGlyphNode, treeGlyph,
@@ -73,6 +74,75 @@ const TALENT_FAIL: Partial<Record<TalentSpendReason, string>> = {
     'max-rank': '该天赋已满级',
     'line-cap': `本线最多投入 ${TALENT_LINE_CAP} 点`,
 };
+
+/**
+ * 试玩 N185：天赋格一直只写相对百分比（`受伤 −1%` / `护甲 +2%`），玩家没有基准，
+ * 也不知道「点下去这一格面板会变成多少」。这里把 `talentEffects` 的差值翻成
+ * 「下一档收益」与「本次加点生效了什么」两处读数：
+ *  - 格子行末 `→受伤 −1.0%`（只在可加点时出现，锁定格不画饼）
+ *  - 三线切换按钮第二行写本线当前贡献，三线同屏可比
+ *  - 点完格子后底部提示行写「本次加点生效：…」
+ * 顺序即优先级：排在前面的更常被玩家拿来做决策。
+ */
+const EFFECT_DISPLAY: Array<{
+    /**
+     * `dir` = 存档里该字段「每点的数值增量」与「玩家看到的方向」之间的关系：
+     * +1 表示数值变大就是变强（暴击 / 护甲…），-1 表示字段存的是「削减量」，
+     * 数值变大对玩家来说反而是变弱（技能CD / 闪避CD）。
+     * 注意 `takenMul` 是个例外：它存的是带符号的承伤系数（每点 -0.01），
+     * 所以方向直接由数值本身给出，`dir` 保持 +1。
+     */
+    key: keyof TalentEffects; label: string; unit: 'pct' | 'sec' | 'flat'; dir?: 1 | -1;
+}> = [
+    { key: 'takenMul', label: '受伤', unit: 'pct' },
+    { key: 'armor', label: '护甲', unit: 'flat' },
+    { key: 'critChance', label: '暴击', unit: 'pct' },
+    { key: 'critMult', label: '暴伤', unit: 'pct' },
+    { key: 'attackSpeed', label: '攻速', unit: 'pct' },
+    { key: 'skillDamage', label: '技能伤害', unit: 'pct' },
+    { key: 'apPct', label: '攻强', unit: 'pct' },
+    { key: 'healMul', label: '治疗量', unit: 'pct' },
+    { key: 'lowHpDr', label: '残血减伤', unit: 'pct' },
+    { key: 'burstDamage', label: '爆发伤害', unit: 'pct' },
+    { key: 'burstAttackSpeed', label: '爆发攻速', unit: 'pct' },
+    { key: 'executeDamage', label: '斩杀伤害', unit: 'pct' },
+    { key: 'woundedDamage', label: '残血增伤', unit: 'pct' },
+    { key: 'killHealPct', label: '击杀回血', unit: 'pct' },
+    { key: 'meleeReflect', label: '反伤', unit: 'pct' },
+    { key: 'counterReflect', label: '格挡反击', unit: 'pct' },
+    { key: 'thornAoe', label: '荆棘扩散', unit: 'pct' },
+    { key: 'ccResist', label: '控制抗性', unit: 'pct' },
+    { key: 'lowHpDamage', label: '残血伤害', unit: 'pct' },
+    { key: 'burstShield', label: '爆发护盾', unit: 'pct' },
+    { key: 'burstTaken', label: '爆发减伤', unit: 'pct' },
+    { key: 'stackDamage', label: '狂潮增伤', unit: 'pct' },
+    { key: 'slowBonus', label: '减速时长', unit: 'pct' },
+    { key: 'stunBonus', label: '眩晕时长', unit: 'sec' },
+    { key: 'armorBreakBonus', label: '减甲', unit: 'pct' },
+    { key: 'skillCd', label: '技能CD', unit: 'pct', dir: -1 },
+    { key: 'dodgeCdCut', label: '闪避CD', unit: 'sec', dir: -1 },
+    { key: 'rageGain', label: '怒气获取', unit: 'pct' },
+    { key: 'rageRegen', label: '怒气回复', unit: 'flat' },
+];
+
+/** 差值 → 可读文本；`dir` 决定符号（存「削减量」的字段要反过来写） */
+function effectDeltaText(from: TalentEffects, to: TalentEffects, maxItems: number): string {
+    const out: string[] = [];
+    for (const e of EFFECT_DISPLAY) {
+        if (out.length >= maxItems) break;
+        const d = (to[e.key] || 0) - (from[e.key] || 0);
+        if (Math.abs(d) < 1e-6) continue;
+        // 显示的增量按 `dir` 换算成玩家视角的方向（技能CD -2% 而不是 +2%）
+        const shown = (e.dir || 1) * d;
+        const sign = shown > 0 ? '+' : '−';
+        const abs = Math.abs(shown);
+        const num = e.unit === 'pct' ? `${(abs * 100).toFixed(1)}%`
+            : e.unit === 'sec' ? `${abs.toFixed(2)}s`
+                : `${abs.toFixed(1)}`;
+        out.push(`${e.label} ${sign}${num}`);
+    }
+    return out.join(' · ');
+}
 
 @ccclass('MithrilGrowthMenu')
 export class MithrilGrowthMenu extends Component {
@@ -301,6 +371,17 @@ export class MithrilGrowthMenu extends Component {
             btn.label.node.setPosition(14, 0);
             const tut = btn.label.node.getComponent(UITransform);
             if (tut) tut.setContentSize(200 - 44, 44);
+            // N185：三线同屏对比不只比投入点数，也比「这条线现在给了什么」。
+            // 只在本线已有实际面板贡献时加第二行；没有贡献的线保持单行（不画空饼）。
+            const summary = this._treeSummary(save, tree);
+            if (summary) {
+                btn.label.node.setPosition(14, 9);
+                if (tut) tut.setContentSize(200 - 44, 30);
+                createLabel(btn.node, summary, 15, {
+                    width: 186, height: 20, color: active ? T.parchmentDim : T.parchmentMuted,
+                    x: 14, y: -14, overflow: 'shrink',
+                });
+            }
         }
 
         const tree = trees[this._talentTree];
@@ -392,9 +473,20 @@ export class MithrilGrowthMenu extends Component {
         // 试玩 N176：锁定格原本用「本线需 N 点」顶替效果文本，玩家看不到这格给什么，
         // 只能凭名字猜投资方向。门槛改挂到等级行（`0/1 · 需5`），效果文本始终显示；
         // 锁定态文字同时从 parchmentMuted(#8A7E66) 提到 parchmentDim(#B9AB8B)，深底上不再糊。
-        createLabel(node, gateOk ? `${rank}/${def.maxRank}` : `${rank}/${def.maxRank} · 需${gate}`, 16, {
-            width: 210, height: 22,
-            color: maxed ? T.warning : T.parchmentDim, x: 24, y: 8,
+        // N185：可加点时把「这一档具体给什么」写在行末（绝对数值，不再只有相对百分比）；
+        // 锁定格不预告，避免把「点不了的东西」写成承诺。
+        let rankText = gateOk ? `${rank}/${def.maxRank}` : `${rank}/${def.maxRank} · 需${gate}`;
+        if (canSpend) {
+            const preview = effectDeltaText(
+                talentEffects(save.talents, save.classId),
+                talentEffects({ ...save.talents, [def.id]: rank + 1 }, save.classId),
+                1,
+            );
+            if (preview) rankText += ` · →${preview}`;
+        }
+        createLabel(node, rankText, 16, {
+            width: 260, height: 22,
+            color: maxed ? T.warning : T.parchmentDim, x: 10, y: 8,
             overflow: 'shrink',
         });
         // 描述两行（行高 20）占 -46..-6，离 104 高的格子下边框留 6px
@@ -612,8 +704,12 @@ export class MithrilGrowthMenu extends Component {
             }
             return;
         }
+        // N185：点完立刻告诉玩家「这次加点换来了什么」，而不是让底部面板数字悄悄跳一格
+        const before = talentEffects(save.talents, save.classId);
         spendTalent(save, id);
+        const gained = effectDeltaText(before, talentEffects(save.talents, save.classId), 2);
         this._changed();
+        this._flash(gained ? `本次加点生效：${gained}` : '本次加点已生效');
     }
 
     private onVariantTap(ev: EventTouch): void {
@@ -739,7 +835,7 @@ export class MithrilGrowthMenu extends Component {
 
     private _defaultHint(): string {
         if (this._tab === 'talent') {
-            return '点击格子加点：每线最多 25 点，第 N 层需本线已有 5×(N−1) 点';
+            return '点击格子加点：行末 → 是下一档收益；每线最多 25 点，第 N 层需本线已有 5×(N−1) 点';
         }
         const head = '点技能名看详情 · 等级与变体选定后立刻生效 · 变体二选一';
         const save = this._save;
@@ -753,6 +849,30 @@ export class MithrilGrowthMenu extends Component {
         if (!this._hintLabel) return;
         this._hintLabel.string = text;
         this._hintLabel.color = hex(T.danger);
+    }
+
+    /** 正向反馈（加点生效）：写在提示行，颜色与错误提示区分开 */
+    private _flash(text: string): void {
+        if (!this._hintLabel) return;
+        this._hintLabel.string = text;
+        this._hintLabel.color = hex(T.goldBright);
+    }
+
+    /**
+     * 某条线当前贡献的面板效果（N185）。做法：把该线的天赋点数清零再算一次
+     * `talentEffects`，两次的差就是「这条线现在给你的东西」；没有效果表的职业返回空串。
+     */
+    private _treeSummary(save: MithrilSave, tree: TalentTree): string {
+        const zero: Record<string, number> = { ...(save.talents || {}) };
+        let any = false;
+        for (const def of talentsOf(save.classId)) {
+            if (def.tree === tree) {
+                zero[def.id] = 0;
+                any = true;
+            }
+        }
+        if (!any) return '';
+        return effectDeltaText(talentEffects(zero, save.classId), talentEffects(save.talents, save.classId), 1);
     }
 
     private _changed(): void {

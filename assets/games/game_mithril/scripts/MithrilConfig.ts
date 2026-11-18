@@ -998,7 +998,7 @@ export const NODE_KIND_NAMES: Record<NodeKind, string> = {
     elite: '精英',
     chest: '宝箱',
     event: '事件',
-    supply: '篝火',
+    supply: '篝火·回血',
     dungeon: '副本入口',
     boss: '区域首领',
 };
@@ -1519,7 +1519,10 @@ export const MINE_BOSS_SCRIPT: BossScriptDef = {
     ],
     moveInterval: 6,
     moveRadius: 130,
-    moveDamage: 10,
+    // 试玩 N184（round34 数值拍 B1）：10 → 6。矿坑是新手第一个副本，砸地是唯一
+    // 「必须走位」的教学点，但 10 点伤害把「躲圈」变成一次生死检查（不躲 0/24、
+    // 会技能不躲 18/24、bot 24/24）；降到 6 后不躲圈仍明显掉血，但不再必死。
+    moveDamage: 6,
     moveWarn: 1.1,
     addsInterval: 16,
     addsCount: 2,
@@ -1621,7 +1624,10 @@ export const ENCOUNTER_GAP = 2.2;export const BOSS_INTRO_GAP = 2.4;
 /** 每次遭遇结束恢复最大生命的比例 */
 export const ENCOUNTER_HEAL_PCT = 0.25;
 /** 每次 BOSS 阶段转换的回血（给三阶段战斗留呼吸窗口） */
-export const BOSS_PHASE_HEAL_PCT = 0.2;
+// 试玩 N184（round34 数值拍 B1）：0.20 → 0.30。阶段转换回血是「不会躲圈」玩家的
+// 主要生存杠杆（单改回血 0/6→3/6，单改砸地 ≈2/6，两者同时 5/6）；对 bot 副本用时
+// 无影响（136.1 s 不变），033 / 036 平衡闸不受触碰。
+export const BOSS_PHASE_HEAL_PCT = 0.3;
 
 // ---- 血球（击杀掉落，补续航；设计 §7.2 的「血球拾取」以此为基） ----
 export const ORB_HEAL_PCT = 0.12;

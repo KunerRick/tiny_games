@@ -433,7 +433,7 @@ export class MithrilWildMap extends Component {
             { kind: 'elite', label: '精英' },
             { kind: 'chest', label: '宝箱' },
             { kind: 'event', label: '事件' },
-            { kind: 'supply', label: '篝火' },
+            { kind: 'supply', label: '篝火·回血' },
             { kind: 'dungeon', label: '副本' },
             { kind: 'boss', label: '首领' },
         ];
@@ -719,8 +719,11 @@ export class MithrilWildMap extends Component {
             : boss ? `推荐装等 ${node.ilvl}` : `Lv${node.level}`;
         // 试玩 N178：11 design px ≈ 5.8 CSS px，手机上前路信息要凑近看。抬到 16
         // （=8.5 CSS px），标签盒同步加宽到 130；同层节点最小横向间距 219 design px，不会蹭到邻格。
+        // 试玩 N183：三行 16/16/14 号字的包围盒相邻处只剩 ≈3 design px，
+        // 微信字体度量与桌面不同，真机可能贴边。中心距统一抬到 28（46 / 74）：
+        // 16 号字行高 25.2，包围盒之间留 2.8 / 4.0 design px。
         const sub = createLabel(holder, subLabel, 16, {
-            width: 130, height: 22, color: T.parchmentDim, y: -r - 40,
+            width: 130, height: 22, color: T.parchmentDim, y: -r - 46,
         });
         this._bindNodeHit(sub.node, node.id);
         // 试玩 N142：「平均装等」只对已装备槽求平均，2 件高装等会显示成 18.0，
@@ -729,7 +732,7 @@ export class MithrilWildMap extends Component {
         if (boss && view.equippedSlots !== undefined) {
             // 试玩 N178：10 → 14；同时下移到 −r−56，避开加高后的装等行
             const slots = createLabel(holder, `已装备 ${view.equippedSlots}/${view.slotTotal || 8} 槽`, 14, {
-                width: 140, height: 20, color: T.parchmentDim, y: -r - 64,
+                width: 140, height: 20, color: T.parchmentDim, y: -r - 74,
             });
             this._bindNodeHit(slots.node, node.id);
         }

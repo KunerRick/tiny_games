@@ -40,7 +40,7 @@ import {
 } from './MithrilProgress';
 import type { MithrilSave } from './MithrilProgress';
 import {
-    COMBAT_ILVL_FLOOR, DUNGEON_BY_ID, FIRST_CLEAR_EXP, GEAR_BASE_BY_ID, GEAR_SLOT_NAMES, GEAR_SLOTS,
+    COMBAT_ILVL_FLOOR, DUNGEON_BOSS_SCRIPTS, DUNGEON_BY_ID, FIRST_CLEAR_EXP, GEAR_BASE_BY_ID, GEAR_SLOT_NAMES, GEAR_SLOTS,
     QUALITY_BY_ID,
     REGION_BOSS_BY_ID, REGION_BY_ID, REGIONS, SKILL_BOOK_FIRST_CLEAR, SKILL_BOOK_PER_CLEAR,
     SUPPLY_EXHAUST_HP_PCT, SUPPLY_PER_RUN,
@@ -661,20 +661,39 @@ export class MithrilGame extends Component {
         const plan = buildWildPlan(map, node);
         const st = equipStats(save.equips);
         const cur = st.ilvl;
-        const under = cur + 0.05 < def.ilvlMin;
+        // 试玩 N177（round34 数值拍 C）：区间「1–10」被读成官方许可，但真实门槛是
+        // 「槽数 ≥3 且会躲机制」——同是 ilvl3，2 槽 0/24、8 槽 17/24；槽数比装等更能
+        // 预测成败。所以下界改成可胜性点估计，槽数单独成一条硬门槛；高副本没有实测
+        // 数据，维持各自 ilvlMin（矿坑抬到 8），不跟着往上抬。
+        const recMin = def.id === 'mine' ? Math.max(def.ilvlMin, 8) : def.ilvlMin;
+        const underIlvl = cur + 0.05 < recMin;
+        const underSlots = st.equipped < 3;
+        const under = underIlvl || underSlots;
         const cleared = save.dungeonsCleared.indexOf(def.id) >= 0;
+        // 首领机制比阶段名更能指导操作：玩家看「砸地 AoE」并不知道要走出去（N177）。
+        const bossScript = DUNGEON_BOSS_SCRIPTS[def.id];
+        const movePhase = bossScript ? bossScript.phases.filter((p) => p.mechanic === 'move')[0] : null;
         const lines = [
             // 试玩 N138：平均装等只按已装备槽算，2 件高装等会显示成 18.0，
             // 玩家会拿它和「推荐 12」直接比。槽数必须同屏写出来。
-            `推荐装等 ${def.ilvlMin}–${def.ilvlMax}　当前平均装等 ${cur.toFixed(1)}（${st.equipped}/8 槽）`,
-            `阶段：${def.phases.map((p) => p.name).join(' → ')}`,
-            cleared
-                ? '已通关：本次没有首通奖励（仍掉副本装备与技能书）'
-                : `首通奖励：经验 +${FIRST_CLEAR_EXP} · 技能书 +${SKILL_BOOK_FIRST_CLEAR} · 一件紫装`,
-            under
-                ? `警告：装等低于推荐下限 ${def.ilvlMin}，建议先清野外节点`
-                : '难度：与节点等级无关，按副本装等固定结算',
+            `建议：平均装等 ≥${recMin} · 装备 ≥3/8 槽`,
+            `当前：平均装等 ${cur.toFixed(1)} · 已装备 ${st.equipped}/8 槽`,
         ];
+        if (movePhase) {
+            lines.push(`首领机制：${movePhase.name} —— ${movePhase.desc}（${bossScript.moveWarn} 秒预警）`);
+        }
+        lines.push(`阶段：${def.phases.map((p) => p.name).join(' → ')}`);
+        lines.push(cleared
+            ? '已通关：本次没有首通奖励（仍掉副本装备与技能书）'
+            : `首通奖励：经验 +${FIRST_CLEAR_EXP} · 技能书 +${SKILL_BOOK_FIRST_CLEAR} · 一件紫装`);
+        if (under) {
+            const bits: string[] = [];
+            if (underIlvl) bits.push(`平均装等低于建议 ${recMin}`);
+            if (underSlots) bits.push(`只装备 ${st.equipped}/8 槽（建议 ≥3）`);
+            lines.push(`警告：${bits.join(' · ')}，建议先清野外节点`);
+        } else {
+            lines.push('难度：与节点等级无关，按副本装等固定结算');
+        }
         const maxHp = profileFromSave(save, COMBAT_ILVL_FLOOR).maxHp;
         if (exp.supply > 0) {
             // 试玩 N166：确认卡是「按下之前」的界面，用完成时会读成「现在已经耗尽 / 已经扣了」
@@ -866,8 +885,10 @@ export class MithrilGame extends Component {
         lines.push(heal > 0
             ? `治疗 +${heal}（${exp.hp}/${maxHp}）${hpCost > 0 ? `　净变化 ${heal - hpCost >= 0 ? '+' : ''}${heal - hpCost}` : ''}`
             : `生命已满（${exp.hp}/${maxHp}）`);
+        // 试玩 N186：节点叫「篝火」时玩家会默认它补补给（内部 kind=supply），
+        // 文案自洽但与直觉冲突。改叫「篝火·回血」，标题与图例、节点名保持同一叫法。
         lines.push('这里只恢复生命，不补充补给。进度已记录：退出游戏后可以从当前节点继续。');
-        this._wildMapRef?.showMessage('篝火', lines, () => this._refreshMap('休整完毕，继续前进'));
+        this._wildMapRef?.showMessage('篝火·回血', lines, () => this._refreshMap('休整完毕，继续前进'));
     }
 
     /** 路线图上的死亡（补给耗尽 / 陷阱 / 事件）：丢材料、清远征，弹窗告知 */
