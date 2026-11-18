@@ -45,8 +45,8 @@
 - [`tech/wechat-text-rendering.md`](./tech/wechat-text-rendering.md) — 微信文本渲染：变体选择符 VS16 导致图标方框、图标单一来源规约
 - [`tech/wechat-build-pitfalls.md`](./tech/wechat-build-pitfalls.md) — 微信小游戏构建产物：开发者工具「编译报错」的时序根因、**「能编译但一打开就崩」的包装器/项目类型根因**、日志与缓存取证、预检脚本与声明纪律
 - [`tech/dev-toolchain-notes.md`](./tech/dev-toolchain-notes.md) — 文本编码（PowerShell 陷阱）、`tsc` 版本注意事项、提交前检查
-- [`tech/playtest-cycle.md`](./tech/playtest-cycle.md) — 试玩-打磨闭环：fresh 子代理分工、拍/批/阶段、台账与报告格式、级别 + 打磨分两根轴、单拍 / 维度 / 全局结束条件、双轨捷径（纯净路径 / 声明式捷径）
-- [`tech/playtest-dimensions.md`](./tech/playtest-dimensions.md) — 试玩五维方法与达标清单：UI 逐屏巡检、玩法系统盘点（五验证点）、交互 15 项清单、数值脚本 + 三进度点 + 预算对照、稳定性回归冒烟
+- [`tech/playtest-cycle.md`](./tech/playtest-cycle.md) — 试玩-打磨闭环：fresh 子代理分工（复核者按需派发）、拍/批/阶段、台账与报告格式（玩家日记先行 + 旅程记录）、级别 / 打磨分 / 体验分三根轴、五层结束判据（闸门 → 覆盖 → 体验收敛 → 平台期 → 预算 → 发布）、双轨捷径
+- [`tech/playtest-dimensions.md`](./tech/playtest-dimensions.md) — 试玩五维方法与达标清单：UI 逐屏巡检、玩法系统盘点（五验证点）、交互 15 项清单、数值脚本 + 三进度点 + 预算对照、稳定性回归冒烟；另加**跨维旅程线**（旅程脚本 + E1–E4 体验分，§6）
 - [`plans/playtest-ledger-index.md`](./plans/playtest-ledger-index.md) — 试玩台账索引：全局问题编号唯一分配源、各游戏台账与未关闭项
 - [`tech/verify-scripts.md`](./tech/verify-scripts.md) — `tools/` 全部脚本的唯一清单：纯逻辑自检覆盖范围、图标/构建/场景同步脚本的「何时跑」
 - [`design/2026-11-10-ui-art-style-guide.md`](./design/2026-11-10-ui-art-style-guide.md) — 全站 UI / 图标美术规范：设计令牌（`UITheme` / `GameUIKit` / `SceneSkin`）、大厅图标四色法与登记表、新增游戏第四步与 `tools/check-game-icons.js`
