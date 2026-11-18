@@ -355,6 +355,29 @@ export function isAdjacent(map: WildMap, exp: ExpeditionState | null, nodeId: nu
     return !!cur && cur.links.indexOf(nodeId) >= 0;
 }
 
+/**
+ * 当前位置的「前进边」是否只剩精英 / 首领（试玩 N151）。
+ *
+ * 已清理的相邻节点是「可路过」的回退边，不算前进；只有玩家真正的下一站
+ * 全是精英 / 首领时，路线图才需要提醒「可以退回起点换另一支」。
+ * 起点回退本身一直免费，缺的只是可见性。
+ */
+export function onlyForwardIsElite(map: WildMap, exp: ExpeditionState | null): boolean {
+    if (!exp || exp.complete) return false;
+    const cur = nodeById(map, exp.pos);
+    if (!cur) return false;
+    let forward = 0;
+    let danger = 0;
+    for (const id of cur.links) {
+        if (id === exp.pos || exp.done.indexOf(id) >= 0) continue;
+        const next = nodeById(map, id);
+        if (!next) continue;
+        forward++;
+        if (next.kind === 'elite' || next.kind === 'boss') danger++;
+    }
+    return forward > 0 && forward === danger;
+}
+
 /** 当前节点（起点也算） */
 export function currentNode(map: WildMap, exp: ExpeditionState | null): WildNode | null {
     if (!exp) return null;

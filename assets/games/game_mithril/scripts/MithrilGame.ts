@@ -51,7 +51,7 @@ import type { ClassId, EquipItem, RunPlan } from './MithrilConfig';
 import {
     WILD_EVENT_OPTIONS, applyWildEvent, buildWildPlan, chargeNodeEntry, chestGold, chestHasTrap, chestTrapDamage,
     createExpedition, enterNode, failExpedition, generateWildMap, grantRunMaterials, isReachable,
-    markNodeDone, nextRegionHint,
+    markNodeDone, nextRegionHint, onlyForwardIsElite,
     nodeById, nodeName, rollNodeMaterials, supplyHeal, wildRng,
 } from './MithrilWild';
 import type { ExpeditionState, WildEventChoice, WildMap, WildNode } from './MithrilWild';
@@ -67,6 +67,7 @@ import {
 import type { BountyRunReport } from './MithrilBounty';
 import { MithrilAudioUi, playCoreEvents, sfx } from './MithrilAudio';
 import { MithrilHud } from './MithrilHud';
+import type { SkillKey } from './MithrilHud';
 import { MithrilJoystick } from './MithrilJoystick';
 import { MithrilMenu } from './MithrilMenu';
 import { MithrilRenderer } from './MithrilRenderer';
@@ -331,7 +332,7 @@ export class MithrilGame extends Component {
             : (REGION_BY_ID[this._regionId] ? this._regionId : this._defaultRegionId());
         this._ensureMapFor(regionId);
         this._wildMapRef?.show();
-        this._refreshMap(this._mapHint());
+        this._applyMapHint();
     }
 
     /** 战斗层（Field / Controls / HUD）整组显隐，避免地图态下技能键还能被点到 */
@@ -343,7 +344,7 @@ export class MithrilGame extends Component {
         if (hud) hud.node.active = visible;
     }
 
-    private _refreshMap(hint?: string): void {
+    private _refreshMap(hint?: string, warn = false): void {
         const wild = this._wildMapRef;
         const save = this._save;
         if (!wild || !save || !this._wildMap) return;
@@ -362,7 +363,25 @@ export class MithrilGame extends Component {
             equippedSlots: equipStats(save.equips).equipped,
             slotTotal: GEAR_SLOTS.length,
         });
-        if (hint !== undefined) wild.setHint(hint);
+        if (hint !== undefined) wild.setHint(hint, warn);
+    }
+
+    /** 刷新常驻提示（含「前方只有精英」的警示色，试玩 N151） */
+    private _applyMapHint(): void {
+        this._refreshMap(this._mapHint(), this._mapHintIsDanger());
+    }
+
+    /**
+     * 当前是否「唯一前进边是精英 / 首领」。
+     * 只有这种情况才在常驻行提醒「退回起点换支路」——普通地图不污染提示行。
+     */
+    private _mapHintIsDanger(): boolean {
+        const save = this._save;
+        const exp = save ? save.expedition : null;
+        if (!save || !exp || !this._wildMap || exp.complete) return false;
+        // 停在未结算节点时提示是「点白圈续开」，不该叠加回退提示
+        if (exp.pos !== 0 && exp.done.indexOf(exp.pos) < 0) return false;
+        return onlyForwardIsElite(this._wildMap, exp);
     }
 
     private _mapHint(): string {
@@ -377,6 +396,11 @@ export class MithrilGame extends Component {
                     ? '上次的战斗未结算：点当前节点重新挑战（会再扣一次入场消耗）'
                     : '上次的节点还没结算：点当前节点（白圈）把内容接上';
             }
+            // 试玩 N151：面对精英墙时，玩家此前在四处界面都看不到「可以退回起点换支路」。
+            // 这不是提示不够详细，而是唯一解法不可见；只在这条路真的走不通时出现。
+            if (this._mapHintIsDanger()) {
+                return `已清理 ${exp.done.length}/${WILD_NODE_COUNT} 个节点 · 前方只有精英：点蓝圈退回起点，可换另一支（不耗补给）`;
+            }
             const supplyNote = exp.supply <= 0 ? ' · 补给耗尽：下一节点按 8% 生命扣血' : '';
             return `远征进行中：已清理 ${exp.done.length}/${WILD_NODE_COUNT} 个节点 · 绿圈进新节点，蓝圈可路过${supplyNote}`;
         }
@@ -384,7 +408,7 @@ export class MithrilGame extends Component {
         if (save.level < region.levelMin) {
             return `等级不足：${region.name} 需要 Lv${region.levelMin}（当前 Lv${save.level}）`;
         }
-        return '点「开始远征」后，沿金色高亮连线选择下一站';
+        return '点「开始远征」后沿金色连线选下一站；走不通可点蓝圈退回起点换支路';
     }
 
     private onRestartRequested(): void {
@@ -414,7 +438,7 @@ export class MithrilGame extends Component {
         if (exp) {
             if (exp.regionId === regionId) {
                 // 点回当前页签：恢复与当前区域相关的提示，别让上一条提示粘住（试玩 N43）
-                this._refreshMap(this._mapHint());
+                this._applyMapHint();
                 return;
             }
             const running = REGION_BY_ID[exp.regionId] || region;
@@ -429,7 +453,7 @@ export class MithrilGame extends Component {
             return;
         }
         this._ensureMapFor(regionId);
-        this._refreshMap('点「开始远征」后，沿金色高亮连线选择下一站');
+        this._refreshMap('点「开始远征」后沿金色连线选下一站；走不通可点蓝圈退回起点换支路');
     }
 
     private onWildPrimary(): void {
@@ -549,9 +573,10 @@ export class MithrilGame extends Component {
         const res = enterNode(map, exp, node.id, maxHp);
         if (!res.ok) {
             let text = '远征已结束，请重新开始';
-            if (res.reason === 'not_reachable') text = '只能走金色高亮连线连着的相邻节点';
+            if (res.reason === 'not_reachable') text = '只能走金色高亮连线连着的相邻节点（蓝圈已清理节点可回退，不耗补给）';
             else if (res.reason === 'done') text = '该节点已清理，不能重复进入（相邻的已清理节点可以路过）';
-            this._refreshMap(text);
+            // 走不通是最需要被看见的时刻：用警示色，不要读成一句普通说明（试玩 N151）
+            this._refreshMap(text, res.reason === 'not_reachable');
             return;
         }
         // 中途主动离开后再点当前节点（试玩 N66）：不免费续开，而是新一次挑战，重新扣入场消耗。
@@ -1290,11 +1315,23 @@ export class MithrilGame extends Component {
     }
 
     /**
-     * 装备变化：立刻落盘（防切后台丢档），但**不改当前这一局**的 profile ——
-     * 换装生效点在「下一场战斗 / 下一个野外节点」，HUD / 面板上都写明了这一点。
+     * 装备变化：立刻落盘（防切后台丢档），并刷新路线图头部（试玩 N154）。
+     *
+     * 此前只落盘不刷新：穿上三件装备后地图头部仍是「生命 114/114」，
+     * 要整页重载才变成 184 —— 玩家会以为白穿了。换装后 maxHp 可能变小，
+     * 顺手把本次远征的当前生命夹到新上限，别让地图出现 200/184。
+     *
+     * 战斗中的 profile 仍按设计「下一场战斗」生效（面板里也这么写），
+     * 这里只同步地图读数，不把新装备硬塞进进行中的这一局。
      */
     private onEquipmentChanged(): void {
+        const save = this._save;
+        if (save && save.expedition) {
+            const maxHp = profileFromSave(save, COMBAT_ILVL_FLOOR).maxHp;
+            save.expedition.hp = Math.max(1, Math.min(Math.round(maxHp), Math.round(save.expedition.hp)));
+        }
         this._persist();
+        if (this._mode === 'map') this._applyMapHint();
     }
 
     // ==================== 成长面板（天赋 / 技能） ====================
@@ -1482,17 +1519,31 @@ export class MithrilGame extends Component {
         }
 
         const held = this._hudRef?.held;
+        const pending = this._hudRef?.pending;
+        // 试玩 N139：短按锁存只消费一次。按住仍走 held（普攻需要持续施放），
+        // 但 0 ms 单击必须可靠放出一次，不能由帧相位决定。
+        const tap = (key: SkillKey): boolean => {
+            if (!pending || !pending[key]) return false;
+            pending[key] = false;
+            return true;
+        };
+        // 先无条件消费：若写成 `held || tap(key)` 的短路式，按住时 pending 会留到松手那帧，
+        // 放完技能再补一次「幽灵施放」。
+        const tapped: Record<SkillKey, boolean> = {
+            basic: tap('basic'), skill1: tap('skill1'), skill2: tap('skill2'),
+            skill3: tap('skill3'), burst: tap('burst'), dodge: tap('dodge'),
+        };
         this._input = {
             moveX: mx,
             moveY: my,
             aimX: 0,
             aimY: 0,
-            basic: !!held?.basic || k.has(KeyCode.KEY_J),
-            skill1: !!held?.skill1 || k.has(KeyCode.KEY_K) || k.has(KeyCode.SPACE),
-            skill2: !!held?.skill2 || k.has(KeyCode.KEY_L),
-            skill3: !!held?.skill3 || k.has(KeyCode.KEY_U),
-            burst: !!held?.burst || k.has(KeyCode.KEY_I),
-            dodge: !!held?.dodge || k.has(KeyCode.KEY_H),
+            basic: !!held?.basic || tapped.basic || k.has(KeyCode.KEY_J),
+            skill1: !!held?.skill1 || tapped.skill1 || k.has(KeyCode.KEY_K) || k.has(KeyCode.SPACE),
+            skill2: !!held?.skill2 || tapped.skill2 || k.has(KeyCode.KEY_L),
+            skill3: !!held?.skill3 || tapped.skill3 || k.has(KeyCode.KEY_U),
+            burst: !!held?.burst || tapped.burst || k.has(KeyCode.KEY_I),
+            dodge: !!held?.dodge || tapped.dodge || k.has(KeyCode.KEY_H),
         };
     }
 

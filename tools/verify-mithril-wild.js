@@ -14,6 +14,7 @@
  *  8. 事件三选一：回血 / 材料 / 冒险深挖（掉血）与死亡
  *  9. 材料入档与本程合计、失败清空、存档净化（坏档回落 null）
  * 10. Wild 模块纯度：不许 import cc / Date.now / Math.random / localStorage
+ * 11. N151：`onlyForwardIsElite` 只在「唯一前进边全是精英 / 首领」时为真（已清理边不算前进）
  *
  * 用法：node tools/verify-mithril-wild.js
  * 通过时打印 MITHRIL_WILD_OK；失败逐条打印并以退出码 1 结束。
@@ -629,6 +630,52 @@ for (const boss of F.REGION_BOSSES) {
         }
     }
     check('42×3 张图全部走通', walked === F.REGIONS.length * 42, `${walked}`);
+}
+
+// ==================== N151：只有精英 / 首领才算「走不通」 ====================
+{
+    let cases = 0;
+    let dangerSeen = 0;
+    let safeSeen = 0;
+    for (const region of F.REGIONS) {
+        for (const seed of [11, 22]) {
+            const map = W.generateWildMap(region.id, seed);
+            const rawMap = { ...map, nodes: map.nodes.map((n) => ({ ...n, links: n.links.slice() })) };
+            // 每个节点：把除第一条以外的相邻边都标成已清理，只留一条前进边，
+            // 断言 helper 的结果完全由那条边的类型决定。
+            for (const node of rawMap.nodes) {
+                if (node.links.length === 0) continue;
+                const keep = node.links[0];
+                const exp = W.createExpedition(region.id, seed, 200);
+                exp.pos = node.id;
+                exp.done = node.links.filter((id) => id !== keep);
+                const kind = rawMap.nodes[keep].kind;
+                const expected = kind === 'elite' || kind === 'boss';
+                eq(`[${region.id}/${seed}/${node.id}] N151 唯一前进边是 ${kind} → ${expected}`,
+                    W.onlyForwardIsElite(rawMap, exp), expected);
+                cases++;
+                if (expected) dangerSeen++;
+                else safeSeen++;
+            }
+        }
+    }
+    check('N151 覆盖样本同时含「精英墙」与普通前进边', dangerSeen > 0 && safeSeen > 0,
+        `danger=${dangerSeen} safe=${safeSeen}（共 ${cases} 例）`);
+
+    const m2 = W.generateWildMap('ash', 7);
+    // 已清理的相邻节点是「可路过」的回退边，不算前进
+    if (m2.nodes[0].links.length >= 2) {
+        const exp2 = W.createExpedition('ash', 7, 200);
+        exp2.pos = 0;
+        exp2.done = [m2.nodes[0].links[0]];
+        const rest = m2.nodes[0].links.slice(1).map((id) => m2.nodes[id].kind);
+        eq('N151 已清理的相邻节点不算前进边', W.onlyForwardIsElite(m2, exp2),
+            rest.every((k) => k === 'elite' || k === 'boss'));
+    }
+    const exp3 = W.createExpedition('ash', 7, 200);
+    exp3.complete = true;
+    check('N151 远征结束后不再提示回退', W.onlyForwardIsElite(m2, exp3) === false);
+    check('N151 无远征状态不提示', W.onlyForwardIsElite(m2, null) === false);
 }
 
 // ==================== 结果 ====================

@@ -577,6 +577,8 @@ export class MithrilMenu extends Component {
 
     private _refreshDetail(): void {
         if (!this._detailTitle || !this._detailBody) return;
+        const save = this._save;
+        if (!save) return;
         const item = this._selectedItem();
         if (!item) {
             // 试玩 N63：点到空槽位时给明确反馈，别让玩家以为自己点空了
@@ -625,9 +627,30 @@ export class MithrilMenu extends Component {
             if (m) lines.push(`改造「${m.name}」：${m.desc}`);
         }
         for (const line of qualitySpecialLines(item)) lines.push(line);
+        // 试玩 N155：穿上装备后攻击强度可能不升反降 —— 攻击倍率按**平均装等**折算，
+        // 往空槽塞一件低于平均的装备会把平均拉低。这不是算错，但玩家无从判断
+        // 「到底变强没有」。背包件直接给换装前后的差值，并把折算口径写在同一屏。
+        const isInv = this._sel?.kind === 'inv';
+        if (isInv) {
+            const nextEquips = { ...save.equips, [item.slot]: item };
+            const stBefore = equipStats(save.equips);
+            const stAfter = equipStats(nextEquips);
+            const before = profileFromSave(save, this._floorIlvl);
+            const after = profileFromSave({ ...save, equips: nextEquips }, this._floorIlvl);
+            const arrow = (a: number, b: number, digits: number): string => {
+                const diff = b - a;
+                const eps = digits > 0 ? 0.05 : 0.5;
+                if (Math.abs(diff) < eps) return '持平';
+                return `${diff > 0 ? '↑' : '↓'}${Math.abs(diff).toFixed(digits)}`;
+            };
+            lines.push(`换装预览：攻击 ${before.attackPower.toFixed(1)} → ${after.attackPower.toFixed(1)}`
+                + `（${arrow(before.attackPower, after.attackPower, 1)}）`
+                + ` · 生命 ${Math.round(before.maxHp)} → ${Math.round(after.maxHp)}`
+                + `（${arrow(before.maxHp, after.maxHp, 0)}）`);
+            lines.push(`平均装等 ${stBefore.ilvl.toFixed(1)} → ${stAfter.ilvl.toFixed(1)}（攻击强度按平均装等折算）`);
+        }
         this._detailBody.string = lines.join('\n');
 
-        const isInv = this._sel?.kind === 'inv';
         // 出售只对背包件有效；选槽位时不给一个点了没反应的按钮
         this._setActions(isInv, this._sel?.kind === 'slot', isInv);
     }

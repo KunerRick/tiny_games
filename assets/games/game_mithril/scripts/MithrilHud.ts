@@ -158,6 +158,16 @@ export class MithrilHud extends Component {
         basic: false, skill1: false, skill2: false, skill3: false, burst: false, dodge: false,
     };
 
+    /**
+     * 按下锁存（试玩 N139）：TOUCH_START 置位，主组件下一帧消费并清零。
+     * 只轮询 `held` 时，一次 0 ms 单击可能整个发生在两帧之间，或被同帧的
+     * TOUCH_END 覆盖 —— 玩家读到的是「这个键时灵时不灵」。技能没有蓄力语义，
+     * 短按必须可靠地放出一次。
+     */
+    readonly pending: Record<SkillKey, boolean> = {
+        basic: false, skill1: false, skill2: false, skill3: false, burst: false, dodge: false,
+    };
+
     private _barGfx: Graphics | null = null;
     private _hpLabel: Label | null = null;
     private _rageLabel: Label | null = null;
@@ -336,6 +346,7 @@ export class MithrilHud extends Component {
         this._growthTimer = 0;
         if (this._resultRoot) this._resultRoot.active = false;
         for (const key of Object.keys(this.held) as SkillKey[]) this.held[key] = false;
+        for (const key of Object.keys(this.pending) as SkillKey[]) this.pending[key] = false;
         for (const b of this._skills) b.pressed = false;
         this.closePause();
         this.hideCombatHint();
@@ -1176,6 +1187,7 @@ export class MithrilHud extends Component {
         const key = this._keyOf(node);
         if (!key) return;
         this.held[key] = true;
+        this.pending[key] = true;
         const btn = this._skills.find((b) => b.key === key);
         if (btn) btn.pressed = true;
     }
@@ -1192,6 +1204,7 @@ export class MithrilHud extends Component {
     /** 切后台时调用：手机端切走不会派发 TOUCH_END，按住状态的键会一直「粘住」持续施法 */
     releaseAllHeld(): void {
         for (const key of Object.keys(this.held) as SkillKey[]) this.held[key] = false;
+        for (const key of Object.keys(this.pending) as SkillKey[]) this.pending[key] = false;
         for (const b of this._skills) b.pressed = false;
     }
 

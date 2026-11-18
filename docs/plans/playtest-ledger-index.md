@@ -9,14 +9,14 @@
 
 | 项 | 值 |
 |---|---|
-| 全局下一编号 | **N153** |
-| 最后更新 | 2026-11-18（round29 复核：N147/N142/N150/N149 CONFIRMED 关闭；033 下限 1.20 有条件接受、三条件已满足；复核条件「N147 缺回归闸」已补 newplayer E 段 → 123 项） |
+| 全局下一编号 | **N157** |
+| 最后更新 | 2026-11-18（round30 玩法 / 交互：N151 四表面回退文案 + N139 短按锁存 + 报告新开 N153 / N154 / N155 当拍修复，**待复核**；N156 留 `open`；wild 闸 2973 项） |
 
 ## 台账一览
 
 | 游戏 | 台账 | 当前阶段 | 未关闭 P0/P1 | 未关闭 P2/P3 | 最近全量轮 | 下一批焦点 |
 |---|---|---|---|---|---|---|
-| 秘银远征（mithril） | [`playtest-ledger-mithril.md`](./playtest-ledger-mithril.md) | 可玩（P0/P1 = 0；稳定性 `frozen`） | 0 | 14（N143 / N146 / N148 / N151 P3 `open`、N152 P3 `open`（watch，绊线已写死）；N139 / N141 P3 `deferred`；N107 / N127 `accepted`、N128–N132 `deferred`） | round29 复核（数值） | 玩法 / 交互：N151（先补回退文案并重测 E2，再决定拓扑；复核不采纳延期）+ N139 |
+| 秘银远征（mithril） | [`playtest-ledger-mithril.md`](./playtest-ledger-mithril.md) | 可玩（P0/P1 = 0；稳定性 `frozen`；round30 无新 P0/P1） | 0 | **18**（14 条存量 + round30 新开 4；其中 N151 / N139 / N153 / N154 / N155 已修**待复核**，N156 `open`；存量 N143 / N146 / N148 `open`、N152 `open`（watch）、N141 `deferred`、N107 / N127 `accepted`、N128–N132 `deferred`） | round30（玩法 / 交互） | round30 独立复核（5 条跨系统修复）→ UI 收尾（N156 + N128–N132 等） |
 | 冰箱底下（fridge） | 未建（下次跑该游戏时按模板建立） | 可玩 | 0 | 2（N34/N35，均 P3，round9 遗留） | round9 | UI / 交互 |
 
 ## 其他历史轮次（未单独立台账）
@@ -25,7 +25,7 @@
 |---|---|
 | N1–N18（全站 UX 大扫，round1–2） | 跨游戏共性问题；修复与未落地项见 [`2026-11-11-playtest-fix-review.md`](./2026-11-11-playtest-fix-review.md) 与各轮复验 |
 | N19–N33（冰箱，round3–9） | 状态见 [`2026-11-13-playtest-round5-reverify.md`](./2026-11-13-playtest-round5-reverify.md)、[`2026-11-13-playtest-round6-reverify.md`](./2026-11-13-playtest-round6-reverify.md) 与 round7–9 报告；**N34/N35 仍未关闭** |
-| N36–N152（秘银，round10–29） | 见 [`playtest-ledger-mithril.md`](./playtest-ledger-mithril.md) 的归档区间与未关闭项；round27 新开 N133–N143，经独立复核关闭 7 条、N135 判 `within`；round28 新开 N144–N147（N144/N145 经独立复核 CONFIRMED 关闭），复核另开 N148/N149；round29 修 N147（副本首领血 1800，033 下限 1.20）并落地 N142/N149/N150，新开 N150–N152；**round29 复核四条全部 CONFIRMED 关闭，033 有条件接受且三条件已满足，复核条件「N147 缺回归闸」已补 `verify-mithril-newplayer` E 段 → 123 项** |
+| N36–N156（秘银，round10–30） | 见 [`playtest-ledger-mithril.md`](./playtest-ledger-mithril.md) 的归档区间与未关闭项；round27 新开 N133–N143，经独立复核关闭 7 条、N135 判 `within`；round28 新开 N144–N147（N144/N145 经独立复核 CONFIRMED 关闭），复核另开 N148/N149；round29 修 N147（副本首领血 1800，033 下限 1.20）并落地 N142/N149/N150，新开 N150–N152；round29 复核四条全部 CONFIRMED 关闭；**round30 修 N151（四表面回退文案 + 条件化警示，wild 闸 2973 项）与 N139（0 ms 短按），新开 N153–N156（N153/N154/N155 当拍修、N156 `open`），复核待派** |
 
 ## 编号规则
 

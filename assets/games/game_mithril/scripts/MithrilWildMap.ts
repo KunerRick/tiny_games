@@ -34,6 +34,7 @@ import {
     isNodeDone,
     isReachable,
     nodeName,
+    onlyForwardIsElite,
 } from './MithrilWild';
 import type {
     ExpeditionState,
@@ -157,8 +158,14 @@ export class MithrilWildMap extends Component {
         return this.node.active;
     }
 
-    setHint(text: string): void {
-        if (this._hint) this._hint.string = text;
+    /**
+     * 常驻提示行。`warn` 用于「唯一前进边是精英 / 首领」——把回退方法写成警示色，
+     * 避免玩家读成普通说明（试玩 N151）。
+     */
+    setHint(text: string, warn = false): void {
+        if (!this._hint) return;
+        this._hint.string = text;
+        this._hint.color = hex(warn ? T.warning : T.parchmentDim);
     }
 
     refresh(view: WildMapView): void {
@@ -660,10 +667,13 @@ export class MithrilWildMap extends Component {
         }
 
         const name = nodeName(node);
-        createLabel(holder, name, boss ? 14 : 13, {
+        const nameLabel = createLabel(holder, name, boss ? 14 : 13, {
             width: 110, height: 20, color: done ? T.parchmentMuted : T.parchment,
             bold: boss, y: -r - 16,
         });
+        // 试玩 N153：名字 / 等级 / 槽数此前是死区 —— 玩家点文字没有任何反应，
+        // 只有 84×84 的圆圈生效。把这两行也接进同一个点击入口。
+        this._bindNodeHit(nameLabel.node, node.id);
         // 副本标签写「装等 1-10」而不是节点层数 Lv：两座副本都落在第 4 层，
         // 旧的「都写 Lv8」掩盖了 1–10 / 10–16 的真实强度差（体验官 E2）
         const dg = node.kind === 'dungeon' && node.dungeonId ? DUNGEON_BY_ID[node.dungeonId] : null;
@@ -671,19 +681,27 @@ export class MithrilWildMap extends Component {
         const subLabel = dg
             ? `装等 ${dg.ilvlMin}-${dg.ilvlMax}`
             : boss ? `推荐装等 ${node.ilvl}` : `Lv${node.level}`;
-        createLabel(holder, subLabel, 11, {
+        const sub = createLabel(holder, subLabel, 11, {
             width: 100, height: 18, color: T.parchmentDim, y: -r - 34,
         });
+        this._bindNodeHit(sub.node, node.id);
         // 试玩 N142：「平均装等」只对已装备槽求平均，2 件高装等会显示成 18.0，
         // 玩家拿它和「推荐装等 12」直接比就会误判。首领节点把槽数同屏写出来。
         // 首领固定在最后一层（layer 5），下方没有节点，这一行不会撞到别的东西。
         if (boss && view.equippedSlots !== undefined) {
-            createLabel(holder, `已装备 ${view.equippedSlots}/${view.slotTotal || 8} 槽`, 10, {
+            const slots = createLabel(holder, `已装备 ${view.equippedSlots}/${view.slotTotal || 8} 槽`, 10, {
                 width: 110, height: 16, color: T.parchmentDim, y: -r - 50,
             });
+            this._bindNodeHit(slots.node, node.id);
         }
 
         holder.on(Node.EventType.TOUCH_END, this.onNodeTap, this);
+    }
+
+    /** 把文字节点也注册成节点点击区（试玩 N153）；TOUCH_END 会冒泡，onNodeTap 里去重 */
+    private _bindNodeHit(labelNode: Node, nodeId: number): void {
+        this._nodeIds.set(labelNode, nodeId);
+        labelNode.on(Node.EventType.TOUCH_END, this.onNodeTap, this);
     }
 
     private _drawGlyph(g: Graphics, kind: NodeKind, r: number, color: string, boss: boolean): void {
@@ -765,7 +783,11 @@ export class MithrilWildMap extends Component {
         }
         if (exp.complete) return '本次远征已结束';
         if (exp.pos !== 0 && exp.done.indexOf(exp.pos) < 0) return '上一次的节点还没结算：点白圈继续';
-        return '绿圈进新节点 · 蓝圈可路过已清理节点 · 起点随时可回';
+        // 试玩 N151：唯一前进边是精英 / 首领时，把「退回起点换支路且免费」直接写出来
+        if (onlyForwardIsElite(view.map, exp)) {
+            return '前方只有精英：点蓝圈退回起点，可换另一支（不耗补给）';
+        }
+        return '绿圈进新节点 · 蓝圈可路过已清理节点 · 退回起点不耗补给';
     }
 
     // ==================== 交互 ====================
@@ -779,6 +801,9 @@ export class MithrilWildMap extends Component {
     }
 
     private onNodeTap(ev: EventTouch): void {
+        // 文字节点与圆圈是父子关系，TOUCH_END 会从文字冒泡到 holder：
+        // 只处理真正被点中的那一个，否则一次点击会进两次节点（试玩 N153）。
+        if (ev.target !== ev.currentTarget) return;
         const node = ev.currentTarget as Node;
         const id = this._nodeIds.get(node);
         if (id === undefined) return;
