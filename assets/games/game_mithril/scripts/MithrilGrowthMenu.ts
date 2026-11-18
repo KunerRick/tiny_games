@@ -36,6 +36,7 @@ import { profileFromSave } from './MithrilCore';
 import {
     CLASS_ACCENT, SKILL_GLYPH_KIND, addGlyphNode, inkOnFill, repaintGlyphNode, treeGlyph,
 } from './MithrilArt';
+import { MITH_UI as T, drawStoneTrim } from './MithrilTheme';
 
 const { ccclass } = _decorator;
 
@@ -118,8 +119,8 @@ export class MithrilGrowthMenu extends Component {
         if (this._tabTalentBtn) this._tabTalentBtn.setActive(this._tab === 'talent');
         if (this._tabSkillBtn) this._tabSkillBtn.setActive(this._tab === 'skill');
         // 选中页签底色就是主题蓝：图标与下划线必须换对比墨色（N88）
-        this._paintTabDecor('talent', 'star', '#FBBF24', this._tab === 'talent');
-        this._paintTabDecor('skill', 'skill', '#60A5FA', this._tab === 'skill');
+        this._paintTabDecor('talent', 'star', T.gold, this._tab === 'talent');
+        this._paintTabDecor('skill', 'skill', T.gold, this._tab === 'skill');
         if (this._tabTalentMark && this._tabTalentMark.isValid) {
             this._tabTalentMark.active = this._tab === 'talent';
         }
@@ -129,7 +130,7 @@ export class MithrilGrowthMenu extends Component {
         if (this._pointsLabel) this._pointsLabel.string = this._pointsText(save);
         if (this._hintLabel) {
             this._hintLabel.string = this._defaultHint();
-            this._hintLabel.color = hex(COLOR.WARNING);
+            this._hintLabel.color = hex(T.warning);
         }
         clearChildren(content);
         if (this._tab === 'talent') this._renderTalent();
@@ -162,48 +163,49 @@ export class MithrilGrowthMenu extends Component {
         panel.layer = this.node.layer;
         panel.addComponent(UITransform).setContentSize(PANEL_W, PANEL_H);
         const pg = panel.addComponent(Graphics);
-        pg.fillColor = hex(COLOR.PANEL_BG, 255);
+        pg.fillColor = hex(T.stone, 255);
         pg.roundRect(-PANEL_W / 2, -PANEL_H / 2, PANEL_W, PANEL_H, 26);
         pg.fill();
-        pg.strokeColor = hex(COLOR.PANEL_BORDER, 255);
+        pg.strokeColor = hex(T.goldDim, 255);
         pg.lineWidth = 3;
         pg.roundRect(-PANEL_W / 2, -PANEL_H / 2, PANEL_W, PANEL_H, 26);
         pg.stroke();
+        drawStoneTrim(pg, PANEL_W, PANEL_H, 26);
         root.addChild(panel);
         this._panel = panel;
         // 首次构建不显示：整棵树（含遮罩）一起关
         root.active = false;
 
         createLabel(panel, '成长', 34, {
-            width: 300, height: 48, color: COLOR.TEXT_PRIMARY, bold: true, x: 0, y: 418,
+            width: 300, height: 48, color: T.parchment, bold: true, x: 0, y: 418,
         });
         const closeBtn = createButton(panel, {
             w: 116, h: 50, text: '返回', fontSize: 22,
-            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            fill: T.stoneLight, textColor: T.parchment, activeFill: T.stonePressed,
             radius: 14, onTap: () => this._onCloseTap(),
         });
         closeBtn.node.setPosition(272, 418, 0);
 
         this._tabTalentBtn = createButton(panel, {
             w: 164, h: 50, text: '天赋', fontSize: 21,
-            fill: '#334155', textColor: COLOR.TEXT_PRIMARY,
-            activeFill: COLOR.PRIMARY, activeTextColor: '#FFFFFF',
-            radius: 12, stroke: '#46536B', onTap: () => this._onTabTap('talent'),
+            fill: T.stoneLight, textColor: T.parchment,
+            activeFill: T.gold, activeTextColor: T.parchment,
+            radius: 12, stroke: T.goldLine, onTap: () => this._onTabTap('talent'),
         });
         this._tabTalentBtn.node.setPosition(-88, 360, 0);
         this._tabSkillBtn = createButton(panel, {
             w: 164, h: 50, text: '技能', fontSize: 21,
-            fill: '#334155', textColor: COLOR.TEXT_PRIMARY,
-            activeFill: COLOR.PRIMARY, activeTextColor: '#FFFFFF',
-            radius: 12, stroke: '#46536B', onTap: () => this._onTabTap('skill'),
+            fill: T.stoneLight, textColor: T.parchment,
+            activeFill: T.gold, activeTextColor: T.parchment,
+            radius: 12, stroke: T.goldLine, onTap: () => this._onTabTap('skill'),
         });
         this._tabSkillBtn.node.setPosition(88, 360, 0);
         // 页签图标 + 选中下划线（N76）
-        this._tabTalentMark = this._decorateTab(this._tabTalentBtn, 'star', '#FBBF24', 'talent');
-        this._tabSkillMark = this._decorateTab(this._tabSkillBtn, 'skill', '#60A5FA', 'skill');
+        this._tabTalentMark = this._decorateTab(this._tabTalentBtn, 'star', T.gold, 'talent');
+        this._tabSkillMark = this._decorateTab(this._tabSkillBtn, 'skill', T.gold, 'skill');
 
         this._pointsLabel = createLabel(panel, '', 16, {
-            width: 380, height: 26, color: COLOR.TEXT_SECONDARY, align: 'left', x: -132, y: 316,
+            width: 380, height: 26, color: T.parchmentDim, align: 'left', x: -132, y: 316,
             overflow: 'shrink',
         });
 
@@ -214,7 +216,7 @@ export class MithrilGrowthMenu extends Component {
         this._content = content;
 
         this._hintLabel = createLabel(panel, '', 15, {
-            width: 640, height: 40, color: COLOR.WARNING, x: 0, y: -438, lineHeight: 20,
+            width: 640, height: 40, color: T.warning, x: 0, y: -438, lineHeight: 20,
         });
     }
 
@@ -240,7 +242,7 @@ export class MithrilGrowthMenu extends Component {
 
     /** 页签选中态换色（N88）：选中底是主题蓝，同色图标/下划线会整块消失 */
     private _paintTabDecor(id: TabId, kind: string, color: string, active: boolean): void {
-        const ink = inkOnFill(COLOR.PRIMARY);
+        const ink = T.ink;
         repaintGlyphNode(
             id === 'talent' ? this._tabTalentIcon : this._tabSkillIcon,
             kind, 11, active ? ink : color, active ? 70 : 40,
@@ -271,7 +273,7 @@ export class MithrilGrowthMenu extends Component {
             addGlyphNode(content, `TreeIcon_${tree}`, tg.kind, 11, tg.color, TALENT_COL_X[tr] - 78, 288, 45);
             createLabel(content, `${TALENT_TREE_NAMES[tree]}  ${inTree}/${TALENT_LINE_CAP}`, 19, {
                 width: 176, height: 28, bold: true, x: TALENT_COL_X[tr] + 10, y: 288,
-                color: inTree >= TALENT_LINE_CAP ? COLOR.WARNING : COLOR.TEXT_PRIMARY,
+                color: inTree >= TALENT_LINE_CAP ? T.warning : T.parchment,
             });
             for (let tier = 1; tier <= 5; tier++) {
                 const y = TALENT_ROW_TOP - (tier - 1) * TALENT_ROW_STEP;
@@ -292,7 +294,7 @@ export class MithrilGrowthMenu extends Component {
             `急速 ${pct(prof.haste)}　精通 ${pct(prof.mastery)}　全能 ${pct(prof.vers)}`,
             `已投 ${spent}/${talentPointsForLevel(save.level)} 点 · 加点立刻作用于当前这一局`,
         ].join('\n'), 16, {
-            width: 620, height: 108, color: COLOR.TEXT_SECONDARY, x: 0, y: -224, lineHeight: 30,
+            width: 620, height: 108, color: T.parchmentDim, x: 0, y: -224, lineHeight: 30,
         });
 
         const respecCost = talentRespecCost(save);
@@ -302,10 +304,10 @@ export class MithrilGrowthMenu extends Component {
             text: !campReady ? '洗点（营地训练场 Lv1 解锁）'
                 : (respecCost > 0 ? `洗点 ${respecCost} 金` : '洗点（免费）'),
             fontSize: 18,
-            fill: campReady ? '#334155' : '#1A2332',
-            textColor: campReady ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED,
-            activeFill: '#475569',
-            radius: 12, stroke: '#3A4658', onTap: () => this._onRespecTalents(),
+            fill: campReady ? T.stoneLight : T.stoneDark,
+            textColor: campReady ? T.parchment : T.parchmentMuted,
+            activeFill: T.stonePressed,
+            radius: 12, stroke: T.goldLine, onTap: () => this._onRespecTalents(),
         });
         respec.node.setPosition(0, -338, 0);
     }
@@ -328,8 +330,8 @@ export class MithrilGrowthMenu extends Component {
         node.setPosition(x, y, 0);
         parent.addChild(node);
 
-        const fill = rank > 0 ? (maxed ? '#3B2A0B' : '#1E3A5F') : (gateOk ? '#1E293B' : '#141B28');
-        const border = maxed ? '#F59E0B' : (canSpend ? '#60A5FA' : (gateOk ? '#475569' : '#2A3446'));
+        const fill = rank > 0 ? (maxed ? T.rowActive : T.rowActive) : (gateOk ? T.row : T.stoneDark);
+        const border = maxed ? T.goldBright : (canSpend ? T.gold : (gateOk ? T.stonePressed : T.stonePressed));
         const g = node.addComponent(Graphics);
         g.fillColor = hex(fill, 255);
         g.roundRect(-TALENT_CELL_W / 2, -TALENT_CELL_H / 2, TALENT_CELL_W, TALENT_CELL_H, 10);
@@ -346,19 +348,19 @@ export class MithrilGrowthMenu extends Component {
         // 角落天赋图标
         addGlyphNode(node, `TalentIcon_${def.id}`, tg.kind, 8, tg.color, -35, 25, rank > 0 ? 70 : 35);
 
-        const nameColor = maxed ? '#F59E0B' : (gateOk ? COLOR.TEXT_PRIMARY : '#64748B');
+        const nameColor = maxed ? T.goldBright : (gateOk ? T.parchment : T.parchmentMuted);
         createLabel(node, def.name, 14, {
             width: 72, height: 20, color: nameColor, bold: true, x: 10, y: 24,
             overflow: 'shrink',
         });
         createLabel(node, `${rank}/${def.maxRank}`, 12, {
             width: 84, height: 16,
-            color: maxed ? COLOR.WARNING : (gateOk ? COLOR.TEXT_SECONDARY : '#64748B'), y: 8,
+            color: maxed ? T.warning : (gateOk ? T.parchmentDim : T.parchmentMuted), y: 8,
         });
         // 试玩 N87：描述折成两行时第二行会被格子下边框切掉（如「击杀回 1% 生命」只剩「生命」半截），
         // 描述框下移到 -18、加宽到 88、行高 14 → 两行占 -32..-4，离下边框仍留 7px。
         createLabel(node, gateOk ? def.desc : `本线需 ${gate} 点`, 12, {
-            width: 88, height: 30, color: gateOk ? COLOR.TEXT_SECONDARY : '#64748B',
+            width: 88, height: 30, color: gateOk ? T.parchmentDim : T.parchmentMuted,
             x: 2, y: -18, lineHeight: 14, overflow: 'shrink',
         });
 
@@ -383,7 +385,7 @@ export class MithrilGrowthMenu extends Component {
         const sel = SKILL_BY_ID[this._selSkill] || defs[0];
         if (sel) {
             createLabel(content, this._skillInfoText(sel), 16, {
-                width: 630, height: 205, color: COLOR.TEXT_SECONDARY, x: 0, y: -302, lineHeight: 22,
+                width: 630, height: 205, color: T.parchmentDim, x: 0, y: -302, lineHeight: 22,
                 overflow: 'shrink',
             });
         }
@@ -397,10 +399,10 @@ export class MithrilGrowthMenu extends Component {
             text: !campReady ? '变体重置（需训练场 Lv1）'
                 : (variantCost > 0 ? `重置变体 ${variantCost} 金` : '重置变体（免费）'),
             fontSize: 18,
-            fill: campReady ? '#334155' : '#1A2332',
-            textColor: campReady ? COLOR.TEXT_PRIMARY : COLOR.TEXT_DISABLED,
-            activeFill: '#475569',
-            radius: 12, stroke: '#3A4658', onTap: () => this._onRespecVariants(),
+            fill: campReady ? T.stoneLight : T.stoneDark,
+            textColor: campReady ? T.parchment : T.parchmentMuted,
+            activeFill: T.stonePressed,
+            radius: 12, stroke: T.goldLine, onTap: () => this._onRespecVariants(),
         });
         respec.node.setPosition(199, 316, 0);
     }
@@ -420,18 +422,18 @@ export class MithrilGrowthMenu extends Component {
         block.setPosition(-240, y, 0);
         parent.addChild(block);
         const bg = block.addComponent(Graphics);
-        bg.fillColor = hex(selected ? '#1E3A5F' : '#1E293B', 255);
+        bg.fillColor = hex(selected ? T.rowActive : T.row, 255);
         bg.roundRect(-90, -36, 180, 72, 10);
         bg.fill();
-        bg.strokeColor = hex(selected ? '#60A5FA' : COLOR.PANEL_BORDER, selected ? 235 : 160);
+        bg.strokeColor = hex(selected ? T.gold : T.goldDim, selected ? 235 : 160);
         bg.lineWidth = 2;
         bg.roundRect(-90, -36, 180, 72, 10);
         bg.stroke();
         // 技能图标（N80）：按职业强调色，六个技能位各有图形
-        const accent = CLASS_ACCENT[save.classId] || COLOR.PRIMARY;
+        const accent = CLASS_ACCENT[save.classId] || T.gold;
         addGlyphNode(block, `SkillIcon_${def.id}`, SKILL_GLYPH_KIND[def.id] || 'skill', 15, accent, -64, 2, 45);
         createLabel(block, `${def.name}  Lv${level}`, 17, {
-            width: 130, height: 22, color: COLOR.TEXT_PRIMARY, bold: true, x: 17,
+            width: 130, height: 22, color: T.parchment, bold: true, x: 17,
             y: def.variants ? 18 : 0, overflow: 'shrink',
         });
         // 基础描述只在右侧详情展示：12pt 塞进 168 宽会折两行，和技能名挤在一起几乎读不清（复核排版回归）
@@ -446,7 +448,7 @@ export class MithrilGrowthMenu extends Component {
             const anyPicked = pickedNames.length > 0;
             createLabel(block, anyPicked ? `变体 ${pickedNames.join(' · ')}` : '变体 未选', 12, {
                 width: 134, height: 16, x: 15,
-                color: anyPicked ? COLOR.INFO : COLOR.TEXT_DISABLED, y: -18, overflow: 'shrink',
+                color: anyPicked ? T.info : T.parchmentMuted, y: -18, overflow: 'shrink',
             });
         }
         block.on(Node.EventType.TOUCH_END, this.onSkillInfoTap, this);
@@ -457,9 +459,9 @@ export class MithrilGrowthMenu extends Component {
             w: 104, h: 46,
             text: level >= SKILL_LEVEL_MAX ? '已满级' : '升级 1 本',
             fontSize: 15,
-            fill: check.ok ? '#334155' : '#1A2332',
-            textColor: check.ok ? COLOR.TEXT_PRIMARY : '#64748B',
-            activeFill: '#475569',
+            fill: check.ok ? T.stoneLight : T.stoneDark,
+            textColor: check.ok ? T.parchment : T.parchmentMuted,
+            activeFill: T.stonePressed,
             radius: 10,
             onTap: () => this._onUpgradeSkill(def.id),
         });
@@ -501,8 +503,8 @@ export class MithrilGrowthMenu extends Component {
         node.setPosition(x, y, 0);
         parent.addChild(node);
 
-        const fill = isChosen ? '#B45309' : (pickable ? '#334155' : '#1A2332');
-        const border = isChosen ? '#F59E0B' : (pickable ? '#475569' : '#2A3446');
+        const fill = isChosen ? T.gold : (pickable ? T.stoneLight : T.stoneDark);
+        const border = isChosen ? T.goldBright : (pickable ? T.stonePressed : T.stonePressed);
         const g = node.addComponent(Graphics);
         g.fillColor = hex(fill, 255);
         g.roundRect(-63, -16, 126, 32, 8);
@@ -512,7 +514,7 @@ export class MithrilGrowthMenu extends Component {
         g.roundRect(-63, -16, 126, 32, 8);
         g.stroke();
         // 状态点：已选实心金 / 可选蓝 / 未解锁灰（N80：变体栏也有第二重信号）
-        g.fillColor = hex(isChosen ? '#FBBF24' : (pickable ? '#93C5FD' : '#475569'), 255);
+        g.fillColor = hex(isChosen ? T.gold : (pickable ? T.goldBright : T.stonePressed), 255);
         g.circle(-54, 0, 3.5);
         g.fill();
 
@@ -521,7 +523,7 @@ export class MithrilGrowthMenu extends Component {
             : (isChosen ? `已选·${vdef.name}` : `${tier}级·${vdef.name}`);
         createLabel(node, text, 13, {
             width: 100, height: 26, bold: isChosen, x: 7,
-            color: isChosen ? '#FFFFFF' : (pickable ? COLOR.TEXT_PRIMARY : '#64748B'),
+            color: isChosen ? T.parchment : (pickable ? T.parchment : T.parchmentMuted),
             overflow: 'shrink',
         });
         node.on(Node.EventType.TOUCH_END, this.onVariantTap, this);
@@ -710,7 +712,7 @@ export class MithrilGrowthMenu extends Component {
     private _notice(text: string): void {
         if (!this._hintLabel) return;
         this._hintLabel.string = text;
-        this._hintLabel.color = hex(COLOR.DANGER);
+        this._hintLabel.color = hex(T.danger);
     }
 
     private _changed(): void {

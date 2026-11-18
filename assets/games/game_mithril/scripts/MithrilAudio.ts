@@ -12,7 +12,8 @@
 
 import { _decorator, Component, Graphics, Label, Node, UITransform } from 'cc';
 import { GameAudio } from '../../../common/audio/GameAudio';
-import { COLOR, hex } from '../../../common/ui/GameUIKit';
+import { hex } from '../../../common/ui/GameUIKit';
+import { MITH_UI as T } from './MithrilTheme';
 import type { CoreEvent } from './MithrilCore';
 import { coreEventSfx } from './MithrilAudioMap';
 
@@ -122,7 +123,7 @@ export class MithrilAudioUi extends Component {
         const label = labelNode.addComponent(Label);
         label.fontSize = 17;
         label.lineHeight = 22;
-        label.color = hex(COLOR.TEXT_SECONDARY);
+        label.color = hex(T.parchmentDim);
         label.horizontalAlign = Label.HorizontalAlign.CENTER;
         label.verticalAlign = Label.VerticalAlign.CENTER;
         label.overflow = Label.Overflow.NONE;
@@ -142,10 +143,10 @@ export class MithrilAudioUi extends Component {
         const g = this._bg;
         if (!g) return;
         g.clear();
-        g.fillColor = hex(COLOR.SLOT_EMPTY_BG, sfx.enabled ? 200 : 130);
+        g.fillColor = hex(T.stoneDark, sfx.enabled ? 200 : 130);
         g.roundRect(-BTN_W / 2, -BTN_H / 2, BTN_W, BTN_H, 10);
         g.fill();
-        g.strokeColor = hex(COLOR.PANEL_BORDER, sfx.enabled ? 170 : 90);
+        g.strokeColor = hex(T.goldLine, sfx.enabled ? 170 : 90);
         g.lineWidth = 1.5;
         g.roundRect(-BTN_W / 2, -BTN_H / 2, BTN_W, BTN_H, 10);
         g.stroke();
@@ -154,6 +155,6 @@ export class MithrilAudioUi extends Component {
     private _updateText(): void {
         if (!this._label) return;
         this._label.string = sfx.enabled ? '音效 开' : '音效 关';
-        this._label.color = hex(sfx.enabled ? COLOR.TEXT_SECONDARY : COLOR.TEXT_DISABLED);
+        this._label.color = hex(sfx.enabled ? T.parchmentDim : T.parchmentMuted);
     }
 }

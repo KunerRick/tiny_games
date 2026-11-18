@@ -33,6 +33,7 @@ import { equippedTags, litSynergies } from './MithrilTrinkets';
 import {
     addGlyphNode, drawGlyphMedallion, drawMithrilGlyph, trinketAccent,
 } from './MithrilArt';
+import { MITH_UI as T, drawInsetBoard, drawStoneTrim, qualityTextColor } from './MithrilTheme';
 
 const { ccclass } = _decorator;
 
@@ -71,6 +72,9 @@ export class MithrilMenu extends Component {
     private _statsLabel: Label | null = null;
     private _goldLabel: Label | null = null;
     private _pageLabel: Label | null = null;
+    /** 背包翻页按钮：空背包 / 单页时整组隐藏（N96） */
+    private _prevBtn: UiButton | null = null;
+    private _nextBtn: UiButton | null = null;
     private _detailTitle: Label | null = null;
     private _detailBody: Label | null = null;
     private _slotBtns: Partial<Record<GearSlot, UiButton>> = {};
@@ -80,6 +84,7 @@ export class MithrilMenu extends Component {
     private _equipBtn: UiButton | null = null;
     private _unequipBtn: UiButton | null = null;
     private _sellBtn: UiButton | null = null;
+    private _emptyGlyph: Node | null = null;
     private _hintLabel: Label | null = null;
 
     // ---- 页签与饰品页（M7） ----
@@ -140,11 +145,11 @@ export class MithrilMenu extends Component {
         // 每次刷新都把提示行复位：操作失败的信息只保留到下一次交互
         if (this._hintLabel) {
             this._hintLabel.string = HINT_TEXT;
-            this._hintLabel.color = hex(COLOR.WARNING);
+            this._hintLabel.color = hex(T.warning);
         }
         if (this._tHintLabel) {
             this._tHintLabel.string = TRINKET_HINT_TEXT;
-            this._tHintLabel.color = hex(COLOR.WARNING);
+            this._tHintLabel.color = hex(T.warning);
         }
         if (this._tab === 'trinket') {
             this._refreshTrinkets();
@@ -164,9 +169,9 @@ export class MithrilMenu extends Component {
             if (n && n.isValid) n.active = gear;
         }
         if (this._trinketRoot && this._trinketRoot.isValid) this._trinketRoot.active = !gear;
-        if (this._gearTabBtn) this._gearTabBtn.setColor(gear ? '#1E3A5F' : '#334155', COLOR.TEXT_PRIMARY);
+        if (this._gearTabBtn) this._gearTabBtn.setColor(gear ? T.rowActive : T.stoneLight, T.parchment);
         if (this._trinketTabBtn) {
-            this._trinketTabBtn.setColor(gear ? '#334155' : '#1E3A5F', COLOR.TEXT_PRIMARY);
+            this._trinketTabBtn.setColor(gear ? T.stoneLight : T.rowActive, T.parchment);
         }
         if (this._gearTabMark && this._gearTabMark.isValid) this._gearTabMark.active = gear;
         if (this._trinketTabMark && this._trinketTabMark.isValid) this._trinketTabMark.active = !gear;
@@ -233,36 +238,37 @@ export class MithrilMenu extends Component {
         panel.layer = this.node.layer;
         panel.addComponent(UITransform).setContentSize(PANEL_W, PANEL_H);
         const pg = panel.addComponent(Graphics);
-        pg.fillColor = hex(COLOR.PANEL_BG, 255);
+        pg.fillColor = hex(T.stone, 255);
         pg.roundRect(-PANEL_W / 2, -PANEL_H / 2, PANEL_W, PANEL_H, 26);
         pg.fill();
-        pg.strokeColor = hex(COLOR.PANEL_BORDER, 255);
+        pg.strokeColor = hex(T.goldDim, 255);
         pg.lineWidth = 3;
         pg.roundRect(-PANEL_W / 2, -PANEL_H / 2, PANEL_W, PANEL_H, 26);
         pg.stroke();
+        drawStoneTrim(pg, PANEL_W, PANEL_H, 26);
         root.addChild(panel);
         this._panel = panel;
         // 首次构建不显示：整棵树关掉（面板 + 遮罩一起），open() 再打开
         root.active = false;
 
         const titleLabel = createLabel(panel, '角色', 36, {
-            width: 300, height: 48, color: COLOR.TEXT_PRIMARY, bold: true, x: 0, y: 540,
+            width: 300, height: 48, color: T.parchment, bold: true, x: 0, y: 540,
         });
         const closeBtn = createButton(panel, {
             w: 120, h: 54, text: '返回', fontSize: 24,
-            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            fill: T.stoneLight, textColor: T.parchment, activeFill: T.stonePressed,
             radius: 14, onTap: () => this._onCloseTap(),
         });
         closeBtn.node.setPosition(268, 540, 0);
 
         this._statsLabel = createLabel(panel, '', 19, {
-            width: 660, height: 90, color: COLOR.TEXT_SECONDARY, x: 0, y: 400, lineHeight: 30,
+            width: 660, height: 90, color: T.parchmentDim, x: 0, y: 400, lineHeight: 30,
         });
         this._hintLabel = createLabel(panel, HINT_TEXT, 16, {
-            width: 600, height: 24, color: COLOR.WARNING, x: 0, y: 342,
+            width: 600, height: 24, color: T.warning, x: 0, y: 342,
         });
         this._goldLabel = createLabel(panel, '', 18, {
-            width: 600, height: 24, color: COLOR.WARNING, x: 0, y: 312,
+            width: 600, height: 24, color: T.warning, x: 0, y: 312,
         });
 
         // 8 槽位：2 行 × 4
@@ -273,12 +279,12 @@ export class MithrilMenu extends Component {
         for (const [slot, x, y] of slotPos) {
             const btn = createButton(panel, {
                 w: 156, h: 66, text: '', fontSize: 17,
-                fill: '#1E293B', textColor: COLOR.TEXT_PRIMARY, activeFill: '#1E3A5F',
-                radius: 12, stroke: '#3A4658', onTap: () => this._onSlotTap(slot),
+                fill: T.row, textColor: T.parchment, activeFill: T.rowActive,
+                radius: 12, stroke: T.goldLine, onTap: () => this._onSlotTap(slot),
             });
             btn.node.setPosition(x, y, 0);
             // 部位剪影 + 品质色（N77：槽位不能只是一行文字）
-            const icon = addGlyphNode(btn.node, `SlotIcon_${slot}`, slot, 14, '#64748B', -54, 0, 60);
+            const icon = addGlyphNode(btn.node, `SlotIcon_${slot}`, slot, 14, T.parchmentMuted, -54, 0, 60);
             this._slotIcons[slot] = icon;
             btn.label.node.setPosition(17, 0);
             const ut = btn.label.node.getComponent(UITransform);
@@ -287,23 +293,25 @@ export class MithrilMenu extends Component {
         }
 
         createLabel(panel, '背包', 24, {
-            width: 200, height: 34, color: COLOR.TEXT_PRIMARY, bold: true, x: -230, y: 128,
+            width: 200, height: 34, color: T.parchment, bold: true, x: -230, y: 128,
         });
         const prev = createButton(panel, {
             w: 96, h: 44, text: '上一页', fontSize: 18,
-            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            fill: T.stoneLight, textColor: T.parchment, activeFill: T.stonePressed,
             radius: 10, onTap: () => this._onPrevPage(),
         });
         prev.node.setPosition(96, 128, 0);
+        this._prevBtn = prev;
         this._pageLabel = createLabel(panel, '', 18, {
-            width: 130, height: 28, color: COLOR.TEXT_SECONDARY, x: 204, y: 128,
+            width: 130, height: 28, color: T.parchmentDim, x: 204, y: 128,
         });
         const next = createButton(panel, {
             w: 96, h: 44, text: '下一页', fontSize: 18,
-            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            fill: T.stoneLight, textColor: T.parchment, activeFill: T.stonePressed,
             radius: 10, onTap: () => this._onNextPage(),
         });
         next.node.setPosition(304, 128, 0);
+        this._nextBtn = next;
 
         const rows = new Node('Rows');
         rows.layer = this.node.layer;
@@ -312,33 +320,43 @@ export class MithrilMenu extends Component {
         panel.addChild(rows);
         this._rowRoot = rows;
 
+        // 详情凹板：正文不再直接铺在石底上，空态也有一个明确的「框」（N96）
+        const detailBoard = new Node('DetailBoard');
+        detailBoard.layer = this.node.layer;
+        detailBoard.addComponent(UITransform).setContentSize(620, 244);
+        detailBoard.setPosition(0, -372, 0);
+        drawInsetBoard(detailBoard.addComponent(Graphics), 620, 122, -122);
+        panel.addChild(detailBoard);
+
         this._detailTitle = createLabel(panel, '', 22, {
-            width: 600, height: 30, color: COLOR.TEXT_PRIMARY, bold: true, x: 0, y: -280,
+            width: 600, height: 30, color: T.parchment, bold: true, x: 0, y: -282,
         });
         // 高度自助增长（Overflow.NONE 会把节点撑到内容大小）：4 词条 + 耐力 + 改造 + 品质特效
-        // 最多 7 行，lineHeight 26 时 182 px，正好落在标题（−295）与按钮（−484）之间。
+        // 最多 7 行，lineHeight 26 时 182 px，落在详情凹板（−250 ~ −494）内。
         this._detailBody = createLabel(panel, '', 18, {
-            width: 600, height: 130, color: COLOR.TEXT_SECONDARY, x: 0, y: -389, lineHeight: 26,
+            width: 600, height: 130, color: T.parchmentDim, x: 0, y: -398, lineHeight: 26,
         });
+        // 未选中任何物品时，详情区不要留成一块空地：给一个低饱和大图形
+        this._emptyGlyph = addGlyphNode(panel, 'MenuEmptyGlyph', 'mainHand', 40, T.goldDim, 0, -320, 12);
 
         this._equipBtn = createButton(panel, {
             w: 160, h: 56, text: '穿上', fontSize: 24,
-            fill: COLOR.SUCCESS, textColor: '#FFFFFF', activeFill: '#15803D',
+            fill: T.emerald, textColor: T.parchment, activeFill: T.emeraldPressed,
             radius: 12, onTap: () => this._onEquipTap(),
         });
-        this._equipBtn.node.setPosition(-180, -512, 0);
+        this._equipBtn.node.setPosition(-180, -530, 0);
         this._unequipBtn = createButton(panel, {
             w: 160, h: 56, text: '卸下', fontSize: 24,
-            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            fill: T.stoneLight, textColor: T.parchment, activeFill: T.stonePressed,
             radius: 12, onTap: () => this._onUnequipTap(),
         });
-        this._unequipBtn.node.setPosition(0, -512, 0);
+        this._unequipBtn.node.setPosition(0, -530, 0);
         this._sellBtn = createButton(panel, {
             w: 160, h: 56, text: '出售', fontSize: 24,
-            fill: '#B45309', textColor: '#FFFFFF', activeFill: '#92400E',
+            fill: T.gold, textColor: T.ink, activeFill: T.goldPressed,
             radius: 12, onTap: () => this._onSellTap(),
         });
-        this._sellBtn.node.setPosition(180, -512, 0);
+        this._sellBtn.node.setPosition(180, -530, 0);
 
         // ---- 页签（常驻）与饰品页（M7） ----
         // 先给装备页拍快照：此刻面板的子节点全部是装备页控件，
@@ -349,19 +367,19 @@ export class MithrilMenu extends Component {
 
         this._gearTabBtn = createButton(panel, {
             w: 140, h: 44, text: '装备', fontSize: 21,
-            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
-            radius: 10, stroke: '#46536B', onTap: () => this._onGearTabTap(),
+            fill: T.stoneLight, textColor: T.parchment, activeFill: T.stonePressed,
+            radius: 10, stroke: T.goldLine, onTap: () => this._onGearTabTap(),
         });
         this._gearTabBtn.node.setPosition(-92, 478, 0);
         this._trinketTabBtn = createButton(panel, {
             w: 140, h: 44, text: '饰品', fontSize: 21,
-            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
-            radius: 10, stroke: '#46536B', onTap: () => this._onTrinketTabTap(),
+            fill: T.stoneLight, textColor: T.parchment, activeFill: T.stonePressed,
+            radius: 10, stroke: T.goldLine, onTap: () => this._onTrinketTabTap(),
         });
         this._trinketTabBtn.node.setPosition(64, 478, 0);
         // 页签图标 + 选中下划线（N76：选中态不能只靠底色）
-        this._tabMarkOf(this._gearTabBtn, 'mainHand', '#93C5FD', 'gear');
-        this._tabMarkOf(this._trinketTabBtn, 'trinket', '#FBBF24', 'trinket');
+        this._tabMarkOf(this._gearTabBtn, 'mainHand', T.goldBright, 'gear');
+        this._tabMarkOf(this._trinketTabBtn, 'trinket', T.gold, 'trinket');
 
         this._buildTrinketPage(panel);
         this._applyTabVisibility();
@@ -378,13 +396,13 @@ export class MithrilMenu extends Component {
         for (let i = 0; i < 2; i++) {
             const btn = createButton(root, {
                 w: 300, h: 96, text: '', fontSize: 19,
-                fill: '#1E293B', textColor: COLOR.TEXT_PRIMARY, activeFill: '#1E3A5F',
-                radius: 14, stroke: '#3A4658', onTap: () => this._onTrinketSlotTap(i),
+                fill: T.row, textColor: T.parchment, activeFill: T.rowActive,
+                radius: 14, stroke: T.goldLine, onTap: () => this._onTrinketSlotTap(i),
             });
             btn.node.setPosition(i === 0 ? -160 : 160, 400, 0);
             btn.node.name = `TrinketSlot_${i}`;
             // 饰品槽图形（N78）：空槽是灰宝石，装上后按标签色画成徽章
-            const icon = addGlyphNode(btn.node, `TrinketSlotIcon_${i}`, 'trinket', 26, '#64748B', -104, 0, 30);
+            const icon = addGlyphNode(btn.node, `TrinketSlotIcon_${i}`, 'trinket', 26, T.parchmentMuted, -104, 0, 30);
             this._tSlotIcons[i] = icon;
             btn.label.node.setPosition(28, 0);
             const ut = btn.label.node.getComponent(UITransform);
@@ -393,27 +411,27 @@ export class MithrilMenu extends Component {
         }
 
         this._tCountLabel = createLabel(root, '', 20, {
-            width: 320, height: 34, color: COLOR.TEXT_PRIMARY, bold: true, x: -190, y: 320,
+            width: 320, height: 34, color: T.parchment, bold: true, x: -190, y: 320,
         });
         const prev = createButton(root, {
             w: 84, h: 40, text: '上一页', fontSize: 16,
-            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            fill: T.stoneLight, textColor: T.parchment, activeFill: T.stonePressed,
             radius: 10, onTap: () => this._onTrinketPrevPage(),
         });
         prev.node.setPosition(104, 320, 0);
         this._tPrevBtn = prev;
         this._tPageLabel = createLabel(root, '', 17, {
-            width: 130, height: 28, color: COLOR.TEXT_SECONDARY, x: 204, y: 320,
+            width: 130, height: 28, color: T.parchmentDim, x: 204, y: 320,
         });
         const next = createButton(root, {
             w: 84, h: 40, text: '下一页', fontSize: 16,
-            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            fill: T.stoneLight, textColor: T.parchment, activeFill: T.stonePressed,
             radius: 10, onTap: () => this._onTrinketNextPage(),
         });
         next.node.setPosition(298, 320, 0);
         this._tNextBtn = next;
         this._tHintLabel = createLabel(root, TRINKET_HINT_TEXT, 16, {
-            width: 600, height: 24, color: COLOR.WARNING, x: 0, y: 284,
+            width: 600, height: 24, color: T.warning, x: 0, y: 284,
         });
 
         const rows = new Node('TRows');
@@ -424,24 +442,24 @@ export class MithrilMenu extends Component {
         this._tRowRoot = rows;
 
         this._tDetailTitle = createLabel(root, '', 21, {
-            width: 600, height: 30, color: COLOR.TEXT_PRIMARY, bold: true, x: 0, y: -212,
+            width: 600, height: 30, color: T.parchment, bold: true, x: 0, y: -212,
         });
         this._tDetailBody = createLabel(root, '', 17, {
-            width: 600, height: 190, color: COLOR.TEXT_SECONDARY, x: 0, y: -330, lineHeight: 28,
+            width: 600, height: 190, color: T.parchmentDim, x: 0, y: -330, lineHeight: 28,
         });
         this._tSynergyLabel = createLabel(root, '', 18, {
-            width: 600, height: 52, color: COLOR.WARNING, x: 0, y: -470, lineHeight: 26,
+            width: 600, height: 52, color: T.warning, x: 0, y: -470, lineHeight: 26,
         });
 
         this._tEquipBtn = createButton(root, {
             w: 180, h: 56, text: '装备', fontSize: 24,
-            fill: COLOR.SUCCESS, textColor: '#FFFFFF', activeFill: '#15803D',
+            fill: T.emerald, textColor: T.parchment, activeFill: T.emeraldPressed,
             radius: 12, onTap: () => this._onTrinketEquipTap(),
         });
         this._tEquipBtn.node.setPosition(-105, -540, 0);
         this._tUnequipBtn = createButton(root, {
             w: 180, h: 56, text: '卸下', fontSize: 24,
-            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            fill: T.stoneLight, textColor: T.parchment, activeFill: T.stonePressed,
             radius: 12, onTap: () => this._onTrinketUnequipTap(),
         });
         this._tUnequipBtn.node.setPosition(105, -540, 0);
@@ -461,7 +479,8 @@ export class MithrilMenu extends Component {
         return [
             `攻击强度 ${prof.attackPower.toFixed(1)}    生命上限 ${Math.round(prof.maxHp)}`,
             `暴击 ${pct(prof.critChance)}    急速 ${pct(prof.haste)}    精通 ${pct(prof.mastery)}    全能 ${pct(prof.vers)}`,
-            `平均装等 ${extra.ilvl.toFixed(1)}    已装备 ${extra.equipped}/8    耐力 +${extra.stamina}（生命 +${extra.bonusHp}）`,
+            // 一件都没穿时不要显示「平均装等 1.0」这种假读数（N96）
+            `平均装等 ${extra.equipped > 0 ? extra.ilvl.toFixed(1) : '—'}    已装备 ${extra.equipped}/8    耐力 +${extra.stamina}（生命 +${extra.bonusHp}）`,
         ].join('\n');
     }
 
@@ -483,10 +502,10 @@ export class MithrilMenu extends Component {
             const q = item ? QUALITY_BY_ID[item.quality] : null;
             if (item) {
                 btn.setText(`${GEAR_SLOT_NAMES[slot]} ${item.ilvl}`);
-                btn.setColor('#1E293B', q ? q.color : COLOR.TEXT_PRIMARY);
+                btn.setColor(T.row, qualityTextColor(q, T.parchment));
             } else {
                 btn.setText(`${GEAR_SLOT_NAMES[slot]} 空`);
-                btn.setColor('#1E293B', '#64748B');
+                btn.setColor(T.row, T.parchmentMuted);
             }
             btn.node.name = `Slot_${slot}`;
             // 部位图标按品质上色：空槽灰、有装备取品质色
@@ -494,7 +513,7 @@ export class MithrilMenu extends Component {
             const g = icon ? icon.getComponent(Graphics) : null;
             if (g) {
                 g.clear();
-                drawMithrilGlyph(g, slot, 14, q ? q.color : '#64748B', item ? 70 : 26);
+                drawMithrilGlyph(g, slot, 14, q ? q.color : T.parchmentMuted, item ? 70 : 26);
             }
         }
     }
@@ -512,13 +531,20 @@ export class MithrilMenu extends Component {
         const pages = Math.max(1, Math.ceil(list.length / ROWS_PER_PAGE));
         if (this._page >= pages) this._page = pages - 1;
         if (this._page < 0) this._page = 0;
-        if (this._pageLabel) this._pageLabel.string = `${this._page + 1} / ${pages}（${list.length}）`;
+        // 空背包 / 只有一页时不给翻页按钮：点了也永远不动（N96）
+        const pagerVisible = list.length > 0 && pages > 1;
+        if (this._prevBtn) this._prevBtn.node.active = pagerVisible;
+        if (this._nextBtn) this._nextBtn.node.active = pagerVisible;
+        if (this._pageLabel) {
+            this._pageLabel.node.active = list.length > 0;
+            this._pageLabel.string = `${this._page + 1} / ${pages}（${list.length}）`;
+        }
 
         const start = this._page * ROWS_PER_PAGE;
         const pageItems = list.slice(start, start + ROWS_PER_PAGE);
         if (pageItems.length === 0) {
             createLabel(rows, '背包是空的 —— 击败矿坑巨魔会掉落紫装', 19, {
-                width: 600, height: 40, color: COLOR.TEXT_SECONDARY, x: 0, y: 120,
+                width: 600, height: 40, color: T.parchmentDim, x: 0, y: 24,
             });
             return;
         }
@@ -528,9 +554,9 @@ export class MithrilMenu extends Component {
             const btn = createButton(rows, {
                 w: 620, h: 56, text: '',
                 fontSize: 20,
-                fill: this._isSelectedInv(item) ? '#1E3A5F' : '#1E293B',
-                textColor: q ? q.color : COLOR.TEXT_PRIMARY,
-                activeFill: '#1E3A5F',
+                fill: this._isSelectedInv(item) ? T.rowActive : T.row,
+                textColor: qualityTextColor(q, T.parchment),
+                activeFill: T.rowActive,
                 radius: 10,
                 onTap: () => this._onRowTap(item.uid),
             });
@@ -540,7 +566,7 @@ export class MithrilMenu extends Component {
             btn.setText(`${itemDesc(item)}${moved}`);
             // 行首部位图标 + 品质色（N77）
             addGlyphNode(btn.node, `RowIcon_${item.uid}`, item.slot, 14,
-                q ? q.color : COLOR.TEXT_SECONDARY, -286, 0, 55);
+                q ? q.color : T.parchmentDim, -286, 0, 55);
             btn.label.node.setPosition(18, 0);
             const rowUt = btn.label.node.getComponent(UITransform);
             if (rowUt) rowUt.setContentSize(620 - 46, 52);
@@ -554,22 +580,34 @@ export class MithrilMenu extends Component {
             // 试玩 N63：点到空槽位时给明确反馈，别让玩家以为自己点空了
             const sel = this._sel;
             if (sel?.kind === 'slot') {
+                if (this._emptyGlyph) this._emptyGlyph.active = false;
+                this._detailTitle.node.setPosition(0, -300, 0);
+                this._detailBody.node.setPosition(0, -352, 0);
                 this._detailTitle.string = `${GEAR_SLOT_NAMES[sel.slot]} · 空槽位`;
-                this._detailTitle.color = hex(COLOR.TEXT_SECONDARY);
+                this._detailTitle.color = hex(T.parchmentDim);
                 this._detailBody.string = '该槽位为空，可从背包选一件同槽位装备穿上。';
                 this._setActions(false, false, false);
                 return;
             }
+            if (this._emptyGlyph) {
+                this._emptyGlyph.active = true;
+                this._emptyGlyph.setPosition(0, -330, 0);
+            }
+            this._detailTitle.node.setPosition(0, -392, 0);
+            this._detailBody.node.setPosition(0, -440, 0);
             this._detailTitle.string = '点击上方装备槽或背包物品查看详情';
-            this._detailTitle.color = hex(COLOR.TEXT_SECONDARY);
-            this._detailBody.string = '';
+            this._detailTitle.color = hex(T.parchmentDim);
+            this._detailBody.string = '打怪掉落的装备会进背包；点一件即可穿上或出售。';
             this._setActions(false, false, false);
             return;
         }
+        if (this._emptyGlyph) this._emptyGlyph.active = false;
+        this._detailTitle.node.setPosition(0, -282, 0);
+        this._detailBody.node.setPosition(0, -398, 0);
         const q = QUALITY_BY_ID[item.quality];
         const base = GEAR_SLOT_NAMES[item.slot];
         this._detailTitle.string = `${itemName(item)}（${q ? q.name : ''} · ${base} · 装等 ${item.ilvl}）`;
-        this._detailTitle.color = hex(q ? q.color : COLOR.TEXT_PRIMARY);
+        this._detailTitle.color = hex(qualityTextColor(q, T.parchment));
 
         const lines: string[] = [];
         for (const roll of item.affixes) {
@@ -620,14 +658,14 @@ export class MithrilMenu extends Component {
             btn.setText(def
                 ? `槽 ${i + 1} · ${def.name}\n${TRINKET_TAG_NAMES[def.tag]}`
                 : `槽 ${i + 1} · 空\n点下方饰品再「装备」`);
-            btn.setColor(picked ? '#1E3A5F' : '#1E293B', def ? COLOR.TEXT_PRIMARY : '#64748B');
+            btn.setColor(picked ? T.rowActive : T.row, def ? T.parchment : T.parchmentMuted);
             // 槽位图形：装上后按标签色画徽章，空槽留灰宝石
             const icon = this._tSlotIcons[i];
             const g = icon ? icon.getComponent(Graphics) : null;
             if (g) {
                 g.clear();
                 if (def) drawGlyphMedallion(g, 'trinket', 30, trinketAccent(def.tag));
-                else drawMithrilGlyph(g, 'trinket', 24, '#64748B', 22);
+                else drawMithrilGlyph(g, 'trinket', 24, T.parchmentMuted, 22);
             }
         }
 
@@ -650,7 +688,7 @@ export class MithrilMenu extends Component {
         const pageItems = owned.slice(this._page * ROWS_PER_PAGE, (this._page + 1) * ROWS_PER_PAGE);
         if (pageItems.length === 0) {
             createLabel(rows, '还没有饰品 —— 副本 BOSS 首通必掉一件本副本未拥有的', 18, {
-                width: 600, height: 40, color: COLOR.TEXT_SECONDARY, x: 0, y: 120,
+                width: 600, height: 40, color: T.parchmentDim, x: 0, y: 120,
             });
         }
         for (let i = 0; i < pageItems.length; i++) {
@@ -660,9 +698,9 @@ export class MithrilMenu extends Component {
             const btn = createButton(rows, {
                 w: 620, h: 56, text: '',
                 fontSize: 19,
-                fill: selected ? '#1E3A5F' : '#1E293B',
-                textColor: COLOR.TEXT_PRIMARY,
-                activeFill: '#1E3A5F',
+                fill: selected ? T.rowActive : T.row,
+                textColor: T.parchment,
+                activeFill: T.rowActive,
                 radius: 10,
                 onTap: () => this._onTrinketRowTap(def.id),
             });
@@ -694,7 +732,7 @@ export class MithrilMenu extends Component {
 
         if (!def) {
             this._tDetailTitle.string = '点上方两格看已装备，点下方列表看详情';
-            this._tDetailTitle.color = hex(COLOR.TEXT_SECONDARY);
+            this._tDetailTitle.color = hex(T.parchmentDim);
             this._tDetailBody.string = '饰品只改规则、不加固定数值：\n击败副本首领可以获得。';
             this._setTrinketActions(false, false);
             this._refreshSynergyFooter();
@@ -703,7 +741,7 @@ export class MithrilMenu extends Component {
 
         const at = this._trinketSlotOf(def.id);
         this._tDetailTitle.string = `${def.name}（${TRINKET_TAG_NAMES[def.tag]}）`;
-        this._tDetailTitle.color = hex(COLOR.TEXT_PRIMARY);
+        this._tDetailTitle.color = hex(T.parchment);
         const lines = [def.effect];
         lines.push(at >= 0 ? `状态：已装备 · 槽 ${at + 1}` : '状态：在背包中（未装备）');
         // 目标槽已有别的饰品时写明会被替换（试玩 N55：旧实现静默替换，玩家不知道丢了什么）
@@ -731,7 +769,7 @@ export class MithrilMenu extends Component {
                 .map((s) => `${s.name}（${TRINKET_TAG_NAMES[s.a]} + ${TRINKET_TAG_NAMES[s.b]}）`)
                 .join(' / ');
             this._tSynergyLabel.string = `协同已点亮：${text}`;
-            this._tSynergyLabel.color = hex(COLOR.WARNING);
+            this._tSynergyLabel.color = hex(T.warning);
             return;
         }
         // 三态文案（试玩 N54）：空 / 真同 tag / tag 不同但没这条协同。
@@ -744,7 +782,7 @@ export class MithrilMenu extends Component {
         } else {
             this._tSynergyLabel.string = `协同：${TRINKET_TAG_NAMES[tags[0]]} + ${TRINKET_TAG_NAMES[tags[1]]} 没有对应协同 —— 换一件试试`;
         }
-        this._tSynergyLabel.color = hex(COLOR.TEXT_SECONDARY);
+        this._tSynergyLabel.color = hex(T.parchmentDim);
     }
 
     private _setTrinketActions(equip: boolean, unequip: boolean): void {
@@ -882,7 +920,7 @@ export class MithrilMenu extends Component {
         const label = this._tab === 'trinket' ? this._tHintLabel : this._hintLabel;
         if (!label) return;
         label.string = text;
-        label.color = hex(COLOR.DANGER);
+        label.color = hex(T.danger);
     }
 
     private _changed(): void {
@@ -917,12 +955,15 @@ export class MithrilMenu extends Component {
         this._statsLabel = null;
         this._goldLabel = null;
         this._pageLabel = null;
+        this._prevBtn = null;
+        this._nextBtn = null;
         this._detailTitle = null;
         this._detailBody = null;
         this._hintLabel = null;
         this._equipBtn = null;
         this._unequipBtn = null;
         this._sellBtn = null;
+        this._emptyGlyph = null;
         this._slotBtns = {};
         // 饰品页（M7）：同样只清引用
         this._gearNodes = [];

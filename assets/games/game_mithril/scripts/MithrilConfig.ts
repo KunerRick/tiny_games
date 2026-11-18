@@ -456,17 +456,32 @@ export interface QualityDef {
     affixCount: number;
     /** 复用 UITheme.COLOR 的十六进制字符串，零新增色值 */
     color: string;
+    /**
+     * 连续文字用的提亮档（圆点 / 描边 / 图标仍用 `color`）。
+     * WoW 原色里史诗 `#A335EE`、稀有 `#2A7FDE`、秘境 `#E03A3A` 在行底 `#1A202A` 上只有 3.4–4.0:1，
+     * 当**标题/行文字**用不合格；这三个给 ≥4.5:1 的提亮版。缺省表示 `color` 本身已合格。
+     */
+    textColor?: string;
     /** 橙装唯一特效 / 红装负面 */
     special?: 'unique' | 'negative';
 }
 
+/**
+ * 品质色（N94）：采用 WoW 稀有度色相（灰 / 绿 / 蓝 / 紫 / 橙 / 红），
+ * 只在暗底上把亮度提一档，避免稀有蓝 `#0070DD` 这类原值在深底上看不清。
+ * 这里是唯一源；UI 一律经 `QUALITY_BY_ID` 取色，不要另存镜像表（会漂移）。
+ */
 export const QUALITIES: QualityDef[] = [
-    { id: 'common', name: '普通', affixCount: 1, color: '#9CA3AF' },
-    { id: 'uncommon', name: '优秀', affixCount: 2, color: '#22C55E' },
-    { id: 'rare', name: '稀有', affixCount: 3, color: '#3B82F6' },
-    { id: 'epic', name: '史诗', affixCount: 4, color: '#A855F7' },
-    { id: 'legendary', name: '传说', affixCount: 4, color: '#F59E0B', special: 'unique' },
-    { id: 'mythic', name: '秘境', affixCount: 4, color: '#EF4444', special: 'negative' },
+    // 颜色对齐 WoW 的品阶色（N106）：稀有=深蓝、史诗=深紫、传说=橙、秘境=红。
+    // 原来那版偏 iOS / Tailwind 的荧光色，放在石+木+黄铜的底子上像塑料标签。
+    // `textColor` 是文字专用提亮档（第 26 轮复核：深蓝/深紫/红当正文只有 3.4–4.0:1），
+    // 圆点与描边仍用 `color` 保持 WoW 原色。括号内为行底 #1A202A 上的实测对比度。
+    { id: 'common', name: '普通', affixCount: 1, color: '#9D9D9D' },                     // 6.0:1
+    { id: 'uncommon', name: '优秀', affixCount: 2, color: '#3FC24E' },                   // 6.9:1
+    { id: 'rare', name: '稀有', affixCount: 3, color: '#2A7FDE', textColor: '#4E9BF0' }, // 4.0 → 5.7
+    { id: 'epic', name: '史诗', affixCount: 4, color: '#A335EE', textColor: '#B96BFF' }, // 3.4 → 5.2
+    { id: 'legendary', name: '传说', affixCount: 4, color: '#FF8000', special: 'unique' }, // 6.1:1
+    { id: 'mythic', name: '秘境', affixCount: 4, color: '#E03A3A', textColor: '#FF6B6B', special: 'negative' }, // 3.4 → 5.5
 ];
 
 export const QUALITY_BY_ID: Record<QualityId, QualityDef> = (() => {

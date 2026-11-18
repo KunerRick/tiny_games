@@ -381,7 +381,7 @@ export class MithrilGame extends Component {
         if (save.level < region.levelMin) {
             return `等级不足：${region.name} 需要 Lv${region.levelMin}（当前 Lv${save.level}）`;
         }
-        return '点「开始远征」后，沿绿色连线选择下一站';
+        return '点「开始远征」后，沿金色高亮连线选择下一站';
     }
 
     private onRestartRequested(): void {
@@ -426,7 +426,7 @@ export class MithrilGame extends Component {
             return;
         }
         this._ensureMapFor(regionId);
-        this._refreshMap('点「开始远征」后，沿绿色连线选择下一站');
+        this._refreshMap('点「开始远征」后，沿金色高亮连线选择下一站');
     }
 
     private onWildPrimary(): void {
@@ -546,7 +546,7 @@ export class MithrilGame extends Component {
         const res = enterNode(map, exp, node.id, maxHp);
         if (!res.ok) {
             let text = '远征已结束，请重新开始';
-            if (res.reason === 'not_reachable') text = '只能走绿色连线连着的相邻节点';
+            if (res.reason === 'not_reachable') text = '只能走金色高亮连线连着的相邻节点';
             else if (res.reason === 'done') text = '该节点已清理，不能重复进入（相邻的已清理节点可以路过）';
             this._refreshMap(text);
             return;

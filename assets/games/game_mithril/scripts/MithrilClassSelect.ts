@@ -20,6 +20,7 @@ import type { ClassId } from './MithrilConfig';
 import {
     CLASS_ACCENT, drawGlyphMedallion, drawMithrilGlyph,
 } from './MithrilArt';
+import { MITH_UI as T, drawStoneTrim } from './MithrilTheme';
 
 const { ccclass } = _decorator;
 
@@ -77,7 +78,7 @@ export class MithrilClassSelect extends Component {
         if (this._confirmBtn) this._confirmBtn.setText(`以${def.name}开局`);
         if (this._hintLabel) {
             this._hintLabel.string = `已选择：${def.name}（${def.archetype}）· 职业在开档后不能更改`;
-            this._hintLabel.color = hex(COLOR.TEXT_SECONDARY);
+            this._hintLabel.color = hex(T.parchmentDim);
         }
         clearChildren(content);
         this._renderCards(content);
@@ -109,26 +110,27 @@ export class MithrilClassSelect extends Component {
         panel.layer = this.node.layer;
         panel.addComponent(UITransform).setContentSize(PANEL_W, PANEL_H);
         const pg = panel.addComponent(Graphics);
-        pg.fillColor = hex(COLOR.PANEL_BG, 255);
+        pg.fillColor = hex(T.stone, 255);
         pg.roundRect(-PANEL_W / 2, -PANEL_H / 2, PANEL_W, PANEL_H, 26);
         pg.fill();
-        pg.strokeColor = hex(COLOR.PANEL_BORDER, 255);
+        pg.strokeColor = hex(T.goldDim, 255);
         pg.lineWidth = 3;
         pg.roundRect(-PANEL_W / 2, -PANEL_H / 2, PANEL_W, PANEL_H, 26);
         pg.stroke();
+        drawStoneTrim(pg, PANEL_W, PANEL_H, 26);
         root.addChild(panel);
         root.active = false;
 
         createLabel(panel, '选择职业', 34, {
-            width: 300, height: 48, color: COLOR.TEXT_PRIMARY, bold: true, x: 0, y: 446,
+            width: 300, height: 48, color: T.parchment, bold: true, x: 0, y: 446,
         });
         createLabel(panel, '每职业 6 个技能、独立资源循环；职业在开档时确定', 16, {
-            width: 620, height: 24, color: COLOR.TEXT_SECONDARY, x: 0, y: 406,
+            width: 620, height: 24, color: T.parchmentDim, x: 0, y: 406,
         });
 
         const cancel = createButton(panel, {
             w: 120, h: 48, text: '返回大厅', fontSize: 20,
-            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            fill: T.stoneLight, textColor: T.parchment, activeFill: T.stonePressed,
             radius: 12, onTap: () => this._onCancelTap(),
         });
         cancel.node.setPosition(268, 446, 0);
@@ -141,16 +143,16 @@ export class MithrilClassSelect extends Component {
 
         this._confirmBtn = createButton(panel, {
             w: 320, h: 62, text: '以战士开局', fontSize: 23,
-            fill: COLOR.PRIMARY, textColor: '#FFFFFF', activeFill: COLOR.PRIMARY_DARK,
+            fill: T.gold, textColor: T.ink, activeFill: T.goldPressed,
             radius: 16, onTap: () => this._onConfirmTap(),
         });
         this._confirmBtn.node.setPosition(0, -330, 0);
         this._hintLabel = createLabel(panel, '', 16, {
-            width: 620, height: 24, color: COLOR.TEXT_SECONDARY, x: 0, y: -386,
+            width: 620, height: 24, color: T.parchmentDim, x: 0, y: -386,
             overflow: 'shrink',
         });
         createLabel(panel, '提示：远程职业靠走位拉开距离，牧师可以自我治疗；第一次玩建议战士。', 15, {
-            width: 620, height: 22, color: COLOR.TEXT_DISABLED, x: 0, y: -424,
+            width: 620, height: 22, color: T.parchmentMuted, x: 0, y: -424,
         });
     }
 
@@ -170,16 +172,21 @@ export class MithrilClassSelect extends Component {
             content.addChild(card);
 
             const g = card.addComponent(Graphics);
-            g.fillColor = hex(selected ? '#1E3A5F' : COLOR.SLOT_EMPTY_BG, 255);
+            g.fillColor = hex(selected ? T.rowActive : COLOR.SLOT_EMPTY_BG, 255);
             g.roundRect(-CARD_W / 2, -CARD_H / 2, CARD_W, CARD_H, 18);
             g.fill();
-            g.strokeColor = hex(selected ? COLOR.PRIMARY : COLOR.PANEL_BORDER, selected ? 255 : 180);
+            g.strokeColor = hex(selected ? T.gold : T.goldDim, selected ? 255 : 180);
             g.lineWidth = selected ? 4 : 2;
             g.roundRect(-CARD_W / 2, -CARD_H / 2, CARD_W, CARD_H, 18);
             g.stroke();
-            // 职业剪影水印（N81：卡面不能只有文字）
-            const accent = CLASS_ACCENT[def.id] || COLOR.PRIMARY;
-            drawMithrilGlyph(g, def.id, 74, accent, selected ? 20 : 12, 26);
+            // 职业剪影水印（N81）：压到卡面右下角只做纹理，不能压住正文（N96）
+            const accent = CLASS_ACCENT[def.id] || T.gold;
+            const wm = new Node(`ClassWatermark_${def.id}`);
+            wm.layer = card.layer;
+            wm.addComponent(UITransform).setContentSize(CARD_W, CARD_H);
+            wm.setPosition(76, -64, 0);
+            drawMithrilGlyph(wm.addComponent(Graphics), def.id, 60, accent, 9, 20);
+            card.addChild(wm);
             // 名称左侧徽记
             const medal = new Node(`ClassMedal_${def.id}`);
             medal.layer = card.layer;
@@ -190,17 +197,18 @@ export class MithrilClassSelect extends Component {
             card.addChild(medal);
 
             createLabel(card, def.name, 28, {
-                width: 186, height: 40, color: selected ? '#FDE68A' : COLOR.TEXT_PRIMARY,
+                width: 186, height: 40, color: selected ? T.goldBright : T.parchment,
                 bold: true, x: 22, y: 84, overflow: 'shrink',
             });
             createLabel(card, def.archetype, 16, {
-                width: 250, height: 22, color: COLOR.TEXT_SECONDARY, x: 0, y: 52,
+                width: 250, height: 22, color: T.parchmentDim, x: 0, y: 52,
             });
             createLabel(card, `资源：${def.resource}`, 16, {
-                width: 250, height: 22, color: COLOR.WARNING, bold: true, x: 0, y: 24,
+                width: 250, height: 22, color: T.warning, bold: true, x: 0, y: 24,
             });
-            createLabel(card, def.resourceDesc, 14, {
-                width: 254, height: 40, color: COLOR.TEXT_SECONDARY, x: 0, y: -8,
+            // 在「，」处显式换行：自动折行会把「（站桩输出）」这类尾注拆成孤字（N96）
+            createLabel(card, def.resourceDesc.replace('，', '，\n'), 14, {
+                width: 254, height: 42, color: T.parchmentDim, x: 0, y: -8,
                 lineHeight: 19, overflow: 'shrink',
             });
 
@@ -210,11 +218,12 @@ export class MithrilClassSelect extends Component {
                 .map((sk) => sk!.name)
                 .join(' · ');
             createLabel(card, names, 14, {
-                width: 254, height: 40, color: selected ? '#BFDBFE' : COLOR.TEXT_SECONDARY,
+                width: 254, height: 40, color: selected ? T.parchment : T.parchmentDim,
                 x: 0, y: -62, lineHeight: 19, overflow: 'shrink',
             });
+            // 选中态用金色而非语义绿：绿色在石+木+黄铜的语言里像「科技状态点」（N103）
             createLabel(card, selected ? '已选中' : '点击选择', 14, {
-                width: 250, height: 20, color: selected ? COLOR.SUCCESS : COLOR.TEXT_DISABLED,
+                width: 250, height: 20, color: selected ? T.goldBright : T.parchmentMuted,
                 x: 0, y: -100,
             });
 

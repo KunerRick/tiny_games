@@ -891,21 +891,25 @@ function _mgPoly(g: Graphics, pts: number[][], close = true): void {
     if (close) g.close();
 }
 
-/** 设施强调色（页签 / 页头徽记 / 水印共用） */
+/**
+ * 设施强调色（页签 / 页头徽记 / 水印共用）。
+ * N91：从 Tailwind 500 霓虹收敛到「珠宝色」——琥珀 / 紫水晶 / 蓝宝石 / 祖母绿 / 红宝石，
+ * 与黄铜木框放在一起不再像五块彩色塑料牌。
+ */
 export const FACILITY_ACCENT: Record<string, string> = {
-    smith: '#F59E0B',
-    enchant: '#A855F7',
-    training: '#0EA5E9',
-    kitchen: '#22C55E',
-    quartermaster: '#F43F5E',
+    smith: '#D9A441',
+    enchant: '#9F6FD9',
+    training: '#4F9BD9',
+    kitchen: '#5FB56A',
+    quartermaster: '#D46A5E',
 };
 
-/** 职业强调色（职业卡 / 选职业按钮共用） */
+/** 职业强调色（职业卡 / 选职业按钮共用；N94 采用 WoW 职业色相） */
 export const CLASS_ACCENT: Record<string, string> = {
-    warrior: '#3B82F6',
-    mage: '#A855F7',
-    ranger: '#22C55E',
-    priest: '#F59E0B',
+    warrior: '#C79C6E',
+    mage: '#69CCF0',
+    ranger: '#A9D473',
+    priest: '#F2E6C9',
 };
 
 /** 12 条天赋线的图标与颜色（同名幻术不再整屏一样） */
@@ -1412,7 +1416,7 @@ export function repaintGlyphNode(
 
 /** 圆形徽记：光晕 + 内盘 + 双环 + 纹章（营地页头 / 职业卡用） */
 export function drawGlyphMedallion(
-    g: Graphics, kind: string, r: number, accentHex: string, bgHex = '#1B2331',
+    g: Graphics, kind: string, r: number, accentHex: string, bgHex = '#0F131A',
 ): void {
     g.fillColor = CA(accentHex, 34);
     g.circle(0, 0, r + 4);
@@ -1428,5 +1432,6 @@ export function drawGlyphMedallion(
     g.lineWidth = 1.5;
     g.circle(0, 0, r * 0.82);
     g.stroke();
-    drawMithrilGlyph(g, kind, r * 0.56, accentHex, 95);
+    // 95α 在深盘上几乎看不见，纹章要能读出设施/职业（N90）
+    drawMithrilGlyph(g, kind, r * 0.56, accentHex, 150);
 }

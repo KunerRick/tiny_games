@@ -27,7 +27,8 @@ import {
     regionMaterialId,
 } from './MithrilConfig';
 import type { NodeKind } from './MithrilConfig';
-import { REGION_GLYPH, addGlyphNode, inkOnFill, repaintGlyphNode } from './MithrilArt';
+import { REGION_GLYPH, addGlyphNode, repaintGlyphNode } from './MithrilArt';
+import { MITH_UI as T } from './MithrilTheme';
 import {
     isAdjacent,
     isNodeDone,
@@ -45,15 +46,19 @@ import type {
 const { ccclass } = _decorator;
 
 /** 各节点类型的主色（与战斗 / 大厅图标体系一致） */
+/** 节点色按宝石色相压暗一档，避免在夜底上发荧光（第 25 轮 UI） */
 export const WILD_NODE_COLORS: Record<NodeKind, string> = {
-    start: '#64748B',
-    battle: '#38BDF8',
-    elite: '#F59E0B',
-    chest: '#EAB308',
-    event: '#A855F7',
-    supply: '#22C55E',
-    dungeon: '#EF4444',
-    boss: '#F97316',
+    // 2026-11-18 第 25 轮（N99）：原先是 Tailwind 荧光色（#5E9BD1 蓝 / #9F6FD9 紫 /
+    // #5FB56A 绿 / #C85A5A 红），在石+木+黄铜的底子上像贴上去的贴纸。
+    // 统一降饱和到「旧羊皮地图上的颜料」档：色相仍可区分，但不抢描边的黄铜。
+    start: '#7A7466',
+    battle: '#6E8CA8',
+    elite: '#C29A46',
+    chest: '#C4A64B',
+    event: '#8C6FA8',
+    supply: '#6F8F63',
+    dungeon: '#A9564F',
+    boss: '#C06B33',
 };
 
 const NODE_SIZE = 76;
@@ -175,12 +180,12 @@ export class MithrilWildMap extends Component {
             const hp = Math.max(0, Math.round(exp ? exp.hp : view.hp));
             const maxHp = Math.max(1, Math.round(view.maxHp));
             this._hpLabel.string = `生命 ${hp}/${maxHp}`;
-            this._hpLabel.color = hex(hp / maxHp <= 0.3 ? COLOR.DANGER : COLOR.TEXT_PRIMARY);
+            this._hpLabel.color = hex(hp / maxHp <= 0.3 ? T.danger : T.parchment);
         }
         if (this._supplyLabel) {
             const supply = exp ? exp.supply : SUPPLY_PER_RUN;
             this._supplyLabel.string = `补给 ${supply}/${SUPPLY_PER_RUN}`;
-            this._supplyLabel.color = hex(supply > 0 ? COLOR.SUCCESS : COLOR.WARNING);
+            this._supplyLabel.color = hex(supply > 0 ? T.success : T.warning);
         }
         if (this._supplyWarn) {
             // 补给归零后把「下一脚要扣多少血」直接摆到台面上（试玩 N41 / N45）
@@ -213,13 +218,13 @@ export class MithrilWildMap extends Component {
         if (enterCost > 0) lines.push(`补给耗尽：进来这一趟已失去 ${enterCost} 生命。`);
         lines.push('打开有风险（可能触发陷阱），但里面通常有装备。');
         const buttons: ModalButtonSpec[] = [
-            { label: '打开', fill: COLOR.PRIMARY, onTap: onOpen },
-            { label: '离开', fill: '#334155', onTap: onLeave },
+            { label: '打开', fill: T.gold, textColor: T.ink, onTap: onOpen },
+            { label: '离开', fill: T.stonePressed, textColor: T.parchment, onTap: onLeave },
         ];
         // 拾荒者背包：多一个「额外搜刮」按钮，代价由调用方在结算里扣（这里只负责显示）
         if (extra) {
             lines.push('背包里的钩爪还能伸进去一次 —— 代价是生命。');
-            buttons.push({ label: extra.label, fill: COLOR.WARNING, onTap: extra.onTap });
+            buttons.push({ label: extra.label, fill: T.warning, textColor: T.ink, onTap: extra.onTap });
         }
         this.showModal('路边宝箱', lines, buttons);
     }
@@ -232,7 +237,8 @@ export class MithrilWildMap extends Component {
         if (enterCost > 0) lines.push(`补给耗尽：进来这一趟已失去 ${enterCost} 生命。`);
         const buttons: ModalButtonSpec[] = options.map((o) => ({
             label: `${o.label}`,
-            fill: o.id === 'dig' ? COLOR.WARNING : COLOR.PRIMARY,
+            fill: o.id === 'dig' ? T.warning : T.gold,
+            textColor: T.ink,
             onTap: () => onPick(o.id),
         }));
         this.showModal('路边事件', lines.concat(options.map((o) => `${o.label}：${o.desc}`)), buttons);
@@ -241,15 +247,16 @@ export class MithrilWildMap extends Component {
     showMessage(title: string, lines: string[], onClose?: () => void): void {
         this.showModal(title, lines, [{
             label: '知道了',
-            fill: COLOR.PRIMARY,
+            fill: T.gold,
+            textColor: T.ink,
             onTap: onClose || (() => this.closeModal()),
         }]);
     }
 
     showConfirm(title: string, lines: string[], okLabel: string, onOk: () => void, okFill?: string): void {
         this.showModal(title, lines, [
-            { label: okLabel, fill: okFill || COLOR.DANGER, onTap: onOk },
-            { label: '取消', fill: '#334155', onTap: () => this.closeModal() },
+            { label: okLabel, fill: okFill || T.danger, textColor: T.ink, onTap: onOk },
+            { label: '取消', fill: T.stonePressed, textColor: T.parchment, onTap: () => this.closeModal() },
         ]);
     }
 
@@ -266,38 +273,44 @@ export class MithrilWildMap extends Component {
         bg.addComponent(UITransform).setContentSize(720, 1280);
         this.node.addChild(bg);
         const g = bg.addComponent(Graphics);
-        g.fillColor = hex('#0B1220', 255);
+        g.fillColor = hex(T.night, 255);
         g.rect(-360, -640, 720, 1280);
         g.fill();
-        // 顶部区域色带：让三个区域一眼能区分
-        g.fillColor = hex('#1E293B', 255);
+        // 顶部区域色带：像一条压暗的石带，不再用蓝灰
+        g.fillColor = hex(T.stone, 255);
         g.rect(-360, 470, 720, 170);
         g.fill();
-        g.fillColor = hex('#0F172A', 255);
+        g.fillColor = hex(T.goldLine, 120);
+        g.rect(-360, 470, 720, 1.5);
+        g.fill();
+        g.fillColor = hex(T.stoneDark, 255);
         g.rect(-360, -640, 720, 250);
+        g.fill();
+        g.fillColor = hex(T.goldLine, 90);
+        g.rect(-360, -390, 720, 1.5);
         g.fill();
     }
 
     private _buildHeader(): void {
         this._title = createLabel(this.node, '野外', 34, {
-            width: 680, height: 44, color: COLOR.TEXT_PRIMARY, bold: true, y: 596,
+            width: 680, height: 44, color: T.goldBright, bold: true, y: 596,
         });
         this._subtitle = createLabel(this.node, '', 17, {
-            width: 680, height: 26, color: COLOR.TEXT_SECONDARY, y: 562,
+            width: 680, height: 26, color: T.parchmentDim, y: 562,
         });
         this._hpLabel = createLabel(this.node, '', 18, {
-            width: 220, height: 28, color: COLOR.TEXT_PRIMARY, bold: true, x: -230, y: 526,
+            width: 220, height: 28, color: T.parchment, bold: true, x: -230, y: 526,
         });
         this._supplyLabel = createLabel(this.node, '', 18, {
-            width: 180, height: 28, color: COLOR.SUCCESS, bold: true, x: -10, y: 526,
+            width: 180, height: 28, color: T.success, bold: true, x: -10, y: 526,
         });
         this._matLabel = createLabel(this.node, '', 17, {
-            width: 260, height: 28, color: COLOR.WARNING, x: 190, y: 526,
+            width: 260, height: 28, color: T.warning, x: 190, y: 526,
         });
         // 补给耗尽警告：常态隐藏。顶栏与页签之间没有空档（页签 y478 高 42），
         // 所以放在地图说明行正下方，图例整体让位（试玩 N41 / N45）
         this._supplyWarn = createLabel(this.node, '', 17, {
-            width: 680, height: 24, color: COLOR.WARNING, bold: true, y: -334,
+            width: 680, height: 24, color: T.warning, bold: true, y: -334,
         });
         this._supplyWarn.node.active = false;
 
@@ -305,7 +318,7 @@ export class MithrilWildMap extends Component {
         // 一次性 toast 错过就没了，这里可随时重看（体验官 E1 建议③）。
         const help = createButton(this.node, {
             w: 56, h: 44, text: '?', fontSize: 26,
-            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
+            fill: T.stoneLight, textColor: T.parchment, activeFill: T.stonePressed,
             radius: 12, onTap: () => this._onHelpTap(),
         });
         help.node.setPosition(180, 598, 0);
@@ -327,9 +340,9 @@ export class MithrilWildMap extends Component {
             const region = REGIONS[i];
             const btn = createButton(this.node, {
                 w: 200, h: 42, text: region.name, fontSize: 19,
-                fill: '#1E293B', textColor: COLOR.TEXT_SECONDARY,
-                activeFill: COLOR.PRIMARY, activeTextColor: '#FFFFFF',
-                stroke: '#334155', radius: 12, onTap: () => this._onRegionTap(region.id),
+                fill: T.stoneLight, textColor: T.parchmentDim,
+                activeFill: T.gold, activeTextColor: T.ink,
+                stroke: T.goldLine, radius: 12, onTap: () => this._onRegionTap(region.id),
             });
             btn.node.setPosition(-220 + i * 220, 478, 0);
             // 地形图标 + 选中下划线（N76：选中态不能只靠底色）
@@ -346,7 +359,7 @@ export class MithrilWildMap extends Component {
             mark.layer = btn.node.layer;
             mark.addComponent(UITransform).setContentSize(200, 42);
             const mk = mark.addComponent(Graphics);
-            mk.fillColor = hex('#93C5FD', 255);
+            mk.fillColor = hex(T.goldBright, 255);
             mk.roundRect(-36, -19, 72, 3, 1.5);
             mk.fill();
             btn.node.addChild(mark);
@@ -370,7 +383,7 @@ export class MithrilWildMap extends Component {
         this._nodeLayer = layer;
 
         this._hint = createLabel(this.node, '', 16, {
-            width: 660, height: 24, color: COLOR.TEXT_SECONDARY, y: -292,
+            width: 660, height: 24, color: T.parchmentDim, y: -292,
         });
         this._hint.string = '';
     }
@@ -401,7 +414,7 @@ export class MithrilWildMap extends Component {
             g.circle(0, 0, 6);
             g.fill();
             createLabel(this.node, entries[i].label, 15, {
-                width: 80, height: 22, color: COLOR.TEXT_SECONDARY, x: x + 10, y,
+                width: 80, height: 22, color: T.parchmentDim, x: x + 10, y,
             });
         }
     }
@@ -409,52 +422,54 @@ export class MithrilWildMap extends Component {
     private _buildBottom(): void {
         this._primaryBtn = createButton(this.node, {
             w: 176, h: 64, text: '开始远征', fontSize: 21,
-            fill: COLOR.PRIMARY, textColor: '#FFFFFF', activeFill: COLOR.PRIMARY_DARK,
+            fill: T.gold, textColor: T.ink, activeFill: T.goldPressed,
             radius: 16, onTap: () => this._onPrimaryTap(),
         });
         this._primaryBtn.node.setPosition(-238, -556, 0);
         // 底部按钮图标（N76）：图标在上、文字在下，按钮不再只是一块色
-        addGlyphNode(this._primaryBtn.node, 'PrimaryIcon', 'growth', 12, '#FFFFFF', -58, 0, 70);
+        addGlyphNode(this._primaryBtn.node, 'PrimaryIcon', 'growth', 12, T.ink, -58, 0, 70);
         this._primaryBtn.label.node.setPosition(16, 0);
         const pUt = this._primaryBtn.label.node.getComponent(UITransform);
         if (pUt) pUt.setContentSize(176 - 46, 60);
 
         // M5 起这一行放 5 个按钮：开始远征 + 营地 / 成长 / 装备 / 返回大厅
+        // N99：四个次级按钮改成同一套石底，身份只由图标色承担 —— 原先「青 / 棕 / 紫」三种
+        // 满饱和填充并排，就是用户说的「配色有点奇怪」最集中的地方。
         const camp = createButton(this.node, {
             w: 104, h: 64, text: '营地', fontSize: 18,
-            fill: '#0E7490', textColor: '#FFFFFF', activeFill: '#155E75',
-            radius: 16, onTap: () => { if (this.onOpenCamp) this.onOpenCamp(); },
+            fill: T.stoneLight, textColor: T.parchment, activeFill: T.stonePressed,
+            radius: 16, stroke: T.goldLine, onTap: () => { if (this.onOpenCamp) this.onOpenCamp(); },
         });
         camp.node.setPosition(-88, -556, 0);
-        this._bottomIcon(camp, 'camp', '#A5F3FC');
+        this._bottomIcon(camp, 'camp', '#7FA6A0');
 
         const grow = createButton(this.node, {
             w: 104, h: 64, text: '成长', fontSize: 18,
-            fill: '#B45309', textColor: '#FFFFFF', activeFill: '#92400E',
-            radius: 16, onTap: () => { if (this.onOpenGrowth) this.onOpenGrowth(); },
+            fill: T.stoneLight, textColor: T.parchment, activeFill: T.stonePressed,
+            radius: 16, stroke: T.goldLine, onTap: () => { if (this.onOpenGrowth) this.onOpenGrowth(); },
         });
         grow.node.setPosition(22, -556, 0);
-        this._bottomIcon(grow, 'growth', '#FDE68A');
+        this._bottomIcon(grow, 'growth', T.goldBright);
 
         const bag = createButton(this.node, {
             w: 104, h: 64, text: '装备', fontSize: 18,
-            fill: '#A855F7', textColor: '#FFFFFF', activeFill: '#7E3AF2',
-            radius: 16, onTap: () => { if (this.onOpenBag) this.onOpenBag(); },
+            fill: T.stoneLight, textColor: T.parchment, activeFill: T.stonePressed,
+            radius: 16, stroke: T.goldLine, onTap: () => { if (this.onOpenBag) this.onOpenBag(); },
         });
         bag.node.setPosition(132, -556, 0);
-        this._bottomIcon(bag, 'bag', '#E9D5FF');
+        this._bottomIcon(bag, 'bag', '#A392B5');
 
         const exit = createButton(this.node, {
             w: 112, h: 64, text: '返回大厅', fontSize: 17,
-            fill: '#334155', textColor: COLOR.TEXT_PRIMARY, activeFill: '#475569',
-            radius: 16, onTap: () => { if (this.onExit) this.onExit(); },
+            fill: T.stoneLight, textColor: T.parchmentDim, activeFill: T.stonePressed,
+            radius: 16, stroke: T.goldLine, onTap: () => { if (this.onExit) this.onExit(); },
         });
         exit.node.setPosition(244, -556, 0);
-        this._bottomIcon(exit, 'exit', '#CBD5E1');
+        this._bottomIcon(exit, 'exit', T.parchmentDim);
 
         // 这行是全游戏唯一解释 8% 规则的地方，字号 / 对比度不能再往低调（试玩 N45）
         createLabel(this.node, '补给耗尽后每新节点 −8% 生命 · 已清理节点可路过 · 死亡失去本程材料', 16, {
-            width: 690, height: 24, color: COLOR.TEXT_SECONDARY, y: -614,
+            width: 690, height: 24, color: T.parchmentDim, y: -614,
         });
     }
 
@@ -484,7 +499,7 @@ export class MithrilWildMap extends Component {
             if (rg) {
                 repaintGlyphNode(
                     this._tabIcons[tab.id] || null, rg.kind, 12,
-                    active ? inkOnFill(COLOR.PRIMARY) : (unlocked ? rg.color : '#64748B'),
+                    active ? T.ink : (unlocked ? rg.color : T.parchmentMuted),
                     active ? 70 : 45,
                 );
             }
@@ -494,7 +509,7 @@ export class MithrilWildMap extends Component {
                 const mg = mark.getComponent(Graphics);
                 if (mg) {
                     mg.clear();
-                    mg.fillColor = hex('#FFFFFF', 255);
+                    mg.fillColor = hex(T.ink, 255);
                     mg.roundRect(-36, -19, 72, 3, 1.5);
                     mg.fill();
                 }
@@ -502,8 +517,8 @@ export class MithrilWildMap extends Component {
             if (!active) {
                 // setActive(false) 已恢复到默认配色，这里按「未解锁 / 已通关」再压一层
                 tab.btn.setColor(
-                    unlocked ? '#1E293B' : '#141A24',
-                    !unlocked ? COLOR.TEXT_DISABLED : cleared ? COLOR.SUCCESS : COLOR.TEXT_SECONDARY,
+                    unlocked ? T.stoneLight : T.stoneDark,
+                    !unlocked ? T.parchmentDim : cleared ? T.success : T.parchmentDim,
                 );
             }
         }
@@ -516,13 +531,13 @@ export class MithrilWildMap extends Component {
         const unlocked = view.playerLevel >= region.levelMin;
         if (exp) {
             btn.setText('放弃远征');
-            btn.setColor(COLOR.DANGER, '#FFFFFF');
+            btn.setColor(T.danger, T.ink);
         } else if (!unlocked) {
             btn.setText(`Lv${region.levelMin} 解锁`);
-            btn.setColor(COLOR.PRIMARY_DISABLED, COLOR.TEXT_DISABLED);
+            btn.setColor(T.stoneDark, T.parchmentDim);
         } else {
             btn.setText('开始远征');
-            btn.setColor(COLOR.PRIMARY, '#FFFFFF');
+            btn.setColor(T.gold, T.ink);
         }
     }
 
@@ -565,8 +580,8 @@ export class MithrilWildMap extends Component {
                 const reachableBack = !!exp && isReachable(view.map, exp, node.id) && otherId === exp.pos;
                 const visited = !!exp && (exp.visited.indexOf(node.id) >= 0 || exp.visited.indexOf(otherId) >= 0);
                 const color = reachable || reachableBack
-                    ? hex(COLOR.SUCCESS, 200)
-                    : hex(visited ? '#3A4658' : '#2A3342', 200);
+                    ? hex(T.goldBright, 200)
+                    : hex(visited ? '#4A4234' : '#232833', 200);
                 this._fillLine(g, a.x, a.y, b.x, b.y, reachable || reachableBack ? 4 : 2.5, color);
             }
         }
@@ -593,14 +608,14 @@ export class MithrilWildMap extends Component {
         this._nodeIds.set(holder, node.id);
 
         const g = holder.addComponent(Graphics);
-        const color = WILD_NODE_COLORS[node.kind] || '#64748B';
+        const color = WILD_NODE_COLORS[node.kind] || T.parchmentMuted;
 
-        // 外圈光晕：可达 = 绿，当前 = 白，首领 = 橙
+        // 外圈光晕：可达 = 黄铜，当前 = 纸白，首领 = 橙
         if (reachable) {
-            g.fillColor = hex(COLOR.SUCCESS, 40);
+            g.fillColor = hex(T.goldBright, 40);
             g.circle(0, 0, r + 14);
             g.fill();
-            g.strokeColor = hex(COLOR.SUCCESS, 255);
+            g.strokeColor = hex(T.goldBright, 255);
             g.lineWidth = 4;
             g.circle(0, 0, r + 8);
             g.stroke();
@@ -608,12 +623,12 @@ export class MithrilWildMap extends Component {
             g.fillColor = hex('#FFFFFF', 28);
             g.circle(0, 0, r + 14);
             g.fill();
-            g.strokeColor = hex('#FFFFFF', 255);
+            g.strokeColor = hex(T.parchment, 255);
             g.lineWidth = 4;
             g.circle(0, 0, r + 8);
             g.stroke();
         } else if (transit) {
-            g.strokeColor = hex(COLOR.PRIMARY, 220);
+            g.strokeColor = hex(T.goldDim, 220);
             g.lineWidth = 2.5;
             g.circle(0, 0, r + 7);
             g.stroke();
@@ -623,25 +638,26 @@ export class MithrilWildMap extends Component {
             g.fill();
         }
 
-        g.fillColor = hex(done ? '#334155' : color, done ? 170 : 235);
+        g.fillColor = hex(done ? T.stonePressed : color, done ? 170 : 235);
         g.circle(0, 0, r);
         g.fill();
-        g.strokeColor = hex(done ? '#475569' : '#FFFFFF', done ? 160 : 235);
+        g.strokeColor = hex(done ? T.goldLine : T.parchment, done ? 200 : 235);
         g.lineWidth = 2.5;
         g.circle(0, 0, r);
         g.stroke();
 
-        this._drawGlyph(g, node.kind, r, done ? '#94A3B8' : '#FFFFFF', boss);
+        this._drawGlyph(g, node.kind, r, done ? T.parchmentMuted : T.parchment, boss);
 
         if (done) {
-            g.fillColor = hex(COLOR.SUCCESS, 255);
+            // 已清理的小勾用祖母绿而不是荧光绿（N99）
+            g.fillColor = hex(T.emerald, 255);
             g.circle(r * 0.72, r * 0.72, 7);
             g.fill();
         }
 
         const name = nodeName(node);
         createLabel(holder, name, boss ? 14 : 13, {
-            width: 110, height: 20, color: done ? COLOR.TEXT_DISABLED : COLOR.TEXT_PRIMARY,
+            width: 110, height: 20, color: done ? T.parchmentMuted : T.parchment,
             bold: boss, y: -r - 16,
         });
         // 副本标签写「装等 1-10」而不是节点层数 Lv：两座副本都落在第 4 层，
@@ -652,7 +668,7 @@ export class MithrilWildMap extends Component {
             ? `装等 ${dg.ilvlMin}-${dg.ilvlMax}`
             : boss ? `推荐装等 ${node.ilvl}` : `Lv${node.level}`;
         createLabel(holder, subLabel, 11, {
-            width: 100, height: 18, color: COLOR.TEXT_SECONDARY, y: -r - 34,
+            width: 100, height: 18, color: T.parchmentDim, y: -r - 34,
         });
 
         holder.on(Node.EventType.TOUCH_END, this.onNodeTap, this);
@@ -703,7 +719,7 @@ export class MithrilWildMap extends Component {
         g.lineTo(size * 0.55, -size * 0.6);
         g.close();
         g.fill();
-        g.fillColor = hex('#0B1220', 235);
+        g.fillColor = hex(T.night, 235);
         g.moveTo(-size * 0.28, -size * 0.6);
         g.lineTo(-size * 0.28, size * 0.1);
         g.arc(0, size * 0.1, size * 0.28, Math.PI, 0, true);
@@ -733,7 +749,7 @@ export class MithrilWildMap extends Component {
             if (view.playerLevel < (REGION_BY_ID[view.regionId] || REGIONS[0]).levelMin) {
                 return `等级不足：${view.regionId} 需要 Lv${(REGION_BY_ID[view.regionId] || REGIONS[0]).levelMin}`;
             }
-            return '点「开始远征」后，沿绿色连线选择下一站';
+            return '点「开始远征」后，沿金色高亮连线选择下一站';
         }
         if (exp.complete) return '本次远征已结束';
         if (exp.pos !== 0 && exp.done.indexOf(exp.pos) < 0) return '上一次的节点还没结算：点白圈继续';
@@ -783,20 +799,25 @@ export class MithrilWildMap extends Component {
         panel.layer = this.node.layer;
         panel.addComponent(UITransform).setContentSize(panelW, panelH);
         const pg = panel.addComponent(Graphics);
-        pg.fillColor = hex(COLOR.PANEL_BG, 255);
+        pg.fillColor = hex(T.stone, 255);
         pg.roundRect(-panelW / 2, -panelH / 2, panelW, panelH, 24);
         pg.fill();
-        pg.strokeColor = hex(COLOR.PANEL_BORDER, 255);
+        pg.strokeColor = hex(T.goldDim, 255);
         pg.lineWidth = 3;
         pg.roundRect(-panelW / 2, -panelH / 2, panelW, panelH, 24);
+        pg.stroke();
+        // 内侧再来一道细金线，和营地面板的「双线铜边」同一语言
+        pg.strokeColor = hex(T.gold, 70);
+        pg.lineWidth = 1;
+        pg.roundRect(-panelW / 2 + 9, -panelH / 2 + 9, panelW - 18, panelH - 18, 18);
         pg.stroke();
         root.addChild(panel);
 
         createLabel(panel, title, 30, {
-            width: panelW - 60, height: 40, color: COLOR.TEXT_PRIMARY, bold: true, y: 148,
+            width: panelW - 60, height: 40, color: T.goldBright, bold: true, y: 148,
         });
         createLabel(panel, lines.join('\n'), 17, {
-            width: panelW - 64, height: 210, color: COLOR.TEXT_SECONDARY, y: 24, lineHeight: 25,
+            width: panelW - 64, height: 210, color: T.parchmentDim, y: 24, lineHeight: 25,
         });
 
         const n = Math.max(1, buttons.length);
@@ -805,8 +826,8 @@ export class MithrilWildMap extends Component {
             const spec = buttons[i];
             const btn = createButton(panel, {
                 w: bw, h: 56, text: spec.label, fontSize: 21,
-                fill: spec.fill || COLOR.PRIMARY, textColor: spec.textColor || '#FFFFFF',
-                activeFill: COLOR.PRIMARY_DARK, radius: 14,
+                fill: spec.fill || T.gold, textColor: spec.textColor || T.ink,
+                activeFill: T.goldPressed, radius: 14,
                 onTap: () => {
                     this.closeModal();
                     spec.onTap();
