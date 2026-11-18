@@ -540,7 +540,10 @@ export class MithrilMenu extends Component {
         if (this._nextBtn) this._nextBtn.node.active = pagerVisible;
         if (this._pageLabel) {
             this._pageLabel.node.active = list.length > 0;
-            this._pageLabel.string = `${this._page + 1} / ${pages}（${list.length}）`;
+            // 试玩 N179：「1 / 1（1）」三个数字没有单位，玩家猜不出是件数还是筛选结果。
+            this._pageLabel.string = pages > 1
+                ? `共 ${list.length} 件 · 第 ${this._page + 1}/${pages} 页`
+                : `共 ${list.length} 件`;
         }
 
         const start = this._page * ROWS_PER_PAGE;

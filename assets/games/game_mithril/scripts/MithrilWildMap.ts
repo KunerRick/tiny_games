@@ -337,7 +337,9 @@ export class MithrilWildMap extends Component {
 
     private _onHelpTap(): void {
         this.showMessage('操作说明', [
-            '地图：点绿圈进入节点，沿途清剿推进',
+            // 试玩 N164：可达节点画的是「金色高亮圈」，帮助里不能再写「绿圈」——
+            // 图例里的绿点是篝火（节点类型），两套颜色语汇撞车会让玩家找错。
+            '地图：点金色高亮圈进入节点，沿途清剿推进',
             '战斗：左侧拖动移动 · 移动会自动朝向最近的敌人',
             '攻击：按住右下最大的普攻键 → 持续攻击',
             '技能与闪避：点按即可；闪避没有前摇，可穿身躲开',
@@ -604,7 +606,7 @@ export class MithrilWildMap extends Component {
         const done = isNodeDone(exp, node.id);
         const current = !!exp && exp.pos === node.id;
         const reachable = !!exp && isReachable(view.map, exp, node.id);
-        // 可路过 / 可回起点：已清理的相邻节点、以及远距离可点的起点（蓝圈，区别于绿圈=有内容）
+        // 可路过 / 可回起点：已清理的相邻节点、以及远距离可点的起点（蓝圈，区别于金色高亮圈=有内容）
         const transit = !!exp && !current && (
             node.kind === 'start' || (done && isAdjacent(view.map, exp, node.id))
         );
@@ -788,7 +790,7 @@ export class MithrilWildMap extends Component {
         if (onlyForwardIsElite(view.map, exp)) {
             return '前方只有精英或首领：点蓝圈退回起点，可换另一支（不耗补给）';
         }
-        return '绿圈进新节点 · 蓝圈可路过已清理节点 · 退回起点不耗补给';
+        return '金色高亮圈进新节点 · 蓝圈可路过已清理节点 · 退回起点不耗补给';
     }
 
     // ==================== 交互 ====================

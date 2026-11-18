@@ -17,7 +17,7 @@ import {
 } from 'cc';
 import { SceneManager } from '../../../common/managers/SceneManager';
 import { StorageManager } from '../../../common/managers/StorageManager';
-import { COLOR, showTutorialOnce } from '../../../common/ui/GameUIKit';
+import { COLOR, showTutorialOnce, toast } from '../../../common/ui/GameUIKit';
 import {
     FIXED_DT, MithrilWorld, PLAYER_START_X, PLAYER_START_Y, equippedModifiers, mulberry32, profileFromSave,
 } from './MithrilCore';
@@ -50,7 +50,7 @@ import {
 import type { ClassId, EquipItem, RunPlan } from './MithrilConfig';
 import {
     WILD_EVENT_OPTIONS, applyWildEvent, buildWildPlan, chargeNodeEntry, chestGold, chestHasTrap, chestTrapDamage,
-    createExpedition, enterNode, failExpedition, generateWildMap, grantRunMaterials, isReachable,
+    createExpedition, enterNode, failExpedition, generateWildMap, grantRunMaterials, isAdjacent, isReachable,
     markNodeDone, nextRegionHint, onlyForwardIsElite,
     nodeById, nodeName, rollNodeMaterials, supplyHeal, wildRng,
 } from './MithrilWild';
@@ -194,7 +194,7 @@ export class MithrilGame extends Component {
 
         this._mapSeed = this.seed > 0 ? (this.seed & 0x7fffffff) : (Date.now() & 0x7fffffff);
         if (this._save) {
-            showTutorialOnce(this.node, 'mithril', '路线图点绿圈启程 · 按住右下最大的键持续攻击 · 右上角「?」可重看操作', 4.2);
+            showTutorialOnce(this.node, 'mithril', '路线图点金色高亮圈启程 · 按住右下最大的键持续攻击 · 右上角「?」可重看操作', 4.2);
             this._enterMapMode();
         } else {
             // 首次进入：先选职业。战斗层与路线图都先收起来，避免玩家透过面板点到摇杆
@@ -402,7 +402,7 @@ export class MithrilGame extends Component {
                 return `已清理 ${exp.done.length}/${WILD_NODE_COUNT} 个节点 · 前方只有精英或首领：点蓝圈退回起点，可换另一支（不耗补给）`;
             }
             const supplyNote = exp.supply <= 0 ? ' · 补给耗尽：下一节点按 8% 生命扣血' : '';
-            return `远征进行中：已清理 ${exp.done.length}/${WILD_NODE_COUNT} 个节点 · 绿圈进新节点，蓝圈可路过${supplyNote}`;
+            return `远征进行中：已清理 ${exp.done.length}/${WILD_NODE_COUNT} 个节点 · 金色高亮圈进新节点，蓝圈可路过${supplyNote}`;
         }
         const region = REGION_BY_ID[this._regionId] || REGIONS[0];
         if (save.level < region.levelMin) {
@@ -537,6 +537,15 @@ export class MithrilGame extends Component {
         const node = nodeById(map, nodeId);
         if (!node) return;
 
+        // 试玩 N174：走不到的节点此前只有底部提示，而提示行本来就常驻同一句文案，
+        // 点下去看起来「毫无反应」——玩家分不清是点偏了还是去不了。给一次明确的轻提示。
+        if (node.kind !== 'start' && node.id !== exp.pos && exp.done.indexOf(node.id) < 0
+            && !isAdjacent(map, exp, node.id)) {
+            toast(this.node, '这个节点走不到：只能点金色高亮圈连着的相邻节点', 1.6);
+            this._refreshMap('这个节点走不到：只能点金色高亮圈连着的相邻节点（蓝圈已清理节点可回退）', true);
+            return;
+        }
+
         // 战斗类节点先确认能编译出内容，再扣补给 —— 免得白扣
         const combat = node.kind === 'battle' || node.kind === 'elite'
             || node.kind === 'boss' || node.kind === 'dungeon';
@@ -556,6 +565,14 @@ export class MithrilGame extends Component {
             && isReachable(map, exp, node.id)
             && exp.done.indexOf(node.id) < 0) {
             this._confirmDungeon(node);
+            return;
+        }
+
+        // 试玩 N175：精英 / 首领此前一击即入，精英圈与普通节点长得一样，玩家没有任何
+        // 「打不打得过 / 这一下会不会终结远征」的信号。与副本同一套确认卡，低于掉落档时警告。
+        if ((node.kind === 'elite' || node.kind === 'boss')
+            && node.id !== exp.pos && exp.done.indexOf(node.id) < 0 && plan) {
+            this._confirmDangerNode(node, plan);
             return;
         }
         this._enterWildNode(node, plan);
@@ -606,7 +623,7 @@ export class MithrilGame extends Component {
             return;
         }
         if (node.kind === 'start') {
-            this._refreshMap('回到起点：绿圈进新节点，蓝圈可路过已清理节点');
+            this._refreshMap('回到起点：金色高亮圈进新节点，蓝圈可路过已清理节点');
             return;
         }
 
@@ -666,6 +683,41 @@ export class MithrilGame extends Component {
             lines.push(`进入消耗：补给已耗尽，生命 −${cost}（${Math.round(SUPPLY_EXHAUST_HP_PCT * 100)}% 上限）`);
         }
         wild.showConfirm(def.name, lines, '进入副本',
+            () => this._enterWildNode(node, plan),
+            under ? COLOR.DANGER : COLOR.PRIMARY);
+    }
+
+    /**
+     * 精英 / 首领节点的进场确认（试玩 N175）。
+     * 普通战斗仍是一击即入；精英与首领是「打不过就会终结整趟远征」的门槛，
+     * 必须先把节点档位、当前装等和进场消耗摆出来。低于掉落档时用警示色。
+     */
+    private _confirmDangerNode(node: WildNode, plan: RunPlan): void {
+        const wild = this._wildMapRef;
+        const save = this._save;
+        const exp = save ? save.expedition : null;
+        if (!wild || !save || !exp) return;
+        const st = equipStats(save.equips);
+        const cur = st.ilvl;
+        const under = cur + 0.05 < node.ilvl;
+        const kindName = node.kind === 'boss' ? '区域首领' : '精英';
+        const lines = [
+            `节点等级 Lv${node.level} · 该节点掉落装等 ${node.ilvl}`,
+            // 与副本确认同一口径：平均装等只按已装备槽算，槽数必须同屏（试玩 N138）
+            `当前平均装等 ${cur.toFixed(1)}（${st.equipped}/8 槽）`,
+            `${kindName}战：敌人更强，建议状态好再进`,
+            under
+                ? `警告：装等低于该节点掉落档 ${node.ilvl}，建议先清普通节点或练级`
+                : '难度：装等与节点档位相当，可正常挑战',
+        ];
+        const maxHp = profileFromSave(save, COMBAT_ILVL_FLOOR).maxHp;
+        if (exp.supply > 0) {
+            lines.push(`进入消耗：补给 −1（当前 ${exp.supply}/${SUPPLY_PER_RUN}）· 阵亡会丢失本程材料`);
+        } else {
+            const cost = Math.max(1, Math.round(maxHp * SUPPLY_EXHAUST_HP_PCT));
+            lines.push(`进入消耗：补给已耗尽，生命 −${cost}（${Math.round(SUPPLY_EXHAUST_HP_PCT * 100)}% 上限）`);
+        }
+        wild.showConfirm(plan.name || `${kindName}节点`, lines, under ? '仍然开打' : '开打',
             () => this._enterWildNode(node, plan),
             under ? COLOR.DANGER : COLOR.PRIMARY);
     }
@@ -1616,7 +1668,7 @@ export class MithrilGame extends Component {
         this._save = defaultSave(classId);
         this._persist();
         this._classRef?.close();
-        showTutorialOnce(this.node, 'mithril', '路线图点绿圈启程 · 按住右下最大的键持续攻击 · 右上角「?」可重看操作', 4.2);
+        showTutorialOnce(this.node, 'mithril', '路线图点金色高亮圈启程 · 按住右下最大的键持续攻击 · 右上角「?」可重看操作', 4.2);
         this._enterMapMode();
     }
 

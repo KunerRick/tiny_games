@@ -348,19 +348,23 @@ export class MithrilGrowthMenu extends Component {
         // 角落天赋图标
         addGlyphNode(node, `TalentIcon_${def.id}`, tg.kind, 8, tg.color, -35, 25, rank > 0 ? 70 : 35);
 
-        const nameColor = maxed ? T.goldBright : (gateOk ? T.parchment : T.parchmentMuted);
+        const nameColor = maxed ? T.goldBright : (gateOk ? T.parchment : T.parchmentDim);
         createLabel(node, def.name, 14, {
             width: 72, height: 20, color: nameColor, bold: true, x: 10, y: 24,
             overflow: 'shrink',
         });
-        createLabel(node, `${rank}/${def.maxRank}`, 12, {
-            width: 84, height: 16,
-            color: maxed ? T.warning : (gateOk ? T.parchmentDim : T.parchmentMuted), y: 8,
+        // 试玩 N176：锁定格原本用「本线需 N 点」顶替效果文本，玩家看不到这格给什么，
+        // 只能凭名字猜投资方向。门槛改挂到等级行（`0/1 · 需5`），效果文本始终显示；
+        // 锁定态文字同时从 parchmentMuted(#8A7E66) 提到 parchmentDim(#B9AB8B)，深底上不再糊。
+        createLabel(node, gateOk ? `${rank}/${def.maxRank}` : `${rank}/${def.maxRank} · 需${gate}`, 12, {
+            width: 88, height: 16,
+            color: maxed ? T.warning : T.parchmentDim, y: 8,
+            overflow: 'shrink',
         });
         // 试玩 N87：描述折成两行时第二行会被格子下边框切掉（如「击杀回 1% 生命」只剩「生命」半截），
         // 描述框下移到 -18、加宽到 88、行高 14 → 两行占 -32..-4，离下边框仍留 7px。
-        createLabel(node, gateOk ? def.desc : `本线需 ${gate} 点`, 12, {
-            width: 88, height: 30, color: gateOk ? T.parchmentDim : T.parchmentMuted,
+        createLabel(node, def.desc, 12, {
+            width: 88, height: 30, color: T.parchmentDim,
             x: 2, y: -18, lineHeight: 14, overflow: 'shrink',
         });
 
