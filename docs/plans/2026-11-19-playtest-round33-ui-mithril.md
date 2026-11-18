@@ -73,3 +73,14 @@
 
 1. 独立复核（fresh 子代理）：五条逐条实机读回，重点看 N163 的边缘点击与 N167 两态、N161 三线换屏。
 2. 复核通过后：fresh 玩家 E 分重测（台账排队项），再看 N171（底栏禁用态）/ N172（提示卡压出生带）。
+
+## 7. 复核结果（主会话补记，2026-11-19）
+
+fresh 独立复核（[`2026-11-19-playtest-round33-ui-mithril-reverify.md`](./2026-11-19-playtest-round33-ui-mithril-reverify.md)）：
+五条**全部 CONFIRMED**，无 PARTIAL / NOT CONFIRMED。关键证据：N163 四处热区在视觉框外 3–10 CSS px 的真实边缘点击
+全部命中、相邻热区间隙点击不误触；N167 开·关两态截图 + `tiny_games_mithril_audio` 读回 true/true ↔ false/false；
+N161 三线整屏换线 + 底部三块包围盒最小间隙 7.1 design px。
+
+复核另开 **N183（P3）**：首领三行 Label 包围盒相邻重叠 ≈3.2 design px（字形 ink 未碰、截图无叠字，
+但微信字体度量不同，真机可能贴边），归地图 / HUD 密度专项，不阻塞验收。
+复核结束时存档已按快照（sha256 `80a4ee50…7300e8`）恢复至 pos 3 / hp 212 / supply 0，预览页已关闭。
