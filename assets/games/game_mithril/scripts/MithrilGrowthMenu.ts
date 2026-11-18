@@ -43,12 +43,21 @@ const { ccclass } = _decorator;
 const PANEL_W = 680;
 const PANEL_H = 940;
 
-/** 天赋格尺寸与行距 */
-const TALENT_CELL_W = 100;
-const TALENT_CELL_H = 78;
-const TALENT_ROW_STEP = 90;
-const TALENT_ROW_TOP = 240;
-const TALENT_COL_X = [-215, 0, 215];
+/**
+ * 天赋格尺寸与行距。
+ * round33 / N161：原「三线并排 × 每线 2 列 = 6 列 × 100×78」在 620 宽里已满，
+ * 描述 12 design px ≈ 6.6 CSS px，手机上看不清。改为一屏一线（三线切换），
+ * 格子 300×104，名称 20 / 门槛 16 / 描述 16，信息可读优先于同屏对比；
+ * 三线各自的投入点数仍由选择行 `N/25` 与总点数行给出。
+ */
+const TALENT_CELL_W = 300;
+const TALENT_CELL_H = 104;
+const TALENT_ROW_STEP = 112;
+const TALENT_ROW_TOP = 190;
+const TALENT_CELL_X = [-160, 160];
+/** 三线切换行（一屏一线，见上） */
+const TALENT_TREE_X = [-215, 0, 215];
+const TALENT_TREE_Y = 272;
 
 /** 技能行距（6 行 × 78 = 470 高） */
 const SKILL_ROW_STEP = 78;
@@ -75,6 +84,8 @@ export class MithrilGrowthMenu extends Component {
     private _save: MithrilSave | null = null;
     private _tab: TabId = 'talent';
     private _selSkill = '';
+    /** 天赋页当前查看的线（N161：一屏一线，0–2 对应 TALENT_TREE_ORDER） */
+    private _talentTree = 0;
 
     private _built = false;
     /** 整棵树（遮罩 + 面板）：显隐只认它，避免「面板关了、遮罩还在吞触摸」 */
@@ -95,6 +106,7 @@ export class MithrilGrowthMenu extends Component {
     open(save: MithrilSave): void {
         this._save = save;
         this._tab = 'talent';
+        this._talentTree = 0;
         const defs = SKILLS.filter((d) => d.classId === save.classId);
         this._selSkill = defs.length > 0 ? defs[0].id : '';
         this._ensureBuilt();
@@ -216,7 +228,7 @@ export class MithrilGrowthMenu extends Component {
         this._content = content;
 
         this._hintLabel = createLabel(panel, '', 15, {
-            width: 640, height: 40, color: T.warning, x: 0, y: -438, lineHeight: 20,
+            width: 640, height: 36, color: T.warning, x: 0, y: -450, lineHeight: 18,
         });
     }
 
@@ -265,24 +277,39 @@ export class MithrilGrowthMenu extends Component {
         if (!save || !content) return;
 
         const trees = TALENT_TREE_ORDER[save.classId];
-        for (let tr = 0; tr < 3; tr++) {
+        if (this._talentTree < 0 || this._talentTree >= trees.length) this._talentTree = 0;
+
+        // 三线切换行（N161）：一屏只铺一条线，格子才够宽把字号抬到可读档。
+        // 三条线各自的投入点数直接写进按钮（`N/25`），跨线比较不必来回切页。
+        for (let tr = 0; tr < trees.length; tr++) {
             const tree = trees[tr];
             const inTree = talentPointsInTree(save.talents, save.classId, tree);
-            // 系别徽记 + 名称（N79：三系不能只靠文字区分）
+            const active = tr === this._talentTree;
             const tg = treeGlyph(tree);
-            addGlyphNode(content, `TreeIcon_${tree}`, tg.kind, 11, tg.color, TALENT_COL_X[tr] - 78, 288, 45);
-            createLabel(content, `${TALENT_TREE_NAMES[tree]}  ${inTree}/${TALENT_LINE_CAP}`, 19, {
-                width: 176, height: 28, bold: true, x: TALENT_COL_X[tr] + 10, y: 288,
-                color: inTree >= TALENT_LINE_CAP ? T.warning : T.parchment,
+            const btn = createButton(content, {
+                w: 200, h: 56,
+                text: `${TALENT_TREE_NAMES[tree]}  ${inTree}/${TALENT_LINE_CAP}`,
+                fontSize: 19,
+                fill: active ? T.rowActive : T.row,
+                textColor: active ? T.parchment : T.parchmentDim,
+                activeFill: T.stonePressed,
+                radius: 12, stroke: active ? T.gold : T.goldDim,
+                onTap: () => this._onTreeTap(tr),
             });
-            for (let tier = 1; tier <= 5; tier++) {
-                const y = TALENT_ROW_TOP - (tier - 1) * TALENT_ROW_STEP;
-                for (let col = 0; col < 2; col++) {
-                    const def = TALENT_BY_ID[`${save.classId}_${tree}_t${tier}_${col}`];
-                    if (!def) continue;
-                    const x = TALENT_COL_X[tr] + (col === 0 ? -51 : 51);
-                    this._makeTalentCell(content, def, x, y);
-                }
+            btn.node.setPosition(TALENT_TREE_X[tr], TALENT_TREE_Y, 0);
+            addGlyphNode(btn.node, `TreeIcon_${tree}`, tg.kind, 11, tg.color, -76, 0, active ? 85 : 55);
+            btn.label.node.setPosition(14, 0);
+            const tut = btn.label.node.getComponent(UITransform);
+            if (tut) tut.setContentSize(200 - 44, 44);
+        }
+
+        const tree = trees[this._talentTree];
+        for (let tier = 1; tier <= 5; tier++) {
+            const y = TALENT_ROW_TOP - (tier - 1) * TALENT_ROW_STEP;
+            for (let col = 0; col < 2; col++) {
+                const def = TALENT_BY_ID[`${save.classId}_${tree}_t${tier}_${col}`];
+                if (!def) continue;
+                this._makeTalentCell(content, def, TALENT_CELL_X[col], y);
             }
         }
 
@@ -290,17 +317,16 @@ export class MithrilGrowthMenu extends Component {
         const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
         const spent = talentPointsSpent(save.talents);
         createLabel(content, [
-            `攻击强度 ${prof.attackPower.toFixed(1)}　生命上限 ${Math.round(prof.maxHp)}　暴击 ${pct(prof.critChance)}`,
-            `急速 ${pct(prof.haste)}　精通 ${pct(prof.mastery)}　全能 ${pct(prof.vers)}`,
-            `已投 ${spent}/${talentPointsForLevel(save.level)} 点 · 加点立刻作用于当前这一局`,
+            `攻击强度 ${prof.attackPower.toFixed(1)}　生命上限 ${Math.round(prof.maxHp)}　暴击 ${pct(prof.critChance)}　急速 ${pct(prof.haste)}`,
+            `精通 ${pct(prof.mastery)}　全能 ${pct(prof.vers)}　·　已投 ${spent}/${talentPointsForLevel(save.level)} 点，加点立刻作用于当前这一局`,
         ].join('\n'), 16, {
-            width: 620, height: 108, color: T.parchmentDim, x: 0, y: -224, lineHeight: 30,
+            width: 640, height: 48, color: T.parchmentDim, x: 0, y: -340, lineHeight: 24,
         });
 
         const respecCost = talentRespecCost(save);
         const campReady = facilityLevel(save, 'training') > 0;
         const respec = createButton(content, {
-            w: 260, h: 48,
+            w: 260, h: 52,
             text: !campReady ? '洗点（营地训练场 Lv1 解锁）'
                 : (respecCost > 0 ? `洗点 ${respecCost} 金` : '洗点（免费）'),
             fontSize: 18,
@@ -309,7 +335,16 @@ export class MithrilGrowthMenu extends Component {
             activeFill: T.stonePressed,
             radius: 12, stroke: T.goldLine, onTap: () => this._onRespecTalents(),
         });
-        respec.node.setPosition(0, -338, 0);
+        // 试玩 N161：面板底部 y=−438 有一条页脚提示（`_hintLabel`），这里按
+        // 「网格 → 数值两行 → 洗点 → 页脚」的顺序重排，避免与提示行叠字。
+        respec.node.setPosition(0, -400, 0);
+    }
+
+    /** 三线切换（N161，具名 handler；createButton 的 onTap 不带 this，包装一次） */
+    private _onTreeTap(index: number): void {
+        if (this._talentTree === index) return;
+        this._talentTree = index;
+        this.refresh();
     }
 
     private _makeTalentCell(parent: Node, def: TalentDef, x: number, y: number): void {
@@ -346,26 +381,26 @@ export class MithrilGrowthMenu extends Component {
         g.roundRect(-TALENT_CELL_W / 2 + 3, -TALENT_CELL_H / 2 + 8, 4, TALENT_CELL_H - 16, 2);
         g.fill();
         // 角落天赋图标
-        addGlyphNode(node, `TalentIcon_${def.id}`, tg.kind, 8, tg.color, -35, 25, rank > 0 ? 70 : 35);
+        addGlyphNode(node, `TalentIcon_${def.id}`, tg.kind, 12, tg.color, -118, 30, rank > 0 ? 70 : 35);
 
         const nameColor = maxed ? T.goldBright : (gateOk ? T.parchment : T.parchmentDim);
-        createLabel(node, def.name, 14, {
-            width: 72, height: 20, color: nameColor, bold: true, x: 10, y: 24,
+        // N161：300 宽的格子把字号抬到 20 / 16 / 16（原 14 / 12 / 12，≈6.6 CSS px）
+        createLabel(node, def.name, 20, {
+            width: 200, height: 26, color: nameColor, bold: true, x: 28, y: 32,
             overflow: 'shrink',
         });
         // 试玩 N176：锁定格原本用「本线需 N 点」顶替效果文本，玩家看不到这格给什么，
         // 只能凭名字猜投资方向。门槛改挂到等级行（`0/1 · 需5`），效果文本始终显示；
         // 锁定态文字同时从 parchmentMuted(#8A7E66) 提到 parchmentDim(#B9AB8B)，深底上不再糊。
-        createLabel(node, gateOk ? `${rank}/${def.maxRank}` : `${rank}/${def.maxRank} · 需${gate}`, 12, {
-            width: 88, height: 16,
-            color: maxed ? T.warning : T.parchmentDim, y: 8,
+        createLabel(node, gateOk ? `${rank}/${def.maxRank}` : `${rank}/${def.maxRank} · 需${gate}`, 16, {
+            width: 210, height: 22,
+            color: maxed ? T.warning : T.parchmentDim, x: 24, y: 8,
             overflow: 'shrink',
         });
-        // 试玩 N87：描述折成两行时第二行会被格子下边框切掉（如「击杀回 1% 生命」只剩「生命」半截），
-        // 描述框下移到 -18、加宽到 88、行高 14 → 两行占 -32..-4，离下边框仍留 7px。
-        createLabel(node, def.desc, 12, {
-            width: 88, height: 30, color: T.parchmentDim,
-            x: 2, y: -18, lineHeight: 14, overflow: 'shrink',
+        // 描述两行（行高 20）占 -46..-6，离 104 高的格子下边框留 6px
+        createLabel(node, def.desc, 16, {
+            width: 276, height: 44, color: T.parchmentDim,
+            x: 0, y: -26, lineHeight: 20, overflow: 'shrink',
         });
 
         node.on(Node.EventType.TOUCH_END, this.onTalentCellTap, this);
@@ -450,8 +485,9 @@ export class MithrilGrowthMenu extends Component {
         }
         if (def.variants) {
             const anyPicked = pickedNames.length > 0;
-            createLabel(block, anyPicked ? `变体 ${pickedNames.join(' · ')}` : '变体 未选', 12, {
-                width: 134, height: 16, x: 15,
+            // 试玩 N178：12 → 14（技能块宽 180，134 的文案盒放 9 个全角 ≈126，仍有余量）
+            createLabel(block, anyPicked ? `变体 ${pickedNames.join(' · ')}` : '变体 未选', 14, {
+                width: 134, height: 18, x: 15,
                 color: anyPicked ? T.info : T.parchmentMuted, y: -18, overflow: 'shrink',
             });
         }

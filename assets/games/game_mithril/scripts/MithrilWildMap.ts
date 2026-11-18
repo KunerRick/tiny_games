@@ -65,6 +65,16 @@ export const WILD_NODE_COLORS: Record<NodeKind, string> = {
 const NODE_SIZE = 76;
 const NODE_R = 26;
 
+/**
+ * 触控热区下限（试玩 N163）：44pt ≈ 83 design px（720 设计宽 / 393 CSS 宽）。
+ * 只放大节点 UITransform，不改绘制样式 —— 贴图与连线保持原尺寸。
+ * 宽度一般不动，避免相邻按钮（横向间隙只有 6–20 px）的热区互相吞。
+ */
+function padTouchHeight(node: Node, h: number): void {
+    const ut = node.getComponent(UITransform);
+    if (ut) ut.setContentSize(ut.width, h);
+}
+
 const LAYER_TOP = 430;
 const LAYER_GAP = 124;
 
@@ -116,6 +126,8 @@ export class MithrilWildMap extends Component {
     private _tabMarks: Record<string, Node> = {};
     /** 区域页签图标节点（选中时换成对比墨色，N88） */
     private _tabIcons: Record<string, Node> = {};
+    /** 区域页签的补充热区（试玩 N163）：页签本体只有 42 高，向上补一条触控带 */
+    private _regionPadIds = new Map<Node, string>();
     private _primaryBtn: UiButton | null = null;
 
     private _edgeGfx: Graphics | null = null;
@@ -138,6 +150,7 @@ export class MithrilWildMap extends Component {
         this._tabs = [];
         this._tabIcons = {};
         this._nodeIds.clear();
+        this._regionPadIds.clear();
         this._modal = null;
         this._primaryBtn = null;
     }
@@ -333,6 +346,9 @@ export class MithrilWildMap extends Component {
             radius: 12, onTap: () => this._onHelpTap(),
         });
         help.node.setPosition(180, 598, 0);
+        // 试玩 N163：56×44 的「?」是地图上最小的可点目标；绘制不变，热区撑到 84×84
+        const helpUt = help.node.getComponent(UITransform);
+        if (helpUt) helpUt.setContentSize(84, 84);
     }
 
     private _onHelpTap(): void {
@@ -378,6 +394,15 @@ export class MithrilWildMap extends Component {
             btn.node.addChild(mark);
             mark.active = false;
             this._tabMarks[region.id] = mark;
+            // 试玩 N163：页签视觉仍是 200×42，但补一条同宽 42 高的向上热区带
+            // （457–499 → 幽合到 541，合计 ≈84 design px）。向下补会压住地图最上层节点。
+            const pad = new Node(`RegionPad_${region.id}`);
+            pad.layer = this.node.layer;
+            pad.addComponent(UITransform).setContentSize(200, 42);
+            pad.setPosition(-220 + i * 220, 478 + 42, 0);
+            this.node.addChild(pad);
+            this._regionPadIds.set(pad, region.id);
+            pad.on(Node.EventType.TOUCH_END, this._onRegionPadTap, this);
             this._tabs.push({ id: region.id, btn });
         }
     }
@@ -395,8 +420,9 @@ export class MithrilWildMap extends Component {
         this.node.addChild(layer);
         this._nodeLayer = layer;
 
+        // y 由 −292 下移到 −308：首领的三行字在 N178 抬字号后变高，避免与提示行叠
         this._hint = createLabel(this.node, '', 16, {
-            width: 660, height: 24, color: T.parchmentDim, y: -292,
+            width: 660, height: 24, color: T.parchmentDim, y: -308,
         });
         this._hint.string = '';
     }
@@ -426,8 +452,9 @@ export class MithrilWildMap extends Component {
             g.fillColor = hex(WILD_NODE_COLORS[entries[i].kind], 235);
             g.circle(0, 0, 6);
             g.fill();
-            createLabel(this.node, entries[i].label, 15, {
-                width: 80, height: 22, color: T.parchmentDim, x: x + 10, y,
+            // 试玩 N178：图例 15 → 16，盒宽 80 → 90（格距 140，仍有 16 px 余量）
+            createLabel(this.node, entries[i].label, 16, {
+                width: 90, height: 22, color: T.parchmentDim, x: x + 10, y,
             });
         }
     }
@@ -479,6 +506,11 @@ export class MithrilWildMap extends Component {
         });
         exit.node.setPosition(244, -556, 0);
         this._bottomIcon(exit, 'exit', T.parchmentDim);
+
+        // 试玩 N163：底栏五颗按钮视觉保持 64 高，热区统一撑到 84（≈44pt）。
+        // 横向间隙只有 6–20 px，宽度一律不动，以免相邻按钮的热区互相吞。
+        padTouchHeight(this._primaryBtn.node, 84);
+        for (const b of [camp, grow, bag, exit]) padTouchHeight(b.node, 84);
 
         // 这行是全游戏唯一解释 8% 规则的地方，字号 / 对比度不能再往低调（试玩 N45）
         createLabel(this.node, '补给耗尽后每新节点 −8% 生命 · 已清理节点可路过 · 死亡失去本程材料', 16, {
@@ -669,9 +701,11 @@ export class MithrilWildMap extends Component {
         }
 
         const name = nodeName(node);
-        const nameLabel = createLabel(holder, name, boss ? 14 : 13, {
-            width: 110, height: 20, color: done ? T.parchmentMuted : T.parchment,
-            bold: boss, y: -r - 16,
+        // 试玩 N178：节点名 13 design px ≈ 6.9 CSS px，是地图上最常读的一行。抬到 16，
+        // 名字 / 等级 / 槽数三行同步下移，行距按 16 号字重排（见下两处 y）。
+        const nameLabel = createLabel(holder, name, 16, {
+            width: 120, height: 22, color: done ? T.parchmentMuted : T.parchment,
+            bold: boss, y: -r - 18,
         });
         // 试玩 N153：名字 / 等级 / 槽数此前是死区 —— 玩家点文字没有任何反应，
         // 只有 84×84 的圆圈生效。把这两行也接进同一个点击入口。
@@ -683,16 +717,19 @@ export class MithrilWildMap extends Component {
         const subLabel = dg
             ? `装等 ${dg.ilvlMin}-${dg.ilvlMax}`
             : boss ? `推荐装等 ${node.ilvl}` : `Lv${node.level}`;
-        const sub = createLabel(holder, subLabel, 11, {
-            width: 100, height: 18, color: T.parchmentDim, y: -r - 34,
+        // 试玩 N178：11 design px ≈ 5.8 CSS px，手机上前路信息要凑近看。抬到 16
+        // （=8.5 CSS px），标签盒同步加宽到 130；同层节点最小横向间距 219 design px，不会蹭到邻格。
+        const sub = createLabel(holder, subLabel, 16, {
+            width: 130, height: 22, color: T.parchmentDim, y: -r - 40,
         });
         this._bindNodeHit(sub.node, node.id);
         // 试玩 N142：「平均装等」只对已装备槽求平均，2 件高装等会显示成 18.0，
         // 玩家拿它和「推荐装等 12」直接比就会误判。首领节点把槽数同屏写出来。
         // 首领固定在最后一层（layer 5），下方没有节点，这一行不会撞到别的东西。
         if (boss && view.equippedSlots !== undefined) {
-            const slots = createLabel(holder, `已装备 ${view.equippedSlots}/${view.slotTotal || 8} 槽`, 10, {
-                width: 110, height: 16, color: T.parchmentDim, y: -r - 50,
+            // 试玩 N178：10 → 14；同时下移到 −r−56，避开加高后的装等行
+            const slots = createLabel(holder, `已装备 ${view.equippedSlots}/${view.slotTotal || 8} 槽`, 14, {
+                width: 140, height: 20, color: T.parchmentDim, y: -r - 64,
             });
             this._bindNodeHit(slots.node, node.id);
         }
@@ -797,6 +834,12 @@ export class MithrilWildMap extends Component {
 
     private _onRegionTap(regionId: string): void {
         if (this.onSelectRegion) this.onSelectRegion(regionId);
+    }
+
+    /** 页签补充热区（试玩 N163）：与页签本体同一动作，靠 map 取区域 id */
+    private _onRegionPadTap(ev: EventTouch): void {
+        const id = this._regionPadIds.get(ev.target as Node);
+        if (id) this._onRegionTap(id);
     }
 
     private _onPrimaryTap(): void {

@@ -677,10 +677,11 @@ export class MithrilGame extends Component {
         ];
         const maxHp = profileFromSave(save, COMBAT_ILVL_FLOOR).maxHp;
         if (exp.supply > 0) {
-            lines.push(`进入消耗：补给 −1（当前 ${exp.supply}/${SUPPLY_PER_RUN}）· 阵亡会丢失本程材料`);
+            // 试玩 N166：确认卡是「按下之前」的界面，用完成时会读成「现在已经耗尽 / 已经扣了」
+            lines.push(`进入时：补给 −1（当前 ${exp.supply}/${SUPPLY_PER_RUN}）· 阵亡会丢失本程材料`);
         } else {
             const cost = Math.max(1, Math.round(maxHp * SUPPLY_EXHAUST_HP_PCT));
-            lines.push(`进入消耗：补给已耗尽，生命 −${cost}（${Math.round(SUPPLY_EXHAUST_HP_PCT * 100)}% 上限）`);
+            lines.push(`进入时：补给已耗尽 →生命 −${cost}（${Math.round(SUPPLY_EXHAUST_HP_PCT * 100)}% 上限）`);
         }
         wild.showConfirm(def.name, lines, '进入副本',
             () => this._enterWildNode(node, plan),
@@ -712,10 +713,11 @@ export class MithrilGame extends Component {
         ];
         const maxHp = profileFromSave(save, COMBAT_ILVL_FLOOR).maxHp;
         if (exp.supply > 0) {
-            lines.push(`进入消耗：补给 −1（当前 ${exp.supply}/${SUPPLY_PER_RUN}）· 阵亡会丢失本程材料`);
+            // 试玩 N166：确认卡是「按下之前」的界面，用完成时会读成「现在已经耗尽 / 已经扣了」
+            lines.push(`进入时：补给 −1（当前 ${exp.supply}/${SUPPLY_PER_RUN}）· 阵亡会丢失本程材料`);
         } else {
             const cost = Math.max(1, Math.round(maxHp * SUPPLY_EXHAUST_HP_PCT));
-            lines.push(`进入消耗：补给已耗尽，生命 −${cost}（${Math.round(SUPPLY_EXHAUST_HP_PCT * 100)}% 上限）`);
+            lines.push(`进入时：补给已耗尽 →生命 −${cost}（${Math.round(SUPPLY_EXHAUST_HP_PCT * 100)}% 上限）`);
         }
         wild.showConfirm(plan.name || `${kindName}节点`, lines, under ? '仍然开打' : '开打',
             () => this._enterWildNode(node, plan),

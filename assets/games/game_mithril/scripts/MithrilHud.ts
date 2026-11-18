@@ -257,6 +257,8 @@ export class MithrilHud extends Component {
     // ---- 暂停层（体验官 E4）：战斗中返回不再直接换场景 ----
     private _pauseRoot: Node | null = null;
     private _pauseAudioBtn: ReturnType<typeof createButton> | null = null;
+    /** 暂停层音效开关的滑轨 / 滑块（试玩 N167：只有文字时看不出「能拨」） */
+    private _pauseAudioSwitch: Node | null = null;
     private _paused = false;
 
     /** 圆键里的字号：两字比单字再缩一点，保证 84–112px 的键面不折行 */
@@ -325,6 +327,7 @@ export class MithrilHud extends Component {
         this._hintLabel = null;
         this._pauseRoot = null;
         this._pauseAudioBtn = null;
+        this._pauseAudioSwitch = null;
     }
 
     // ==================== 对外 ====================
@@ -550,9 +553,25 @@ export class MithrilHud extends Component {
     };
 
     private _refreshPauseAudio(): void {
+        const on = sfx.sfxOn || sfx.vibOn;
         if (this._pauseAudioBtn) {
-            this._pauseAudioBtn.setText(sfx.sfxOn || sfx.vibOn ? '音效与震动：开' : '音效与震动：关');
+            this._pauseAudioBtn.setText(on ? '音效与震动：开' : '音效与震动：关');
         }
+        // 滑块位置 + 颜色同时给信号：开 → 靠右实心金；关 → 靠左灰件
+        const sw = this._pauseAudioSwitch;
+        const g = sw ? sw.getComponent(Graphics) : null;
+        if (!g) return;
+        g.clear();
+        g.fillColor = hex(on ? T.gold : T.stonePressed, on ? 150 : 255);
+        g.roundRect(-30, -14, 60, 28, 14);
+        g.fill();
+        g.strokeColor = hex(T.goldLine, on ? 210 : 140);
+        g.lineWidth = 1.5;
+        g.roundRect(-30, -14, 60, 28, 14);
+        g.stroke();
+        g.fillColor = hex(on ? T.goldBright : T.parchmentMuted, 255);
+        g.circle(on ? 16 : -16, 0, 10);
+        g.fill();
     }
 
     private _buildPause(): void {
@@ -616,7 +635,9 @@ export class MithrilHud extends Component {
             fill: T.gold, textColor: T.ink, activeFill: T.goldPressed,
             radius: 14, onTap: () => this._onPauseResume(),
         });
-        resume.node.setPosition(0, 22, 0);
+        // 试玩 N163：视觉保持 156×58，热区撑到 84 design px（≈44pt@720 宽）。
+        // 三行按钮的 y 因此整体上移 / 让位，保证放大后热区不互相压住。
+        resume.node.setPosition(0, 34, 0);
 
         const map = createButton(panel, {
             w, h, text: '返回路线图', fontSize: 20,
@@ -633,12 +654,34 @@ export class MithrilHud extends Component {
         lobby.node.setPosition(120, -54, 0);
 
         // 音效开关（报告 §8：战斗中想静音不必退出场景）
+        // 试玩 N167：原先只有「音效与震动：开」一行字，读不出「可以拨」；
+        // 这里补一条可见滑轨 + 滑块（文字同步保留，作为语义冗余）。
         this._pauseAudioBtn = createButton(panel, {
-            w: 250, h: 48, text: '音效与震动：开', fontSize: 19,
+            w: 280, h: 52, text: '音效与震动：开', fontSize: 19,
             fill: T.stoneDark, textColor: T.parchmentDim, activeFill: T.stonePressed,
             radius: 12, onTap: () => this._onPauseAudio(),
         });
         this._pauseAudioBtn.node.setPosition(0, -140, 0);
+        // 文字左移给右侧开关让位（标签节点原位居中，这里改锚点位置与宽度）
+        this._pauseAudioBtn.label.node.setPosition(-38, 0, 0);
+        const audioLabelUt = this._pauseAudioBtn.label.node.getComponent(UITransform);
+        if (audioLabelUt) audioLabelUt.setContentSize(190, 30);
+
+        const sw = new Node('AudioSwitch');
+        sw.layer = panel.layer;
+        sw.addComponent(UITransform).setContentSize(60, 28);
+        sw.setPosition(98, 0, 0);
+        sw.addComponent(Graphics);
+        this._pauseAudioBtn.node.addChild(sw);
+        this._pauseAudioSwitch = sw;
+        this._refreshPauseAudio();
+
+        // 试玩 N163：四颗按钮热区统一撑到 84 design px（视觉不变，只放大 UITransform）。
+        // 行距按放大后的热区重排过：34 / −54 / −140，垂直间隙 4 / 2 px，互不压住。
+        for (const b of [resume, map, lobby, this._pauseAudioBtn]) {
+            const but = b.node.getComponent(UITransform);
+            if (but) but.setContentSize(but.width, 84);
+        }
 
         root.active = false;
     }
