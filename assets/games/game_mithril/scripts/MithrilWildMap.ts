@@ -783,9 +783,10 @@ export class MithrilWildMap extends Component {
         }
         if (exp.complete) return '本次远征已结束';
         if (exp.pos !== 0 && exp.done.indexOf(exp.pos) < 0) return '上一次的节点还没结算：点白圈继续';
-        // 试玩 N151：唯一前进边是精英 / 首领时，把「退回起点换支路且免费」直接写出来
+        // 试玩 N151：唯一前进边是精英 / 首领时，把「退回起点换支路且免费」直接写出来。
+        // N157：首领也算「危险前进边」，文案不能再只说「精英」。
         if (onlyForwardIsElite(view.map, exp)) {
-            return '前方只有精英：点蓝圈退回起点，可换另一支（不耗补给）';
+            return '前方只有精英或首领：点蓝圈退回起点，可换另一支（不耗补给）';
         }
         return '绿圈进新节点 · 蓝圈可路过已清理节点 · 退回起点不耗补给';
     }

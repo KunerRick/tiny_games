@@ -399,7 +399,7 @@ export class MithrilGame extends Component {
             // 试玩 N151：面对精英墙时，玩家此前在四处界面都看不到「可以退回起点换支路」。
             // 这不是提示不够详细，而是唯一解法不可见；只在这条路真的走不通时出现。
             if (this._mapHintIsDanger()) {
-                return `已清理 ${exp.done.length}/${WILD_NODE_COUNT} 个节点 · 前方只有精英：点蓝圈退回起点，可换另一支（不耗补给）`;
+                return `已清理 ${exp.done.length}/${WILD_NODE_COUNT} 个节点 · 前方只有精英或首领：点蓝圈退回起点，可换另一支（不耗补给）`;
             }
             const supplyNote = exp.supply <= 0 ? ' · 补给耗尽：下一节点按 8% 生命扣血' : '';
             return `远征进行中：已清理 ${exp.done.length}/${WILD_NODE_COUNT} 个节点 · 绿圈进新节点，蓝圈可路过${supplyNote}`;
