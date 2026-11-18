@@ -39,10 +39,12 @@ extensions/**/node_modules/
 .playwright-mcp/
 
 #//////////////////////////
-# 试玩截图（本地证据，不入库：一轮 20+ 张、几 MB）
-# 报告照常写相对链接，只是本机指针；规则见 docs/tech/playtest-cycle.md §7.5
+# 文档配图 / 试玩截图（本地证据，不入库：一轮 20+ 张、几 MB）
+# 报告与设计文档照常写相对链接，只是本机指针；
+# 规则与例外见 docs/assets/README.md 与 docs/tech/playtest-cycle.md §7.5
 #//////////////////////////
-docs/assets/*-round*/
+docs/assets/*
+!docs/assets/README.md
 
 #//////////////////////////
 # AI 协作工具（本地设置 / worktree 目录，不入库）

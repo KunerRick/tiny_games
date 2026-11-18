@@ -267,7 +267,7 @@ export class IdiomCore {
 
 ## 12. 浏览器试玩复核（2026-11-05）
 
-![轻松难度：选中一条成语后](../assets/idiom/easy-active-word.png)
+[轻松难度：选中一条成语后](../assets/idiom/easy-active-word.png)
 
 用编辑器预览（`http://127.0.0.1:7456/`）+ 真实点击事件走了一遍完整链路，结论与实测要点：
 

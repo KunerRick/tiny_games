@@ -6,7 +6,7 @@
 - 玩法定位：文字猜测 · 每日挑战 · 分享传播
 - 前置文档：[`../plans/2026-11-05-game-catalog-and-roadmap.md`](../plans/2026-11-05-game-catalog-and-roadmap.md)
 
-![每日挑战界面](../assets/wordle-daily.png)
+[每日挑战界面](../assets/wordle-daily.png)
 
 ---
 
@@ -213,4 +213,4 @@ export function shareGrid(rows: CellMark[][]): string;
 - 结算卡没有独立关闭按钮，退出靠「再来一局 / 返回大厅」。
 - 每日挑战完成后切到随机再切回每日，会再次弹出当日结算卡（可视为「回看棋盘」）。
 
-![失败结算](../assets/wordle-result-loss.png)
+[失败结算](../assets/wordle-result-loss.png)

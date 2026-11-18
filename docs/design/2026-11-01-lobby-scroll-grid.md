@@ -146,7 +146,7 @@ hint.active = contentHeight > viewHeight + 1;   // +1 吃掉浮点误差
 
 | 改前 | 改后 |
 |------|------|
-| ![改前](../assets/lobby/before.png) | ![改后](../assets/lobby/after.png) |
+| [改前](../assets/lobby/before.png) | [改后](../assets/lobby/after.png) |
 | 文字在卡片外、压着下一行图标；末行被屏幕底边切掉；配色偏单调 | 文字收进卡片底部；分区之间有留白；末行完整可见；卡片按 id 八色区分 |
 
 ---

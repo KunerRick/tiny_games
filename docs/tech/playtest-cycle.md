@@ -178,8 +178,9 @@ UI → 玩法 → 交互 → 数值 → 稳定性/回归 → （回到最低分 
 
 ### 7.5 截图与产物（本地证据，不入库）
 
-- 截图统一放 `docs/assets/<YYYY-MM-DD>-<game>-round<N>/`；该目录由 `.gitignore` 的
-  `docs/assets/*-round*/` 规则排除，**不进版本库**（一轮 20+ 张、几 MB，且对读代码的人无用）。
+- 截图统一放 `docs/assets/<YYYY-MM-DD>-<game>-round<N>/`；整个 `docs/assets/` 由 `.gitignore`
+  排除，**不进版本库**（一轮 20+ 张、几 MB，且对读代码的人无用）。目录约定见
+  [`docs/assets/README.md`](../assets/README.md)。
 - 报告里照常写相对链接（`../assets/…png`），它只是**本机查阅指针**：远端仓库 / PR 里点不开是预期的，
   不要把「链接失效」当成缺证据。需要给别人看图时单独贴，不要为了链接把图提交进去。
 - 提交范围：报告 `.md` + 台账 + 代码 / 配置。截图、录屏、`.playwright-mcp/` 产物一律不提交。
