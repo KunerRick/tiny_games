@@ -215,15 +215,18 @@ function botInput(world) {
 
 /**
  * 跑任意 `RunPlan`（副本或野外节点）。
- * `opts`：`{ classId, level, ilvl, seconds, trinkets, hp, seed, profile }`。
+ * `opts`：`{ classId, level, ilvl, seconds, trinkets, hp, seed, profile, input }`。
  * `profile` 显式给出战斗档案（例如带装备倍率 / 天赋的 `profileFromSave`）；省略时
  * 用 `makeProfile(classId, level, ilvl)`（副本矩阵的既有口径，勿改）。
  * `hp` 省略 = 满血；野外节点传远征当前生命即可（`startWild` 与 `startDungeon` 共用 `startPlan`）。
+ * `input` 覆盖每帧输入函数（默认 `botInput`）；`verify-mithril-newplayer.js` 的副本段
+ * 用它复现「会走位、不放技能」的玩家口径（N147 回归锁）。
  */
 function runPlan(plan, opts) {
     const o = opts || {};
     const classId = o.classId || 'warrior';
     const seconds = o.seconds || 300;
+    const input = typeof o.input === 'function' ? o.input : botInput;
     const label = plan ? plan.id : 'no-plan';
     const world = new C.MithrilWorld(
         o.profile || C.makeProfile(classId, o.level || 30, o.ilvl || 1),
@@ -247,7 +250,7 @@ function runPlan(plan, opts) {
     let sawAdds = false;
     let sawTelegraph = false;
     while (world.phase === 'playing' && steps < maxSteps) {
-        world.step(F.FIXED_DT, botInput(world));
+        world.step(F.FIXED_DT, input(world));
         for (const ev of world.drainEvents()) {
             if (ev.type === 'phase') {
                 seen.add(`phase${ev.phase}`);

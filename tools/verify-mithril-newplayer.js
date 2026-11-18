@@ -13,13 +13,22 @@
  *  D. 非回归锁：霜牙 / 深渊的「不放技能」胜场不得低于当前基线（11/12、9/12）——
  *     这是**防退化**，不是「要求无技能必须赢」。战士不带技能打深渊首节点全灭是已知设计张力
  *     （远程职业靠风筝能赢），见台账 N149；把它改好这里会自然通过（只拦下降）。
+ *  E. N147 回归锁：**废弃矿坑副本**、真实 Lv8 档（3 槽 / ilvl 3.67 / maxHp 256 / 入场 hp185 = 72%）、
+ *     分析师口径的「追着目标走、只普攻」（chase：弧内 100、普攻 128、不躲不滚不捡球），
+ *     6 seed 必须 ≥ 5 胜。round29 把矿坑首领 `troll.hp` 3000 → 1800 就是为了翻这堵墙；
+ *     回退到 3000 时 6 seed **全灭**（首领剩 47%），所以这道闸是真有牙齿的。
+ *     已知近失：seed 2468 在 1800 下首领剩 2% 阵亡（minHp 0.01）——它计入 5/6 的下限，
+ *     不为了凑 6/6 去挑 seed。
  *
  * 用法：node tools/verify-mithril-newplayer.js
  * 通过时打印 MITHRIL_NEWPLAYER_OK；失败逐条打印并以退出码 1 结束。
  * 调参时 `MITHRIL_VERBOSE=1` 打印每场读数。
  *
- * 组内确定性：种子固定（9001 / 4242 / 7007），世界种子由节点种子派生（^ 0x9e37），
- * 因此同一份代码每次读数完全一致，可直接当回归基线。
+ * `--self-test`：只在内存里还原两处旧构成（层 1 第三波远程墙 + troll.hp 3000），
+ * 期望 C 段与 E 段同时变红；两段都红才算「闸门有牙齿」。
+ *
+ * 组内确定性：种子固定（9001 / 4242 / 7007 / 1337 / 5150 / 2468），世界种子由节点种子派生（^ 0x9e37），
+ * 副本段直接用传入 seed；因此同一份代码每次读数完全一致，可直接当回归基线。
  */
 
 'use strict';
@@ -56,9 +65,10 @@ const W = require(path.join(OUT, 'MithrilWild.js'));
 const bot = require(path.join(ROOT, 'tools', 'lib', 'mithril-bot.js')).createBot(F, C);
 
 // ---------- --self-test：证明这道闸真有牙齿 ----------
-// 只在内存里 monkey-patch 编译产物（不改仓库代码），把层 1 的第三波还原成 N144 之前的
-// 旧构成（远程 ×2 + 近战 ×2 + 近战 ×1），断言 C 段（站桩）确实打不过。
-// round29 实测：旧构成下站桩 0/3（57.4 / 65.9 / 65.9 s 阵亡），新构成 3/3 胜。
+// 只在内存里 monkey-patch 编译产物（不改仓库代码），同时还原两处旧状态：
+//  ① 层 1 第三波还原成 N144 之前的构成（远程 ×2 + 近战 ×2 + 近战 ×1）→ 期望 C 段变红；
+//  ② 矿坑首领 troll.hp 改回 3000（N147 之前）→ 期望 E 段变红。
+// round29 实测：旧构成下站桩 0/3；troll 3000 时副本段 0/6（首领剩 47%）。
 const SELF_TEST = process.argv.includes('--self-test');
 if (SELF_TEST) {
     const origBuild = W.buildWildPlan;
@@ -80,11 +90,15 @@ if (SELF_TEST) {
         }
         return plan;
     };
-    console.log('（--self-test：已把层 1 第三波还原为旧构成，预期 C 段变红）');
+    if (F.ENEMY_BY_ID && F.ENEMY_BY_ID.troll) F.ENEMY_BY_ID.troll.hp = 3000;
+    console.log('（--self-test：已还原层 1 第三波旧构成 + troll.hp 3000，预期 C 段与 E 段变红）');
 }
 
 const CLASS_IDS = ['warrior', 'mage', 'ranger', 'priest'];
 const SEEDS = [9001, 4242, 7007];
+// E 段（副本）比首节点宽：加 3 个 seed 覆盖「追着打」模型的方差。
+const MINE_SEEDS = [...SEEDS, 1337, 5150, 2468];
+const MINE_GATE_MIN_WINS = 5;
 const BOT_LIMIT = 180;
 const ASH_NO_SKILL_LIMIT = 90;
 const STAND_LIMIT = 90;
@@ -289,6 +303,98 @@ if (!SELF_TEST) {
         if (process.env.MITHRIL_VERBOSE) for (const r of rows) console.log('    ' + reportRow(r));
         check(`D ${region.id} 不放技能胜场 ≥ 基线 ${baseline}`, wins >= baseline, `${wins}/${rows.length}`);
     }
+}
+
+// ==================== E. N147 回归锁：矿坑副本 · 真实 Lv8 档 · 不放技能 ====================
+// 口径与 round29 数值分析师逐字同款（chase：弧内 100、普攻 128、aim 交给引擎、不躲不滚不捡球）。
+// 档位取自 30 分钟曲线 noskill seed 9001 的副本入场快照：Lv8 / 3 槽 / ilvl3.67 / maxHp 256 / hp185。
+// 用「合成存档」而不是外部快照文件：只保留 ilvl 与单条词条，读数与快照档逐位相同（round29 实测）。
+function mineGateChaseInput(world) {
+    const p = world.player;
+    if (world.phase !== 'playing') return { moveX: 0, moveY: 0, aimX: 0, aimY: 0 };
+    let target = null;
+    let best = Infinity;
+    for (const e of world.enemies) {
+        const d = Math.hypot(e.x - p.x, e.y - p.y);
+        const score = d * (e.kind === 'wraith' ? 0.8 : 1);
+        if (score < best) { best = score; target = e; }
+    }
+    if (!target) return { moveX: 0, moveY: 0, aimX: 0, aimY: 0 };
+    const dx = target.x - p.x;
+    const dy = target.y - p.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    const inArc = dist < 100;
+    return {
+        moveX: inArc ? 0 : dx / dist,
+        moveY: inArc ? 0 : dy / dist,
+        aimX: 0, aimY: 0,
+        basic: dist < 128,
+        skill1: false, skill2: false, skill3: false, burst: false, dodge: false,
+    };
+}
+
+function mineGateSave() {
+    const save = P.defaultSave('warrior');
+    save.level = 8;
+    save.exp = 0;
+    save.equips = {
+        offHand: { ilvl: 5, affixes: [{ id: 'vers', points: 1 }] },
+        chest: { ilvl: 3, affixes: [{ id: 'mastery', points: 1 }] },
+        feet: { ilvl: 3, affixes: [{ id: 'vers', points: 1 }] },
+    };
+    return save;
+}
+
+console.log('\nE. N147 回归锁 · 矿坑副本 Lv8/3 槽/ilvl3.67 不放技能');
+const minePlan = F.dungeonRunPlan('mine');
+if (!minePlan) {
+    check('E 矿坑副本计划存在', false, 'dungeonRunPlan(mine) 返回空');
+} else {
+    const mineRows = [];
+    for (const seed of MINE_SEEDS) {
+        const save = mineGateSave();
+        const res = bot.runPlan(minePlan, {
+            classId: 'warrior',
+            level: save.level,
+            ilvl: 3.67,
+            seconds: 260,
+            seed,
+            hp: 185,
+            profile: C.profileFromSave(save, F.COMBAT_ILVL_FLOOR),
+            input: mineGateChaseInput,
+        });
+        mineRows.push({
+            seed,
+            phase: res.world.phase,
+            seconds: +res.seconds.toFixed(1),
+            minHp: res.minHp,
+            bossPct: res.world.boss ? res.world.boss.hp / res.world.boss.maxHp : 0,
+        });
+    }
+    if (process.env.MITHRIL_VERBOSE) {
+        for (const r of mineRows) {
+            console.log(`    seed ${r.seed}: ${r.phase} ${r.seconds} s minHp ${r.minHp.toFixed(3)}`
+                + `${r.phase === 'won' ? '' : ` boss ${(r.bossPct * 100).toFixed(0)}%`}`);
+        }
+    }
+    const mineWins = mineRows.filter((r) => r.phase === 'won').length;
+    if (SELF_TEST) {
+        // 自测口径反过来：troll.hp 3000（N147 之前）下必须跌破下限，否则说明这道闸拦不住回退。
+        check('self-test troll 3000 下矿坑副本必须变红', mineWins < MINE_GATE_MIN_WINS,
+            `${mineWins}/${mineRows.length} 胜`);
+    } else {
+        check(`E 矿坑副本 · 不放技能胜场 ≥ ${MINE_GATE_MIN_WINS}/${mineRows.length}`,
+            mineWins >= MINE_GATE_MIN_WINS, `${mineWins}/${mineRows.length}`);
+        // 逐 seed 只查「跑完了」：近失（seed 2468 首领剩 2%）是已知读数，计入 5/6 下限，
+        // 不按单场判红 —— 否则等于要求 6/6，会把已知近失变成永久红。
+        for (const r of mineRows) {
+            check(`E [mine/seed ${r.seed}] 跑完（未卡超时）`, r.phase !== 'playing',
+                `${r.phase} @ ${r.seconds}s minHp ${r.minHp.toFixed(3)} boss ${(r.bossPct * 100).toFixed(0)}%`);
+        }
+    }
+    const worstWin = Math.min(...mineRows.filter((r) => r.phase === 'won').map((r) => r.minHp));
+    console.log(`  mine: ${mineWins}/${mineRows.length} 胜（下限 ${MINE_GATE_MIN_WINS}），`
+        + `最慢 ${Math.max(...mineRows.map((r) => r.seconds))} s，胜局最低血量 ${Number.isFinite(worstWin) ? worstWin.toFixed(3) : '-'}`);
 }
 
 // ==================== 汇总 ====================
