@@ -358,6 +358,9 @@ export class MithrilGame extends Component {
             hp: exp ? exp.hp : profile.maxHp,
             materials: save.materials,
             cleared: save.regionsCleared,
+            // 试玩 N142：首领节点副标题要写「已装备 n/8 槽」，否则 avg 18.0 会被读成远超推荐装等
+            equippedSlots: equipStats(save.equips).equipped,
+            slotTotal: GEAR_SLOTS.length,
         });
         if (hint !== undefined) wild.setHint(hint);
     }

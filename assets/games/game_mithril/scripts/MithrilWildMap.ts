@@ -77,6 +77,10 @@ export interface WildMapView {
     /** 存档里的材料总量（含本次远征） */
     materials: Record<string, number>;
     cleared: string[];
+    /** 已装备槽数（试玩 N142：首领节点要披露「装等是几件平均出来的」） */
+    equippedSlots?: number;
+    /** 装备槽总数；缺省按 8 */
+    slotTotal?: number;
 }
 
 export interface ModalButtonSpec {
@@ -670,6 +674,14 @@ export class MithrilWildMap extends Component {
         createLabel(holder, subLabel, 11, {
             width: 100, height: 18, color: T.parchmentDim, y: -r - 34,
         });
+        // 试玩 N142：「平均装等」只对已装备槽求平均，2 件高装等会显示成 18.0，
+        // 玩家拿它和「推荐装等 12」直接比就会误判。首领节点把槽数同屏写出来。
+        // 首领固定在最后一层（layer 5），下方没有节点，这一行不会撞到别的东西。
+        if (boss && view.equippedSlots !== undefined) {
+            createLabel(holder, `已装备 ${view.equippedSlots}/${view.slotTotal || 8} 槽`, 10, {
+                width: 110, height: 16, color: T.parchmentDim, y: -r - 50,
+            });
+        }
 
         holder.on(Node.EventType.TOUCH_END, this.onNodeTap, this);
     }

@@ -23,7 +23,7 @@ import type { ButtonOpts, UiButton } from '../../../common/ui/GameUIKit';
 import {
     AFFIX_BY_ID, FACILITIES, FACILITY_BY_ID, FACILITY_MAX_LEVEL, GEAR_BASE_BY_ID, GEAR_SLOT_NAMES,
     KITCHEN_BONUS_LEVEL, KITCHEN_BONUS_MUL, MATERIALS, MEAL_BY_ID, QUALITY_BY_ID,
-    TALENT_TREE_NAMES, TALENT_TREE_ORDER, materialName,
+    TALENT_TREE_NAMES, TALENT_TREE_ORDER, WILD_REWARDS, materialName,
 } from './MithrilConfig';
 import type { EquipItem, FacilityId, MealStat } from './MithrilConfig';
 import { affixValue, addToInventory, sellPrice, staminaOf } from './MithrilLoot';
@@ -1536,9 +1536,12 @@ export class MithrilCampPanel extends Component {
         if (check.cost && !check.ok) {
             const have = materialCount(save, check.cost.materialId);
             const need = Math.max(1, check.cost.count - have);
-            // 战斗节点掉 1–2 灰烬、精英 2–3：按每场 2 保守估，宁可说少了不夸大
-            const wins = Math.max(1, Math.ceil(need / 2));
-            const progress = `${materialName(check.cost.materialId)} ${have}/${check.cost.count} · 再赢 ${wins} 场可凑齐`;
+            // 战斗节点掉 1–2 灰烬、精英 2–3、BOSS 3–5（WILD_REWARDS）。
+            // 按普通战斗的平均 1.5 估并写「约」：之前按最高值 2 估，灰烬 1/3 时写「再赢 1 场」，
+            // 但普通战斗只掉 1 个，实际要 2 场（试玩 N150）。宁可说「约 2 场」，不要报少。
+            const avgDrop = (WILD_REWARDS.battle.matsMin + WILD_REWARDS.battle.matsMax) / 2;
+            const wins = Math.max(1, Math.ceil(need / Math.max(1, avgDrop)));
+            const progress = `${materialName(check.cost.materialId)} ${have}/${check.cost.count} · 再赢约 ${wins} 场可凑齐`;
             // effects[0] 自带「解锁」字样，这里不要再套一层「解锁：」
             return lv <= 0 ? `升到 Lv1 就能用：${def.effects[0]}\n${progress}` : progress;
         }

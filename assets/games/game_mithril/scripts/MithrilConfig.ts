@@ -1222,7 +1222,14 @@ export const ENEMIES: EnemyDef[] = [
     },
     {
         id: 'troll', name: '矿坑巨魔', kind: 'boss',
-        hp: 3000, speed: 52, radius: 44, contactDamage: 6, exp: 400, gold: 120,
+        // 试玩 N147（round29 数值拍）：3000 → 1800。
+        // 不进副本前的真实进度档（Lv8 / 3 槽 / ilvl 3.67 / 入场 185 血）「不放技能」打 0/6：
+        // 有效输出约 11 hp/s × 玩家约 145 s 存活 ≈ 1600 血，3000 血池在数学上就摸不到。
+        // 单参数 ×0.60 实测 6/6 胜（159–162 s，最低血 3–18%）；×0.65 只有 4/6、×0.68 0/6。
+        // 打断矩阵 12 组 × 6 seed 全为「断 0」，所以减伤 / 狂暴 / 召唤 / 精英血都不是杠杆。
+        // troll 只被 MINE_BOSS_SCRIPT 引用，区域首领（ash_lord / frost_wolf / abyss_watcher）
+        // 与 024 三区域清区时长不受影响；代价是 033 一周目估计 1.27 → 1.23 h（见 verify 脚本注释）。
+        hp: 1800, speed: 52, radius: 44, contactDamage: 6, exp: 400, gold: 120,
         shotCd: 4.2, shotDamage: 6, shotSpeed: 250,
     },
 

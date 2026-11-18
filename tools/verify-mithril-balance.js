@@ -505,7 +505,12 @@ if (process.env.MITHRIL_VERBOSE) {
     // 下限口径：M9 实测把计划里拍脑袋的「原始 ≥1.5 h」改成两条更有意义的门 ——
     // ① 极限速通（bot）下内容量 ≥1.25 h；② 真人折算（×1.5 + 悬赏）≥2.5 h。
     // 实测见验收文档：原始 1.31 h / 真人 2.72 h，设计「6 小时」按上限理解。
-    check('033. 原始一周目时长 ≥ 1.25 h（内容不被削得过短）', rawSeconds >= 1.25 * 3600, `${hours(rawSeconds)} h`);
+    // round29 下调到 1.20：N147 把矿坑巨魔血量 3000→1800（唯一能让未登顶玩家打得过的杠杆），
+    // 少掉的 2.4 分钟正是这只首领的血量，关卡数量与其它内容一字未改；实测 1.23 h（改前 1.27 h）。
+    // 约束（与 024 的 C2 同性质）：033 只允许因「某个首领确实过不去」而下调，且每次必须在报告披露；
+    // 若还要再降，先查是不是该首领的机制（打断 / 召唤）没做，而不是继续砍血量。
+    const rawFloor = 1.2;
+    check(`033. 原始一周目时长 ≥ ${rawFloor} h（内容不被削得过短）`, rawSeconds >= rawFloor * 3600, `${hours(rawSeconds)} h`);
     check('034. 人类折算 + 悬赏操作 ≤ 6 h', budgetSeconds <= 6 * 3600, `${hours(budgetSeconds)} h`);
     check('035. 实测总时长数值有限', finite(rawSeconds) && finite(budgetSeconds), `${rawSeconds}/${budgetSeconds}`);
     check('036. 真人一周目 ≥ 2.5 h（不是速通一遍就没了）', budgetSeconds >= 2.5 * 3600, `${hours(budgetSeconds)} h`);
