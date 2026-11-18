@@ -377,7 +377,9 @@ export class MithrilHud extends Component {
 
     private _refreshHintText(): void {
         if (this._hintLabel) {
-            this._hintLabel.string = `按住「${this._basicName()}」持续攻击\n移动会自动朝向最近的敌人\n站着不动会被围殴：边打边走`;
+            // 试玩 N145：只教「边打边走」不够 —— 只走位不追的输入 30 分钟 0 胜 19 死。
+            // 真正的解法是追远程（远程保持 keep=260 会后撤），第三行必须写出来。
+            this._hintLabel.string = `按住「${this._basicName()}」持续攻击，边打边走\n移动会自动朝向最近的敌人\n远程敌人会后撤：追上去再打`;
         }
     }
 

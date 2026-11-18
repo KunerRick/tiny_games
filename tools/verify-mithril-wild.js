@@ -391,7 +391,59 @@ for (const region of F.REGIONS) {
     }
 }
 
-// 区域 BOSS 脚本：三个阶段阈值递减、召唤怪存在
+// 新手首战（N144，round28 修）：每区域第一层的战斗节点用 `intro` 编排 —— 第三波去掉远程。
+// 机理：远程 AI 保持 keep=260，近战扇形半径只有 105，站桩 / 只走位的人永远够不到；
+// 20 组数值实验（减数量 / 降血 / 降伤 / 加回血）全部救不回来，只有「去掉远程」有效。
+// 这里钉住两件事：① 层 1 战斗节点 = 3 波且第三波无远程；② 其它层仍是原来的三波构成。
+{
+    const shape = (spawns) => JSON.stringify(spawns.map((sp) => `${sp.enemyId}x${sp.count}`));
+    for (const region of F.REGIONS) {
+        const pool = F.REGION_ENEMY_POOLS[region.id];
+        const [a, b, c] = pool.mobs;
+        const map = W.generateWildMap(region.id, 31337);
+        // 远程位不固定（灰烬是 c，霜牙 / 深渊是 b），所以期望值同样按 kind 现挑两只近战
+        const melee = [a, b, c].filter((id) => {
+            const def = F.ENEMY_BY_ID[id];
+            return !def || def.kind !== 'ranged';
+        });
+        const [m0, m1] = melee.length >= 2 ? [melee[0], melee[1]] : [a, b];
+        const introWave3 = shape([{ enemyId: m1, count: 2 }, { enemyId: m0, count: 1 }]);
+        const normalWave3 = shape([
+            { enemyId: c, count: 2 },
+            { enemyId: b, count: 2 },
+            { enemyId: a, count: 1 },
+        ]);
+        let introSeen = 0;
+        let normalSeen = 0;
+        for (const node of map.nodes) {
+            if (node.kind !== 'battle') continue;
+            const plan = W.buildWildPlan(map, node);
+            if (!plan) continue;
+            const tag = `[${region.id}] battle#${node.id} 层${node.layer}`;
+            eq(`${tag} 三波`, plan.encounters.length, 3);
+            eq(`${tag} 第一波`, shape(plan.encounters[0].spawns), shape([{ enemyId: a, count: 3 }]));
+            eq(`${tag} 第二波`, shape(plan.encounters[1].spawns), shape([
+                { enemyId: b, count: 2 },
+                { enemyId: a, count: 2 },
+            ]));
+            if (node.layer === 1) {
+                introSeen++;
+                eq(`${tag} 首战第三波无远程`, shape(plan.encounters[2].spawns), introWave3);
+                check(
+                    `${tag} 首战第三波确实没有 ranged`,
+                    !plan.encounters[2].spawns.some((sp) => (F.ENEMY_BY_ID[sp.enemyId] || {}).kind === 'ranged'),
+                );
+            } else {
+                normalSeen++;
+                eq(`${tag} 非首战第三波不变`, shape(plan.encounters[2].spawns), normalWave3);
+            }
+        }
+        check(`[${region.id}] 有层 1 战斗节点用例`, introSeen > 0, `${introSeen}`);
+        check(`[${region.id}] 有非层 1 战斗节点用例`, normalSeen > 0, `${normalSeen}`);
+    }
+}
+
+
 for (const boss of F.REGION_BOSSES) {
     const script = F.regionBossScript(boss.id);
     check(`[${boss.id}] 有 BOSS 脚本`, !!script);

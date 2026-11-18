@@ -13,6 +13,7 @@
 
 import {
     ENCOUNTER_HEAL_PCT,
+    ENEMY_BY_ID,
     MATERIAL_BY_ID,
     MATERIALS,
     NODE_KIND_NAMES,
@@ -530,18 +531,35 @@ export function applyWildEvent(
 
 // ==================== 节点 → RunPlan ====================
 
-function battleEncounters(pool: RegionEnemyPool): EncounterDef[] {
+/**
+ * 普通战斗节点的三波编排。
+ *
+ * `intro` = 每区域第一层的战斗节点（新手遇到的第一场仗）：
+ * 试玩 N144 —— 第三波的两只远程怪保持 `keep = 260`，而近战扇形只有 105，站着按住普攻
+ * 或只绕圈走位的玩家永远进不了攻击圈，只能被风筝死（实机 90.7 s、无头 70.5–81.1 s，
+ * 且击杀表恒为「全部近战」）。20 组数值实验证明减数量 / 削血量 / 削伤害 / 加回血
+ * 全都没用，只是死得更晚；唯一有效的是「第三波不放远程」：
+ * 站桩 53.3–55.1 s 首胜、只走位 46.0–48.4 s、追打 40.4–42.2 s。
+ * 第三波仍然保留，用来教「波次推进」。
+ *
+ * 注意**不能只把 `c` 换成近战**：`pool.mobs` 的远程位并不固定在 `c` ——
+ * 灰烬荒原是 `c`（wraith），霜牙峡谷 / 秘银深渊是 `b`（ice_wisp / void_acolyte）。
+ * 所以这里按 `ENEMY_BY_ID[*].kind` 现挑两只近战，保证三个区域的首战都没有远程。
+ */
+function battleEncounters(pool: RegionEnemyPool, intro = false): EncounterDef[] {
     const [a, b, c] = [pool.mobs[0], pool.mobs[1], pool.mobs[2]];
+    const melee = [a, b, c].filter((id) => (ENEMY_BY_ID[id] ? ENEMY_BY_ID[id].kind !== 'ranged' : true));
+    const [m0, m1] = melee.length >= 2 ? [melee[0], melee[1]] : [a, b];
+    const lastWave: EncounterDef['spawns'] = intro
+        ? [{ enemyId: m1, count: 2 }, { enemyId: m0, count: 1 }]
+        : [{ enemyId: c, count: 2 }, { enemyId: b, count: 2 }, { enemyId: a, count: 1 }];
     return [
         { name: '第一波', subtitle: '前哨的游荡者', spawns: [{ enemyId: a, count: 3 }] },
         {
             name: '第二波', subtitle: '它们开始聚拢',
             spawns: [{ enemyId: b, count: 2 }, { enemyId: a, count: 2 }],
         },
-        {
-            name: '第三波', subtitle: '头目压阵',
-            spawns: [{ enemyId: c, count: 2 }, { enemyId: b, count: 2 }, { enemyId: a, count: 1 }],
-        },
+        { name: '第三波', subtitle: intro ? '最后一批' : '头目压阵', spawns: lastWave },
     ];
 }
 
@@ -596,7 +614,9 @@ export function buildWildPlan(map: WildMap, node: WildNode | null): RunPlan | nu
         kind: 'wild',
         id: `${region.id}_${node.kind}_${node.id}`,
         name: `${region.name} · ${NODE_KIND_NAMES[node.kind]}`,
-        encounters: node.kind === 'elite' ? eliteEncounter(pool) : battleEncounters(pool),
+        encounters: node.kind === 'elite'
+            ? eliteEncounter(pool)
+            : battleEncounters(pool, node.layer === 1),
         healPct: ENCOUNTER_HEAL_PCT,
         boss: null,
         bossTitle: '',

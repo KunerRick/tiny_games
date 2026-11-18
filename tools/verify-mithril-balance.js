@@ -436,7 +436,13 @@ for (const r of wildRuns) {
     check(`022.${tag}. 首领节点获胜`, !!r.bossCleared);
     eq(`023.${tag}. 节点数 = 12`, r.map ? r.map.nodes.length : 0, 12);
     check(`023b.${tag}. 全部节点结算`, !!r.allDone, r.exp ? `${r.exp.done.length}/11` : 'n/a');
-    near(`024.${tag}. 全清时长 3–30 min`, r.seconds / 60, 3, 30);
+    // 下限守的是「全清不能是一场笑话」，不是精确时长。新手区（ash）最弱、清得最快，
+    // N144 把该区第一层战斗节点的第三波从 5 只减到 3 只（去掉够不到的远程）后落到 2.75 min，
+    // 因此只对 ash 把下限放到 2.5；其它两区下限仍是 3 min。
+    // 下调经 round28 独立复核「有条件接受」：旧构成实测 3.0611 min，旧线 3.0 本来只有 2.0% 余量。
+    // 约束：ash 若继续变快，先查敌人数量/血量/掉落，不要把这个下限再往下降（三区域不得低于 2.5）。
+    const clearFloor = tag === 'ash' ? 2.5 : 3;
+    near(`024.${tag}. 全清时长 ${clearFloor}–30 min`, r.seconds / 60, clearFloor, 30);
 }
 
 // ==================== 5. 一周目 6 小时预算 ====================
