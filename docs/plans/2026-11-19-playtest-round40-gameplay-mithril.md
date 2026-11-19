@@ -12,7 +12,7 @@
 
 | N 号 | 来源 | 级别 | 改动 | 文件 |
 |---|---|---|---|---|
-| **N199** | P-1 | P1 | 首战节点（层 1 第一个战斗节点）三波 **3/4/3 → 2/3/2**：imp×2 → miner+imp×2 → miner+imp；副标「先来两只 / 它们开始聚拢 / 最后一批」。非首战节点维持 3/4/3 与原副标 | `MithrilWild.ts:576–605`、`MithrilWild.ts:658` |
+| **N199** | P-1 | P1 | 首战（`intro` = 层 1 的**两个**战斗节点）三波 **3/4/3 → 2/3/2**：imp×2 → miner+imp×2 → miner+imp；副标「先来两只 / 它们开始聚拢 / 最后一批」。非首战节点维持原构成 **3/4/5**（12 只，第三波含 2 只远程）与原副标 | `MithrilWild.ts:576–605`、`MithrilWild.ts:658` |
 | **N200** | P-2 | P2 | 五个营地设施首档升级材料 **灰烬 ×3 → ×2**（其余档位不动） | `MithrilConfig.ts` `FACILITIES[*].costs[0]` |
 | **N201** | P-3 | P2 | 玩家头顶加青色（`#7DE9FF`）三角标记：深色描边 + 脉动 alpha，位置 `py + PLAYER_RADIUS + 16` | `MithrilRenderer.ts:110`、`517–540` |
 | **N202** | P-4 | P3 | 结算面板弹出时隐藏左上返回按钮（`_backBtnNode.active = false`），`resetForNewRun()` 恢复 | `MithrilHud.ts:208/370/1011/1424` |
@@ -42,7 +42,7 @@
 第三波  「最后一批」    miner×1 + imp×1
 ```
 
-当前 `_core.enemies.length == 2`（与第一波 spawn 数一致）。修复前同节点为 3/4/3。
+当前 `_core.enemies.length == 2`（与第一波 spawn 数一致）。修复前该 `intro` 节点为 3/4/3（10 只）；非首战节点是 3/4/5（12 只、第三波含 2 只远程），本批未动 —— 旧注释把两者混写成「3/4/3」，已按复核意见更正（见 §7）。
 
 难度侧旁证（无头 bot，`tools/lib/mithril-bot.js`，朴素模型玩家 × 6 seed）：
 - 3/4/3：**0/6 胜**；
@@ -128,3 +128,24 @@
 - 修复批按 round39 问题表处理完 6 条 + 驳回 2 条；
 - 已派 **fresh 独立复核者**（协议：改玩法难度 + 跨系统 ≥3 条 → 必须复核），裁决见台账 §8 的复核条目；
 - 下一拍 = **round41 fresh 玩法拍**（旅程脚本 v1，重测 E1–E4，重点回访 N199 首战与 N200 首升）。
+
+---
+
+## 7. 独立复核结论（round40-r，fresh 复核者）
+
+报告：[`2026-11-19-playtest-round40-gameplay-mithril-reverify.md`](./2026-11-19-playtest-round40-gameplay-mithril-reverify.md)
+
+| N 号 | 裁决 |
+|---|---|
+| N199 | **CONFIRMED** |
+| N200 | **CONFIRMED** |
+| N201 | **CONFIRMED** |
+| N202 | **CONFIRMED** |
+| N203 | **CONFIRMED** |
+| N204 | **CONFIRMED** |
+
+复核另确认：wild 闸的首战期望值是硬编码构成（非 `expected=actual`），回退会失败 → **闸门有效**；N202 隐藏返回键后仍有结算面板自带的四条退出通道；存档 1813 / `b381ab61…` 往返一致。
+
+**描述口径更正（不新开编号）**：复核指出「非首战 3/4/3」是错的 —— 非首战实际为 **3/4/5**（第三波 `wraith×2 + miner×2 + imp×1`，含 2 只远程），3/4/3 只是旧 `intro` 构成；此外 `intro` 作用于层 1 的**两个** battle 节点，不是「第一个」。代码注释、本报告 §1 / §2.1 与 `verify-mithril-wild.js` 注释已同步更正，**行为未改**。
+
+**复核未证实（留给 round41）**：N199 的 6 seed 胜率由开发者实跑、复核未独立复跑；N201 极端贴身遮挡与呼吸频率体感；N203 锁标在微信产物 / 低分辨率下的辨识度。
