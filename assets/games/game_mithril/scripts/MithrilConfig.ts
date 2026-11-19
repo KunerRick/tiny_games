@@ -2007,13 +2007,15 @@ export interface FacilityDef {
 }
 
 /**
+ * 营地设施（M5）。首档统一 **2 灰烬**：战斗节点掉 1–2、精英 2–3。
+ * 历史：4 → 3（体验官 E3）→ 2（试玩 N200，round39 fresh 玩家）。
+ * round39 的真实路径是「清 1 个战斗节点掉 1 灰烬 → 营地升级要 3 → 攒到 4 后阵亡全丢」，
+ * 第一小时内成长链完全断掉（E3 = 1）。降到 2 后「两场胜利」或「一场胜利 + 一次事件」
+ * 就能解锁第一个设施，且和 N199（首战 2/3/2）叠加后新手能稳定打赢 -> 攒得住。
+ * 再往上的档位维持原曲线。
+ *
  * 升级材料按区域递进：1–2 级吃灰烬、3–4 级吃霜晶、5 级吃秘银。
  * 这样营地的成长节奏自动绑在「野外推进到哪个区域」上，不需要额外的前置条件。
- */
-/**
- * 营地设施（M5）。首档统一 3 灰烬：战斗节点掉 1–2、精英 2–3，
- * 首访营地时新玩家通常已经有 3+（体验官 E3：原来 4 灰烬，两场胜利凑不齐，
- * 五个页签全是灰按钮）。再往上的档位维持原曲线。
  */
 export const FACILITIES: FacilityDef[] = [
     {
@@ -2028,7 +2030,7 @@ export const FACILITIES: FacilityDef[] = [
             '重铸费用 −50%',
         ],
         costs: [
-            { materialId: 'ash_dust', count: 3 },
+            { materialId: 'ash_dust', count: 2 },
             { materialId: 'ash_dust', count: 10 },
             { materialId: 'frost_crystal', count: 8 },
             { materialId: 'frost_crystal', count: 16 },
@@ -2047,7 +2049,7 @@ export const FACILITIES: FacilityDef[] = [
             '目标词条不再受品质条数限制（最多 4 条）',
         ],
         costs: [
-            { materialId: 'ash_dust', count: 3 },
+            { materialId: 'ash_dust', count: 2 },
             { materialId: 'ash_dust', count: 10 },
             { materialId: 'frost_crystal', count: 8 },
             { materialId: 'frost_crystal', count: 16 },
@@ -2066,7 +2068,7 @@ export const FACILITIES: FacilityDef[] = [
             '解锁天赋方案 B',
         ],
         costs: [
-            { materialId: 'ash_dust', count: 3 },
+            { materialId: 'ash_dust', count: 2 },
             { materialId: 'ash_dust', count: 10 },
             { materialId: 'frost_crystal', count: 8 },
             { materialId: 'frost_crystal', count: 16 },
@@ -2085,7 +2087,7 @@ export const FACILITIES: FacilityDef[] = [
             '料理持续 3 场战斗（默认 1 场）',
         ],
         costs: [
-            { materialId: 'ash_dust', count: 3 },
+            { materialId: 'ash_dust', count: 2 },
             { materialId: 'ash_dust', count: 10 },
             { materialId: 'frost_crystal', count: 8 },
             { materialId: 'frost_crystal', count: 16 },
@@ -2104,7 +2106,7 @@ export const FACILITIES: FacilityDef[] = [
             '仓库共 +30 格',
         ],
         costs: [
-            { materialId: 'ash_dust', count: 3 },
+            { materialId: 'ash_dust', count: 2 },
             { materialId: 'ash_dust', count: 10 },
             { materialId: 'frost_crystal', count: 8 },
             { materialId: 'frost_crystal', count: 16 },

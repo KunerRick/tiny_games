@@ -175,11 +175,12 @@ export class MithrilClassSelect extends Component {
             g.fillColor = hex(selected ? T.rowActive : COLOR.SLOT_EMPTY_BG, 255);
             g.roundRect(-CARD_W / 2, -CARD_H / 2, CARD_W, CARD_H, 18);
             g.fill();
-            // N198 残余（round37r 复核 §8-4）：未选中卡原来只有 `goldDim #8A6C1E` @180 的细边，
-            // 深底上被读成「禁用 / 只剩一个可选」。改成金色描边 @120 + 条宽 2.5：
-            // 仍然明显弱于选中态（实心金 4 px），但看得出是「可点的另一张」。
-            g.strokeColor = selected ? hex(T.gold, 255) : hex(T.gold, 120);
-            g.lineWidth = selected ? 4 : 2.5;
+            // N198 残余（round37r 复核 §8-4）+ N204（round39 fresh 玩家）：未选中卡原来只有
+            // `goldDim #8A6C1E` @180 的细边，深底上被读成「禁用 / 只剩一个可选」。
+            // round38 提到 `gold@120 / 2.5 px` 后，fresh 玩家仍然第一眼以为是灰掉的按钮，
+            // 想直接点「以战士开局」。再提一档：`gold@170 / 3 px`，仍明显弱于选中态（实心金 4 px）。
+            g.strokeColor = selected ? hex(T.gold, 255) : hex(T.gold, 170);
+            g.lineWidth = selected ? 4 : 3;
             g.roundRect(-CARD_W / 2, -CARD_H / 2, CARD_W, CARD_H, 18);
             g.stroke();
             // 职业剪影水印（N81）：压到卡面右下角只做纹理，不能压住正文（N96）
@@ -225,10 +226,10 @@ export class MithrilClassSelect extends Component {
                 x: 0, y: -62, lineHeight: 19, overflow: 'shrink',
             });
             // 选中态用金色而非语义绿：绿色在石+木+黄铜的语言里像「科技状态点」（N103）
-            // N198 残余：未选中卡的「点击选择」原来用 parchmentMuted #8A7E66，深底上像灰掉的禁用文案，
-            // 提到 parchmentDim 并加粗，和卡面描边一起说明「这张也能选」。
-            createLabel(card, selected ? '已选中' : '点击选择', 14, {
-                width: 250, height: 20, color: selected ? T.goldBright : T.parchmentDim,
+            // N198 残余 + N204：未选中卡的「点击选择」原来用 parchmentMuted #8A7E66，
+            // 深底上像灰掉的禁用文案，提到 parchment 并加粗，和卡面描边一起说明「这张也能选」。
+            createLabel(card, selected ? '已选中' : '点击选择', 15, {
+                width: 250, height: 20, color: selected ? T.goldBright : T.parchment,
                 bold: !selected, x: 0, y: -100,
             });
 

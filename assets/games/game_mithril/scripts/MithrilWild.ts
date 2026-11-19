@@ -578,13 +578,25 @@ function battleEncounters(pool: RegionEnemyPool, intro = false): EncounterDef[] 
     const melee = [a, b, c].filter((id) => (ENEMY_BY_ID[id] ? ENEMY_BY_ID[id].kind !== 'ranged' : true));
     const [m0, m1] = melee.length >= 2 ? [melee[0], melee[1]] : [a, b];
     const lastWave: EncounterDef['spawns'] = intro
-        ? [{ enemyId: m1, count: 2 }, { enemyId: m0, count: 1 }]
+        ? [{ enemyId: m1, count: 1 }, { enemyId: m0, count: 1 }]
         : [{ enemyId: c, count: 2 }, { enemyId: b, count: 2 }, { enemyId: a, count: 1 }];
+    // 试玩 N199（round39 fresh 玩家）：首层战斗节点 3/4/3 共 10 只，新玩家第 1 个节点连死
+    // 4 次（3 次死在最后一波），第 5 次才通关 —— 不是学不会，是同时贴身的数量超出手忙脚乱
+    // 的阈值。三档实测（无头自动玩家 × 6 种子，「只会追着砍」的新手口径）：
+    //   3/4/3（旧）0/6 胜 · 3/3/3 0/6 · 3/4/2 2/6 · 3/3/2 5/6（最低血线 16%）
+    //   2/4/3 0/6 · **2/3/2 6/6 胜、均 31 s、最低血线 30%**
+    // 只减第一波（2/4/3）没用 —— 压力来自累计贴身数量，所以首战三波一起降到 2/3/2。
+    // 熟练 bot 仍 6/6 且更快（22 → 17 s）；其它层与精英保持原构成，不全局削难度。
     return [
-        { name: '第一波', subtitle: '前哨的游荡者', spawns: [{ enemyId: a, count: 3 }] },
+        {
+            name: '第一波', subtitle: intro ? '先来两只' : '前哨的游荡者',
+            spawns: [{ enemyId: a, count: intro ? 2 : 3 }],
+        },
         {
             name: '第二波', subtitle: '它们开始聚拢',
-            spawns: [{ enemyId: b, count: 2 }, { enemyId: a, count: 2 }],
+            spawns: intro
+                ? [{ enemyId: b, count: 1 }, { enemyId: a, count: 2 }]
+                : [{ enemyId: b, count: 2 }, { enemyId: a, count: 2 }],
         },
         { name: '第三波', subtitle: intro ? '最后一批' : '头目压阵', spawns: lastWave },
     ];

@@ -469,7 +469,34 @@ export class MithrilGrowthMenu extends Component {
         // 角落天赋图标
         addGlyphNode(node, `TalentIcon_${def.id}`, tg.kind, 12, tg.color, -118, 30, rank > 0 ? 70 : 35);
 
-        const nameColor = maxed ? T.goldBright : (gateOk ? T.parchment : T.parchmentDim);
+        // 试玩 N203（round39 fresh 玩家）：锁定行与可投行「长得一模一样」，点下去才知道
+        // 是层数门槛 —— 玩家第一反应是「点了没反应」，第二眼才看到底部那行小红字。
+        // N193 的卡片 toast 实测能弹出，但 1.5 s 的瞬时反馈救不了「点之前不知道」。
+        // 这里给锁定格一个**常驻**标记：矢量挂锁压在天赋图标上（不依赖字体 / emoji），
+        // 名称与描述再降一档到 parchmentMuted，行内直接写「需本线 N 点」。
+        if (!gateOk) {
+            // 独立子节点：父节点的 Graphics 会画在子节点下面，挂在图标上会被图标盖住
+            const lock = new Node('TalentLock');
+            lock.layer = node.layer;
+            lock.addComponent(UITransform).setContentSize(34, 34);
+            lock.setPosition(-116, 30, 0);
+            // 深底垫一层；尺寸按「设计像素 ×0.5 = CSS 像素」反推：24 设计 px 只有 12 CSS px，
+            // 门环糊成金色小方块，提到 34 设计 px（≈17 CSS px）才读得出是锁。
+            const lg = lock.addComponent(Graphics);
+            lg.fillColor = hex(T.stoneDark, 200);
+            lg.circle(0, 1, 15);
+            lg.fill();
+            lg.strokeColor = hex(T.warning, 255);
+            lg.lineWidth = 3;
+            lg.arc(0, 7, 7, 0, Math.PI, true);
+            lg.stroke();
+            lg.fillColor = hex(T.warning, 255);
+            lg.roundRect(-9, -8, 18, 14, 3);
+            lg.fill();
+            node.addChild(lock);
+        }
+
+        const nameColor = maxed ? T.goldBright : (gateOk ? T.parchment : T.parchmentMuted);
         // N161：300 宽的格子把字号抬到 20 / 16 / 16（原 14 / 12 / 12，≈6.6 CSS px）
         createLabel(node, def.name, 20, {
             width: 200, height: 26, color: nameColor, bold: true, x: 28, y: 32,
@@ -480,7 +507,7 @@ export class MithrilGrowthMenu extends Component {
         // 锁定态文字同时从 parchmentMuted(#8A7E66) 提到 parchmentDim(#B9AB8B)，深底上不再糊。
         // N185：可加点时把「这一档具体给什么」写在行末（绝对数值，不再只有相对百分比）；
         // 锁定格不预告，避免把「点不了的东西」写成承诺。
-        let rankText = gateOk ? `${rank}/${def.maxRank}` : `${rank}/${def.maxRank} · 需${gate}`;
+        let rankText = gateOk ? `${rank}/${def.maxRank}` : `${rank}/${def.maxRank} · 需本线 ${gate} 点`;
         if (canSpend) {
             const preview = effectDeltaText(
                 talentEffects(save.talents, save.classId),
@@ -491,12 +518,12 @@ export class MithrilGrowthMenu extends Component {
         }
         createLabel(node, rankText, 16, {
             width: 260, height: 22,
-            color: maxed ? T.warning : T.parchmentDim, x: 10, y: 8,
+            color: maxed ? T.warning : (gateOk ? T.parchmentDim : T.parchmentMuted), x: 10, y: 8,
             overflow: 'shrink',
         });
         // 描述两行（行高 20）占 -46..-6，离 104 高的格子下边框留 6px
         createLabel(node, def.desc, 16, {
-            width: 276, height: 44, color: T.parchmentDim,
+            width: 276, height: 44, color: gateOk ? T.parchmentDim : T.parchmentMuted,
             x: 0, y: -26, lineHeight: 20, overflow: 'shrink',
         });
 

@@ -106,6 +106,8 @@ export class MithrilRenderer extends Component {
     private _cRed = cacheColor('#EF4444');
     private _cPurple = cacheColor('#B44BE0');
     private _cBlue = cacheColor('#93C5FD');
+    /** 试玩 N201：头顶「我在这」指示色。敌我配色里没有任何敌人用青色，贴身混战也能一眼分辨 */
+    private _cMark = cacheColor('#7DE9FF');
     private _cHurt = cacheColor('#EF444455');
     /** 地面阴影（N191：远景下实体与矿道地砖同色系，需要一脚阴影把轮廓抬出来） */
     private _cShadow = cacheColor('#000000');
@@ -513,6 +515,29 @@ export class MithrilRenderer extends Component {
             whirlwind: p.whirlwind > 0,
             hitFlash: this._hurtFlash,
         }, snap.classId);
+
+        // 试玩 N201（round39 fresh 玩家）：玩家与小怪贴身时（实测三只 imp 距玩家 ≤33 px）
+        // 画面上是一团橙色 —— 战士职业色 #C79C6E / 脚环 #F59E0B 与 imp #E06A3B 同色系，
+        // 脚环的暗色外描边在「怪的身体压上来」时也救不了。这里补一个**只属于玩家**的
+        // 头顶指示：青色向下的三角（敌我配色里没有任何敌人用青色），深色描边保证
+        // 压在橙色身体上也读得出形状，1.2 Hz 呼吸避免完全融入静态背景。
+        const pulse = 0.5 + 0.5 * Math.sin(this._time * 7.5);
+        const markY = py + PLAYER_RADIUS + 16;
+        const tri = (scale: number): void => {
+            g.moveTo(px, markY - 7 * scale);
+            g.lineTo(px - 8 * scale, markY + 7 * scale);
+            g.lineTo(px + 8 * scale, markY + 7 * scale);
+            g.close();
+            g.fill();
+        };
+        this._tmp.set(this._cShadow);
+        this._tmp.a = 205;
+        g.fillColor = this._tmp;
+        tri(1.5);
+        this._tmp.set(this._cMark);
+        this._tmp.a = Math.round(170 + 85 * pulse);
+        g.fillColor = this._tmp;
+        tri(1);
     }
 
     /** 游侠陷阱：画在敌人下面，不挡视野 */

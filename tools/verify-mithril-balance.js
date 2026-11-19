@@ -561,8 +561,8 @@ const essentialSinks = F.TALENT_RESPEC_GOLD + F.SKILL_RESPEC_GOLD + F.ENCHANT_GO
     for (const def of F.FACILITIES) {
         for (const c of def.costs) need[c.materialId] = (need[c.materialId] || 0) + c.count;
     }
-    // 首档 4 → 3（体验官 E3）：每个设施灰烬需求 3+10=13，5 个设施共 65
-    eq('050. 灰烬满级总需求 = 65', need.ash_dust, 65);
+    // 首档 4 → 3（体验官 E3）→ 2（试玩 N200，round39）：每个设施灰烬需求 2+10=12，5 个设施共 60
+    eq('050. 灰烬满级总需求 = 60', need.ash_dust, 60);
     eq('051. 霜晶满级总需求 = 120', need.frost_crystal, 120);
     eq('052. 秘银满级总需求 = 60', need.mithril_ore, 60);
 

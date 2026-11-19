@@ -396,7 +396,10 @@ for (const region of F.REGIONS) {
 // 新手首战（N144，round28 修）：每区域第一层的战斗节点用 `intro` 编排 —— 第三波去掉远程。
 // 机理：远程 AI 保持 keep=260，近战扇形半径只有 105，站桩 / 只走位的人永远够不到；
 // 20 组数值实验（减数量 / 降血 / 降伤 / 加回血）全部救不回来，只有「去掉远程」有效。
-// 这里钉住两件事：① 层 1 战斗节点 = 3 波且第三波无远程；② 其它层仍是原来的三波构成。
+// N199（round39 fresh 玩家）：首战 3/4/3 十只仍然把新玩家按在地上 —— 第 1 个节点连死 4 次。
+// 三档实测（「只会追着砍」的新手口径 × 6 种子）：3/3/3 → 0/6，3/3/2 → 5/6（血线 16%），
+// 2/3/2 → 6/6（血线 30%）；熟练 bot 22 → 17 s。所以首战三波统一降到 2/3/2。
+// 这里钉住：① 层 1 战斗节点 = 3 波、2/3/2、第三波无远程；② 其它层仍是 3/4/3。
 {
     const shape = (spawns) => JSON.stringify(spawns.map((sp) => `${sp.enemyId}x${sp.count}`));
     for (const region of F.REGIONS) {
@@ -409,7 +412,11 @@ for (const region of F.REGIONS) {
             return !def || def.kind !== 'ranged';
         });
         const [m0, m1] = melee.length >= 2 ? [melee[0], melee[1]] : [a, b];
-        const introWave3 = shape([{ enemyId: m1, count: 2 }, { enemyId: m0, count: 1 }]);
+        const introWave1 = shape([{ enemyId: a, count: 2 }]);
+        const introWave2 = shape([{ enemyId: b, count: 1 }, { enemyId: a, count: 2 }]);
+        const introWave3 = shape([{ enemyId: m1, count: 1 }, { enemyId: m0, count: 1 }]);
+        const normalWave1 = shape([{ enemyId: a, count: 3 }]);
+        const normalWave2 = shape([{ enemyId: b, count: 2 }, { enemyId: a, count: 2 }]);
         const normalWave3 = shape([
             { enemyId: c, count: 2 },
             { enemyId: b, count: 2 },
@@ -423,13 +430,10 @@ for (const region of F.REGIONS) {
             if (!plan) continue;
             const tag = `[${region.id}] battle#${node.id} 层${node.layer}`;
             eq(`${tag} 三波`, plan.encounters.length, 3);
-            eq(`${tag} 第一波`, shape(plan.encounters[0].spawns), shape([{ enemyId: a, count: 3 }]));
-            eq(`${tag} 第二波`, shape(plan.encounters[1].spawns), shape([
-                { enemyId: b, count: 2 },
-                { enemyId: a, count: 2 },
-            ]));
             if (node.layer === 1) {
                 introSeen++;
+                eq(`${tag} 首战第一波 2 只`, shape(plan.encounters[0].spawns), introWave1);
+                eq(`${tag} 首战第二波 3 只`, shape(plan.encounters[1].spawns), introWave2);
                 eq(`${tag} 首战第三波无远程`, shape(plan.encounters[2].spawns), introWave3);
                 check(
                     `${tag} 首战第三波确实没有 ranged`,
@@ -437,6 +441,8 @@ for (const region of F.REGIONS) {
                 );
             } else {
                 normalSeen++;
+                eq(`${tag} 第一波`, shape(plan.encounters[0].spawns), normalWave1);
+                eq(`${tag} 第二波`, shape(plan.encounters[1].spawns), normalWave2);
                 eq(`${tag} 非首战第三波不变`, shape(plan.encounters[2].spawns), normalWave3);
             }
         }

@@ -200,6 +200,13 @@ export class MithrilHud extends Component {
 
     private _skills: SkillBtn[] = [];
 
+    /**
+     * 试玩 N202（round39）：结算根节点（全屏 Mask + BlockInputEvents）排在返回键之上，
+     * 结算时左上角「‹」仍然可见、但点击被遮罩吞掉（探针：Button index 18 < Result index 19，
+     * 点击前后 `_paused` 不变）。结算期间直接隐藏它，避免「看得见按不动」的假按钮。
+     */
+    private _backBtnNode: Node | null = null;
+
     private _resultRoot: Node | null = null;
     private _resultTitle: Label | null = null;
     /** 结算「上下文」行：地点 / 用时 / 推进（暗色小字，与收益分开） */
@@ -318,6 +325,7 @@ export class MithrilHud extends Component {
         this._castGfx = null;
         this._castLabel = null;
         this._skills.length = 0;
+        this._backBtnNode = null;
         this._resultRoot = null;
         this._resultTitle = null;
         this._resultSub = null;
@@ -359,6 +367,7 @@ export class MithrilHud extends Component {
         this._postLootLines = [];
         this._growthTimer = 0;
         if (this._resultRoot) this._resultRoot.active = false;
+        if (this._backBtnNode && this._backBtnNode.isValid) this._backBtnNode.active = true;
         for (const key of Object.keys(this.held) as SkillKey[]) this.held[key] = false;
         for (const key of Object.keys(this.pending) as SkillKey[]) this.pending[key] = false;
         for (const b of this._skills) b.pressed = false;
@@ -999,6 +1008,7 @@ export class MithrilHud extends Component {
         btn.node.addChild(skin);
         btn.node.setPosition(-302, 578, 0);
         btn.node.setSiblingIndex(this.node.children.length - 1);
+        this._backBtnNode = btn.node;
     }
 
     private _onExitTap = (): void => {
@@ -1410,6 +1420,8 @@ export class MithrilHud extends Component {
         const root = this._resultRoot;
         if (!root) return;
         root.active = true;
+        // N202：结算遮罩会吞掉同级的返回键，留着只会变成「看得见按不动」
+        if (this._backBtnNode && this._backBtnNode.isValid) this._backBtnNode.active = false;
         const won = snap.phase === 'won';
         this._lastWin = won;
         const t = Math.max(0, Math.floor(snap.time));
