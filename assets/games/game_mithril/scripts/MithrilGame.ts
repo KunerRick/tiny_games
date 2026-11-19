@@ -292,6 +292,17 @@ export class MithrilGame extends Component {
         this._regionId = this._wildMap.regionId;
     }
 
+    /**
+     * N190：一趟远征结束（放弃 / 阵亡 / 通关）后换一张图。
+     * 出发时直接用 `_mapSeed` 保证「预览图 == 远征图」；若之后不换种子，
+     * 同一会话里每次重开都是同一张图，规划乐趣会消失。
+     * 用 LCG 而不是 `Date.now()`，保证同一次构建里可复现。
+     */
+    private _rotateMapSeed(): void {
+        this._mapSeed = ((Math.imul(this._mapSeed, 1664525) + 1013904223) >>> 0) & 0x7fffffff;
+        if (this._mapSeed <= 0) this._mapSeed = 1;
+    }
+
     private _defaultRegionId(): string {
         const level = this._save ? this._save.level : 1;
         let id = REGIONS[0].id;
@@ -479,7 +490,11 @@ export class MithrilGame extends Component {
             return;
         }
         const profile = profileFromSave(save, COMBAT_ILVL_FLOOR);
-        const seed = this.seed > 0 ? ((this.seed ^ 0x51ed) >>> 0) : (Date.now() & 0x7fffffff);
+        // N190：出发必须落在玩家正看着的那张图上。预览图由 `_mapSeed` 生成
+        // （`_ensureMapFor` 无远征时用 `_mapSeed`），这里若另外摇种子，
+        // `_ensureMapFor` 会换成另一张图——拓扑相同、节点种类互换，玩家按预览
+        // 规划的路线必然踩空。远征结束后由 `_rotateMapSeed()` 换图。
+        const seed = this._mapSeed;
         save.expedition = createExpedition(region.id, seed, profile.maxHp);
         this._ensureMapFor(region.id);
         this._persist();
@@ -493,6 +508,7 @@ export class MithrilGame extends Component {
         const lost = failExpedition(exp);
         const text = this._applyMaterialLoss(save, lost);
         save.expedition = null;
+        this._rotateMapSeed();
         this._persist();
         this._ensureMapFor(this._regionId);
         this._refreshMap(text ? `已放弃远征，丢失 ${text}` : '已放弃远征');
@@ -902,6 +918,7 @@ export class MithrilGame extends Component {
         const lost = failExpedition(exp);
         const lostText = this._applyMaterialLoss(save, lost);
         save.expedition = null;
+        this._rotateMapSeed();
         this._persist();
         const lines = [reason];
         lines.push(lostText ? `丢失本程材料：${lostText}` : '本次还没有拾取材料。');
@@ -1275,6 +1292,7 @@ export class MithrilGame extends Component {
                 exp.complete = true;
                 if (save.regionsCleared.indexOf(exp.regionId) < 0) save.regionsCleared.push(exp.regionId);
                 save.expedition = null;
+                this._rotateMapSeed();
                 reward.push(`区域通关：${nodeName(node)}已击败（生命 ${exp.hp}/${maxHp}）`);
                 // 下一区域的等级门槛直接写进结算：否则玩家回到地图点页签才被拒绝（试玩 N68）
                 const nextHint = nextRegionHint(exp.regionId, save.level);
@@ -1287,6 +1305,7 @@ export class MithrilGame extends Component {
             const lost = failExpedition(exp);
             const lostText = this._applyMaterialLoss(save, lost);
             save.expedition = null;
+            this._rotateMapSeed();
             reward.push('远征失败：本程材料已丢失（装备、经验与等级保留）');
             // 试玩 N53：阵亡是「整次远征结束」而非退回副本门口，结算里要写明白，
             // 否则玩家会以为还能原地重进，回路线图才发现要重新开始远征。

@@ -11,7 +11,7 @@
 import { _decorator, Color, Component, Graphics, Label, Node, UITransform } from 'cc';
 import { createLabel } from '../../../common/ui/GameUIKit';
 import type { CoreEvent, MithrilSnapshot } from './MithrilCore';
-import { FIELD_H, FIELD_W } from './MithrilCore';
+import { FIELD_H, FIELD_W, PLAYER_RADIUS } from './MithrilCore';
 import {
     MITH_PAL,
     drawClassPlayer,
@@ -107,8 +107,12 @@ export class MithrilRenderer extends Component {
     private _cPurple = cacheColor('#B44BE0');
     private _cBlue = cacheColor('#93C5FD');
     private _cHurt = cacheColor('#EF444455');
+    /** 地面阴影（N191：远景下实体与矿道地砖同色系，需要一脚阴影把轮廓抬出来） */
+    private _cShadow = cacheColor('#000000');
     /** 各职业玩家弹道色（懒建，避免每帧 new Color） */
     private _cPlayerBullet: Record<string, Color> = {};
+    /** 各职业玩家脚环色（N191，与弹道色分开缓存，避免互相改 alpha） */
+    private _cPlayerRing: Record<string, Color> = {};
 
     onLoad(): void {
         if (!this.entityGfx) {
@@ -160,6 +164,7 @@ export class MithrilRenderer extends Component {
         g.node.setPosition(ox, oy, 0);
 
         this._drawFloor(g);
+        this._drawPlayerFootMark(g, snap);
         this._drawTelegraphs(g, snap);
         this._drawOrbs(g, snap);
         this._drawTraps(g, snap);
@@ -289,6 +294,37 @@ export class MithrilRenderer extends Component {
         }
     }
 
+    /**
+     * 试玩 N191（部分修复）：设计空间 720×1280 映射到 393 CSS 宽后缩放 ≈0.545，
+     * 玩家仅约 18 CSS px、与矿道地砖同色系，远景下常「找不到自己在哪」。
+     * 这里在脚下加一枚阴影 + 职业色脚环（半径 = 碰撞半径），只加可读性，
+     * **不改碰撞 / 受击判定**；彻底解法（镜头推近或实体放大 + HUD 分层）仍记在 N191。
+     * 画在地面之上、预警圈与实体之下，避免盖住红圈或压在敌人身上。
+     */
+    private _drawPlayerFootMark(g: Graphics, snap: MithrilSnapshot): void {
+        const p = snap.player;
+        if (p.hidden) return;
+        const px = p.x - FIELD_W / 2;
+        const py = p.y - FIELD_H / 2;
+        this._tmp.set(this._cShadow);
+        this._tmp.a = 120;
+        g.fillColor = this._tmp;
+        g.ellipse(px, py - PLAYER_RADIUS * 0.72, PLAYER_RADIUS * 1.05, PLAYER_RADIUS * 0.42);
+        g.fill();
+
+        let ring = this._cPlayerRing[snap.classId];
+        if (!ring) {
+            ring = cacheColor(CLASS_PROJECTILE_COLOR[snap.classId] || CLASS_PROJECTILE_COLOR.warrior);
+            this._cPlayerRing[snap.classId] = ring;
+        }
+        this._tmp.set(ring);
+        this._tmp.a = 150;
+        g.strokeColor = this._tmp;
+        g.lineWidth = 2;
+        g.ellipse(px, py - PLAYER_RADIUS * 0.72, PLAYER_RADIUS * 1.1, PLAYER_RADIUS * 0.46);
+        g.stroke();
+    }
+
     private _drawTelegraphs(g: Graphics, snap: MithrilSnapshot): void {
         for (const t of snap.telegraphs) {
             if (t.done) continue;
@@ -296,21 +332,24 @@ export class MithrilRenderer extends Component {
             const cx = t.x - FIELD_W / 2;
             const cy = t.y - FIELD_H / 2;
             const color = t.kind === 'boss_slam' ? this._cTelegraphBoss : this._cTelegraph;
+            // 试玩 N192：设计空间 720×1280 塞进 393 CSS 宽画布，缩放 ≈0.545 后
+            // 原 3 design px 描边只剩 ≈1.6 CSS px、填充 ≤37%，预警圈在实机上「看不见」。
+            // 线宽按 CSS 可读下限反推（5 design px ≈ 2.7 CSS px），填充同步加深。
             this._tmp.set(color);
-            this._tmp.a = 40 + k * 55;
+            this._tmp.a = 90 + k * 85;
             g.fillColor = this._tmp;
             g.circle(cx, cy, t.radius);
             g.fill();
 
             this._tmp.set(color);
-            this._tmp.a = 150 + k * 90;
+            this._tmp.a = 210 + k * 45;
             g.strokeColor = this._tmp;
-            g.lineWidth = 3;
+            g.lineWidth = 5;
             g.circle(cx, cy, t.radius);
             g.stroke();
             // 内圈收缩：读条完成感
             g.strokeColor = this._tmp;
-            g.lineWidth = 2;
+            g.lineWidth = 3;
             g.circle(cx, cy, t.radius * (1 - k) + 6);
             g.stroke();
         }
@@ -346,6 +385,14 @@ export class MithrilRenderer extends Component {
                     g.stroke();
                 }
             }
+            // 试玩 N191（部分修复）：脚下阴影，把敌人轮廓从矿道地砖上抬出来。
+            // 只影响观感，不改半径 / 判定。
+            this._tmp.set(this._cShadow);
+            this._tmp.a = 120;
+            g.fillColor = this._tmp;
+            g.ellipse(x, y - e.radius * 0.7, e.radius * 1.0, e.radius * 0.38);
+            g.fill();
+
             if (e.kind === 'imp') drawImp(g, x, y, this._time);
             else if (e.kind === 'miner') drawMiner(g, x, y, this._time);
             else if (e.kind === 'wraith') drawWraith(g, x, y, this._time);
