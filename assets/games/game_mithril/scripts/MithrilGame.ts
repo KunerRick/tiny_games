@@ -35,17 +35,18 @@ import {
 } from './MithrilTrinkets';
 import {
     SAVE_STORAGE_KEY, addExp, defaultSave, expToNext, facilityLevel, inventoryCapFor, markDungeonCleared,
-    parseSave, pendingVariantCount, queuePendingFirstClear, serializeSave, takePendingFirstClear,
+    maxHpAt, parseSave, pendingVariantCount, queuePendingFirstClear, serializeSave, takePendingFirstClear,
     talentPointsForLevel, talentPointsSpent,
 } from './MithrilProgress';
 import type { MithrilSave } from './MithrilProgress';
 import {
-    COMBAT_ILVL_FLOOR, DUNGEON_BOSS_SCRIPTS, DUNGEON_BY_ID, FIRST_CLEAR_EXP, GEAR_BASE_BY_ID, GEAR_SLOT_NAMES, GEAR_SLOTS,
+    COMBAT_ILVL_FLOOR, DUNGEON_BOSS_SCRIPTS, DUNGEON_BY_ID, DUNGEON_SLOT_REC,
+    FIRST_CLEAR_EXP, GEAR_BASE_BY_ID, GEAR_SLOT_NAMES, GEAR_SLOTS,
     QUALITY_BY_ID,
     REGION_BOSS_BY_ID, REGION_BY_ID, REGIONS, SKILL_BOOK_FIRST_CLEAR, SKILL_BOOK_PER_CLEAR,
     SUPPLY_EXHAUST_HP_PCT, SUPPLY_PER_RUN,
     TRINKET_BY_ID, TRINKET_TAG_NAMES,
-    WILD_NODE_COUNT, WILD_REWARDS, materialName, regionMaterialId,
+    WILD_NODE_COUNT, WILD_REWARDS, dungeonRecMin, materialName, regionMaterialId,
 } from './MithrilConfig';
 import type { ClassId, EquipItem, RunPlan } from './MithrilConfig';
 import {
@@ -679,11 +680,11 @@ export class MithrilGame extends Component {
         const cur = st.ilvl;
         // 试玩 N177（round34 数值拍 C）：区间「1–10」被读成官方许可，但真实门槛是
         // 「槽数 ≥3 且会躲机制」——同是 ilvl3，2 槽 0/24、8 槽 17/24；槽数比装等更能
-        // 预测成败。所以下界改成可胜性点估计，槽数单独成一条硬门槛；高副本没有实测
-        // 数据，维持各自 ilvlMin（矿坑抬到 8），不跟着往上抬。
-        const recMin = def.id === 'mine' ? Math.max(def.ilvlMin, 8) : def.ilvlMin;
+        // 预测成败。下界改成可胜性点估计；口径源统一在 `MithrilConfig.dungeonRecMin()`，
+        // 地图副标 / 阵亡归因与这里必须同一句话（N189）。
+        const recMin = dungeonRecMin(def);
         const underIlvl = cur + 0.05 < recMin;
-        const underSlots = st.equipped < 3;
+        const underSlots = st.equipped < DUNGEON_SLOT_REC;
         const under = underIlvl || underSlots;
         const cleared = save.dungeonsCleared.indexOf(def.id) >= 0;
         // 首领机制比阶段名更能指导操作：玩家看「砸地 AoE」并不知道要走出去（N177）。
@@ -692,7 +693,7 @@ export class MithrilGame extends Component {
         const lines = [
             // 试玩 N138：平均装等只按已装备槽算，2 件高装等会显示成 18.0，
             // 玩家会拿它和「推荐 12」直接比。槽数必须同屏写出来。
-            `建议：平均装等 ≥${recMin} · 装备 ≥3/8 槽`,
+            `建议：平均装等 ≥${recMin} · 装备 ≥${DUNGEON_SLOT_REC}/8 槽`,
             `当前：平均装等 ${cur.toFixed(1)} · 已装备 ${st.equipped}/8 槽`,
         ];
         if (movePhase) {
@@ -705,7 +706,7 @@ export class MithrilGame extends Component {
         if (under) {
             const bits: string[] = [];
             if (underIlvl) bits.push(`平均装等低于建议 ${recMin}`);
-            if (underSlots) bits.push(`只装备 ${st.equipped}/8 槽（建议 ≥3）`);
+            if (underSlots) bits.push(`只装备 ${st.equipped}/8 槽（建议 ≥${DUNGEON_SLOT_REC}）`);
             lines.push(`警告：${bits.join(' · ')}，建议先清野外节点`);
         } else {
             lines.push('难度：与节点等级无关，按副本装等固定结算');
@@ -1066,6 +1067,7 @@ export class MithrilGame extends Component {
         }
         if (exp > 0) {
             this._runExp += exp;
+            const levelBefore = save.level;
             const levels = addExp(save, exp);
             if (levels > 0) {
                 const profile = profileFromSave(save, COMBAT_ILVL_FLOOR);
@@ -1073,9 +1075,12 @@ export class MithrilGame extends Component {
                 this._persist();
                 // 升级用 BOSS 换阶段同一条上扬音（'core' 带 medium 震动）：战斗中这是最该被听到的一次
                 sfx.play('core');
+                // 试玩 N194 残余：横幅只写「生命上限 152」时，玩家会读成「升级回满血」。
+                // 写清增量（+18）并保留「只补差额、不回满」的事实（代码见 setProfile）。
+                const hpGain = Math.round(maxHpAt(save.level)) - Math.round(maxHpAt(levelBefore));
                 this._hudRef?.showGrowthBanner(
                     `升级！Lv ${save.level}`,
-                    `生命上限 ${Math.round(profile.maxHp)} · 天赋点 +${levels}`,
+                    `生命上限 ${Math.round(profile.maxHp)}${hpGain > 0 ? `（+${hpGain}）` : ''} · 天赋点 +${levels}`,
                 );
                 this._refreshGrowthHud();
             }
@@ -1320,10 +1325,12 @@ export class MithrilGame extends Component {
                 const pct = Math.max(0, Math.round((bos.hp / Math.max(1, bos.maxHp)) * 100));
                 reward.push(`首领还剩 ${pct}%（${Math.round(bos.hp)}/${Math.round(bos.maxHp)} 生命）`);
                 const worn = equipStats(save.equips);
-                const rec = node.kind === 'dungeon' && node.dungeonId
-                    ? `${DUNGEON_BY_ID[node.dungeonId].ilvlMin}–${DUNGEON_BY_ID[node.dungeonId].ilvlMax}`
-                    : `${node.ilvl}`;
-                reward.push(`推荐装等 ${rec} · 当前平均装等 ${worn.ilvl.toFixed(1)}（${worn.equipped}/8 槽）`);
+                // N189：副本归因原来还写区间「推荐装等 1–10」，与确认卡点估计打架；
+                // 统一走 `dungeonRecMin()` 的同口径文案（阵亡后玩家最需要知道差在哪）。
+                const recText = node.kind === 'dungeon' && node.dungeonId
+                    ? `建议：平均装等 ≥${dungeonRecMin(DUNGEON_BY_ID[node.dungeonId])} · ≥${DUNGEON_SLOT_REC}/8 槽`
+                    : `推荐装等 ${node.ilvl}`;
+                reward.push(`${recText} · 当前平均装等 ${worn.ilvl.toFixed(1)}（${worn.equipped}/8 槽）`);
             }
         }
 

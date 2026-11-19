@@ -17,6 +17,7 @@ import {
 import type { UiButton } from '../../../common/ui/GameUIKit';
 import {
     DUNGEON_BY_ID,
+    DUNGEON_SLOT_REC,
     MATERIAL_BY_ID,
     NODE_KIND_NAMES,
     REGION_BY_ID,
@@ -24,6 +25,7 @@ import {
     SUPPLY_EXHAUST_HP_PCT,
     SUPPLY_PER_RUN,
     WILD_LAYERS,
+    dungeonRecMin,
     regionMaterialId,
 } from './MithrilConfig';
 import type { NodeKind } from './MithrilConfig';
@@ -714,8 +716,11 @@ export class MithrilWildMap extends Component {
         // 旧的「都写 Lv8」掩盖了 1–10 / 10–16 的真实强度差（体验官 E2）
         const dg = node.kind === 'dungeon' && node.dungeonId ? DUNGEON_BY_ID[node.dungeonId] : null;
         // 区域首领也标推荐装等：Lv{层数} 看不出强度，玩家在 ilvl 7 就点进 3536 血首领（试玩 N69）
+        // 试玩 N189（round38）：副本副标不再写区间「装等 1-10」——区间会被读成官方许可，
+        // 与确认卡的点估计「建议 平均装等 ≥8 · ≥3/8 槽」自相矛盾。改与确认卡同口径，
+        // 口径源统一为 `dungeonRecMin()`，别再手抄第二个下界。
         const subLabel = dg
-            ? `装等 ${dg.ilvlMin}-${dg.ilvlMax}`
+            ? `建议 ≥${dungeonRecMin(dg)} · ≥${DUNGEON_SLOT_REC} 槽`
             : boss ? `推荐装等 ${node.ilvl}` : `Lv${node.level}`;
         // 试玩 N178：11 design px ≈ 5.8 CSS px，手机上前路信息要凑近看。抬到 16
         // （=8.5 CSS px），标签盒同步加宽到 130；同层节点最小横向间距 219 design px，不会蹭到邻格。
@@ -723,7 +728,9 @@ export class MithrilWildMap extends Component {
         // 微信字体度量与桌面不同，真机可能贴边。中心距统一抬到 28（46 / 74）：
         // 16 号字行高 25.2，包围盒之间留 2.8 / 4.0 design px。
         const sub = createLabel(holder, subLabel, 16, {
-            width: 130, height: 22, color: T.parchmentDim, y: -r - 46,
+            // N189：副标从「装等 1-10」改成「建议 ≥8 · ≥3 槽」，字数变多，标签盒 130 → 180；
+            // 同层节点最小横向间距 219 design px，两盒之间仍留 39 px，不会蹭到邻格。
+            width: 180, height: 22, color: T.parchmentDim, y: -r - 46, overflow: 'shrink',
         });
         this._bindNodeHit(sub.node, node.id);
         // 试玩 N142：「平均装等」只对已装备槽求平均，2 件高装等会显示成 18.0，

@@ -317,11 +317,21 @@ export class MithrilRenderer extends Component {
             ring = cacheColor(CLASS_PROJECTILE_COLOR[snap.classId] || CLASS_PROJECTILE_COLOR.warrior);
             this._cPlayerRing[snap.classId] = ring;
         }
-        this._tmp.set(ring);
-        this._tmp.a = 150;
+        // 试玩 N191（round38）：战士脚环 #F59E0B 与橙色小恶魔同色系，密集怪群里
+        // 「哪个是我」信噪比太低。做法不改职业色（弹道 / 职业识别靠它），而是先铺
+        // 一圈近黑外描边再压上高 alpha 的职业色环 —— 轮廓与橙色身体之间始终有一道暗边。
+        const ringRy = py - PLAYER_RADIUS * 0.72;
+        this._tmp.set(this._cShadow);
+        this._tmp.a = 210;
         g.strokeColor = this._tmp;
-        g.lineWidth = 2;
-        g.ellipse(px, py - PLAYER_RADIUS * 0.72, PLAYER_RADIUS * 1.1, PLAYER_RADIUS * 0.46);
+        g.lineWidth = 5;
+        g.ellipse(px, ringRy, PLAYER_RADIUS * 1.24, PLAYER_RADIUS * 0.60);
+        g.stroke();
+        this._tmp.set(ring);
+        this._tmp.a = 225;
+        g.strokeColor = this._tmp;
+        g.lineWidth = 2.5;
+        g.ellipse(px, ringRy, PLAYER_RADIUS * 1.10, PLAYER_RADIUS * 0.46);
         g.stroke();
     }
 

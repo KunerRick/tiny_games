@@ -923,6 +923,21 @@ export const DUNGEON_BY_ID: Record<string, DungeonDef> = (() => {
     return out;
 })();
 
+/** 副本的槽数硬门槛（N177 C：槽数比平均装等更能预测成败） */
+export const DUNGEON_SLOT_REC = 3;
+
+/**
+ * 副本「建议平均装等」（N177 C 定稿，round38 N189 收口为唯一源）。
+ *
+ * 区间 `ilvlMin–ilvlMax` 会被玩家读成「官方许可」，但矿坑实测：同是 ilvl3，
+ * 2 槽 0/24、8 槽 17/24；3 槽时要 ilvl10 才勉强 33%。所以对外只给点估计：
+ * 矿坑下界抬到 8，高副本维持各自 ilvlMin（没有同档实测，不凭空往上抬）。
+ * 地图副标 / 确认卡 / 阵亡归因三处必须同口径，否则又是一次 N189。
+ */
+export function dungeonRecMin(def: DungeonDef): number {
+    return def.id === 'mine' ? Math.max(def.ilvlMin, 8) : def.ilvlMin;
+}
+
 export interface RegionBossDef {
     id: string;
     name: string;

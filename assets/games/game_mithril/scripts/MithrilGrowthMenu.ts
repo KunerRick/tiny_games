@@ -12,10 +12,11 @@
  */
 
 import {
-    _decorator, BlockInputEvents, Component, EventTouch, Graphics, Label, Node, UITransform,
+    _decorator, BlockInputEvents, Component, EventTouch, Graphics, Label, Node,
+    UIOpacity, UITransform, tween,
 } from 'cc';
 import {
-    COLOR, clearChildren, createButton, createLabel, hex,
+    COLOR, clearChildren, createButton, createLabel, hex, stopTweens,
 } from '../../../common/ui/GameUIKit';
 import type { UiButton } from '../../../common/ui/GameUIKit';
 import {
@@ -170,6 +171,8 @@ export class MithrilGrowthMenu extends Component {
     private _tabSkillIcon: Node | null = null;
     private _pointsLabel: Label | null = null;
     private _hintLabel: Label | null = null;
+    /** 试玩 N193：被点格子旁的即时反馈气泡（底部提示行距格 ≈360 CSS px，玩家看不到） */
+    private _cardToast: Node | null = null;
 
     // ==================== 对外 ====================
 
@@ -186,6 +189,7 @@ export class MithrilGrowthMenu extends Component {
     }
 
     close(): void {
+        this._clearCardToast();
         if (this._root) this._root.active = false;
     }
 
@@ -214,6 +218,7 @@ export class MithrilGrowthMenu extends Component {
             this._hintLabel.string = this._defaultHint();
             this._hintLabel.color = hex(T.warning);
         }
+        this._clearCardToast();
         clearChildren(content);
         if (this._tab === 'talent') this._renderTalent();
         else this._renderSkill();
@@ -697,11 +702,13 @@ export class MithrilGrowthMenu extends Component {
         const check = canSpendTalent(save, id);
         if (!check.ok) {
             const def = TALENT_BY_ID[id];
-            if (check.reason === 'tier-gate' && def) {
-                this._notice(`第 ${def.tier} 层需要本线已有 ${talentTierGate(def.tier)} 点`);
-            } else {
-                this._notice(TALENT_FAIL[check.reason] || '无法加点');
-            }
+            // N193：同时给「格子上」与「面板底部」两处反馈 —— 前者是玩家视线所在，
+            // 后者保留给错过淡出（1.2 s）或读屏式的回头查看。
+            const text = check.reason === 'tier-gate' && def
+                ? `第 ${def.tier} 层需要本线已有 ${talentTierGate(def.tier)} 点`
+                : (TALENT_FAIL[check.reason] || '无法加点');
+            this._cellToast(node, text);
+            this._notice(text);
             return;
         }
         // N185：点完立刻告诉玩家「这次加点换来了什么」，而不是让底部面板数字悄悄跳一格
@@ -851,6 +858,55 @@ export class MithrilGrowthMenu extends Component {
         this._hintLabel.color = hex(T.danger);
     }
 
+    /**
+     * 试玩 N193（round37r 复核维持 P2）：加点失败的提示原本只写面板底部 `_hintLabel`——
+     * 距被点卡片约 360 CSS px、字号约 8 CSS px，玩家点完格子视线还在格子上，等于没反馈。
+     * 这里在被点格子正上方（覆盖格子上半）弹一条掉血色的气泡，1.2 s 后淡出。
+     * 位置必须跟着格子走（行距 112、格高 104，格与格之间没有空隙，放外面会撞邻格）。
+     */
+    private _cellToast(cell: Node, text: string): void {
+        const parent = cell.parent;
+        if (!parent) return;
+        this._clearCardToast();
+        const node = new Node('TalentCardToast');
+        node.layer = this.node.layer;
+        node.addComponent(UITransform).setContentSize(TALENT_CELL_W, 60);
+        node.setPosition(cell.position.x, cell.position.y, 0);
+        parent.addChild(node);
+        node.setSiblingIndex(parent.children.length - 1);
+        const g = node.addComponent(Graphics);
+        g.fillColor = hex('#0A1120', 236);
+        g.roundRect(-TALENT_CELL_W / 2 + 8, -30, TALENT_CELL_W - 16, 60, 12);
+        g.fill();
+        g.strokeColor = hex(T.danger, 235);
+        g.lineWidth = 2;
+        g.roundRect(-TALENT_CELL_W / 2 + 8, -30, TALENT_CELL_W - 16, 60, 12);
+        g.stroke();
+        createLabel(node, text, 20, {
+            width: TALENT_CELL_W - 40, height: 52, color: T.danger, bold: true, overflow: 'shrink',
+        });
+        const op = node.addComponent(UIOpacity);
+        op.opacity = 255;
+        tween(op)
+            .delay(1.2)
+            .to(0.3, { opacity: 0 })
+            .call(() => {
+                if (node.isValid) node.destroy();
+                if (this._cardToast === node) this._cardToast = null;
+            })
+            .start();
+        this._cardToast = node;
+    }
+
+    /** 重建面板 / 关闭前清掉残留气泡（避免 tween 回调打到已销毁节点） */
+    private _clearCardToast(): void {
+        const node = this._cardToast;
+        this._cardToast = null;
+        if (!node || !node.isValid) return;
+        stopTweens(node);
+        node.destroy();
+    }
+
     /** 正向反馈（加点生效）：写在提示行，颜色与错误提示区分开 */
     private _flash(text: string): void {
         if (!this._hintLabel) return;
@@ -890,5 +946,6 @@ export class MithrilGrowthMenu extends Component {
         this._tabSkillBtn = null;
         this._pointsLabel = null;
         this._hintLabel = null;
+        this._cardToast = null;
     }
 }
