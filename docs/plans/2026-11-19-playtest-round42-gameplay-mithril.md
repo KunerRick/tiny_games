@@ -127,3 +127,22 @@ save.expedition = null · 主按钮 = 「开始远征」
 - 按 round41 问题表处理完 3 条；
 - 协议判定：本批改了玩法（教学门冻结世界）+ 数值经济（免费重铸券）+ 跨系统 3 条 → **必须复核**，已派 fresh 复核者，裁决见台账 §8；
 - 下一拍 = **round43 fresh 玩法拍**（旅程脚本 v1 重测 E1–E4，重点回访 N205 首战教学门 / N206 首建礼 / N207 阵亡后重开）。
+
+---
+
+## 7. 复核落账（round42-r，fresh 复核者）
+
+复核报告：[`2026-11-19-playtest-round42-gameplay-mithril-reverify.md`](./2026-11-19-playtest-round42-gameplay-mithril-reverify.md)
+
+| 条目 | 裁决 | 落账 |
+|---|---|---|
+| N205 首战教学门 | **CONFIRMED**（P2 维持） | `verified` |
+| N206 首建礼免费重铸券 | **CONFIRMED**（P3 维持） | `verified` |
+| N207 阵亡后点节点有回应 | **CONFIRMED**（P3 维持） | `verified` |
+| N193（附加，台账待签字） | **CONFIRMED**（P2 维持） | `verified` |
+
+- 复核自查：闸门 9/9 exit 0；改坏自测把赠券条件改成 `check.nextLevel >= 1` 后 `verify-mithril-camp` **3 条转红**，还原后 355/355 且 `git diff` 零残留——证明 §6b 不是「必绿」的摆设。
+- 冒烟 0 error / 2 warning；存档 1813 字符 sha256 `b381ab61…bee769` 逐字节还原（复核自己在拍内做过真实改写）。
+- **复核新发现 1 条 → N208**：「有免费券时，重铸失败提示仍写『需要 331 金，现有 0 金』，同屏按钮却是『重铸 免费 ×1』」。根因是 `_onReforgeTap` 的失败分支无条件追加金币句，没走 `canReforge` 的「有券即 0 费」口径。
+- **N208 当日修复**：失败提示按 `check.reason` 分流——仅 `no-gold` 追加金币句并复用 `check.cost.gold`（`canReforge` 报价），其余原因只报原因。本机实机复验：有券 + 锁 3 条 → 「锁定的词条太多了」（无金币句）；无券 + 金币 0 → 「金币不足：需要 100 金，现有 0」；有券成功路径仍「重铸完成：…（用掉 1 次免费重铸，剩 0 次）」、券 1→0、金币仍 0。tsc 5.8.2 TS_OK、`verify-mithril-camp` 355/355。判 `fixed-pending-review`，留 round43 回访。
+- 复核提出的「N193 toast 覆盖被点卡下半部约 1.2 s」记为观察，不构成问题（瞬态且在玩家视线处）。

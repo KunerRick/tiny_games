@@ -1262,7 +1262,15 @@ export class MithrilCampPanel extends Component {
         }
         const check = canReforge(save, sel.item, this._locks);
         if (!check.ok) {
-            this._notice(`${REASON_TEXT[check.reason] || '无法重铸'}：需要 ${reforgeGold(save, sel.item, this._locks.length)} 金，现有 ${Math.max(0, Math.floor(save.gold || 0))}`);
+            // N208：失败原因与金币无关时（锁太多 / 全锁 / 无词条）不要追加金币句——
+            // 有免费券时按钮写「免费 ×N」，再报「需要 N 金」会自相矛盾把玩家劝退。
+            const base = REASON_TEXT[check.reason] || '无法重铸';
+            if (check.reason === 'no-gold') {
+                const due = (check.cost && check.cost.gold) || reforgeGold(save, sel.item, this._locks.length);
+                this._notice(`${base}：需要 ${due} 金，现有 ${Math.max(0, Math.floor(save.gold || 0))}`);
+            } else {
+                this._notice(base);
+            }
             return;
         }
         this._rngTick = (this._rngTick * 1103515245 + 12345) & 0x7fffffff;
