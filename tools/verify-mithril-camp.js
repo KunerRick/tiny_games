@@ -388,6 +388,48 @@ function spendOneTalent(save) {
         tight.affixes.map((r) => r.id).join(','));
 }
 
+// ==================== 6b. 首建礼：免费重铸券（试玩 N206） ====================
+
+{
+    const save = mkSave();
+    const def = F.FACILITY_BY_ID.smith;
+    save.materials[def.costs[0].materialId] = def.costs[0].count;
+    eq('首建前没有免费重铸', K.freeReforgeCount(save), 0);
+    check('铁匠铺建成', K.upgradeFacility(save, 'smith'));
+    eq('铁匠铺首建赠 1 次免费重铸', K.freeReforgeCount(save), 1);
+    save.materials[def.costs[1].materialId] = def.costs[1].count;
+    check('铁匠铺继续升到 Lv2', K.upgradeFacility(save, 'smith'));
+    eq('后续升级不再赠送', K.freeReforgeCount(save), 1);
+    eq('Lv2 锁位照旧', K.maxReforgeLocks(save), 1);
+
+    const item = mkItem();
+    save.gold = 0;
+    const chk = K.canReforge(save, item, []);
+    check('有券时 0 金也能重铸', chk.ok, chk.reason);
+    eq('有券时费用为 0', chk.cost && chk.cost.gold, 0);
+    const res = K.reforge(save, item, [], () => 0);
+    check('券能重铸成功', res.ok, res.reason);
+    eq('金币没被扣', save.gold, 0);
+    eq('券被消耗', K.freeReforgeCount(save), 0);
+    eq('没券后恢复金币校验', K.canReforge(save, item, []).reason, 'no-gold');
+
+    // 只有铁匠铺首建赠送
+    const other = mkSave();
+    const defT = F.FACILITY_BY_ID.training;
+    other.materials[defT.costs[0].materialId] = defT.costs[0].count;
+    check('训练场建成', K.upgradeFacility(other, 'training'));
+    eq('其它设施首建不赠券', K.freeReforgeCount(other), 0);
+
+    // 坏档：券张数夹到 0..9，旧档缺字段回落 0
+    const junk = P.sanitizeSave({ freeReforges: 99 });
+    eq('坏档券数夹到 9', junk.freeReforges, 9);
+    eq('负券数回落 0', P.sanitizeSave({ freeReforges: -3 }).freeReforges, 0);
+    eq('旧档缺字段回落 0', P.defaultSave('warrior').freeReforges, 0);
+    const holder = mkSave();
+    holder.freeReforges = 2;
+    eq('券张数往返保留', P.sanitizeSave(JSON.parse(P.serializeSave(holder))).freeReforges, 2);
+}
+
 // ==================== 7. 铁匠铺：分解 ====================
 
 {

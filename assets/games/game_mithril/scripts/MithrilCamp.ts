@@ -158,6 +158,12 @@ export function upgradeFacility(save: MithrilSave, id: FacilityId): boolean {
     if (!check.ok || !check.cost) return false;
     if (!payMaterial(save, check.cost.materialId, check.cost.count)) return false;
     save.facilities[id] = check.nextLevel;
+    // 试玩 N206：铁匠铺建成（0→1）赠 1 次免费重铸。首档本来只「解锁重铸」入口，
+    // 而重铸首价 40 + 6×装等（装等 3 时 58 金）远超玩家当时的二十几金，
+    // 于是第一次设施升级点完没有任何可执行动作。送一次免费重铸，让升级当下就有回报。
+    if (id === 'smith' && check.nextLevel === 1) {
+        save.freeReforges = Math.min(9, freeReforgeCount(save) + 1);
+    }
     return true;
 }
 
@@ -205,6 +211,11 @@ export function inventoryItems(save: MithrilSave): OwnedItem[] {
 
 // ==================== 铁匠铺：重铸 ====================
 
+/** 免费重铸券张数（N206：铁匠铺首建赠送；`canReforge` 有券时费用为 0） */
+export function freeReforgeCount(save: MithrilSave): number {
+    return Math.max(0, Math.floor(save.freeReforges || 0));
+}
+
 /** 当前等级可锁的词条条数（Lv2 → 1、Lv3 → 2） */
 export function maxReforgeLocks(save: MithrilSave): number {
     const lv = facilityLevel(save, 'smith');
@@ -234,7 +245,8 @@ export function canReforge(save: MithrilSave, item: EquipItem | null, locked: nu
     const locks = uniqueIndexes(locked, rolls.length);
     if (locks.length > maxReforgeLocks(save)) return { ok: false, reason: 'too-many-locks' };
     if (locks.length >= rolls.length) return { ok: false, reason: 'all-locked' };
-    const gold = reforgeGold(save, item, locks.length);
+    // 免费重铸券（N206）优先：有券时费用 0，不再校验金币
+    const gold = freeReforgeCount(save) > 0 ? 0 : reforgeGold(save, item, locks.length);
     const cost: CampCostDef = { materialId: '', count: 0, gold };
     if (Math.max(0, Math.floor(save.gold || 0)) < gold) return { ok: false, reason: 'no-gold', cost };
     return { ok: true, reason: '', cost };
@@ -280,6 +292,10 @@ export function reforge(
     if (free.length < 0) return { ok: false, reason: 'bad-affix', changed: [] };
 
     save.gold = Math.max(0, Math.floor(save.gold || 0) - check.cost.gold);
+    // 有券时 cost.gold 为 0：先扣券；没有券才扣金币（上面那行对 0 是无操作）
+    if ((check.cost.gold || 0) <= 0 && freeReforgeCount(save) > 0) {
+        save.freeReforges = freeReforgeCount(save) - 1;
+    }
     item.affixes = next;
     return { ok: true, reason: '', cost: check.cost, changed };
 }

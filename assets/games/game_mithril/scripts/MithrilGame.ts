@@ -127,6 +127,12 @@ export class MithrilGame extends Component {
     private _nodeHpCost = 0;
     /** 结算只处理一次（update 每帧都会看到非 playing） */
     private _settled = false;
+    /**
+     * 首战教学门（试玩 N205）：操作提示还挂着时核心先不推进 ——
+     * 新玩家停下来读三行提示的十几秒里，小怪已经贴脸输出，第一把必死。
+     * 玩家给出第一次移动 / 攻击输入后解除，同帧照常推进。
+     */
+    private _introGate = false;
     /** 路线图预览种子（`seed > 0` 时固定，便于复现） */
     private _mapSeed = 1;
     /** 本局开打时全身是否只有白装 / 两个饰品槽是否都空（副本挑战悬赏要在开打前取快照） */
@@ -245,6 +251,16 @@ export class MithrilGame extends Component {
         if (!Number.isFinite(dt) || dt <= 0) return;
         // 输入：摇杆 + 键盘（桌面调试）
         this._buildInput();
+        // 首战教学门（N205）：提示卡还在时敌人先不动。任何移动 / 技能输入都算「我准备好了」，
+        // 同帧解除、照常推进 —— 读提示的十几秒不再白掉一条命。
+        if (this._introGate) {
+            if (!this._hasInputIntent()) {
+                this._acc = 0;
+                return;
+            }
+            this._introGate = false;
+            this._hudRef?.releaseCombatHintGate();
+        }
         this._acc = Math.min(this._acc + Math.min(dt, 0.1), MAX_STEPS * FIXED_DT);
         let steps = 0;
         while (this._acc >= FIXED_DT && steps < MAX_STEPS) {
@@ -323,6 +339,7 @@ export class MithrilGame extends Component {
         this._lastSnapshot = null;
         this._wildNode = null;
         this._settled = true;
+        this._introGate = false;
         this._nodeHpCost = 0;
         this._acc = 0;
         this._hudTimer = 0;
@@ -548,7 +565,10 @@ export class MithrilGame extends Component {
         if (!save || !map) return;
         const exp = save.expedition;
         if (!exp) {
-            this._refreshMap('先点「开始远征」');
+            // 试玩 N207：阵亡 / 放弃后地图节点仍是高亮样子，点下去原来只改底部小字，
+            // 玩家的第一反应是「点了没反应」。给一次明确提示，并指到唯一有效入口。
+            toast(this.node, '本次远征已结束：先点下方「开始远征」再出发', 1.8);
+            this._refreshMap('本次远征已结束：先点下方「开始远征」再出发', true);
             return;
         }
         const node = nodeById(map, nodeId);
@@ -987,7 +1007,12 @@ export class MithrilGame extends Component {
         hud?.updateHud(snap);
         // 首战操作引导（E1）：不写进 once-only toast —— 玩家真学会（3 击杀 / 按住 1 秒）才关，
         // 在那之前每场战斗开头都会再出现一次。
-        if (hud && !save.combatHintDone) hud.showCombatHint();
+        // 试玩 N205：提示出现时开教学门 —— 敌人在玩家第一次操作前不动，
+        // 读提示的十几秒不再以「0 击杀阵亡」收场。
+        if (hud && !save.combatHintDone) {
+            hud.showCombatHint(true);
+            this._introGate = true;
+        }
     }
 
     /** 全身装备是否只有白装（空槽允许）：副本挑战悬赏「仅用白装」用 */
@@ -1662,6 +1687,14 @@ export class MithrilGame extends Component {
             burst: !!held?.burst || tapped.burst || k.has(KeyCode.KEY_I),
             dodge: !!held?.dodge || tapped.dodge || k.has(KeyCode.KEY_H),
         };
+    }
+
+    /** 本轮是否给出了任何操作意图（移动或任意技能；首战教学门用，N205） */
+    private _hasInputIntent(): boolean {
+        const i = this._input;
+        if (!i) return false;
+        return i.moveX !== 0 || i.moveY !== 0
+            || !!i.basic || !!i.skill1 || !!i.skill2 || !!i.skill3 || !!i.burst || !!i.dodge;
     }
 
     private onKeyDown(ev: EventKeyboard): void {

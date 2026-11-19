@@ -241,6 +241,11 @@ export class MithrilHud extends Component {
     private _hintRoot: Node | null = null;
     private _hintLabel: Label | null = null;
     private _hintActive = false;
+    /**
+     * 提示卡是否正处于「教学门」状态（试玩 N205）：主组件此时不推进核心，
+     * 直到玩家第一次移动 / 出手。文案要说明「动一下才开始」，否则会被读成卡死。
+     */
+    private _hintGated = false;
     /** 提示出现时的击杀数基线；第一次 updateHud 时按真实快照校准 */
     private _hintBaseKills = -1;
     /** 按住普攻累计秒数（HUD 刷新节拍 0.1s） */
@@ -387,9 +392,10 @@ export class MithrilHud extends Component {
      * 与 once-only 的 tutorial toast 不同，它由 `combatHintDone` 存档位控制 ——
      * 玩家没学会之前，每场战斗开头都会再出现，学会（3 击杀 / 按住 1 秒，且走位 ≥120 像素）才永久关闭。
      */
-    showCombatHint(): void {
+    showCombatHint(gated = false): void {
         this._buildHint();
         this._hintActive = true;
+        this._hintGated = gated;
         this._hintBaseKills = -1;
         this._hintHold = 0;
         this._hintTravelled = 0;
@@ -404,7 +410,15 @@ export class MithrilHud extends Component {
 
     hideCombatHint(): void {
         this._hintActive = false;
+        this._hintGated = false;
         if (this._hintRoot) this._hintRoot.active = false;
+    }
+
+    /** 玩家第一次操作，教学门解除：提示卡留到「真学会」为止，但文案回到常规三行（N205） */
+    releaseCombatHintGate(): void {
+        if (!this._hintGated) return;
+        this._hintGated = false;
+        this._refreshHintText();
     }
 
     private _basicName(): string {
@@ -418,7 +432,15 @@ export class MithrilHud extends Component {
             // 真正的解法是追远程（远程保持 keep=260 会后撤），第三行必须写出来。
             // 试玩 N159（round31）：整张卡说「边打边走」，却没写「怎么走」——
             // 新玩家不知道左半屏能拖，首战 0 击杀 21 秒死亡。输入方式必须进第一行。
-            this._hintLabel.string = `左半屏拖动移动 · 按住「${this._basicName()}」边打边走\n移动会自动朝向最近的敌人\n远程敌人会后撤：追上去再打`;
+            const lines = this._hintGated
+                // 试玩 N205：敌人暂停时第一行必须写清楚，否则会读成卡死
+                ? ['先看看操作，动一下或按攻击键就开始',
+                    `左半屏拖动移动 · 按住「${this._basicName()}」边打边走`,
+                    '移动会自动朝向最近的敌人 · 远程会后撤']
+                : [`左半屏拖动移动 · 按住「${this._basicName()}」边打边走`,
+                    '移动会自动朝向最近的敌人',
+                    '远程敌人会后撤：追上去再打'];
+            this._hintLabel.string = lines.join('\n');
         }
     }
 

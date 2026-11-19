@@ -31,7 +31,7 @@ import {
     activeMeals, availableMeals, bountySlots, buyMeal, canBuyMeal, canDismantle, canEnchant,
     canLoadTalentPreset, canReforge, canSaveTalentPreset, canUpgradeFacility, dismantle,
     dismantleYield, enchant, enchantMaterialCost, enchantMaxTransfer, enchantTargetCap,
-    facilityDef, inventoryItems, loadTalentPreset, materialCount, maxReforgeLocks, mealMultipliers,
+    facilityDef, freeReforgeCount, inventoryItems, loadTalentPreset, materialCount, maxReforgeLocks, mealMultipliers,
     ownedItems, reforge, reforgeGold, saveTalentPreset, storageBonus, upgradeFacility,
 } from './MithrilCamp';
 import type { OwnedItem } from './MithrilCamp';
@@ -677,6 +677,14 @@ export class MithrilCampPanel extends Component {
         // 列右缘必须和左列/凹板留同样 18px 内边距：x=190、宽 270 时右缘到 685，
         // 离 688 的凹板边只剩 3px，看起来像「压边」
         const sel = this._selectedOwned(save);
+        // 免费重铸券（N206）：有券时费用显示「免费」，按钮与信息行同一口径
+        const freeTickets = freeReforgeCount(save);
+        const reforgeCostLine = (item: EquipItem): string => freeTickets > 0
+            ? `重铸费用 免费（首建礼 ×${freeTickets}）`
+            : `重铸费用 ${reforgeGold(save, item, this._locks.length)} 金`;
+        const reforgeBtnText = (item: EquipItem): string => freeTickets > 0
+            ? `重铸 免费 ×${freeTickets}`
+            : `重铸 ${reforgeGold(save, item, this._locks.length)} 金`;
         if (sel) {
             createLabel(content, '词条（点一行切换锁定）', 16, {
                 width: 270, height: 24, color: T.parchmentDim, bold: true, x: 175, y: TOP,
@@ -707,7 +715,7 @@ export class MithrilCampPanel extends Component {
             }
             const info = [
                 lv >= 2 ? `可锁 ${maxLocks} 条 · 已锁 ${this._locks.length}` : '升到 Lv2 才能锁定词条',
-                `重铸费用 ${reforgeGold(save, sel.item, this._locks.length)} 金`,
+                reforgeCostLine(sel.item),
                 `耐力 +${staminaOf(sel.item)}`,
             ].join('\n');
             createLabel(content, info, 15, {
@@ -719,7 +727,7 @@ export class MithrilCampPanel extends Component {
         const canForge = sel ? canReforge(save, sel.item, this._locks) : null;
         const forge = createButton(content, {
             w: 200, h: 50,
-            text: gate ? '重铸（需铁匠铺 Lv1）' : (sel ? `重铸 ${reforgeGold(save, sel.item, this._locks.length)} 金` : '重铸'),
+            text: gate ? '重铸（需铁匠铺 Lv1）' : (sel ? reforgeBtnText(sel.item) : '重铸'),
             fontSize: gate ? 15 : 18,
             fill: gate ? T.stoneDark : (canForge && canForge.ok ? T.gold : T.stoneLight),
             textColor: gate ? T.parchmentMuted : (canForge && canForge.ok ? T.ink : T.parchmentDim),
@@ -747,11 +755,15 @@ export class MithrilCampPanel extends Component {
 
         createLabel(content, [
             gate ? '铁匠铺还没建造：升到 Lv1 就能重铸与分解背包里的装备。' : '',
+            freeTickets > 0 && !gate ? `首建礼：还有 ${freeTickets} 次免费重铸 —— 选一件装备点「重铸」就能用掉，不花金币。` : '',
             '重铸：金币重掷「未锁定」的词条，点数与装等不变；每锁一条费用 +40%。',
             '分解：背包里的装备按装等换成材料；身上穿着的不能拆（先脱下）。',
         ].filter((line) => !!line).join('\n'), 15, {
             // 底部呼吸统一到 ~24px（复核 P2：五页分别是 7/6/19/72/104，切页签时内容高度在跳）
-            width: 620, height: 72, color: T.parchmentDim, x: 0, y: -212, align: 'left', lineHeight: 22, overflow: 'shrink',
+            // N206：有首建礼时多一行，高度 72 → 96（4 行 × 22 正好放得下，不触发 shrink）
+            width: 620, height: freeTickets > 0 && !gate ? 96 : 72,
+            color: T.parchmentDim, x: 0, y: freeTickets > 0 && !gate ? -224 : -212,
+            align: 'left', lineHeight: 22, overflow: 'shrink',
         });
     }
 
@@ -1263,7 +1275,11 @@ export class MithrilCampPanel extends Component {
         const shown = res.changed
             .map((c) => `${AFFIX_BY_ID[c.from] ? AFFIX_BY_ID[c.from].name : c.from}→${AFFIX_BY_ID[c.to] ? AFFIX_BY_ID[c.to].name : c.to}`)
             .join('、');
-        this._changed(`重铸完成：${shown}（点数不变）`);
+        const freeUsed = !!res.cost && res.cost.gold <= 0;
+        const tail = freeUsed
+            ? `（用掉 1 次免费重铸，剩 ${freeReforgeCount(save)} 次）`
+            : '（点数不变）';
+        this._changed(`重铸完成：${shown}${tail}`);
     }
 
     private _onDismantleTap(): void {

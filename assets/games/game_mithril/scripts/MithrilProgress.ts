@@ -592,6 +592,12 @@ export interface MithrilSave {
      * 之前每进一场战斗都会再提示，直到真学会为止。
      */
     combatHintDone: boolean;
+    /**
+     * 免费重铸次数（试玩 N206）。铁匠铺从 Lv0 建成 Lv1 时赠送 1 次：
+     * 首档升级本来只解锁「重铸」入口，而重铸首价 40+6×装等远超玩家当时持有的金币，
+     * 于是第一次设施升级「点完什么也没发生」。送一次免费重铸，让升级当下就有可执行的动作。
+     */
+    freeReforges: number;
 }
 
 /** 一份生效中的料理 */
@@ -634,6 +640,7 @@ export function defaultSave(classId: ClassId = 'warrior'): MithrilSave {
         meals: [],
         talentPresets: [],
         combatHintDone: false,
+        freeReforges: 0,
     };
 }
 
@@ -951,6 +958,8 @@ export function sanitizeSave(raw: unknown): MithrilSave {
 
     // 首战引导标记（体验官 E1）：旧档没有该字段 → false，下次进战斗会再提示一次
     out.combatHintDone = src.combatHintDone === true;
+    // 免费重铸券（N206）：旧档没有该字段 → 0；上限 9 防坏档刷次数
+    out.freeReforges = toInt(src.freeReforges, 0, 9, 0);
 
     return out;
 }
