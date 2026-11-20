@@ -852,7 +852,7 @@ export class MithrilGame extends Component {
             if (heal > 0) {
                 const before = exp.hp;
                 exp.hp = Math.min(maxHp, exp.hp + Math.round(heal));
-                if (exp.hp > before) lines.push(`饕餮：额外掉落回复 ${exp.hp - before} 生命`);
+                if (exp.hp > before) lines.push(`饕餮：额外掉落回复 ${Math.round(exp.hp - before)} 生命`);
             }
         }
         markNodeDone(exp, node.id);
@@ -1323,7 +1323,7 @@ export class MithrilGame extends Component {
                 const heal = feastHealOnExtraLoot(save.trinkets, maxHp);
                 if (heal > 0 && gained > 0) {
                     exp.hp = Math.min(maxHp, exp.hp + Math.round(heal));
-                    if (exp.hp > before) reward.push(`饕餮：额外掉落回复 ${exp.hp - before} 生命`);
+                    if (exp.hp > before) reward.push(`饕餮：额外掉落回复 ${Math.round(exp.hp - before)} 生命`);
                 }
             }
 
