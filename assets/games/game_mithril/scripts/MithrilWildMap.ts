@@ -430,21 +430,19 @@ export class MithrilWildMap extends Component {
     }
 
     private _buildLegend(): void {
+        // N214：7 条图例 + 两行挤压了地图主视觉。只留「颜色/形状需要解释」的 5 类；
+        // 篝火（节点名直接写「篝火·回血」）与副本（节点名 + 建议装等已写在同一行）靠自身文案区分。
         const entries: Array<{ kind: NodeKind; label: string }> = [
             { kind: 'battle', label: '战斗' },
             { kind: 'elite', label: '精英' },
             { kind: 'chest', label: '宝箱' },
             { kind: 'event', label: '事件' },
-            { kind: 'supply', label: '篝火·回血' },
-            { kind: 'dungeon', label: '副本' },
             { kind: 'boss', label: '首领' },
         ];
         for (let i = 0; i < entries.length; i++) {
-            const row = i < 4 ? 0 : 1;
-            const col = i < 4 ? i : i - 4;
-            // 两行共用同一列网格（第二行左对齐），否则 3 项那行会整体右移 70px（试玩 N46）
-            const x = -240 + col * 140;
-            const y = -382 - row * 34;
+            // 单行 5 列：格距从 140 收到 132，左右各留 ~7 px 安全边
+            const x = -264 + i * 132;
+            const y = -382;
             const dot = new Node(`Legend_${entries[i].kind}`);
             dot.layer = this.node.layer;
             dot.addComponent(UITransform).setContentSize(18, 18);
@@ -454,7 +452,7 @@ export class MithrilWildMap extends Component {
             g.fillColor = hex(WILD_NODE_COLORS[entries[i].kind], 235);
             g.circle(0, 0, 6);
             g.fill();
-            // 试玩 N178：图例 15 → 16，盒宽 80 → 90（格距 140，仍有 16 px 余量）
+            // 试玩 N178：图例 15 → 16，盒宽 80 → 90（格距 132，仍有 8 px 余量）
             createLabel(this.node, entries[i].label, 16, {
                 width: 90, height: 22, color: T.parchmentDim, x: x + 10, y,
             });
@@ -514,8 +512,9 @@ export class MithrilWildMap extends Component {
         padTouchHeight(this._primaryBtn.node, 84);
         for (const b of [camp, grow, bag, exit]) padTouchHeight(b.node, 84);
 
-        // 这行是全游戏唯一解释 8% 规则的地方，字号 / 对比度不能再往低调（试玩 N45）
-        createLabel(this.node, '补给耗尽后每新节点 −8% 生命 · 已清理节点可路过 · 死亡失去本程材料', 16, {
+        // N214：这条只讲「路过 / 死亡代价」两条常驻规则；补给 −8% 交给「补给归零时才出现」
+        // 的顶部警告（那里带具体扣血数），不再同一屏说两遍
+        createLabel(this.node, '已清理节点可路过 · 死亡失去本程材料', 16, {
             width: 690, height: 24, color: T.parchmentDim, y: -614,
         });
     }

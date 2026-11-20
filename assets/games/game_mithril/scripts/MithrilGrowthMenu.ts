@@ -267,21 +267,21 @@ export class MithrilGrowthMenu extends Component {
             width: 300, height: 48, color: T.parchment, bold: true, x: 0, y: 418,
         });
         const closeBtn = createButton(panel, {
-            w: 116, h: 50, text: '返回', fontSize: 22,
+            w: 116, h: 50, text: '返回', fontSize: 20,
             fill: T.stoneLight, textColor: T.parchment, activeFill: T.stonePressed,
             radius: 14, onTap: () => this._onCloseTap(),
         });
         closeBtn.node.setPosition(272, 418, 0);
 
         this._tabTalentBtn = createButton(panel, {
-            w: 164, h: 50, text: '天赋', fontSize: 21,
+            w: 164, h: 50, text: '天赋', fontSize: 20,
             fill: T.stoneLight, textColor: T.parchment,
             activeFill: T.gold, activeTextColor: T.parchment,
             radius: 12, stroke: T.goldLine, onTap: () => this._onTabTap('talent'),
         });
         this._tabTalentBtn.node.setPosition(-88, 360, 0);
         this._tabSkillBtn = createButton(panel, {
-            w: 164, h: 50, text: '技能', fontSize: 21,
+            w: 164, h: 50, text: '技能', fontSize: 20,
             fill: T.stoneLight, textColor: T.parchment,
             activeFill: T.gold, activeTextColor: T.parchment,
             radius: 12, stroke: T.goldLine, onTap: () => this._onTabTap('skill'),
@@ -302,8 +302,8 @@ export class MithrilGrowthMenu extends Component {
         panel.addChild(content);
         this._content = content;
 
-        this._hintLabel = createLabel(panel, '', 15, {
-            width: 640, height: 36, color: T.warning, x: 0, y: -450, lineHeight: 18,
+        this._hintLabel = createLabel(panel, '', 16, {
+            width: 640, height: 36, color: T.warning, x: 0, y: -450, lineHeight: 20,
         });
     }
 
@@ -595,7 +595,7 @@ export class MithrilGrowthMenu extends Component {
         // 技能图标（N80）：按职业强调色，六个技能位各有图形
         const accent = CLASS_ACCENT[save.classId] || T.gold;
         addGlyphNode(block, `SkillIcon_${def.id}`, SKILL_GLYPH_KIND[def.id] || 'skill', 15, accent, -64, 2, 45);
-        createLabel(block, `${def.name}  Lv${level}`, 17, {
+        createLabel(block, `${def.name}  Lv${level}`, 18, {
             width: 130, height: 22, color: T.parchment, bold: true, x: 17,
             y: def.variants ? 18 : 0, overflow: 'shrink',
         });
@@ -609,8 +609,12 @@ export class MithrilGrowthMenu extends Component {
         }
         if (def.variants) {
             const anyPicked = pickedNames.length > 0;
+            // N210：未解锁的档位不再逐格写「未解锁」，行内只留一句解锁门槛
+            const variantText = anyPicked
+                ? `变体 ${pickedNames.join(' · ')}`
+                : (level < 2 ? '变体 Lv2 解锁' : '变体 未选');
             // 试玩 N178：12 → 14（技能块宽 180，134 的文案盒放 9 个全角 ≈126，仍有余量）
-            createLabel(block, anyPicked ? `变体 ${pickedNames.join(' · ')}` : '变体 未选', 14, {
+            createLabel(block, variantText, 14, {
                 width: 134, height: 18, x: 15,
                 color: anyPicked ? T.info : T.parchmentMuted, y: -18, overflow: 'shrink',
             });
@@ -622,7 +626,7 @@ export class MithrilGrowthMenu extends Component {
         const up = createButton(parent, {
             w: 104, h: 46,
             text: level >= SKILL_LEVEL_MAX ? '已满级' : '升级 1 本',
-            fontSize: 15,
+            fontSize: 16,
             fill: check.ok ? T.stoneLight : T.stoneDark,
             textColor: check.ok ? T.parchment : T.parchmentMuted,
             activeFill: T.stonePressed,
@@ -631,13 +635,20 @@ export class MithrilGrowthMenu extends Component {
         });
         up.node.setPosition(-55, y, 0);
 
-        // 2 级 / 4 级变体：两档各两个选项
+        // 2 级 / 4 级变体：N210 锁定档不再渲染灰格（原来每技能 4 个「未解锁」×6 = 24 个），
+        // 已选的档位收成一格「已选·名称」，只有「已解锁且未选」才摊开两个可点选项。
         for (const tier of [2, 4]) {
             const slot = tier === 2 ? 0 : 1;
             const rowY = y + (tier === 2 ? 18 : -18);
+            const chosen = state[slot];
+            if (level < tier) continue;
+            if (chosen !== null) {
+                this._makeVariantCell(parent, def, tier, chosen as 0 | 1, chosen, 132, rowY);
+                continue;
+            }
             for (const choice of [0, 1]) {
                 this._makeVariantCell(
-                    parent, def, tier, choice as 0 | 1, state[slot], level >= tier,
+                    parent, def, tier, choice as 0 | 1, chosen,
                     66 + choice * 132, rowY,
                 );
             }
@@ -650,7 +661,6 @@ export class MithrilGrowthMenu extends Component {
         tier: number,
         choice: 0 | 1,
         chosen: number | null,
-        unlocked: boolean,
         x: number,
         y: number,
     ): void {
@@ -659,7 +669,7 @@ export class MithrilGrowthMenu extends Component {
         if (!pair) return;
         const vdef = pair[choice];
         const isChosen = chosen === choice;
-        const pickable = unlocked && chosen === null;
+        const pickable = chosen === null;
 
         const node = new Node(`Variant_${def.id}#${tier}#${choice}`);
         node.layer = this.node.layer;
@@ -682,10 +692,8 @@ export class MithrilGrowthMenu extends Component {
         g.circle(-54, 0, 3.5);
         g.fill();
 
-        const text = !unlocked
-            ? `${tier}级 未解锁`
-            : (isChosen ? `已选·${vdef.name}` : `${tier}级·${vdef.name}`);
-        createLabel(node, text, 13, {
+        const text = isChosen ? `已选·${vdef.name}` : `${tier}级·${vdef.name}`;
+        createLabel(node, text, 14, {
             width: 100, height: 26, bold: isChosen, x: 7,
             color: isChosen ? T.parchment : (pickable ? T.parchment : T.parchmentMuted),
             overflow: 'shrink',
@@ -700,8 +708,9 @@ export class MithrilGrowthMenu extends Component {
         // 等级带来的实际乘数（与 MithrilTalents 同源，避免文案和实战对不上 —— 试玩 N36）
         const dmgMul = 1 + SKILL_DMG_PER_LEVEL * (level - 1);
         const cdMul = Math.max(0.5, 1 - SKILL_CD_PER_LEVEL * (level - 1));
+        // N210：207 字 → 5 行内。已选档只写选了什么，未解锁档只写名字（解锁后再给描述）
         const lines: string[] = [
-            `${def.name} Lv${level}　伤害 ×${dmgMul.toFixed(3)}　冷却 ×${cdMul.toFixed(3)}`,
+            `${def.name} Lv${level}　伤害 ${Math.round(dmgMul * 100)}%　冷却 ${Math.round(cdMul * 100)}%`,
             `基础：${def.desc}`,
         ];
         if (def.variants) {
@@ -709,13 +718,16 @@ export class MithrilGrowthMenu extends Component {
                 const tier = i === 0 ? 2 : 4;
                 const pair = def.variants[i];
                 const chosen = state[i];
-                const tag = chosen === null ? '待选' : `已选 ${pair[chosen].name}`;
-                lines.push(`${tier}级（${tag}）：${pair[0].name} / ${pair[1].name}`);
-                lines.push(`　${pair[0].name}：${pair[0].desc}`);
-                lines.push(`　${pair[1].name}：${pair[1].desc}`);
+                if (chosen !== null) {
+                    lines.push(`${tier}级已选 ${pair[chosen].name}：${pair[chosen].desc}`);
+                } else if (level >= tier) {
+                    lines.push(`${tier}级可选：${pair[0].name}（${pair[0].desc}） / ${pair[1].name}（${pair[1].desc}）`);
+                } else {
+                    lines.push(`${tier}级变体（Lv${tier} 解锁）：${pair[0].name} / ${pair[1].name}`);
+                }
             }
         }
-        lines.push('技能书：每通关 +1 本，首通再 +1；等级与变体选定后立刻作用于这一局');
+        lines.push('技能书：每通关 +1 本，首通再 +1');
         return lines.join('\n');
     }
 

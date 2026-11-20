@@ -80,6 +80,14 @@ const MAX_STEPS = 3;
 /** HUD 刷新间隔（秒） */
 const HUD_REFRESH = 0.1;
 
+/**
+ * N209：生命上限是浮点（如 120.60000000000001），直接拼进文案会露 14 位小数。
+ * 所有「现生命 / 上限」文本统一走这里，取整口径与地图顶栏、战斗 HUD 一致（四舍五入）。
+ */
+function hpText(hp: number, maxHp: number): string {
+    return `${Math.max(0, Math.round(hp))}/${Math.max(1, Math.round(maxHp))}`;
+}
+
 @ccclass('MithrilGame')
 export class MithrilGame extends Component {
     @property({ type: MithrilRenderer, tooltip: '渲染层（留空则运行时创建 Field 节点）' })
@@ -814,7 +822,7 @@ export class MithrilGame extends Component {
             const dmg = chestTrapDamage(maxHp);
             exp.hp = Math.max(0, exp.hp - dmg);
             sfx.play('playerHit');
-            lines.push(`锁扣弹开：失去 ${dmg} 生命（${exp.hp}/${maxHp}）`);
+            lines.push(`锁扣弹开：失去 ${Math.round(dmg)} 生命（${hpText(exp.hp, maxHp)}）`);
         }
         const gold = chestGold(node);
         save.gold = Math.max(0, Math.floor(save.gold || 0) + gold);
@@ -833,7 +841,7 @@ export class MithrilGame extends Component {
         if (extra) {
             const cost = Math.max(1, Math.round(maxHp * chestHpCostOf(save.trinkets)));
             exp.hp = Math.max(0, exp.hp - cost);
-            lines.push(`拾荒者背包：额外搜刮失去 ${cost} 生命（${exp.hp}/${maxHp}）`);
+            lines.push(`拾荒者背包：额外搜刮失去 ${cost} 生命（${hpText(exp.hp, maxHp)}）`);
             const bonus = rollItem(rng, { ilvl: node.ilvl, classId: save.classId, minQuality: 'uncommon' });
             if (bonus) {
                 maybeLowerQuality(rng, bonus, lowerChance);
@@ -856,7 +864,7 @@ export class MithrilGame extends Component {
         // 扣血已生效：弹窗开着时顶栏也要显示扣完的生命（试玩 N49）
         this._refreshMap();
         this._wildMapRef?.showMessage('宝箱', lines, () => {
-            this._refreshMap(`宝箱已开 · 生命 ${exp.hp}/${maxHp}`);
+            this._refreshMap(`宝箱已开 · 生命 ${hpText(exp.hp, maxHp)}`);
         });
     }
 
@@ -882,14 +890,14 @@ export class MithrilGame extends Component {
         sfx.play(res.hpDelta < 0 ? 'playerHit' : 'pickup');
         const matId = regionMaterialId(exp.regionId);
         const lines: string[] = [];
-        if (hpCost > 0) lines.push(`补给耗尽：进入节点失去 ${hpCost} 生命（现 ${exp.hp}/${maxHp}）`);
+        if (hpCost > 0) lines.push(`补给耗尽：进入节点失去 ${Math.round(hpCost)} 生命（现 ${hpText(exp.hp, maxHp)}）`);
         if (res.materialDelta > 0) {
             // 事件材料同样「先入档、计入本程」，死亡时按本程扣除
             save.materials[matId] = Math.max(0, Math.floor(save.materials[matId] || 0)) + res.materialDelta;
             lines.push(`${materialName(matId)} +${res.materialDelta}（现有 ${save.materials[matId]}）`);
         }
-        if (res.hpDelta > 0) lines.push(`生命 +${res.hpDelta}（${exp.hp}/${maxHp}）`);
-        else if (res.hpDelta < 0) lines.push(`失去 ${-res.hpDelta} 生命（${exp.hp}/${maxHp}）`);
+        if (res.hpDelta > 0) lines.push(`生命 +${Math.round(res.hpDelta)}（${hpText(exp.hp, maxHp)}）`);
+        else if (res.hpDelta < 0) lines.push(`失去 ${Math.round(-res.hpDelta)} 生命（${hpText(exp.hp, maxHp)}）`);
         markNodeDone(exp, node.id);
         this._persist();
         if (res.dead) {
@@ -899,7 +907,7 @@ export class MithrilGame extends Component {
         // 扣血已生效：弹窗开着时顶栏也要显示扣完的生命（试玩 N49）
         this._refreshMap();
         this._wildMapRef?.showMessage('事件结果', lines, () => {
-            this._refreshMap(`事件已处理 · 生命 ${exp.hp}/${maxHp}`);
+            this._refreshMap(`事件已处理 · 生命 ${hpText(exp.hp, maxHp)}`);
         });
     }
 
@@ -918,10 +926,12 @@ export class MithrilGame extends Component {
         // 治疗已生效：弹窗开着时顶栏也要显示治完的生命（试玩 N49）
         this._refreshMap();
         const lines: string[] = ['你在这里生火、包扎，歇了一口气。'];
-        if (hpCost > 0) lines.push(`补给耗尽：进入节点失去 ${hpCost} 生命`);
+        if (hpCost > 0) lines.push(`补给耗尽：进入节点失去 ${Math.round(hpCost)} 生命`);
+        const healText = Math.round(heal);
+        const netText = Math.round(heal - hpCost);
         lines.push(heal > 0
-            ? `治疗 +${heal}（${exp.hp}/${maxHp}）${hpCost > 0 ? `　净变化 ${heal - hpCost >= 0 ? '+' : ''}${heal - hpCost}` : ''}`
-            : `生命已满（${exp.hp}/${maxHp}）`);
+            ? `治疗 +${healText}（${hpText(exp.hp, maxHp)}）${hpCost > 0 ? `　净变化 ${netText >= 0 ? '+' : ''}${netText}` : ''}`
+            : `生命已满（${hpText(exp.hp, maxHp)}）`);
         // 试玩 N186：节点叫「篝火」时玩家会默认它补补给（内部 kind=supply），
         // 文案自洽但与直觉冲突。改叫「篝火·回血」，标题与图例、节点名保持同一叫法。
         lines.push('这里只恢复生命，不补充补给。进度已记录：退出游戏后可以从当前节点继续。');
@@ -1323,12 +1333,12 @@ export class MithrilGame extends Component {
                 if (save.regionsCleared.indexOf(exp.regionId) < 0) save.regionsCleared.push(exp.regionId);
                 save.expedition = null;
                 this._rotateMapSeed();
-                reward.push(`区域通关：${nodeName(node)}已击败（生命 ${exp.hp}/${maxHp}）`);
+                reward.push(`区域通关：${nodeName(node)}已击败（生命 ${hpText(exp.hp, maxHp)}）`);
                 // 下一区域的等级门槛直接写进结算：否则玩家回到地图点页签才被拒绝（试玩 N68）
                 const nextHint = nextRegionHint(exp.regionId, save.level);
                 if (nextHint) reward.push(nextHint);
             } else {
-                reward.push(`节点结束：生命 ${exp.hp}/${maxHp} · 补给 ${exp.supply}/${SUPPLY_PER_RUN} · 返回路线图继续`);
+                reward.push(`节点结束：生命 ${hpText(exp.hp, maxHp)} · 补给 ${exp.supply}/${SUPPLY_PER_RUN} · 返回路线图继续`);
             }
         } else {
             // 死亡只丢本程材料，装备 / 经验 / 等级保留（设计 §7 决策 3）

@@ -270,7 +270,7 @@ export class MithrilCampPanel extends Component {
         title.spacingX = 6;
 
         const closeBtn = this._btn(panel, {
-            w: 112, h: 48, text: '返回', fontSize: 21,
+            w: 112, h: 48, text: '返回', fontSize: 20,
             fill: T.stoneLight, textColor: T.parchment,
             activeFill: T.gold, activeTextColor: T.ink,
             radius: 12, stroke: BTN_STROKE, onTap: () => this._onCloseTap(),
@@ -309,7 +309,7 @@ export class MithrilCampPanel extends Component {
             const def = FACILITIES[i];
             const accent = FACILITY_ACCENT[def.id] || T.gold;
             const btn = this._btn(panel, {
-                w: TAB_W, h: TAB_H, text: def.name, fontSize: 17,
+                w: TAB_W, h: TAB_H, text: def.name, fontSize: 16,
                 fill: T.stoneLight, textColor: T.parchmentDim,
                 activeFill: T.gold, activeTextColor: T.ink,
                 radius: 10, stroke: BTN_STROKE, onTap: () => this._onTabTap(def.id),
@@ -580,11 +580,17 @@ export class MithrilCampPanel extends Component {
             this._summaryLabel.string = `${def.name} Lv${lv}/${FACILITY_MAX_LEVEL} · ${def.summary}`;
         }
         if (this._effectLabel) {
-            const cur = lv > 0 ? def.effects[lv - 1] : '尚未建造（升到 1 级解锁）';
-            const next = lv < FACILITY_MAX_LEVEL ? def.effects[lv] : null;
-            this._effectLabel.string = next
-                ? `当前：${cur}\n下一级：${next}`
-                : `当前：${cur}\n已满级`;
+            // N215：未建造时「当前：尚未建造（升到 1 级解锁）」与「下一级：解锁 X」是同一件事，
+            // 锁态只留一行「建造后：…」，把两行模板省成一行、也少一处门槛复读
+            if (lv <= 0) {
+                this._effectLabel.string = `建造后：${def.effects[0]}`;
+            } else {
+                const cur = def.effects[lv - 1];
+                const next = lv < FACILITY_MAX_LEVEL ? def.effects[lv] : null;
+                this._effectLabel.string = next
+                    ? `当前：${cur}\n下一级：${next}`
+                    : `当前：${cur}\n已满级`;
+            }
         }
 
         const btn = this._upgradeBtn;
@@ -754,13 +760,14 @@ export class MithrilCampPanel extends Component {
         dismantleBtn.node.setPosition(110, -140, 0);
 
         createLabel(content, [
-            gate ? '铁匠铺还没建造：升到 Lv1 就能重铸与分解背包里的装备。' : '',
             freeTickets > 0 && !gate ? `首建礼：还有 ${freeTickets} 次免费重铸 —— 选一件装备点「重铸」就能用掉，不花金币。` : '',
             '重铸：金币重掷「未锁定」的词条，点数与装等不变；每锁一条费用 +40%。',
             '分解：背包里的装备按装等换成材料；身上穿着的不能拆（先脱下）。',
         ].filter((line) => !!line).join('\n'), 15, {
             // 底部呼吸统一到 ~24px（复核 P2：五页分别是 7/6/19/72/104，切页签时内容高度在跳）
             // N206：有首建礼时多一行，高度 72 → 96（4 行 × 22 正好放得下，不触发 shrink）
+            // N215：删掉「铁匠铺还没建造…升到 Lv1」——同一句门槛在页头效果行、两个灰按钮、底部提示上
+            // 已经各说一次，这里再写一遍就是第 5 处（round43 读数为 6 处）
             width: 620, height: freeTickets > 0 && !gate ? 96 : 72,
             color: T.parchmentDim, x: 0, y: freeTickets > 0 && !gate ? -224 : -212,
             align: 'left', lineHeight: 22, overflow: 'shrink',
@@ -1010,12 +1017,12 @@ export class MithrilCampPanel extends Component {
         const lv = facilityLevel(save, 'kitchen');
         const active = activeMeals(save);
         const built = lv > 0;
-        const activeText = active.length > 0
-            ? `生效中：${active.map((m) => `${m.def.name}（剩 ${m.runsLeft} 场）`).join(' · ')}`
-            : '生效中：没有料理（每场战斗都从满血打）';
-        // 未建造时不播报「没有料理 / 下一场无加成」，否则页面上半屏全是负面读数（N89）
+        // N212：没有生效料理时不再写「生效中：没有料理」+「下一场加成：无」两条负面读数，
+        // 只留一条中性说明（怎么用），把注意力交给可买的料理
         if (built) {
-            createLabel(content, activeText, 16, {
+            createLabel(content, active.length > 0
+                ? `生效中：${active.map((m) => `${m.def.name}（剩 ${m.runsLeft} 场）`).join(' · ')}`
+                : '没有生效中的料理 · 开战前吃一份，下一场生效', 16, {
                 width: 620, height: 26, color: active.length > 0 ? T.success : T.parchmentDim,
                 x: 0, y: TOP, align: 'left', overflow: 'shrink',
             });
@@ -1028,6 +1035,10 @@ export class MithrilCampPanel extends Component {
                 '把厨房升到 Lv1，解锁 3 种料理\n料理在下一场战斗生效，打完一场扣 1 场', 120);
         }
         this._rowBackdrops(content, meals.map((_, i) => 276 - i * 62), 56);
+        // 缺钱 / 缺料的料理不再各画一个等大的「买不起」按钮（round43：5 个等强负面动作），
+        // 收成列表底部一行「哪些不够」，按钮只留给真能点的那些
+        const shortMats: string[] = [];
+        let shortGold = false;
         for (let i = 0; i < meals.length; i++) {
             const meal = meals[i];
             const y = 276 - i * 62;
@@ -1053,6 +1064,14 @@ export class MithrilCampPanel extends Component {
                 });
             const check = canBuyMeal(save, meal.id);
             const bought = active.some((m) => m.def.id === meal.id);
+            if (!bought && (check.reason === 'no-gold' || check.reason === 'no-material')) {
+                if (check.reason === 'no-gold') shortGold = true;
+                else {
+                    const mat = materialName(def.materialId);
+                    if (shortMats.indexOf(mat) < 0) shortMats.push(mat);
+                }
+                continue;
+            }
             const label = bought ? '已生效' : (check.ok ? '购买' : (check.reason === 'tier' ? '需要 Lv2' : (check.reason === 'no-slot' ? '槽位已满' : '买不起')));
             const buyBtn = createButton(content, {
                 w: 120, h: 46, text: label, fontSize: 16,
@@ -1063,6 +1082,15 @@ export class MithrilCampPanel extends Component {
             });
             buyBtn.node.setPosition(248, y, 0);
         }
+        if (shortMats.length > 0 || shortGold) {
+            const missing: string[] = shortMats.map((m) => `${m}不足`);
+            if (shortGold) missing.push('金币不足');
+            // 紧跟列表最后一行（随料理数量浮动），别飘到页脚跟规则说明挤在一起
+            createLabel(content, `暂时买不了：${missing.join(' · ')}（野外节点与悬赏可获得）`, 15, {
+                width: 620, height: 24, color: T.warning,
+                x: 0, y: 276 - meals.length * 62 + 2, align: 'left', overflow: 'shrink',
+            });
+        }
 
         const mul = mealMultipliers(save);
         const parts: string[] = [];
@@ -1071,18 +1099,18 @@ export class MithrilCampPanel extends Component {
         if (mul.crit > 0) parts.push(`暴击 +${(mul.crit * 100).toFixed(1)}%`);
         if (mul.haste > 0) parts.push(`急速 +${(mul.haste * 100).toFixed(1)}%`);
         if (mul.vers > 0) parts.push(`全能 +${(mul.vers * 100).toFixed(1)}%`);
-        if (built) {
-            createLabel(content, parts.length > 0 ? `下一场加成：${parts.join(' · ')}` : '下一场加成：无', 15, {
-                width: 620, height: 26, color: parts.length > 0 ? T.info : T.parchmentMuted,
+        // 没有生效料理时 parts 必然为空，这条已经由顶部那句覆盖（N212）
+        if (built && parts.length > 0) {
+            createLabel(content, `下一场加成：${parts.join(' · ')}`, 15, {
+                width: 620, height: 26, color: T.info,
                 x: 0, y: -145, align: 'left', overflow: 'shrink',
             });
         }
         createLabel(content, [
             `料理在「打完一场战斗」时扣 1 场（本场仍吃到效果）。`,
-            `厨房 Lv3 起可同时生效 2 种；Lv4 效果 ×${KITCHEN_BONUS_MUL}；Lv5 每份持续 3 场。`,
-            `当前槽位 ${mealSlotsFor(save)} 个 · 每份持续 ${mealDurationFor(save)} 场。`,
+            `当前 ${mealSlotsFor(save)} 个槽位 · 每份持续 ${mealDurationFor(save)} 场（Lv3 起 2 种 · Lv4 效果 ×${KITCHEN_BONUS_MUL} · Lv5 持续 3 场）。`,
         ].join('\n'), 15, {
-            width: 620, height: 76, color: T.parchmentDim, x: 0, y: -210, align: 'left', lineHeight: 23, overflow: 'shrink',
+            width: 620, height: 52, color: T.parchmentDim, x: 0, y: -218, align: 'left', lineHeight: 23, overflow: 'shrink',
         });
     }
 
@@ -1553,7 +1581,6 @@ export class MithrilCampPanel extends Component {
     }
 
     private _defaultHint(save: MithrilSave): string {
-        const def = FACILITY_BY_ID[this._tab];
         const lv = facilityLevel(save, this._tab);
         // 材料不够时直接给出进度与预估场次（体验官 E3：别让首访营地只看到一排灰按钮）
         const check = canUpgradeFacility(save, this._tab);
@@ -1566,10 +1593,10 @@ export class MithrilCampPanel extends Component {
             const avgDrop = (WILD_REWARDS.battle.matsMin + WILD_REWARDS.battle.matsMax) / 2;
             const wins = Math.max(1, Math.ceil(need / Math.max(1, avgDrop)));
             const progress = `${materialName(check.cost.materialId)} ${have}/${check.cost.count} · 再赢约 ${wins} 场可凑齐`;
-            // effects[0] 自带「解锁」字样，这里不要再套一层「解锁：」
-            return lv <= 0 ? `升到 Lv1 就能用：${def.effects[0]}\n${progress}` : progress;
+            // effects[0] 已经在页头「建造后：…」说过一次（N215），这里只讲怎么凑材料
+            return progress;
         }
-        if (lv <= 0) return `升到 Lv1 就能用：${def.effects[0]}`;
+        if (lv <= 0) return '先升级设施：材料够就点上面的「升级」';
         return `设施升级只用材料 · 金币留给重铸 / 附魔 / 料理 / 洗点`;
     }
 
