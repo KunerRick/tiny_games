@@ -276,14 +276,16 @@ export class MithrilGrowthMenu extends Component {
         this._tabTalentBtn = createButton(panel, {
             w: 164, h: 50, text: '天赋', fontSize: 20,
             fill: T.stoneLight, textColor: T.parchment,
-            activeFill: T.gold, activeTextColor: T.parchment,
+            // 选中的底是黄铜：浅色纸白字压上去只有 1.9:1（未选中反而 12:1），
+            // 与地图 / 营地页签统一成墨色（7.1:1）
+            activeFill: T.gold, activeTextColor: T.ink,
             radius: 12, stroke: T.goldLine, onTap: () => this._onTabTap('talent'),
         });
         this._tabTalentBtn.node.setPosition(-88, 360, 0);
         this._tabSkillBtn = createButton(panel, {
             w: 164, h: 50, text: '技能', fontSize: 20,
             fill: T.stoneLight, textColor: T.parchment,
-            activeFill: T.gold, activeTextColor: T.parchment,
+            activeFill: T.gold, activeTextColor: T.ink,
             radius: 12, stroke: T.goldLine, onTap: () => this._onTabTap('skill'),
         });
         this._tabSkillBtn.node.setPosition(88, 360, 0);
@@ -323,6 +325,8 @@ export class MithrilGrowthMenu extends Component {
         g.roundRect(-40, -23, 80, 3, 1.5);
         g.fill();
         btn.node.addChild(mark);
+        // 下划线跟着文字走（文字右移 14 给左侧图标让位，线原本居中 → 永远偏左 14）
+        mark.setPosition(14, 0);
         mark.active = false;
         return mark;
     }

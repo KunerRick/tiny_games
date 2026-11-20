@@ -193,6 +193,8 @@ export class MithrilMenu extends Component {
         g.roundRect(-34, -20, 68, 3, 1.5);
         g.fill();
         btn.node.addChild(mark);
+        // 下划线跟着文字走（文字右移 12 给左侧图标让位，线原本居中 → 永远偏左 12）
+        mark.setPosition(12, 0);
         mark.active = false;
         if (tab === 'gear') this._gearTabMark = mark;
         else this._trinketTabMark = mark;

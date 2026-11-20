@@ -97,6 +97,43 @@ const MEAL_STAT_NAMES: Record<MealStat, string> = {
     vers: '全能',
 };
 
+/**
+ * 每个设施页的「规则详情」。
+ *
+ * 这些东西原先以 3–4 行灰字常驻在内容板底部（每页 60–105 字），玩家第一眼看到
+ * 的是规则而不是可做的事。改成页头「?」按需展开：页内只留会变的读数与动作。
+ */
+const FACILITY_RULES: Record<FacilityId, string[]> = {
+    smith: [
+        '重铸：花金币重掷未锁定的词条，点数与装等不变',
+        '每锁一条词条，重铸费用 +40%',
+        '分解：背包装备按装等换材料；穿着的不能拆（先脱下）',
+    ],
+    enchant: [
+        'Lv1 转移 1 条（源装备被消耗）· Lv2 一次 2 条',
+        'Lv3 保留源装备 · Lv4 材料减半',
+        'Lv5 目标无视品质条数（最多 4 条）',
+        '词条点数跟着词条走：低点数转过去仍然只是低点数',
+    ],
+    training: [
+        'Lv1 解锁洗点 · Lv2 洗点半价 · Lv3 洗点免费',
+        'Lv4 解锁方案 A · Lv5 解锁方案 B',
+        '「存入」把当前天赋抄进方案槽（免费）',
+        '「载入」用方案覆盖当前天赋，点数总量不变',
+    ],
+    kitchen: [
+        '料理在「打完一场战斗」时扣 1 场（本场仍生效）',
+        '槽位与持续场数随厨房等级提升',
+        'Lv3 起同时生效 2 种 · Lv4 效果增强 · Lv5 持续 3 场',
+    ],
+    quartermaster: [
+        '仓库满了不用卖：战斗掉落的装备会按装等折算成金币',
+        '材料主要来自分解与悬赏；升级军需官可扩仓',
+        '悬赏自动追踪，完成即可领取 · Lv4 起每日刷新',
+        '收集类悬赏按当前库存判定，领取时扣背包（不动已装备）',
+    ],
+};
+
 /** 失败原因 → 人话（未列出的走兜底文案） */
 const REASON_TEXT: Record<string, string> = {
     locked: '这处设施还没建造',
@@ -150,6 +187,8 @@ export class MithrilCampPanel extends Component {
     private _effectLabel: Label | null = null;
     private _upgradeBtn: UiButton | null = null;
     private _hintLabel: Label | null = null;
+    /** 规则弹窗（页头「?」按需打开；切页签 / 关面板时一并销毁） */
+    private _helpRoot: Node | null = null;
     private _tabBtns: Partial<Record<FacilityId, UiButton>> = {};
     /** 页签选中下划线：颜色二次信号（N76：不能只靠底色） */
     private _tabMarks: Partial<Record<FacilityId, Node>> = {};
@@ -190,7 +229,83 @@ export class MithrilCampPanel extends Component {
     }
 
     close(): void {
+        this._closeHelp();
         if (this._root) this._root.active = false;
+    }
+
+    // ==================== 规则弹窗（「?」） ====================
+
+    /** 把当前设施的规则摊开：页内常驻只留读数与动作，解释按需取 */
+    private _onHelpTap(): void {
+        this._closeHelp();
+        const root = this._root;
+        if (!root) return;
+        const def = FACILITY_BY_ID[this._tab];
+        const lines = FACILITY_RULES[this._tab] || [];
+        const W = 560;
+        const LINE_H = 28;
+        const textH = lines.length * LINE_H;
+        // 高度按行数长出来：标题 62 + 正文 + 16 间隙 + 按钮 54 + 上下内边距。
+        // 少 1 行时卡片就矮 28，不会出现「正文贴着按钮」或底下空一大块
+        const H = 168 + textH;
+        const titleY = H / 2 - 44;
+        const textY = titleY - 40 - textH / 2;
+
+        const help = new Node('CampHelp');
+        help.layer = this.node.layer;
+        help.addComponent(UITransform).setContentSize(720, 1280);
+        // 整层吞事件：弹窗打开时下面的页签 / 按钮不应该还能点
+        help.addComponent(BlockInputEvents);
+        root.addChild(help);
+        this._helpRoot = help;
+
+        const mask = new Node('Mask');
+        mask.layer = this.node.layer;
+        mask.addComponent(UITransform).setContentSize(720, 1280);
+        const mg = mask.addComponent(Graphics);
+        mg.fillColor = hex(COLOR.BG_OVERLAY, 235);
+        mg.rect(-360, -640, 720, 1280);
+        mg.fill();
+        help.addChild(mask);
+
+        const card = new Node('Card');
+        card.layer = this.node.layer;
+        card.addComponent(UITransform).setContentSize(W, H);
+        const cg = card.addComponent(Graphics);
+        cg.fillColor = hex(T.stone, 255);
+        cg.roundRect(-W / 2, -H / 2, W, H, 22);
+        cg.fill();
+        cg.strokeColor = hex(T.goldDim, 255);
+        cg.lineWidth = 3;
+        cg.roundRect(-W / 2, -H / 2, W, H, 22);
+        cg.stroke();
+        cg.strokeColor = hex(T.gold, 70);
+        cg.lineWidth = 1;
+        cg.roundRect(-W / 2 + 8, -H / 2 + 8, W - 16, H - 16, 16);
+        cg.stroke();
+        help.addChild(card);
+
+        createLabel(card, `${def ? def.name : '设施'} · 规则`, 26, {
+            width: W - 60, height: 36, color: T.goldBright, bold: true, y: titleY,
+        });
+        createLabel(card, lines.join('\n'), 16, {
+            // align:'left' 必须配 overflow:'shrink'，否则会缩到内容宽度再按中心摆（N89）
+            width: W - 76, height: textH, color: T.parchmentDim,
+            x: 0, y: textY, align: 'left', lineHeight: LINE_H, overflow: 'shrink',
+        });
+        const ok = createButton(card, {
+            w: 168, h: 54, text: '知道了', fontSize: 20,
+            fill: T.gold, textColor: T.ink, activeFill: T.goldPressed,
+            radius: 14, onTap: () => this._closeHelp(),
+        });
+        ok.node.setPosition(0, -H / 2 + 46, 0);
+
+        help.setSiblingIndex(root.children.length - 1);
+    }
+
+    private _closeHelp(): void {
+        if (this._helpRoot && this._helpRoot.isValid) this._helpRoot.destroy();
+        this._helpRoot = null;
     }
 
     isOpen(): boolean {
@@ -277,6 +392,16 @@ export class MithrilCampPanel extends Component {
         });
         closeBtn.node.setPosition(270, 534, 0);
 
+        // 规则说明从页内常驻改成「?」按需展开（用户反馈：每页 3–4 行灰字压力大）。
+        // 位置在标题与「返回」之间的空档：标题盒到 x=8，返回左沿 214
+        const helpBtn = this._btn(panel, {
+            w: 48, h: 48, text: '?', fontSize: 22,
+            fill: T.stoneLight, textColor: T.parchment,
+            activeFill: T.stonePressed, radius: 14, stroke: BTN_STROKE,
+            onTap: () => this._onHelpTap(),
+        });
+        helpBtn.node.setPosition(185, 534, 0);
+
         addHeaderDiamond(panel, -312, 492, 4);
         this._currencyLabel = createLabel(panel, '', 16, {
             width: 560, height: 26, color: T.parchmentDim, x: -12, y: 492,
@@ -315,8 +440,9 @@ export class MithrilCampPanel extends Component {
                 radius: 10, stroke: BTN_STROKE, onTap: () => this._onTabTap(def.id),
             });
             btn.node.setPosition(TAB_X[i], TAB_Y, 0);
-            // 页签图标（N75/N76）：文字左移，左边留出 22px 图标位
-            btn.label.node.setPosition(13, 0);
+            // 页签图标（N75/N76）：文字右移给左边的图标让位。位移 13 → 9：
+            // 内容框仍按 TAB_W-34 算，13 时右内边距只剩 4px（左 30），9 时回到左右 8/26 的视觉平衡
+            btn.label.node.setPosition(9, 0);
             const labelUt = btn.label.node.getComponent(UITransform);
             if (labelUt) labelUt.setContentSize(TAB_W - 34, TAB_H - 4);
             this._tabIcons[def.id] = addGlyphNode(
@@ -331,6 +457,8 @@ export class MithrilCampPanel extends Component {
             mk.roundRect(-40, -TAB_H / 2 + 1, 80, 3, 1.5);
             mk.fill();
             btn.node.addChild(mark);
+            // 下划线跟着文字走：文字给左侧图标让位右移了 9，线原本居中 → 永远偏左 9
+            mark.setPosition(9, 0);
             mark.active = false;
             this._tabMarks[def.id] = mark;
             this._tabBtns[def.id] = btn;
@@ -759,19 +887,16 @@ export class MithrilCampPanel extends Component {
         });
         dismantleBtn.node.setPosition(110, -140, 0);
 
-        createLabel(content, [
-            freeTickets > 0 && !gate ? `首建礼：还有 ${freeTickets} 次免费重铸 —— 选一件装备点「重铸」就能用掉，不花金币。` : '',
-            '重铸：金币重掷「未锁定」的词条，点数与装等不变；每锁一条费用 +40%。',
-            '分解：背包里的装备按装等换成材料；身上穿着的不能拆（先脱下）。',
-        ].filter((line) => !!line).join('\n'), 15, {
-            // 底部呼吸统一到 ~24px（复核 P2：五页分别是 7/6/19/72/104，切页签时内容高度在跳）
-            // N206：有首建礼时多一行，高度 72 → 96（4 行 × 22 正好放得下，不触发 shrink）
-            // N215：删掉「铁匠铺还没建造…升到 Lv1」——同一句门槛在页头效果行、两个灰按钮、底部提示上
-            // 已经各说一次，这里再写一遍就是第 5 处（round43 读数为 6 处）
-            width: 620, height: freeTickets > 0 && !gate ? 96 : 72,
-            color: T.parchmentDim, x: 0, y: freeTickets > 0 && !gate ? -224 : -212,
-            align: 'left', lineHeight: 22, overflow: 'shrink',
-        });
+        // 规则说明（重铸 / 锁定 / 分解的机制）统一收进右上角「?」→ FACILITY_RULES.smith。
+        // 正文底部只留「当下这一件能做什么」的即时信息：首建礼还剩几次。
+        // 没有首建礼时这里整行不画，切页签时底部高度也不再随规则行数跳动
+        if (freeTickets > 0 && !gate) {
+            createLabel(content,
+                `首建礼：还有 ${freeTickets} 次免费重铸 —— 选一件装备点「重铸」就能用掉，不花金币。`, 15, {
+                    width: 620, height: 24, color: T.goldBright,
+                    x: 0, y: -212, align: 'left', overflow: 'shrink',
+                });
+        }
     }
 
     // ==================== 附魔台 ====================
@@ -873,13 +998,18 @@ export class MithrilCampPanel extends Component {
         });
         cast.node.setPosition(0, -120, 0);
 
-        createLabel(content, [
-            `Lv1：转移 1 条 · 源装备被消耗　　Lv2：一次 2 条`,
-            `Lv3：保留源装备　　Lv4：材料减半　　Lv5：目标无视品质条数（最多 4 条）`,
-            '词条点数跟着词条走：低点数的词条转过去仍然只是低点数。',
-        ].join('\n'), 15, {
-            width: 620, height: 76, color: T.parchmentDim, x: 0, y: -215, align: 'left', lineHeight: 23, overflow: 'shrink',
-        });
+        // 各等级的规则表收进右上角「?」→ FACILITY_RULES.enchant。
+        // 正文只留一行「当前等级此刻怎么运作」，等级变化时这一行自己跟着变。
+        // 未建造（Lv0）时不写「当前 Lv0：一次转移 1 条」——那会把没解锁的能力说成已生效
+        const eLv = facilityLevel(save, 'enchant');
+        if (eLv >= 1) {
+            createLabel(content,
+                `当前 Lv${eLv}：一次转移 ${eLv >= 2 ? 2 : 1} 条 · 源装备${eLv >= 3 ? '保留' : '被消耗'}`,
+                15, {
+                    width: 620, height: 24, color: T.parchmentDim, x: 0, y: -210,
+                    align: 'left', overflow: 'shrink',
+                });
+        }
     }
 
     /** 一列装备列表（附魔台源 / 目标共用） */
@@ -1000,14 +1130,17 @@ export class MithrilCampPanel extends Component {
             loadBtn.node.setPosition(268, y, 0);
         }
 
-        createLabel(content, [
-            '训练场等级效果：',
-            'Lv1 解锁洗点　　Lv2 洗点半价　　Lv3 洗点免费',
-            'Lv4 解锁方案 A　　Lv5 解锁方案 B',
-            '「存入」把当前天赋抄进方案槽（免费）；「载入」用方案覆盖当前天赋，点数总量不变。',
-        ].join('\n'), 15, {
-            width: 620, height: 100, color: T.parchmentDim, x: 0, y: slots === 0 ? -198 : -143, align: 'left', lineHeight: 24, overflow: 'shrink',
-        });
+        // 等级效果表收进右上角「?」→ FACILITY_RULES.training（Lv0/Lv4/Lv5 的门槛在
+        // 空态插画、按钮文案、方案行里已经各说了一遍，这里不再重复第三遍）。
+        // 只在这个页面上真有「存入 / 载入」按钮时才解释它们的差别——没有按钮时解释等于噪音
+        if (slots > 0) {
+            createLabel(content,
+                '「存入」把当前天赋抄进方案槽 · 「载入」用方案覆盖当前天赋（点数总量不变）',
+                15, {
+                    width: 620, height: 24, color: T.parchmentDim, x: 0,
+                    y: -150, align: 'left', overflow: 'shrink',
+                });
+        }
     }
 
     // ==================== 厨房 ====================
@@ -1106,12 +1239,14 @@ export class MithrilCampPanel extends Component {
                 x: 0, y: -145, align: 'left', overflow: 'shrink',
             });
         }
-        createLabel(content, [
-            `料理在「打完一场战斗」时扣 1 场（本场仍吃到效果）。`,
-            `当前 ${mealSlotsFor(save)} 个槽位 · 每份持续 ${mealDurationFor(save)} 场（Lv3 起 2 种 · Lv4 效果 ×${KITCHEN_BONUS_MUL} · Lv5 持续 3 场）。`,
-        ].join('\n'), 15, {
-            width: 620, height: 52, color: T.parchmentDim, x: 0, y: -218, align: 'left', lineHeight: 23, overflow: 'shrink',
-        });
+        // 扣场时机 / 各等级效果收进右上角「?」→ FACILITY_RULES.kitchen。
+        // 正文只留「当前有几个槽」——这是玩家想买第二份时才需要、而列表行里没有的读数
+        if (built) {
+            createLabel(content, `当前 ${mealSlotsFor(save)} 个生效槽位`, 15, {
+                width: 620, height: 24, color: T.parchmentDim,
+                x: 0, y: -212, align: 'left', overflow: 'shrink',
+            });
+        }
     }
 
     // ==================== 军需官 ====================
@@ -1138,16 +1273,10 @@ export class MithrilCampPanel extends Component {
         this._pageRule(content, 288);
 
         if (lv < BOUNTY_UNLOCK_LEVEL) {
+            // 未建造时只留空态插画：原来下面还有两行「仓库满了折算金币 / 材料来自分解」，
+            // 空态第二行已经把这两件事说完（round43 复核读数：同页 3 处讲满仓）
             this._emptyState(content, 'quartermaster', '悬赏板还没建造',
                 '把军需官升到 Lv1：3 条悬赏自动追踪\nLv2 起 6 条，Lv4 每日刷新；满仓掉落会折算金币', 110);
-            // 原这里还有一行「下一级：装备仓库 +6 格」，与页头设施块的「下一级」逐字相同（复核 P2），删掉
-            createLabel(content, [
-                '仓库满了不用急着卖：战斗掉落的装备会按装等折算成金币。',
-                '材料主要来自分解与悬赏；先把军需官升到 Lv1，仓库 +6 格。',
-            ].join('\n'), 15, {
-                width: 620, height: 52, color: T.parchmentMuted, x: 0, y: -40,
-                align: 'left', lineHeight: 22, overflow: 'shrink',
-            });
             return;
         }
 
@@ -1188,14 +1317,8 @@ export class MithrilCampPanel extends Component {
                 '下一次战斗结算后会补上新悬赏', 150);
         }
 
-        // 注脚只放「怎么用」；「下一级」已经在页头设施块里说过一次，不在这里重复
-        createLabel(content, [
-            `悬赏板自动追踪，完成即可领取；${lv >= BOUNTY_DAILY_REFRESH_LEVEL ? '每日刷新已开启' : 'Lv4 起每日刷新'}。`,
-            '收集类悬赏按当前库存判定，领取时扣除（只扣背包，不动已装备）。',
-        ].join('\n'), 15, {
-            width: 620, height: 50, color: T.parchmentMuted, x: 0, y: -223,
-            align: 'left', lineHeight: 22, overflow: 'shrink',
-        });
+        // 注脚（自动追踪 / 每日刷新 / 收集类扣背包）全部收进右上角「?」→ FACILITY_RULES.quartermaster。
+        // 「下一级」也已经在页头设施块里说过一次，这里不再重复：悬赏板这一页正文只留读数与列表
     }
 
     /** 领取悬赏：扣收集物 → 发金币 / 材料 / 装备 → 补位 */
@@ -1242,6 +1365,7 @@ export class MithrilCampPanel extends Component {
 
     private _onTabTap(id: FacilityId): void {
         if (this._tab === id) return;
+        this._closeHelp();
         this._tab = id;
         this.refresh();
     }

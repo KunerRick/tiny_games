@@ -77,7 +77,10 @@ function padTouchHeight(node: Node, h: number): void {
     if (ut) ut.setContentSize(ut.width, h);
 }
 
-const LAYER_TOP = 430;
+// 430 → 410：起点节点的可达光圈半径 r+14 = 40，按 430 时圈顶到 world 1110，
+// 会插进区域页签导轨（1097–1139）里 13 px（页签先建、节点后建，圈压在线上面）。
+// 下移一层间距的 16%，圈顶回到 1090，页签下方留 7 px 干净边。
+const LAYER_TOP = 410;
 const LAYER_GAP = 124;
 
 export interface WildMapView {
@@ -143,7 +146,6 @@ export class MithrilWildMap extends Component {
         this._buildHeader();
         this._buildTabs();
         this._buildMapLayer();
-        this._buildLegend();
         this._buildBottom();
     }
 
@@ -333,10 +335,10 @@ export class MithrilWildMap extends Component {
         this._matLabel = createLabel(this.node, '', 17, {
             width: 260, height: 28, color: T.warning, x: 190, y: 526,
         });
-        // 补给耗尽警告：常态隐藏。顶栏与页签之间没有空档（页签 y478 高 42），
-        // 所以放在地图说明行正下方，图例整体让位（试玩 N41 / N45）
+        // 补给耗尽警告：常态隐藏。图例收进「?」后这条独占原图例那一行（-370），
+        // 与上方提示行（-344）保持 26 px 行距，互不压字
         this._supplyWarn = createLabel(this.node, '', 17, {
-            width: 680, height: 24, color: T.warning, bold: true, y: -334,
+            width: 680, height: 24, color: T.warning, bold: true, y: -370,
         });
         this._supplyWarn.node.active = false;
 
@@ -354,15 +356,19 @@ export class MithrilWildMap extends Component {
     }
 
     private _onHelpTap(): void {
-        this.showMessage('操作说明', [
-            // 试玩 N164：可达节点画的是「金色高亮圈」，帮助里不能再写「绿圈」——
-            // 图例里的绿点是篝火（节点类型），两套颜色语汇撞车会让玩家找错。
-            '地图：点金色高亮圈进入节点，沿途清剿推进',
-            '战斗：左侧拖动移动 · 移动会自动朝向最近的敌人',
-            '攻击：按住右下最大的普攻键 → 持续攻击',
-            '技能与闪避：点按即可；闪避没有前摇，可穿身躲开',
-            '面板：路线图底部按钮（桌面 B 装备 / T 成长 / C 营地）',
-            '战斗中返回会打开暂停层，节点进度保留',
+        // 地图上原本摊着「5 条图例 + 1 行底部规则 + 1 行 38 字提示」，全是常驻说明。
+        // 改成按需：常驻只留一行当下的动作提示，图例与规则都收进这里（用户反馈：字多压力大）。
+        this.showMessage('玩法说明', [
+            '【操作】',
+            '点金色高亮圈进入节点，沿连线推进',
+            '左侧拖动移动 · 按住右下普攻 · 技能点按',
+            '闪避无前摇可穿身；战斗中点返回会暂停',
+            '【图例】',
+            '蓝=战斗　金=精英　黄=宝箱　紫=事件　绿=篝火　橙=首领',
+            '金圈=可进入 · 蓝圈=已清理可路过 · 白圈=当前',
+            '【规则】',
+            '退回起点不耗补给；死亡会失去本程材料',
+            '补给耗尽后，每进一个新节点失去 8% 生命上限',
         ]);
     }
 
@@ -394,6 +400,9 @@ export class MithrilWildMap extends Component {
             mk.roundRect(-36, -19, 72, 3, 1.5);
             mk.fill();
             btn.node.addChild(mark);
+            // 下划线跟着文字走：文字为给左侧地形图标让位右移了 12，下划线原本居中在按钮里，
+            // 于是永远比文字偏左 12（四个页签全中）。整条节点平移同样的 12 即可
+            mark.setPosition(12, 0);
             mark.active = false;
             this._tabMarks[region.id] = mark;
             // 试玩 N163：页签视觉仍是 200×42，但补一条同宽 42 高的向上热区带
@@ -422,41 +431,12 @@ export class MithrilWildMap extends Component {
         this.node.addChild(layer);
         this._nodeLayer = layer;
 
-        // y 由 −292 下移到 −308：首领的三行字在 N178 抬字号后变高，避免与提示行叠
+        // 提示行 -308 → -344：首领三行字（−r−74 那行在 world 314–336）压着旧位置。
+        // 图例收进「?」后这一带空出来了，提示行下移 36 px，与首领末行留 6 px 间隙
         this._hint = createLabel(this.node, '', 16, {
-            width: 660, height: 24, color: T.parchmentDim, y: -308,
+            width: 660, height: 24, color: T.parchmentDim, y: -344,
         });
         this._hint.string = '';
-    }
-
-    private _buildLegend(): void {
-        // N214：7 条图例 + 两行挤压了地图主视觉。只留「颜色/形状需要解释」的 5 类；
-        // 篝火（节点名直接写「篝火·回血」）与副本（节点名 + 建议装等已写在同一行）靠自身文案区分。
-        const entries: Array<{ kind: NodeKind; label: string }> = [
-            { kind: 'battle', label: '战斗' },
-            { kind: 'elite', label: '精英' },
-            { kind: 'chest', label: '宝箱' },
-            { kind: 'event', label: '事件' },
-            { kind: 'boss', label: '首领' },
-        ];
-        for (let i = 0; i < entries.length; i++) {
-            // 单行 5 列：格距从 140 收到 132，左右各留 ~7 px 安全边
-            const x = -264 + i * 132;
-            const y = -382;
-            const dot = new Node(`Legend_${entries[i].kind}`);
-            dot.layer = this.node.layer;
-            dot.addComponent(UITransform).setContentSize(18, 18);
-            dot.setPosition(x - 34, y, 0);
-            this.node.addChild(dot);
-            const g = dot.addComponent(Graphics);
-            g.fillColor = hex(WILD_NODE_COLORS[entries[i].kind], 235);
-            g.circle(0, 0, 6);
-            g.fill();
-            // 试玩 N178：图例 15 → 16，盒宽 80 → 90（格距 132，仍有 8 px 余量）
-            createLabel(this.node, entries[i].label, 16, {
-                width: 90, height: 22, color: T.parchmentDim, x: x + 10, y,
-            });
-        }
     }
 
     private _buildBottom(): void {
@@ -512,11 +492,8 @@ export class MithrilWildMap extends Component {
         padTouchHeight(this._primaryBtn.node, 84);
         for (const b of [camp, grow, bag, exit]) padTouchHeight(b.node, 84);
 
-        // N214：这条只讲「路过 / 死亡代价」两条常驻规则；补给 −8% 交给「补给归零时才出现」
-        // 的顶部警告（那里带具体扣血数），不再同一屏说两遍
-        createLabel(this.node, '已清理节点可路过 · 死亡失去本程材料', 16, {
-            width: 690, height: 24, color: T.parchmentDim, y: -614,
-        });
+        // 底栏上方那行「已清理节点可路过 · 死亡失去本程材料」已并入「?」的【规则】：
+        // 它是常驻却低频的信息，留在主视觉里只会把 12 个节点挤窄
     }
 
     /** 底部方按钮：图标在上（y=14）、文字压到下半（y=-14） */
@@ -827,16 +804,16 @@ export class MithrilWildMap extends Component {
             if (view.playerLevel < (REGION_BY_ID[view.regionId] || REGIONS[0]).levelMin) {
                 return `等级不足：${view.regionId} 需要 Lv${(REGION_BY_ID[view.regionId] || REGIONS[0]).levelMin}`;
             }
-            return '点「开始远征」后，沿金色高亮连线选择下一站';
+            return '点「开始远征」，沿金色连线选下一站';
         }
         if (exp.complete) return '本次远征已结束';
-        if (exp.pos !== 0 && exp.done.indexOf(exp.pos) < 0) return '上一次的节点还没结算：点白圈继续';
+        if (exp.pos !== 0 && exp.done.indexOf(exp.pos) < 0) return '上一个节点没结算：点白圈继续';
         // 试玩 N151：唯一前进边是精英 / 首领时，把「退回起点换支路且免费」直接写出来。
         // N157：首领也算「危险前进边」，文案不能再只说「精英」。
         if (onlyForwardIsElite(view.map, exp)) {
-            return '前方只有精英或首领：点蓝圈退回起点，可换另一支（不耗补给）';
+            return '前方只有精英或首领：点蓝圈退回起点换支路（不耗补给）';
         }
-        return '金色高亮圈进新节点 · 蓝圈可路过已清理节点 · 退回起点不耗补给';
+        return '点金圈继续 · 蓝圈回已清理节点';
     }
 
     // ==================== 交互 ====================
@@ -886,7 +863,9 @@ export class MithrilWildMap extends Component {
         root.addChild(mask);
 
         const panelW = 580;
-        const panelH = 380;
+        // 高度按行数自适应：帮助页（10 行）比宝箱确认卡（3–5 行）需要更多版面，
+        // 固定 380 会把正文压成 13 号字（overflow shrink），反而更难读
+        const panelH = Math.max(380, 200 + lines.length * 25);
         const panel = new Node('Panel');
         panel.layer = this.node.layer;
         panel.addComponent(UITransform).setContentSize(panelW, panelH);
@@ -905,11 +884,19 @@ export class MithrilWildMap extends Component {
         pg.stroke();
         root.addChild(panel);
 
+        const titleY = panelH / 2 - 42;
         createLabel(panel, title, 30, {
-            width: panelW - 60, height: 40, color: T.goldBright, bold: true, y: 148,
+            width: panelW - 60, height: 40, color: T.goldBright, bold: true, y: titleY,
         });
+        const textH = lines.length * 25 + 8;
+        // 正文摆在「标题底」和「按钮顶」的中点：两者都贴着面板上下边，
+        // 所以这段空带的中点恒为 11.5（= ((H/2−62) + (−H/2+85)) / 2），与行数无关。
+        // 短确认卡（3 行）与帮助页（10 行）都不会一头贴标题、一头悬在按钮上方
         createLabel(panel, lines.join('\n'), 17, {
-            width: panelW - 64, height: 210, color: T.parchmentDim, y: 24, lineHeight: 25,
+            // 左对齐：条目是「【段名】+ 若干短句」，居中时每行起止位置都不同，读起来像打散的碎片。
+            // align:'left' 必须配 overflow:'shrink'，否则会缩到内容宽度再按中心摆（N89）
+            width: panelW - 64, height: textH, color: T.parchmentDim,
+            y: 12, lineHeight: 25, align: 'left', overflow: 'shrink',
         });
 
         const n = Math.max(1, buttons.length);
@@ -926,7 +913,7 @@ export class MithrilWildMap extends Component {
                 },
             });
             const step = n >= 3 ? 180 : 190;
-            btn.node.setPosition((i - (n - 1) / 2) * step, -132, 0);
+            btn.node.setPosition((i - (n - 1) / 2) * step, -panelH / 2 + 58, 0);
         }
 
         root.setSiblingIndex(this.node.children.length - 1);
